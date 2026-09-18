@@ -59,8 +59,8 @@ struct Matching {
     std::uint32_t eligible_older{};
     std::uint32_t eligible_newer{};
     std::uint32_t matched{};
-    // The camera: the view matrix most eligible draws of the newer frame use,
-    // compared with the view the same draws had in the older frame.
+    // The camera's turn and move between the frames: the median over the
+    // matched draws of how far each turned and moved in eye space.
     bool camera_found{};
     float camera_angle_degrees{};
     float camera_distance{};
@@ -106,11 +106,12 @@ private:
 // rotation's slerp for the few degrees one game frame turns), and the
 // translation moves linearly. `t` = 0 gives `a`, 1 gives `b`.
 [[nodiscard]] Matrix blend_affine(const Matrix &a, const Matrix &b, float t) noexcept;
+// a * b for column-major matrices.
+[[nodiscard]] Matrix multiply(const Matrix &a, const Matrix &b) noexcept;
 // Element-wise linear blend, for projections.
 [[nodiscard]] Matrix blend_linear(const Matrix &a, const Matrix &b, float t) noexcept;
 
-// Camera position and the angle between two view matrices.
-[[nodiscard]] std::array<float, 3> camera_position(const Matrix &view) noexcept;
+// The angle between the rotations of two transforms.
 [[nodiscard]] float rotation_angle_degrees(const Matrix &a, const Matrix &b) noexcept;
 
 } // namespace mhp3rd::gpu::interpolation

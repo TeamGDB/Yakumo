@@ -91,32 +91,36 @@ const Matching &Matcher::match(const std::vector<DrawSummary> &older, const std:
     // Keys neither frame used lately would pile up over a long session.
     if (slots_.size() > 8192u) slots_.clear();
 
-    // The camera is the view matrix most of the newer frame's matched draws
-    // use; a frame seldom has more than a few.
-    struct Candidate {
-        const Matrix *view;
-        std::size_t older_index;
-        std::uint32_t uses;
-    };
-    std::vector<Candidate> views;
+    // How the camera moved: this game keeps the view matrix almost fixed and
+    // puts the camera's rotation into every world matrix, so the camera shows
+    // in how each matched draw moved in eye space (view times world). Most of
+    // a scene stands still, so the median over the matched draws is the
+    // camera's turn and move, and characters moving on their own do not
+    // count. A sample of up to 256 pairs spread over the frame is enough.
+    std::vector<float> turns;
+    std::vector<float> moves;
+    const std::size_t stride = std::max<std::size_t>(1u, out.matched / 256u);
+    std::size_t seen = 0u;
     for (std::size_t i = 0; i < older.size(); ++i) {
         const std::int32_t partner = out.newer_of[i];
-        if (partner < 0) continue;
-        const Matrix &view = newer[static_cast<std::size_t>(partner)].view;
-        auto found = std::find_if(views.begin(), views.end(), [&](const Candidate &c) { return *c.view == view; });
-        if (found != views.end()) ++found->uses;
-        else if (views.size() < 16u) views.push_back({&view, i, 1u});
+        if (partner < 0 || seen++ % stride != 0u) continue;
+        const DrawSummary &from = older[i];
+        const DrawSummary &to = newer[static_cast<std::size_t>(partner)];
+        const Matrix before = multiply(from.view, from.world);
+        const Matrix after = multiply(to.view, to.world);
+        turns.push_back(rotation_angle_degrees(before, after));
+        const float dx = after[12] - before[12], dy = after[13] - before[13], dz = after[14] - before[14];
+        moves.push_back(std::sqrt(dx * dx + dy * dy + dz * dz));
     }
-    if (!views.empty()) {
-        const Candidate &camera = *std::max_element(
-            views.begin(), views.end(), [](const Candidate &a, const Candidate &b) { return a.uses < b.uses; });
-        const Matrix &before = older[camera.older_index].view;
-        const std::array<float, 3> from = camera_position(before);
-        const std::array<float, 3> to = camera_position(*camera.view);
-        const float dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
+    if (!turns.empty()) {
+        const auto median = [](std::vector<float> &values) {
+            const auto middle = values.begin() + static_cast<std::ptrdiff_t>(values.size() / 2u);
+            std::nth_element(values.begin(), middle, values.end());
+            return *middle;
+        };
         out.camera_found = true;
-        out.camera_distance = std::sqrt(dx * dx + dy * dy + dz * dz);
-        out.camera_angle_degrees = rotation_angle_degrees(before, *camera.view);
+        out.camera_angle_degrees = median(turns);
+        out.camera_distance = median(moves);
     }
 
     if (out.eligible_newer == 0u || out.matched == 0u) {
@@ -145,21 +149,22 @@ Matrix blend_affine(const Matrix &a, const Matrix &b, float t) noexcept {
     return out;
 }
 
+Matrix multiply(const Matrix &a, const Matrix &b) noexcept {
+    Matrix out{};
+    for (std::uint32_t column = 0; column < 4u; ++column) {
+        for (std::uint32_t row = 0; row < 4u; ++row) {
+            float sum = 0.0f;
+            for (std::uint32_t k = 0; k < 4u; ++k) sum += a[k * 4u + row] * b[column * 4u + k];
+            out[column * 4u + row] = sum;
+        }
+    }
+    return out;
+}
+
 Matrix blend_linear(const Matrix &a, const Matrix &b, float t) noexcept {
     Matrix out{};
     for (std::size_t i = 0; i < out.size(); ++i) out[i] = a[i] + (b[i] - a[i]) * t;
     return out;
-}
-
-std::array<float, 3> camera_position(const Matrix &view) noexcept {
-    // view = [R | t] maps world to eye space; the eye sits at -R^T t.
-    std::array<float, 3> position{};
-    for (std::uint32_t axis = 0; axis < 3u; ++axis) {
-        float sum = 0.0f;
-        for (std::uint32_t row = 0; row < 3u; ++row) sum += view[axis * 4u + row] * view[12u + row];
-        position[axis] = -sum;
-    }
-    return position;
 }
 
 float rotation_angle_degrees(const Matrix &a, const Matrix &b) noexcept {
