@@ -1,5 +1,7 @@
 <p align="center"><img src="docs/images/logo.svg" alt="Yakumo" width="720"></p>
 
+<p align="center"><b>English</b> · <a href="README.ru.md">Русский</a> · <a href="README.es.md">Español</a></p>
+
 # Yakumo
 
 A native port of **Monster Hunter Portable 3rd HD Ver.** made by static recompilation: the game's PSP code is translated ahead of time into C++ and compiled for your machine, then run on a reimplementation of the PSP system software. It is not an emulator — there is no interpreter or JIT at the heart of it — and it is not a decompilation.
