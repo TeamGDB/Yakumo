@@ -534,7 +534,6 @@ struct VulkanRenderer::Impl {
         bool blend{};
         std::chrono::steady_clock::time_point anchor{};
         std::chrono::steady_clock::duration period{};
-        bool anchor_valid{};  // the next cycle continues this one's pacing
         std::string capture;  // file name prefix for writing this cycle's images
     };
     struct InterpolationStats {
@@ -553,7 +552,6 @@ struct VulkanRenderer::Impl {
         std::chrono::steady_clock::duration replay_time{};  // CPU time recording the blended frames
         std::chrono::steady_clock::duration slot_time{};    // CPU time of the presents between flips
         std::chrono::steady_clock::duration max_late{};     // latest present after its time
-        std::chrono::steady_clock::duration max_anchor_delay{};  // first present's time after the flip
     };
     settings::FrameInterpolation interpolation_mode{settings::FrameInterpolation::Off};
     bool trace_interpolation{};
@@ -2703,8 +2701,7 @@ void VulkanRenderer::Impl::report_interpolation() {
     for (const auto &[reason, count] : stats.cuts) cuts += ", " + reason + " " + std::to_string(count);
     std::printf("[interp] %u frames: matched %.1f%% of %.0f draws per frame, skinned %.1f%% of %.0f; "
                 "camera up to %.2f deg %.2f units; cuts %s; presents %u, %u blended (%.2f ms to record each), "
-                "%u dropped; %.2f ms presenting per game frame; late up to %.1f ms, first present up to %.1f ms "
-                "after the flip\n",
+                "%u dropped; %.2f ms presenting per game frame; late up to %.1f ms\n",
                 stats.frames,
                 stats.eligible != 0u ? 100.0 * static_cast<double>(stats.matched) / static_cast<double>(stats.eligible)
                                      : 0.0,
@@ -2719,15 +2716,14 @@ void VulkanRenderer::Impl::report_interpolation() {
                     ? std::chrono::duration<double, std::milli>(stats.replay_time).count() / stats.blended
                     : 0.0,
                 stats.dropped, std::chrono::duration<double, std::milli>(stats.slot_time).count() / std::max(1u, stats.frames),
-                std::chrono::duration<double, std::milli>(stats.max_late).count(),
-                std::chrono::duration<double, std::milli>(stats.max_anchor_delay).count());
+                std::chrono::duration<double, std::milli>(stats.max_late).count());
     std::fflush(stdout);
     stats = InterpolationStats{};
     stats.window_start = now;
 }
 
 // Starts the presents of one game frame: keeps a copy of its picture and
-// spaces the presents until the next flip evenly in real time. The first
+// spaces the presents from the flip to the next one evenly in real time. The first
 // shows the older frame blended a step towards the newer one, the last the
 // newer frame itself, so the newer frame reaches the screen (slots - 1)
 // slots after its flip.
@@ -2795,25 +2791,17 @@ bool VulkanRenderer::Impl::begin_cycle(VkImage source) {
         slots = static_cast<std::uint32_t>(
             std::clamp<long>(std::lround(rate * static_cast<double>(period_us) / 1e6), 1l, 8l));
 
-    const Clock::time_point now = Clock::now();
+    // The presents start at the flip: the game waits for its next frame
+    // right after it, which is when there is time to draw them. Holding the
+    // first one back to smooth out a flip that came a little early let the
+    // last ones slide past that wait and get dropped.
     const Clock::duration period = std::chrono::microseconds(std::max<std::uint64_t>(period_us, 1u));
-    // Pace from where the last cycle would have continued, so a flip that
-    // comes a little early or late does not bunch the presents; drift back
-    // towards the flips by 1/64 of a frame per frame, and never schedule the
-    // first present more than a slot ahead.
-    Clock::time_point anchor = now;
-    if (schedule.anchor_valid && slots > 1u) {
-        const Clock::time_point expected = schedule.anchor + schedule.period - schedule.period / 64;
-        anchor = std::clamp(expected, now, now + period / slots);
-    }
-    interpolation_stats.max_anchor_delay = std::max(interpolation_stats.max_anchor_delay, anchor - now);
     frame_ui = ui_draw_data;
     schedule = Schedule{};
     schedule.slots = slots;
     schedule.blend = slots > 1u && matching.cut == nullptr && older_frame.replayable() && newer_frame.replayable();
-    schedule.anchor = anchor;
+    schedule.anchor = Clock::now();
     schedule.period = period;
-    schedule.anchor_valid = slots > 1u;
     schedule.capture = capture;
     if (!capture.empty() && schedule.blend) {
         // How faithful the replay is: the older frame drawn again unblended
