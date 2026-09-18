@@ -8,7 +8,7 @@ A native port of **Monster Hunter Portable 3rd HD Ver.** made by static recompil
 
 > **This project does not include any part of the game.** You need your own copy of Monster Hunter Portable 3rd HD Ver. (`NPJB-40001`). The build recompiles the game from that copy on your machine, and none of the result can be redistributed.
 
-## Legal Disclamer
+## Legal disclaimer
 
 **Yakumo** is an independent, open-source project and is not affiliated with, authorized by, sponsored by, or endorsed by CAPCOM, Sony, or any of their affiliates.
 
@@ -130,5 +130,3 @@ To target another title, see [`docs/PROFILE_GUIDE.md`](docs/PROFILE_GUIDE.md). [
 ## License
 
 The repository is distributed under the MIT License; see [`LICENSE`](LICENSE). Third-party files keep their own notices beside them — currently `profiles/mhp3rd/third_party/stb_truetype.h`, under MIT or public domain.
-
-Monster Hunter is a trademark of its owner. This project is not affiliated with or endorsed by its publisher.
