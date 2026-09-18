@@ -83,6 +83,8 @@ public:
     // older frame drawn again unblended as BMPs named `prefix`_*.bmp.
     void capture_interpolation(const std::string &prefix);
     void set_frame_interpolation(settings::FrameInterpolation mode);
+    // The refresh rate of the window's display as SDL reports it, 0 when unknown.
+    [[nodiscard]] float display_refresh() const noexcept;
     // Shows a frame the game wrote to memory itself instead of drawing it
     // with the GE, as the movie player does: the next present of
     // `display_address` shows these `width` x `height` pixels (R, G, B, A in

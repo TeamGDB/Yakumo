@@ -245,6 +245,7 @@ Every change applies at once and is saved to `settings.ini` in the per-user dire
 | Video | Scaling filter | `video.sharp_screen` | | Smooth or sharp scaling of the finished picture to the window |
 | Video | Texture filter | `video.sharp_textures` | | Smooth (bilinear) or sharp (nearest) texture sampling |
 | Video | Vsync | `video.present_mode` | | On (FIFO), or off through mailbox or immediate presentation where the driver offers them |
+| Video | Frame rate | `video.frame_interpolation` | `MHP3RD_FRAME_INTERPOLATION` | 30 (off, the default), 60, or match the display's refresh rate, through [frame interpolation](#frame-interpolation) |
 | Video | Game speed | `video.unthrottled` | `MHP3RD_UNTHROTTLED` | Normal (held to real time) or unlimited |
 | Video | Performance | `video.performance` | `MHP3RD_PERF` | Off, overlay, overlay and log, log only |
 | Audio | Volume | `audio.volume` | | 0–100% |
@@ -319,11 +320,13 @@ The settings a player needs are in the [in-game menu](#in-game-menu). Environmen
 | `MHP3RD_INTERNAL_SCALE` | `2` | Render resolution as a multiple of 480×272 (menu: Resolution) |
 | `MHP3RD_NO_RENDER` | off | Run without a window; the installer shows no dialogs either. Emulated time is not held to real time |
 | `MHP3RD_UNTHROTTLED` | off | Let emulated time run ahead of real time, so the game runs as fast as it can be drawn (menu: Game speed) |
+| `MHP3RD_FRAME_INTERPOLATION` | `off` | `60` or `display` presents interpolated frames between the game's own (menu: Frame rate); `1` means `60`. See [Frame interpolation](#frame-interpolation) |
+| `MHP3RD_INTERPOLATION_RATE` | unset | Presents per second that `display` aims for instead of the display's refresh rate, to try another display's rate, for example `90` with Vsync off |
 | `MHP3RD_NO_MATERIAL_COLOR` | off | Leave unlit geometry without vertex colours white instead of taking the material colour |
 | `MHP3RD_NO_LIGHTING` | off | Draw lit geometry with the flat white stand-in used before lighting existed, and without fog, to compare a scene with and without them |
 | `MHP3RD_NO_FOG` | off | Turn fog off and keep lighting |
 | `MHP3RD_SCREENSHOT_DIR` | unset | Write BMP frames into this directory |
-| `MHP3RD_SCREENSHOT_EVERY` | `60` | Frames between screenshots |
+| `MHP3RD_SCREENSHOT_EVERY` | `60` | Frames between screenshots. With frame interpolation on, each captured frame `frame_N.bmp` also gets the presents that led up to it (`frame_N_slot1of2.bmp`, …, the last one being frame N itself), the frame before it (`frame_N_older.bmp`) and that frame drawn again from its recorded draws without blending (`frame_N_replay0.bmp`, which should equal `_older`) |
 | `MHP3RD_PERF` | off | `1` shows the performance overlay and logs frame statistics once per second; `log` only logs them (menu: Performance). See [Performance statistics](#performance-statistics) |
 
 ### Audio
@@ -380,16 +383,19 @@ With `MHP3RD_PERF=1` the game draws a small overlay into the top-left corner of 
 [perf] fps 30.0 game 30.0 speed 100% | frame avg 33.4 max 34.7 ms | guest 4.1 render 9.8 wait 19.5 ms | lists 60/s | FIFO 1440x816 90Hz | overlay 0.05 ms
 ```
 
+With [frame interpolation](#frame-interpolation) on, `fps` counts every present and `game` still counts the game's own frames, so at 60 the line reads `fps 60.0 game 30.0 speed 100%`.
+
 `MHP3RD_PERF=log` prints the line without the overlay. F3 shows or hides the overlay at any time, with or without the variable; there is deliberately no gamepad combination for it. The menu's *Performance* setting chooses the same modes, plus the overlay without the log. The statistics are collected all the time, so turning them on changes nothing else.
 
 A frame runs from one guest flip (`sceDisplaySetFrameBuf`, where the renderer presents) to the next.
 
 | Field | Meaning |
 | --- | --- |
-| `fps` | Frames presented per second of real time |
+| `fps` | Presents per second of real time, interpolated frames included |
 | `game` | Frames the game flips per second of *emulated* time: its own frame rate, 30 when it keeps up with its target |
 | `speed` | Emulated time per real time: 100% when the game runs at PSP speed. The kernel holds its clock to real time, so it stays at 100% unless frames take longer than the game's frame time; below 100% the game runs slow |
 | `frame avg`, `max` | Real time between presents over the last second |
+| `guest`, `render`, `wait` | Per game frame (flip to flip); `render` includes drawing that frame's interpolated presents |
 | `guest` | The rest of the frame: recompiled code, HLE, the kernel, input and audio |
 | `render` | CPU time turning display lists into Vulkan commands and recording the present |
 | `wait` | Time blocked on the GPU: the frame fence, swapchain acquire, queue submit and present, and the queue idle waits of texture uploads. With FIFO presentation, pacing to the display shows up here, and so does the time the kernel waits to hold the game to real time |
@@ -398,6 +404,22 @@ A frame runs from one guest flip (`sceDisplaySetFrameBuf`, where the renderer pr
 | `overlay` | CPU time spent drawing the overlay, when it is shown |
 
 The overlay shows the same numbers and a graph of the last 192 frame times, from 0 to 50 ms, with guides at 16.7 and 33.3 ms: green up to 34 ms, yellow up to 50 ms, red beyond.
+
+## Frame interpolation
+
+The game simulates at 30 frames per second, and its logic (animation, physics, attack windows, timers) advances once per frame, so it cannot simply run faster. *Frame rate* in the menu presents more frames than that instead: between two game frames the renderer draws the older frame again with its transforms blended towards the newer one. The game itself runs exactly as before; `[perf]` keeps reporting `game 30.0 speed 100%`.
+
+How it works:
+
+- **Recording.** While it is on, every draw of a game frame is kept with what drawing it again takes: the decoded vertices, the lighting block, pipeline state, texture, viewport and scissor.
+- **Matching.** At each flip the new frame's draws are paired with the frame before's by what they read: vertex address, index address, vertex type, texture address, prim type and count, and for several draws with all of those equal (instances of one mesh), the order they are drawn in. In the village about 7,700 3D draws a frame match at 99.9%, skinned characters at 100%. `MHP3RD_TRACE_INTERPOLATION=1` prints these numbers once a second.
+- **Blending.** An in-between present draws the older frame into a target of its own. Each matched draw gets world, view and projection matrices blended towards its partner's: basis vectors blended and brought to a blended length (close to a rotation's slerp for the few degrees a frame turns), translation linearly. Skinned vertices are blended linearly, which is the same as blending their bones, and small texture scrolls are blended too.
+- **Left alone.** Through-mode (2D and interface) draws, orthographic projections, clears and draws into framebuffers the game did not show (shadows, render to texture) are never blended; neither are draws without a partner. They appear as the older frame drew them, and render targets the game reads keep the newer frame's contents.
+- **Cuts.** When fewer than half the 3D draws match, when the camera turns more than 30° or moves more than 200 units within one frame, when there is nothing 3D to blend (loading screens, menus, movies), or when a frame took longer than 100 ms, every present of that frame shows the newer frame without blending.
+- **Pacing.** The presents between two flips are spaced evenly in real time over the game's frame time: two at 60, three at 90 with the game at 30. The last one shows the newer frame itself, so each game frame reaches the screen (n − 1)/n of a frame after its flip: about 17 ms later at 60, 22 ms at 90. The kernel presents the in-between frames while it waits for real time to catch up, so they cost the game no time.
+- **Pause.** The in-game menu stops the game and with it the in-between frames; the paused frame stays behind the menu. *Game speed: Unlimited* turns interpolation off, since the game then presents faster than its own rate anyway.
+
+Cost: recording an in-between frame of the village (about 7,700 draws, 960×544) takes about 2.4 ms of CPU on an Apple M1, and presenting takes about 8 ms per game frame at 60 in all, fence waits included.
 
 ## Host layout
 
@@ -423,6 +445,7 @@ host/hle/utility_dialog.hpp      Status life cycle shared by the dialogs
 host/save_data/                  AES-128, PARAM.SFO, the save-data encryption and hashes, save folders
 host/gpu/ge_state.{hpp,cpp}      GE command state machine: display lists to draw calls
 host/gpu/vulkan_renderer.*       Vulkan backend, window and input
+host/gpu/frame_interpolation.*   Matching draws between frames, cut detection, matrix blending
 host/gpu/shaders/                GLSL, compiled to SPIR-V and embedded at build time
 host/perf/frame_stats.*          Frame timing, the per-second summary and the [perf] log line
 host/perf/perf_overlay.*         Performance overlay drawn on the CPU with a built-in 5x7 font

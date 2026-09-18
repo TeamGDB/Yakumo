@@ -3110,6 +3110,8 @@ void VulkanRenderer::capture_interpolation(const std::string &prefix) {
     if (impl_ && impl_->interpolation_wanted()) impl_->cycle_capture = prefix;
 }
 
+float VulkanRenderer::display_refresh() const noexcept { return impl_ ? impl_->display_hz : 0.0f; }
+
 void VulkanRenderer::set_frame_interpolation(settings::FrameInterpolation mode) {
     if (!impl_) return;
     Impl &impl = *impl_;
