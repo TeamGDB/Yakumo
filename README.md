@@ -89,6 +89,11 @@ ctest --test-dir out/framework -C Release --output-on-failure
 
 To target another title, see [`docs/PROFILE_GUIDE.md`](docs/PROFILE_GUIDE.md). [`docs/SOURCE_PROVENANCE.md`](docs/SOURCE_PROVENANCE.md) sets out the rules for independently written code and third-party source.
 
+## Authors
+
+- [@MHunterG](https://github.com/MHunterG)
+- [@mojitosunrise](https://github.com/mojitosunrise)
+
 ## Credits
 
 - [PSPRecomp](https://github.com/jessicanataliagta/PSPRecomp) — the recompilation framework this project builds on
