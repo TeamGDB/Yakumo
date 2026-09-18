@@ -590,6 +590,7 @@ void GeState::draw_primitive(const GuestMemory &memory, std::uint32_t data) {
     const auto primitive = static_cast<PrimitiveType>((data >> 16u) & 7u);
     if (count == 0u || vertex_address_ == 0u) return;
 
+    const std::uint32_t index_type = (vertex_type_ >> 11u) & 3u;
     DrawCall call{};
     call.primitive = primitive;
     call.through = (vertex_type_ & (1u << 23u)) != 0u;
@@ -604,6 +605,9 @@ void GeState::draw_primitive(const GuestMemory &memory, std::uint32_t data) {
     call.clear_mode = clear_mode_;
     call.clear_flags = clear_flags_;
     call.vertex_type = vertex_type_;
+    call.vertex_address = vertex_address_;
+    call.index_address = index_type != 0u ? index_address_ : 0u;
+    call.primitive_count = count;
     call.material_color = material_color_;
     call.lighting_enabled = lighting_enabled_;
     call.has_vertex_color = ((vertex_type_ >> 2u) & 7u) != 0u;
@@ -614,7 +618,6 @@ void GeState::draw_primitive(const GuestMemory &memory, std::uint32_t data) {
     call.projection = projection_;
     call.texture_matrix = texture_matrix_;
 
-    const std::uint32_t index_type = (vertex_type_ >> 11u) & 3u;
     std::uint32_t vertex_count = count;
     std::uint32_t first_vertex = 0u;
     if (index_type != 0u && index_address_ != 0u) {

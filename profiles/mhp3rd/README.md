@@ -359,6 +359,7 @@ The settings a player needs are in the [in-game menu](#in-game-menu). Environmen
 | `MHP3RD_TRACE_3D=1` | Per-frame counts of transformed draws, their targets and screen-space bounds |
 | `MHP3RD_TRACE_MATERIAL=1` | Every distinct value the game writes to the GE material registers |
 | `MHP3RD_TRACE_LIGHTING=1` | Every distinct value the game writes to the GE light and fog registers, and one line per distinct register state a lit draw is made with |
+| `MHP3RD_TRACE_INTERPOLATION=1` | Once a second: how many of a frame's 3D draws were recognised in the next frame, the largest camera turn and move between two frames, and how many frames counted as cuts, by reason; each cut is also printed as it happens. `frames` prints every frame |
 | `MHP3RD_NO_CULL=1`, `MHP3RD_NO_DEPTH=1` | Disable face culling or the depth test, to bisect missing geometry |
 | `MHP3RD_TRACE_AUDIO=1` | One line per second of output: frames, peak, RMS, silence and drops |
 | `MHP3RD_TRACE_ATRAC=1` | Every `sceAtrac3plus` call with its arguments, result and decode position |

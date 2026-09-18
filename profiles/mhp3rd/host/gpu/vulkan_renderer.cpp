@@ -1,5 +1,6 @@
 #include "vulkan_renderer.hpp"
 
+#include "frame_interpolation.hpp"
 #include "texture_decode.hpp"
 
 #include "perf/frame_stats.hpp"
@@ -15,7 +16,9 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -484,6 +487,29 @@ struct VulkanRenderer::Impl {
     std::map<TextureKeyInput, std::uint64_t> list_texture_keys;
 
     std::vector<GpuVertex> scratch;
+
+    // Frame interpolation. Each game frame's draws are summarised as they are
+    // submitted; at the flip the frame is matched against the one before.
+    struct InterpolationStats {
+        std::chrono::steady_clock::time_point window_start{std::chrono::steady_clock::now()};
+        std::uint32_t frames{};
+        std::uint64_t eligible{};
+        std::uint64_t matched{};
+        std::uint64_t skinned{};
+        std::uint64_t skinned_matched{};
+        float max_camera_angle{};
+        float max_camera_distance{};
+        std::map<std::string, std::uint32_t> cuts;
+    };
+    bool summarize_draws{};
+    std::vector<interpolation::DrawSummary> frame_draws;
+    std::vector<interpolation::DrawSummary> previous_draws;
+    bool previous_valid{};
+    interpolation::Matcher matcher;
+    interpolation::CutThresholds cut_thresholds;
+    InterpolationStats interpolation_stats;
+    void match_frame(std::uint32_t displayed);
+
     PadState pad{};
     SDL_Gamepad *gamepad{};
     SDL_JoystickID gamepad_id{};
@@ -653,6 +679,7 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
     impl.keep_aspect = player.keep_aspect;
     impl.sharp_screen = player.sharp_screen;
     impl.sharp_textures = player.sharp_textures;
+    impl.summarize_draws = std::getenv("MHP3RD_TRACE_INTERPOLATION") != nullptr;
     const std::uint32_t window_scale = std::clamp<std::uint32_t>(player.window_scale, 1u, settings::kMaxWindowScale);
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -2490,6 +2517,63 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
     vkCmdDraw(impl.command_buffer, static_cast<std::uint32_t>(impl.scratch.size()), 1u, 0u, 0u);
     impl.vertex_offset += bytes;
     ++impl.draws;
+    if (impl.summarize_draws) impl.frame_draws.push_back(interpolation::summarize(call));
+}
+
+// Matches the frame just finished against the one before and keeps the
+// numbers MHP3RD_TRACE_INTERPOLATION reports.
+void VulkanRenderer::Impl::match_frame(std::uint32_t displayed) {
+    static const char *trace_setting = std::getenv("MHP3RD_TRACE_INTERPOLATION");
+    static const bool trace_frames = trace_setting != nullptr && std::strcmp(trace_setting, "frames") == 0;
+    interpolation::mark_eligible(frame_draws, displayed);
+    if (previous_valid) {
+        const interpolation::Matching &matching = matcher.match(previous_draws, frame_draws, cut_thresholds);
+        InterpolationStats &stats = interpolation_stats;
+        ++stats.frames;
+        stats.eligible += matching.eligible_newer;
+        stats.matched += matching.matched;
+        for (std::size_t i = 0; i < previous_draws.size(); ++i) {
+            if (!previous_draws[i].eligible || !previous_draws[i].skinned) continue;
+            ++stats.skinned;
+            if (matching.newer_of[i] >= 0) ++stats.skinned_matched;
+        }
+        if (matching.camera_found) {
+            stats.max_camera_angle = std::max(stats.max_camera_angle, matching.camera_angle_degrees);
+            stats.max_camera_distance = std::max(stats.max_camera_distance, matching.camera_distance);
+        }
+        if (matching.cut != nullptr) ++stats.cuts[matching.cut];
+        if (trace_frames || (trace_setting != nullptr && matching.cut != nullptr && matching.eligible_newer != 0u)) {
+            std::printf("[interp] frame %llu: eligible %u/%u matched %u camera %.2f deg %.2f units%s%s\n",
+                        static_cast<unsigned long long>(frames), matching.eligible_older, matching.eligible_newer,
+                        matching.matched, static_cast<double>(matching.camera_angle_degrees),
+                        static_cast<double>(matching.camera_distance), matching.cut != nullptr ? " cut: " : "",
+                        matching.cut != nullptr ? matching.cut : "");
+            std::fflush(stdout);
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (trace_setting != nullptr && now - stats.window_start >= std::chrono::seconds(1)) {
+            std::string cuts;
+            for (const auto &[reason, count] : stats.cuts) cuts += ", " + reason + " " + std::to_string(count);
+            std::printf("[interp] %u frames: matched %.1f%% of %.0f draws per frame, skinned %.1f%% of %.0f; "
+                        "camera up to %.2f deg %.2f units; cuts %s\n",
+                        stats.frames, stats.eligible != 0u ? 100.0 * static_cast<double>(stats.matched) /
+                                                                 static_cast<double>(stats.eligible)
+                                                           : 0.0,
+                        static_cast<double>(stats.eligible) / std::max(1u, stats.frames),
+                        stats.skinned != 0u ? 100.0 * static_cast<double>(stats.skinned_matched) /
+                                                  static_cast<double>(stats.skinned)
+                                            : 0.0,
+                        static_cast<double>(stats.skinned) / std::max(1u, stats.frames),
+                        static_cast<double>(stats.max_camera_angle), static_cast<double>(stats.max_camera_distance),
+                        cuts.empty() ? "none" : cuts.substr(2).c_str());
+            std::fflush(stdout);
+            stats = InterpolationStats{};
+            stats.window_start = now;
+        }
+    }
+    std::swap(previous_draws, frame_draws);
+    frame_draws.clear();
+    previous_valid = true;
 }
 
 void VulkanRenderer::present(std::uint32_t display_address) {
@@ -2525,6 +2609,7 @@ void VulkanRenderer::present(std::uint32_t display_address) {
     if (displayed == impl.targets.end()) displayed = impl.targets.find(impl.last_drawn_target);
     const VkImage source = displayed != impl.targets.end() ? displayed->second.color : VK_NULL_HANDLE;
     impl.presented_target = displayed != impl.targets.end() ? displayed->first : 0u;
+    if (impl.summarize_draws) impl.match_frame(impl.presented_target);
     impl.submit_and_present(source, true);
     ++impl.frames;
 }
