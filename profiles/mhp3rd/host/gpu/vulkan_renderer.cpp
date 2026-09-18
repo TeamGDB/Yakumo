@@ -27,6 +27,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace mhp3rd::gpu {
@@ -534,6 +535,7 @@ struct VulkanRenderer::Impl {
         std::chrono::steady_clock::time_point anchor{};
         std::chrono::steady_clock::duration period{};
         bool anchor_valid{};  // the next cycle continues this one's pacing
+        std::string capture;  // file name prefix for writing this cycle's images
     };
     struct InterpolationStats {
         std::chrono::steady_clock::time_point window_start{std::chrono::steady_clock::now()};
@@ -2745,7 +2747,10 @@ bool VulkanRenderer::Impl::begin_cycle(VkImage source) {
         return false;
     }
     initialize_layouts(interpolated_target);
-    if (!cycle_capture.empty() && held_target.initialized) record_readback(held_target.color, cycle_capture + "_older.bmp");
+    // A capture belongs to this cycle only, even when some of its presents
+    // are dropped.
+    const std::string capture = std::exchange(cycle_capture, std::string{});
+    if (!capture.empty() && held_target.initialized) record_readback(held_target.color, capture + "_older.bmp");
     initialize_layouts(held_target);
 
     // The newer frame's picture, before the game draws anything else.
@@ -2809,11 +2814,12 @@ bool VulkanRenderer::Impl::begin_cycle(VkImage source) {
     schedule.anchor = anchor;
     schedule.period = period;
     schedule.anchor_valid = slots > 1u;
-    if (!cycle_capture.empty() && schedule.blend) {
+    schedule.capture = capture;
+    if (!capture.empty() && schedule.blend) {
         // How faithful the replay is: the older frame drawn again unblended
         // should equal _older.bmp.
         replay(0.0f);
-        record_readback(interpolated_target.color, cycle_capture + "_replay0.bmp");
+        record_readback(interpolated_target.color, capture + "_replay0.bmp");
     }
     return true;
 }
@@ -2856,14 +2862,13 @@ void VulkanRenderer::Impl::present_slot() {
         image = interpolated_target.color;
         ++interpolation_stats.blended;
     }
-    if (!cycle_capture.empty())
-        record_readback(image, cycle_capture + "_slot" + std::to_string(slot + 1u) + "of" +
+    if (!schedule.capture.empty())
+        record_readback(image, schedule.capture + "_slot" + std::to_string(slot + 1u) + "of" +
                                    std::to_string(schedule.slots) + ".bmp");
     ++interpolation_stats.presents;
     ui_draw_data = frame_ui;
     submit_and_present(image, true);
     write_readbacks();
-    if (last) cycle_capture.clear();
 }
 
 // Draws the older frame into the interpolation target with every matched
