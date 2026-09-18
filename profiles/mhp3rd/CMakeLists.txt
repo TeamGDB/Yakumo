@@ -206,6 +206,18 @@ if(PSPRECOMP_BUILD_TESTS)
     add_test(NAME mhp3rd_savedata_tests COMMAND mhp3rd_savedata_tests)
 endif()
 
+# Frame interpolation checks: matching draws, cuts and blending.
+add_executable(mhp3rd_interpolation_tests
+    tests/interpolation_tests.cpp
+    host/gpu/frame_interpolation.cpp)
+target_include_directories(mhp3rd_interpolation_tests PRIVATE
+    "${MHP3RD_PROFILE_DIR}/host"
+    "${PROJECT_SOURCE_DIR}/include")
+set_target_properties(mhp3rd_interpolation_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_interpolation_tests COMMAND mhp3rd_interpolation_tests)
+endif()
+
 # Chained AOT calls nest native frames; give the guest-executing main thread
 # the same 64 MiB stack the Windows profiles use.
 if(MSVC)

@@ -417,6 +417,7 @@ How it works:
 - **Left alone.** Through-mode (2D and interface) draws, orthographic projections, clears and draws into framebuffers the game did not show (shadows, render to texture) are never blended; neither are draws without a partner. They appear as the older frame drew them, and render targets the game reads keep the newer frame's contents.
 - **Cuts.** When fewer than half the 3D draws match, when the camera turns more than 30° or moves more than 200 units within one frame (measured as the median over the matched draws of how far each turned and moved in eye space, since this game puts the camera's rotation into every world matrix), when there is nothing 3D to blend (loading screens, menus, movies), or when a frame took longer than 100 ms, every present of that frame shows the newer frame without blending.
 - **Pacing.** The presents between two flips are spaced evenly in real time over the game's frame time: two at 60, three at 90 with the game at 30. The last one shows the newer frame itself, so each game frame reaches the screen (n − 1)/n of a frame after its flip: about 17 ms later at 60, 22 ms at 90. The kernel presents the in-between frames while it waits for real time to catch up, so they cost the game no time.
+- **Checks.** `mhp3rd_interpolation_tests` runs the matching, the cut rules and the blending on made-up frames; it needs no game data.
 - **Pause.** The in-game menu stops the game and with it the in-between frames; the paused frame stays behind the menu. *Game speed: Unlimited* turns interpolation off, since the game then presents faster than its own rate anyway.
 
 Cost: recording an in-between frame of the village (about 7,700 draws, 960×544) takes about 2.4 ms of CPU on an Apple M1, and presenting takes about 8 ms per game frame at 60 in all, fence waits included.
@@ -465,7 +466,7 @@ config/       Executable identity and overlay slot map
 host/         Bootstrap, kernel, HLE, graphics, audio
 scripts/      prepare_game.sh, generate.sh, build_overlays.sh, bootstrap_overlays.sh
 tools/        ISO and DATA.BIN extraction, overlay wrapping, shader embedding
-tests/        Save-data self-tests and save checker (mhp3rd_savedata_tests)
+tests/        Save-data self-tests and save checker (mhp3rd_savedata_tests), frame interpolation checks (mhp3rd_interpolation_tests)
 third_party/  stb_truetype, tiny-AES-c (installer and saves), Dear ImGui (menu and setup screens)
 game/         Local game data: EBOOT.ELF, disc.iso, ms0/ (ignored)
 analysis/     Analyzer output and extracted overlays (ignored)
