@@ -21,6 +21,8 @@ You can create a character, explore the village and go on hunts, with sound, key
 
 Tested so far on macOS (Apple Silicon, Vulkan through MoltenVK). Steam Deck and Windows are the target platforms but have not been verified yet.
 
+The state of each part of the game on each platform is in [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
+
 ## Requirements
 
 - Your own copy of the game (see above)
@@ -58,7 +60,7 @@ The executable is analyzed and every instruction of its code is emitted as C++, 
 
 Around that code sits a reimplementation of the PSP system: a kernel with threads, semaphores, event flags and timers; disc I/O read straight from the image; a Vulkan renderer for the PSP's graphics engine; software voice mixing for audio; and input from SDL3.
 
-[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) describes the execution model and [`docs/DATA_BIN.md`](docs/DATA_BIN.md) the game's archive format.
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) describes the execution model and [`docs/DATA_BIN.md`](docs/DATA_BIN.md) the game's archive format. [`docs/TESTING.md`](docs/TESTING.md) has the smoke test and how to report results.
 
 ## Repository layout
 
