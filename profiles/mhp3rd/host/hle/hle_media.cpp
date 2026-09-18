@@ -152,18 +152,24 @@ void present_frame(Runtime &rt) {
         renderer.upload_frame(address, rt.memory().raw_pointer(address, bytes), display.width, display.height,
                               display.buffer_width);
     }
-    ui::draw_over_game();
-    renderer.present(address);
-    perf::add_render_time(perf::Clock::now() - present_start);
-    // A frame ends when its image has been handed to the swapchain.
-    perf::end_frame(kernel().now_us());
-
     // Optional frame capture, independent of the window.
     static const char *screenshot_dir = std::getenv("MHP3RD_SCREENSHOT_DIR");
     static const std::uint64_t screenshot_every = [] {
         const char *text = std::getenv("MHP3RD_SCREENSHOT_EVERY");
         return text != nullptr ? std::strtoull(text, nullptr, 10) : 60ull;
     }();
+    // With frame interpolation, the presents that lead up to a captured frame
+    // are written too.
+    if (screenshot_dir != nullptr && screenshot_every != 0u &&
+        (renderer.frames_presented() + 1u) % screenshot_every == 0u)
+        renderer.capture_interpolation(std::string(screenshot_dir) + "/frame_" +
+                                       std::to_string(renderer.frames_presented() + 1u));
+    ui::draw_over_game();
+    const bool presented = renderer.present(address, kernel().now_us());
+    perf::add_render_time(perf::Clock::now() - present_start);
+    // A frame ends when its image has been handed to the swapchain.
+    perf::end_frame(kernel().now_us(), presented);
+
     if (screenshot_dir != nullptr && screenshot_every != 0u &&
         renderer.frames_presented() % screenshot_every == 0u) {
         const std::string path = std::string(screenshot_dir) + "/frame_" +
@@ -177,6 +183,7 @@ void present_frame(Runtime &rt) {
     } else if (ui::menu_requested()) {
         // The menu pauses the game: guest code and emulated time stand still
         // while it runs in here, and the device stops playing.
+        renderer.pause_interpolation();
         audio::AudioSink::instance().set_paused(true);
         const bool keep_playing = ui::run_menu();
         audio::AudioSink::instance().set_paused(false);
@@ -540,6 +547,10 @@ gpu::VulkanRenderer *ensure_renderer() {
     }
     media().renderer = std::move(renderer);
     ui::attach(*media().renderer);
+    // Frame interpolation presents between flips while the kernel waits.
+    kernel().set_idle_hook([](std::chrono::steady_clock::time_point wake) {
+        if (gpu::VulkanRenderer *active = active_renderer()) active->present_due(wake);
+    });
     return media().renderer.get();
 }
 #endif

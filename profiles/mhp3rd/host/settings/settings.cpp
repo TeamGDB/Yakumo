@@ -98,6 +98,9 @@ const Names<PerfDisplay> kPerfDisplays{{{PerfDisplay::Off, "off"},
                                         {PerfDisplay::Overlay, "overlay"},
                                         {PerfDisplay::OverlayAndLog, "overlay+log"},
                                         {PerfDisplay::Log, "log"}}};
+const Names<FrameInterpolation> kFrameInterpolations{{{FrameInterpolation::Off, "off"},
+                                                      {FrameInterpolation::Fps60, "60"},
+                                                      {FrameInterpolation::Display, "display"}}};
 const Names<RightStick> kRightSticks{
     {{RightStick::Camera, "camera"}, {RightStick::DPad, "dpad"}, {RightStick::Off, "off"}}};
 
@@ -130,6 +133,15 @@ const std::vector<Field> &fields() {
          [](Settings &s, const std::string &t) { return parse_bool(t, s.unthrottled); },
          [](const Settings &s) { return std::string(s.unthrottled ? "1" : "0"); },
          [](Settings &s, const char *t) { s.unthrottled = variable_present(t); }},
+        {"video.frame_interpolation", "MHP3RD_FRAME_INTERPOLATION",
+         [](Settings &s, const std::string &t) { return kFrameInterpolations.parse(t, s.frame_interpolation); },
+         [](const Settings &s) { return kFrameInterpolations.format(s.frame_interpolation); },
+         [](Settings &s, const char *t) {
+             // The file's spellings, plus 0 and 1 like the other switches.
+             if (!kFrameInterpolations.parse(t, s.frame_interpolation))
+                 s.frame_interpolation = *t != '\0' && variable_flag(t) ? FrameInterpolation::Fps60
+                                                                        : FrameInterpolation::Off;
+         }},
         {"video.performance", "MHP3RD_PERF",
          [](Settings &s, const std::string &t) { return kPerfDisplays.parse(t, s.perf); },
          [](const Settings &s) { return kPerfDisplays.format(s.perf); },

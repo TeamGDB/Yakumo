@@ -2,6 +2,7 @@
 
 #include "ge_state.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -67,8 +68,21 @@ public:
     void submit(const DrawCall &call, const GuestMemory &memory);
     // Ends the frame and shows the target the guest just flipped to. Draws go to
     // a separate offscreen target per guest framebuffer address, so only the
-    // displayed one reaches the window.
-    void present(std::uint32_t display_address);
+    // displayed one reaches the window. `virtual_us` is the kernel's clock at
+    // the flip. With frame interpolation the frame is shown over several
+    // presents until the next flip, the first of them possibly later;
+    // returns whether anything was presented now.
+    bool present(std::uint32_t display_address, std::uint64_t virtual_us = 0u);
+    // Frame interpolation: presents the in-between frames due before `until`,
+    // waiting for each one's time. The kernel calls it while it waits for real
+    // time to catch up.
+    void present_due(std::chrono::steady_clock::time_point until);
+    // Drops the presents still scheduled, as the game pauses.
+    void pause_interpolation();
+    // Writes the images of the next flip's presents, the older frame and the
+    // older frame drawn again unblended as BMPs named `prefix`_*.bmp.
+    void capture_interpolation(const std::string &prefix);
+    void set_frame_interpolation(settings::FrameInterpolation mode);
     // Shows a frame the game wrote to memory itself instead of drawing it
     // with the GE, as the movie player does: the next present of
     // `display_address` shows these `width` x `height` pixels (R, G, B, A in

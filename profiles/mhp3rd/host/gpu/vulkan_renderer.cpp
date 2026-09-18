@@ -26,6 +26,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace mhp3rd::gpu {
@@ -488,8 +489,52 @@ struct VulkanRenderer::Impl {
 
     std::vector<GpuVertex> scratch;
 
-    // Frame interpolation. Each game frame's draws are summarised as they are
-    // submitted; at the flip the frame is matched against the one before.
+    // Frame interpolation (#39). Each game frame's draws are recorded as they
+    // are submitted: a summary for matching and, while interpolation is on,
+    // everything needed to draw them again. At the flip the frame is matched
+    // against the one before, and the presents until the next flip show the
+    // older frame's draws with their transforms blended towards the newer
+    // frame's, then the newer frame itself.
+    struct RecordedDraw {
+        std::uint32_t target{};
+        PipelineKey key{};
+        bool textured{};
+        std::uint64_t texture{};    // texture cache key, when textured
+        std::uint32_t lighting{};   // index into FrameRecord::lighting
+        std::uint32_t first_vertex{};
+        std::uint32_t vertex_count{};
+        VkViewport viewport{};
+        VkRect2D scissor{};
+        std::array<float, 4> blend_constants{};
+        PushConstants push{};
+    };
+    struct FrameRecord {
+        std::vector<interpolation::DrawSummary> summaries;
+        std::vector<RecordedDraw> draws;  // parallel to summaries when the frame can be replayed
+        std::vector<GpuVertex> vertices;
+        std::vector<LightingBlock> lighting;
+        std::uint32_t displayed{};  // the framebuffer the game showed
+        std::uint64_t virtual_us{};
+        bool valid{};
+        [[nodiscard]] bool replayable() const { return valid && draws.size() == summaries.size(); }
+        void clear() {
+            summaries.clear();
+            draws.clear();
+            vertices.clear();
+            lighting.clear();
+            valid = false;
+        }
+    };
+    // Presents between one flip and the next: `slots` evenly spaced from
+    // `anchor`, the last one showing the newer frame.
+    struct Schedule {
+        std::uint32_t slots{};
+        std::uint32_t next{};
+        bool blend{};
+        std::chrono::steady_clock::time_point anchor{};
+        std::chrono::steady_clock::duration period{};
+        bool anchor_valid{};  // the next cycle continues this one's pacing
+    };
     struct InterpolationStats {
         std::chrono::steady_clock::time_point window_start{std::chrono::steady_clock::now()};
         std::uint32_t frames{};
@@ -500,15 +545,54 @@ struct VulkanRenderer::Impl {
         float max_camera_angle{};
         float max_camera_distance{};
         std::map<std::string, std::uint32_t> cuts;
+        std::uint32_t presents{};
+        std::uint32_t blended{};
+        std::uint32_t dropped{};
+        std::chrono::steady_clock::duration replay_time{};  // CPU time recording the blended frames
+        std::chrono::steady_clock::duration slot_time{};    // CPU time of the presents between flips
+        std::chrono::steady_clock::duration max_late{};     // latest present after its time
+        std::chrono::steady_clock::duration max_anchor_delay{};  // first present's time after the flip
     };
-    bool summarize_draws{};
-    std::vector<interpolation::DrawSummary> frame_draws;
-    std::vector<interpolation::DrawSummary> previous_draws;
-    bool previous_valid{};
+    settings::FrameInterpolation interpolation_mode{settings::FrameInterpolation::Off};
+    bool trace_interpolation{};
+    bool summarize_draws{};  // record summaries: interpolation or its trace is on
+    bool record_replay{};    // also record what replaying the draws needs
+    FrameRecord recording_frame;  // the frame the game is drawing
+    FrameRecord newer_frame;      // the frame it flipped last
+    FrameRecord older_frame;      // the frame before that
     interpolation::Matcher matcher;
     interpolation::CutThresholds cut_thresholds;
+    interpolation::Matching matching;  // older_frame against newer_frame
     InterpolationStats interpolation_stats;
-    void match_frame(std::uint32_t displayed);
+    Schedule schedule;
+    Target interpolated_target{};  // where in-between frames are drawn
+    Target held_target{};          // the newer frame's picture, kept for its own slot
+    ImDrawData *frame_ui{};        // the interface drawn over this game frame
+    float display_hz{};
+    std::vector<GpuVertex> blend_scratch;
+    std::uint64_t last_texture_key{};  // what texture_for resolved last
+    bool last_texture_cached{};
+    // Screenshots of one cycle (MHP3RD_SCREENSHOT_DIR with interpolation on).
+    std::string cycle_capture;
+    struct Readback {
+        std::string path;
+        VkBuffer buffer{};
+        VkDeviceMemory memory{};
+    };
+    std::vector<Readback> readbacks;
+
+    [[nodiscard]] bool interpolation_wanted() const;
+    void finish_frame(std::uint32_t displayed, std::uint64_t virtual_us);
+    void report_interpolation();
+    bool begin_cycle(VkImage source);
+    std::uint32_t present_slots(std::chrono::steady_clock::time_point until, bool account);
+    void present_slot();
+    void replay(float t);
+    void reset_interpolation();
+    void record_readback(VkImage image, const std::string &path);
+    void write_readbacks();
+    void flush();
+    void begin_recording();
 
     PadState pad{};
     SDL_Gamepad *gamepad{};
@@ -650,6 +734,8 @@ struct VulkanRenderer::Impl {
     void destroy_target(Target &target);
     void run_commands(const std::function<void(VkCommandBuffer)> &record);
     Target *target_for(std::uint32_t address, std::string &error);
+    bool create_target(Target &target, std::string &error);
+    void initialize_layouts(Target &target);
     bool create_overlay(std::string &error);
     void record_overlay(VkImage destination);
     void update_display_info();
@@ -679,7 +765,10 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
     impl.keep_aspect = player.keep_aspect;
     impl.sharp_screen = player.sharp_screen;
     impl.sharp_textures = player.sharp_textures;
-    impl.summarize_draws = std::getenv("MHP3RD_TRACE_INTERPOLATION") != nullptr;
+    impl.trace_interpolation = std::getenv("MHP3RD_TRACE_INTERPOLATION") != nullptr;
+    impl.interpolation_mode = player.frame_interpolation;
+    impl.summarize_draws = impl.trace_interpolation || impl.interpolation_mode != settings::FrameInterpolation::Off;
+    impl.record_replay = impl.interpolation_wanted();
     const std::uint32_t window_scale = std::clamp<std::uint32_t>(player.window_scale, 1u, settings::kMaxWindowScale);
 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -1056,6 +1145,7 @@ void VulkanRenderer::Impl::update_display_info() {
         if (const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(display); mode != nullptr)
             refresh = mode->refresh_rate;
     }
+    display_hz = refresh;
     perf::set_display_info(present_mode_name(present_mode), swapchain_extent.width, swapchain_extent.height, refresh);
 }
 
@@ -1384,16 +1474,21 @@ VulkanRenderer::Impl::Target *VulkanRenderer::Impl::target_for(std::uint32_t add
     if (found != targets.end()) return &found->second;
 
     Target target{};
+    if (!create_target(target, error)) return nullptr;
+    return &targets.emplace(address, target).first->second;
+}
+
+bool VulkanRenderer::Impl::create_target(Target &target, std::string &error) {
     if (!create_image(target_extent.width, target_extent.height, VK_FORMAT_R8G8B8A8_UNORM,
                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
                           VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                       target.color,
                       target.color_memory, target.color_view, VK_IMAGE_ASPECT_COLOR_BIT, error))
-        return nullptr;
+        return false;
     if (!create_image(target_extent.width, target_extent.height, VK_FORMAT_D32_SFLOAT,
                       VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, target.depth, target.depth_memory,
                       target.depth_view, VK_IMAGE_ASPECT_DEPTH_BIT, error))
-        return nullptr;
+        return false;
     const std::array<VkImageView, 2> views{target.color_view, target.depth_view};
     VkFramebufferCreateInfo info{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
     info.renderPass = render_pass;
@@ -1402,9 +1497,7 @@ VulkanRenderer::Impl::Target *VulkanRenderer::Impl::target_for(std::uint32_t add
     info.width = target_extent.width;
     info.height = target_extent.height;
     info.layers = 1u;
-    if (!check(vkCreateFramebuffer(device, &info, nullptr, &target.framebuffer), "vkCreateFramebuffer", error))
-        return nullptr;
-    return &targets.emplace(address, target).first->second;
+    return check(vkCreateFramebuffer(device, &info, nullptr, &target.framebuffer), "vkCreateFramebuffer", error);
 }
 
 void VulkanRenderer::Impl::destroy_upload() {
@@ -1454,15 +1547,7 @@ void VulkanRenderer::Impl::begin_pass(std::uint32_t address) {
     std::string error;
     Target *target = target_for(address, error);
     if (target == nullptr) return;
-    if (!target->initialized) {
-        // Attachments are loaded, not cleared, so a new target starts undefined:
-        // move it into the layouts the render pass expects once.
-        transition(command_buffer, target->color, VK_IMAGE_LAYOUT_UNDEFINED,
-                   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-        transition(command_buffer, target->depth, VK_IMAGE_LAYOUT_UNDEFINED,
-                   VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
-        target->initialized = true;
-    }
+    initialize_layouts(*target);
     VkRenderPassBeginInfo pass{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     pass.renderPass = render_pass;
     pass.framebuffer = target->framebuffer;
@@ -1471,6 +1556,16 @@ void VulkanRenderer::Impl::begin_pass(std::uint32_t address) {
     current_target = address;
     last_drawn_target = address;
     pass_active = true;
+}
+
+void VulkanRenderer::Impl::initialize_layouts(Target &target) {
+    if (target.initialized) return;
+    // Attachments are loaded, not cleared, so a new target starts undefined:
+    // move it into the layouts the render pass expects once.
+    transition(command_buffer, target.color, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    transition(command_buffer, target.depth, VK_IMAGE_LAYOUT_UNDEFINED,
+               VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
+    target.initialized = true;
 }
 
 void VulkanRenderer::Impl::end_pass() {
@@ -1574,6 +1669,7 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
     auto [memo, inserted] = list_texture_keys.try_emplace(input, 0u);
     if (inserted) memo->second = texture_key(memory, state);
     const std::uint64_t key = memo->second;
+    last_texture_key = key;
     const auto found = textures.find(key);
     if (found != textures.end()) {
         found->second.last_used = ++texture_clock;
@@ -1855,6 +1951,10 @@ void VulkanRenderer::set_internal_scale(std::uint32_t scale) {
         }
     });
     for (auto &[address, old_target] : old_targets) impl.destroy_target(old_target);
+    // Recorded draws hold viewports at the old size.
+    impl.destroy_target(impl.interpolated_target);
+    impl.destroy_target(impl.held_target);
+    impl.reset_interpolation();
     std::cout << "[render] internal resolution " << extent.width << "x" << extent.height << "\n";
 }
 
@@ -2037,20 +2137,23 @@ bool VulkanRenderer::text_input_confirmed() const noexcept { return impl_ && imp
 bool VulkanRenderer::text_input_cancelled() const noexcept { return impl_ && impl_->text_cancelled; }
 
 void VulkanRenderer::begin_frame() {
-    Impl &impl = *impl_;
-    if (!impl.ready || impl.recording) return;
+    if (impl_->ready) impl_->begin_recording();
+}
+
+void VulkanRenderer::Impl::begin_recording() {
+    if (recording) return;
     const perf::Clock::time_point wait_start = perf::Clock::now();
-    vkWaitForFences(impl.device, 1u, &impl.frame_fence, VK_TRUE, UINT64_MAX);
+    vkWaitForFences(device, 1u, &frame_fence, VK_TRUE, UINT64_MAX);
     perf::add_wait_time(perf::Clock::now() - wait_start);
-    vkResetFences(impl.device, 1u, &impl.frame_fence);
-    vkResetCommandBuffer(impl.command_buffer, 0u);
+    vkResetFences(device, 1u, &frame_fence);
+    vkResetCommandBuffer(command_buffer, 0u);
     VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(impl.command_buffer, &begin);
-    impl.vertex_offset = 0u;
-    impl.last_lighting_valid = false;
-    impl.pass_active = false;
-    impl.recording = true;
+    vkBeginCommandBuffer(command_buffer, &begin);
+    vertex_offset = 0u;
+    last_lighting_valid = false;
+    pass_active = false;
+    recording = true;
 }
 
 void VulkanRenderer::upload_frame(std::uint32_t display_address, const std::uint8_t *pixels, std::uint32_t width,
@@ -2517,68 +2620,438 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
     vkCmdDraw(impl.command_buffer, static_cast<std::uint32_t>(impl.scratch.size()), 1u, 0u, 0u);
     impl.vertex_offset += bytes;
     ++impl.draws;
-    if (impl.summarize_draws) impl.frame_draws.push_back(interpolation::summarize(call));
+    if (!impl.summarize_draws) return;
+    Impl::FrameRecord &record = impl.recording_frame;
+    record.summaries.push_back(interpolation::summarize(call));
+    if (!impl.record_replay) return;
+    Impl::RecordedDraw draw{};
+    draw.target = call.target.color_address;
+    draw.key = key;
+    draw.textured = call.texture.enabled && !call.clear_mode;
+    draw.texture = draw.textured ? impl.last_texture_key : 0u;
+    if (record.lighting.empty() || std::memcmp(&record.lighting.back(), &block, sizeof(block)) != 0)
+        record.lighting.push_back(block);
+    draw.lighting = static_cast<std::uint32_t>(record.lighting.size() - 1u);
+    draw.first_vertex = static_cast<std::uint32_t>(record.vertices.size());
+    draw.vertex_count = static_cast<std::uint32_t>(impl.scratch.size());
+    record.vertices.insert(record.vertices.end(), impl.scratch.begin(), impl.scratch.end());
+    draw.viewport = vk_viewport;
+    draw.scissor = vk_scissor;
+    draw.blend_constants = blend_constants;
+    draw.push = push;
+    record.draws.push_back(draw);
 }
 
-// Matches the frame just finished against the one before and keeps the
-// numbers MHP3RD_TRACE_INTERPOLATION reports.
-void VulkanRenderer::Impl::match_frame(std::uint32_t displayed) {
+bool VulkanRenderer::Impl::interpolation_wanted() const {
+    // Emulated time running ahead of real time already presents faster than
+    // the game's own rate.
+    return interpolation_mode != settings::FrameInterpolation::Off && !settings::current().unthrottled;
+}
+
+// The frame the game just flipped becomes the newer one and is matched
+// against the one before.
+void VulkanRenderer::Impl::finish_frame(std::uint32_t displayed, std::uint64_t virtual_us) {
+    interpolation::mark_eligible(recording_frame.summaries, displayed);
+    recording_frame.displayed = displayed;
+    recording_frame.virtual_us = virtual_us;
+    recording_frame.valid = true;
+    std::swap(older_frame, newer_frame);
+    std::swap(newer_frame, recording_frame);
+    recording_frame.clear();
+    record_replay = interpolation_wanted();
+    if (!older_frame.valid) {
+        matching = interpolation::Matching{};
+        matching.cut = "no frame before";
+        return;
+    }
+    matching = matcher.match(older_frame.summaries, newer_frame.summaries, cut_thresholds);
+    report_interpolation();
+}
+
+// The numbers MHP3RD_TRACE_INTERPOLATION prints.
+void VulkanRenderer::Impl::report_interpolation() {
     static const char *trace_setting = std::getenv("MHP3RD_TRACE_INTERPOLATION");
     static const bool trace_frames = trace_setting != nullptr && std::strcmp(trace_setting, "frames") == 0;
-    interpolation::mark_eligible(frame_draws, displayed);
-    if (previous_valid) {
-        const interpolation::Matching &matching = matcher.match(previous_draws, frame_draws, cut_thresholds);
-        InterpolationStats &stats = interpolation_stats;
-        ++stats.frames;
-        stats.eligible += matching.eligible_newer;
-        stats.matched += matching.matched;
-        for (std::size_t i = 0; i < previous_draws.size(); ++i) {
-            if (!previous_draws[i].eligible || !previous_draws[i].skinned) continue;
-            ++stats.skinned;
-            if (matching.newer_of[i] >= 0) ++stats.skinned_matched;
-        }
-        if (matching.camera_found) {
-            stats.max_camera_angle = std::max(stats.max_camera_angle, matching.camera_angle_degrees);
-            stats.max_camera_distance = std::max(stats.max_camera_distance, matching.camera_distance);
-        }
-        if (matching.cut != nullptr) ++stats.cuts[matching.cut];
-        if (trace_frames || (trace_setting != nullptr && matching.cut != nullptr && matching.eligible_newer != 0u)) {
-            std::printf("[interp] frame %llu: eligible %u/%u matched %u camera %.2f deg %.2f units%s%s\n",
-                        static_cast<unsigned long long>(frames), matching.eligible_older, matching.eligible_newer,
-                        matching.matched, static_cast<double>(matching.camera_angle_degrees),
-                        static_cast<double>(matching.camera_distance), matching.cut != nullptr ? " cut: " : "",
-                        matching.cut != nullptr ? matching.cut : "");
-            std::fflush(stdout);
-        }
-        const auto now = std::chrono::steady_clock::now();
-        if (trace_setting != nullptr && now - stats.window_start >= std::chrono::seconds(1)) {
-            std::string cuts;
-            for (const auto &[reason, count] : stats.cuts) cuts += ", " + reason + " " + std::to_string(count);
-            std::printf("[interp] %u frames: matched %.1f%% of %.0f draws per frame, skinned %.1f%% of %.0f; "
-                        "camera up to %.2f deg %.2f units; cuts %s\n",
-                        stats.frames, stats.eligible != 0u ? 100.0 * static_cast<double>(stats.matched) /
-                                                                 static_cast<double>(stats.eligible)
-                                                           : 0.0,
-                        static_cast<double>(stats.eligible) / std::max(1u, stats.frames),
-                        stats.skinned != 0u ? 100.0 * static_cast<double>(stats.skinned_matched) /
-                                                  static_cast<double>(stats.skinned)
-                                            : 0.0,
-                        static_cast<double>(stats.skinned) / std::max(1u, stats.frames),
-                        static_cast<double>(stats.max_camera_angle), static_cast<double>(stats.max_camera_distance),
-                        cuts.empty() ? "none" : cuts.substr(2).c_str());
-            std::fflush(stdout);
-            stats = InterpolationStats{};
-            stats.window_start = now;
-        }
+    InterpolationStats &stats = interpolation_stats;
+    ++stats.frames;
+    stats.eligible += matching.eligible_newer;
+    stats.matched += matching.matched;
+    for (std::size_t i = 0; i < older_frame.summaries.size(); ++i) {
+        if (!older_frame.summaries[i].eligible || !older_frame.summaries[i].skinned) continue;
+        ++stats.skinned;
+        if (matching.newer_of[i] >= 0) ++stats.skinned_matched;
     }
-    std::swap(previous_draws, frame_draws);
-    frame_draws.clear();
-    previous_valid = true;
+    if (matching.camera_found) {
+        stats.max_camera_angle = std::max(stats.max_camera_angle, matching.camera_angle_degrees);
+        stats.max_camera_distance = std::max(stats.max_camera_distance, matching.camera_distance);
+    }
+    if (matching.cut != nullptr) ++stats.cuts[matching.cut];
+    if (!trace_interpolation) return;
+    if (trace_frames || (matching.cut != nullptr && matching.eligible_newer != 0u)) {
+        std::printf("[interp] frame %llu: eligible %u/%u matched %u camera %.2f deg %.2f units%s%s\n",
+                    static_cast<unsigned long long>(frames), matching.eligible_older, matching.eligible_newer,
+                    matching.matched, static_cast<double>(matching.camera_angle_degrees),
+                    static_cast<double>(matching.camera_distance), matching.cut != nullptr ? " cut: " : "",
+                    matching.cut != nullptr ? matching.cut : "");
+        std::fflush(stdout);
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now - stats.window_start < std::chrono::seconds(1)) return;
+    std::string cuts;
+    for (const auto &[reason, count] : stats.cuts) cuts += ", " + reason + " " + std::to_string(count);
+    std::printf("[interp] %u frames: matched %.1f%% of %.0f draws per frame, skinned %.1f%% of %.0f; "
+                "camera up to %.2f deg %.2f units; cuts %s; presents %u, %u blended (%.2f ms to record each), "
+                "%u dropped; %.2f ms presenting per game frame; late up to %.1f ms, first present up to %.1f ms "
+                "after the flip\n",
+                stats.frames,
+                stats.eligible != 0u ? 100.0 * static_cast<double>(stats.matched) / static_cast<double>(stats.eligible)
+                                     : 0.0,
+                static_cast<double>(stats.eligible) / std::max(1u, stats.frames),
+                stats.skinned != 0u
+                    ? 100.0 * static_cast<double>(stats.skinned_matched) / static_cast<double>(stats.skinned)
+                    : 0.0,
+                static_cast<double>(stats.skinned) / std::max(1u, stats.frames),
+                static_cast<double>(stats.max_camera_angle), static_cast<double>(stats.max_camera_distance),
+                cuts.empty() ? "none" : cuts.substr(2).c_str(), stats.presents, stats.blended,
+                stats.blended != 0u
+                    ? std::chrono::duration<double, std::milli>(stats.replay_time).count() / stats.blended
+                    : 0.0,
+                stats.dropped, std::chrono::duration<double, std::milli>(stats.slot_time).count() / std::max(1u, stats.frames),
+                std::chrono::duration<double, std::milli>(stats.max_late).count(),
+                std::chrono::duration<double, std::milli>(stats.max_anchor_delay).count());
+    std::fflush(stdout);
+    stats = InterpolationStats{};
+    stats.window_start = now;
 }
 
-void VulkanRenderer::present(std::uint32_t display_address) {
+// Starts the presents of one game frame: keeps a copy of its picture and
+// spaces the presents until the next flip evenly in real time. The first
+// shows the older frame blended a step towards the newer one, the last the
+// newer frame itself, so the newer frame reaches the screen (slots - 1)
+// slots after its flip.
+bool VulkanRenderer::Impl::begin_cycle(VkImage source) {
+    using Clock = std::chrono::steady_clock;
+    std::string error;
+    if (interpolated_target.color == VK_NULL_HANDLE && !create_target(interpolated_target, error)) {
+        std::cout << "[render] frame interpolation unavailable: " << error << "\n";
+        destroy_target(interpolated_target);
+        interpolation_mode = settings::FrameInterpolation::Off;
+        return false;
+    }
+    if (held_target.color == VK_NULL_HANDLE && !create_target(held_target, error)) {
+        std::cout << "[render] frame interpolation unavailable: " << error << "\n";
+        destroy_target(held_target);
+        interpolation_mode = settings::FrameInterpolation::Off;
+        return false;
+    }
+    initialize_layouts(interpolated_target);
+    if (!cycle_capture.empty() && held_target.initialized) record_readback(held_target.color, cycle_capture + "_older.bmp");
+    initialize_layouts(held_target);
+
+    // The newer frame's picture, before the game draws anything else.
+    transition(command_buffer, source, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    transition(command_buffer, held_target.color, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    VkImageCopy copy{};
+    copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u};
+    copy.dstSubresource = copy.srcSubresource;
+    copy.extent = {target_extent.width, target_extent.height, 1u};
+    vkCmdCopyImage(command_buffer, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, held_target.color,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &copy);
+    transition(command_buffer, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    transition(command_buffer, held_target.color, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+    // Presents the last cycle had no time for are skipped.
+    if (schedule.next < schedule.slots) interpolation_stats.dropped += schedule.slots - schedule.next;
+
+    // The game's own frame time, from the emulated clock the kernel holds to
+    // real time: 33.3 ms at 30 frames per second.
+    const std::uint64_t period_us =
+        older_frame.valid && newer_frame.virtual_us > older_frame.virtual_us
+            ? newer_frame.virtual_us - older_frame.virtual_us
+            : 0u;
+    // MHP3RD_INTERPOLATION_RATE stands in for the display's refresh rate, to
+    // try other displays' rates on this one.
+    static const double rate_override = [] {
+        const char *text = std::getenv("MHP3RD_INTERPOLATION_RATE");
+        return text != nullptr ? std::clamp(std::strtod(text, nullptr), 0.0, 480.0) : 0.0;
+    }();
+    const double display_rate = rate_override > 0.0 ? rate_override : static_cast<double>(display_hz);
+    const double rate = interpolation_mode == settings::FrameInterpolation::Fps60 || display_rate < 1.0
+                            ? 60.0
+                            : display_rate;
+    std::uint32_t slots = 1u;
+    // A frame that took longer than a tenth of a second is a stall or a load,
+    // not motion.
+    constexpr std::uint64_t kMinPeriodUs = 8000u;
+    constexpr std::uint64_t kMaxPeriodUs = 100000u;
+    if (period_us >= kMinPeriodUs && period_us <= kMaxPeriodUs)
+        slots = static_cast<std::uint32_t>(
+            std::clamp<long>(std::lround(rate * static_cast<double>(period_us) / 1e6), 1l, 8l));
+
+    const Clock::time_point now = Clock::now();
+    const Clock::duration period = std::chrono::microseconds(std::max<std::uint64_t>(period_us, 1u));
+    // Pace from where the last cycle would have continued, so a flip that
+    // comes a little early or late does not bunch the presents; drift back
+    // towards the flips by 1/64 of a frame per frame, and never schedule the
+    // first present more than a slot ahead.
+    Clock::time_point anchor = now;
+    if (schedule.anchor_valid && slots > 1u) {
+        const Clock::time_point expected = schedule.anchor + schedule.period - schedule.period / 64;
+        anchor = std::clamp(expected, now, now + period / slots);
+    }
+    interpolation_stats.max_anchor_delay = std::max(interpolation_stats.max_anchor_delay, anchor - now);
+    frame_ui = ui_draw_data;
+    schedule = Schedule{};
+    schedule.slots = slots;
+    schedule.blend = slots > 1u && matching.cut == nullptr && older_frame.replayable() && newer_frame.replayable();
+    schedule.anchor = anchor;
+    schedule.period = period;
+    schedule.anchor_valid = slots > 1u;
+    if (!cycle_capture.empty() && schedule.blend) {
+        // How faithful the replay is: the older frame drawn again unblended
+        // should equal _older.bmp.
+        replay(0.0f);
+        record_readback(interpolated_target.color, cycle_capture + "_replay0.bmp");
+    }
+    return true;
+}
+
+// Presents the slots due before `until`, sleeping up to each one's time.
+// `account`: add their time to the frame statistics, which the flip already
+// does for the presents it makes.
+std::uint32_t VulkanRenderer::Impl::present_slots(std::chrono::steady_clock::time_point until, bool account) {
+    using Clock = std::chrono::steady_clock;
+    std::uint32_t presented = 0u;
+    while (schedule.next < schedule.slots) {
+        const Clock::time_point due = schedule.anchor + schedule.period * schedule.next / schedule.slots;
+        if (due > until) break;
+        const Clock::time_point now = Clock::now();
+        if (due > now) {
+            std::this_thread::sleep_until(due);
+            if (account) perf::add_wait_time(Clock::now() - now);
+        } else {
+            interpolation_stats.max_late = std::max(interpolation_stats.max_late, now - due);
+        }
+        const Clock::time_point start = Clock::now();
+        present_slot();
+        if (account) perf::add_render_time(Clock::now() - start);
+        interpolation_stats.slot_time += Clock::now() - start;
+        ++presented;
+    }
+    return presented;
+}
+
+void VulkanRenderer::Impl::present_slot() {
+    begin_recording();
+    end_pass();
+    const std::uint32_t slot = schedule.next++;
+    const bool last = schedule.next == schedule.slots;
+    VkImage image = held_target.color;
+    if (schedule.blend && !last) {
+        const auto replay_start = std::chrono::steady_clock::now();
+        replay(static_cast<float>(slot + 1u) / static_cast<float>(schedule.slots));
+        interpolation_stats.replay_time += std::chrono::steady_clock::now() - replay_start;
+        image = interpolated_target.color;
+        ++interpolation_stats.blended;
+    }
+    if (!cycle_capture.empty())
+        record_readback(image, cycle_capture + "_slot" + std::to_string(slot + 1u) + "of" +
+                                   std::to_string(schedule.slots) + ".bmp");
+    ++interpolation_stats.presents;
+    ui_draw_data = frame_ui;
+    submit_and_present(image, true);
+    write_readbacks();
+    if (last) cycle_capture.clear();
+}
+
+// Draws the older frame into the interpolation target with every matched
+// draw's transforms blended a fraction `t` towards the newer frame. Draws
+// without a partner, and those that are never blended, are drawn as the
+// older frame drew them.
+void VulkanRenderer::Impl::replay(float t) {
+    const FrameRecord &older = older_frame;
+    const FrameRecord &newer = newer_frame;
+    end_pass();
+    VkRenderPassBeginInfo pass{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    pass.renderPass = render_pass;
+    pass.framebuffer = interpolated_target.framebuffer;
+    pass.renderArea = {{0, 0}, target_extent};
+    vkCmdBeginRenderPass(command_buffer, &pass, VK_SUBPASS_CONTENTS_INLINE);
+    // The game clears its framebuffer itself; start from the same known state
+    // for any part it does not.
+    std::array<VkClearAttachment, 2> clears{};
+    clears[0].aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    clears[0].colorAttachment = 0u;
+    clears[0].clearValue.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+    clears[1].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    clears[1].clearValue.depthStencil = {0.0f, 0u};
+    const VkClearRect whole{{{0, 0}, target_extent}, 0u, 1u};
+    vkCmdClearAttachments(command_buffer, static_cast<std::uint32_t>(clears.size()), clears.data(), 1u, &whole);
+
+    for (std::size_t i = 0; i < older.draws.size(); ++i) {
+        const RecordedDraw &draw = older.draws[i];
+        const interpolation::DrawSummary &summary = older.summaries[i];
+        if (draw.target != older.displayed) continue;
+        PushConstants push = draw.push;
+        const LightingBlock *block = &older.lighting[draw.lighting];
+        LightingBlock blended_block;
+        const GpuVertex *vertices = older.vertices.data() + draw.first_vertex;
+        const std::int32_t partner = matching.newer_of[i];
+        if (partner >= 0 && t != 0.0f) {
+            const interpolation::DrawSummary &next = newer.summaries[static_cast<std::size_t>(partner)];
+            const RecordedDraw &next_draw = newer.draws[static_cast<std::size_t>(partner)];
+            const auto world = interpolation::blend_affine(summary.world, next.world, t);
+            const auto view = interpolation::blend_affine(summary.view, next.view, t);
+            const auto projection = interpolation::blend_linear(summary.projection, next.projection, t);
+            push.transform = multiply(projection, multiply(view, world));
+            // A texture that scrolls moves its offset a little each frame; a
+            // jump of half the texture or more is a wrap, left alone.
+            for (std::size_t axis = 2u; axis < 4u; ++axis) {
+                const float from = draw.push.uv_transform[axis];
+                const float to = next_draw.push.uv_transform[axis];
+                if (std::fabs(to - from) < 0.5f && draw.push.uv_transform[axis - 2u] == next_draw.push.uv_transform[axis - 2u])
+                    push.uv_transform[axis] = from + (to - from) * t;
+            }
+            if (block->flags[0] != 0.0f || block->flags[2] != 0.0f) {
+                blended_block = *block;
+                if (block->flags[0] != 0.0f) blended_block.world = world;
+                const auto view_world = multiply(view, world);
+                blended_block.view_z = {view_world[2], view_world[6], view_world[10], view_world[14]};
+                block = &blended_block;
+            }
+            // Skinning is linear in the bone matrices, so blending the skinned
+            // vertices blends the bones.
+            if (summary.skinned && next_draw.vertex_count == draw.vertex_count) {
+                const GpuVertex *to = newer.vertices.data() + next_draw.first_vertex;
+                blend_scratch.assign(vertices, vertices + draw.vertex_count);
+                for (std::uint32_t v = 0; v < draw.vertex_count; ++v) {
+                    GpuVertex &out = blend_scratch[v];
+                    out.x += (to[v].x - out.x) * t;
+                    out.y += (to[v].y - out.y) * t;
+                    out.z += (to[v].z - out.z) * t;
+                    out.nx += (to[v].nx - out.nx) * t;
+                    out.ny += (to[v].ny - out.ny) * t;
+                    out.nz += (to[v].nz - out.nz) * t;
+                }
+                vertices = blend_scratch.data();
+            }
+        }
+
+        const bool reuse_lighting =
+            last_lighting_valid && std::memcmp(block, &last_lighting, sizeof(LightingBlock)) == 0;
+        VkDeviceSize lighting_offset = last_lighting_offset;
+        VkDeviceSize vertex_start = vertex_offset;
+        if (!reuse_lighting) {
+            lighting_offset = (vertex_offset + uniform_alignment - 1u) / uniform_alignment * uniform_alignment;
+            vertex_start = lighting_offset + sizeof(LightingBlock);
+        }
+        const VkDeviceSize bytes = static_cast<VkDeviceSize>(draw.vertex_count) * sizeof(GpuVertex);
+        if (vertex_start + bytes > kVertexBufferBytes) break;
+        if (!reuse_lighting) {
+            std::memcpy(static_cast<std::uint8_t *>(vertex_mapped) + lighting_offset, block, sizeof(LightingBlock));
+            last_lighting = *block;
+            last_lighting_offset = lighting_offset;
+            last_lighting_valid = true;
+            vertex_offset = vertex_start;
+        }
+        std::memcpy(static_cast<std::uint8_t *>(vertex_mapped) + vertex_offset, vertices,
+                    static_cast<std::size_t>(bytes));
+
+        const VkPipeline pipeline = pipeline_for(draw.key);
+        if (pipeline == VK_NULL_HANDLE) continue;
+        const Texture *texture = &white_texture;
+        if (draw.textured) {
+            const auto found = textures.find(draw.texture);
+            if (found != textures.end()) texture = &found->second;
+        }
+        vkCmdSetViewport(command_buffer, 0u, 1u, &draw.viewport);
+        vkCmdSetScissor(command_buffer, 0u, 1u, &draw.scissor);
+        vkCmdSetBlendConstants(command_buffer, draw.blend_constants.data());
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0u, 1u,
+                                &texture->descriptor, 0u, nullptr);
+        const auto dynamic_offset = static_cast<std::uint32_t>(lighting_offset);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 1u, 1u,
+                                &lighting_descriptor, 1u, &dynamic_offset);
+        vkCmdPushConstants(command_buffer, pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0u, sizeof(push), &push);
+        const VkDeviceSize offset = vertex_offset;
+        vkCmdBindVertexBuffers(command_buffer, 0u, 1u, &vertex_buffer, &offset);
+        vkCmdDraw(command_buffer, draw.vertex_count, 1u, 0u, 0u);
+        vertex_offset += bytes;
+    }
+    vkCmdEndRenderPass(command_buffer);
+}
+
+void VulkanRenderer::Impl::reset_interpolation() {
+    recording_frame.clear();
+    newer_frame.clear();
+    older_frame.clear();
+    schedule = Schedule{};
+    cycle_capture.clear();
+}
+
+// Copies `image` (resting in COLOR_ATTACHMENT_OPTIMAL) into a buffer written
+// to `path` once the frame has run.
+void VulkanRenderer::Impl::record_readback(VkImage image, const std::string &path) {
+    Readback readback{path};
+    const VkDeviceSize bytes = static_cast<VkDeviceSize>(target_extent.width) * target_extent.height * 4u;
+    VkBufferCreateInfo buffer_info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    buffer_info.size = bytes;
+    buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    if (vkCreateBuffer(device, &buffer_info, nullptr, &readback.buffer) != VK_SUCCESS) return;
+    VkMemoryRequirements requirements{};
+    vkGetBufferMemoryRequirements(device, readback.buffer, &requirements);
+    VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    allocate.allocationSize = requirements.size;
+    allocate.memoryTypeIndex = find_memory_type(
+        requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    vkAllocateMemory(device, &allocate, nullptr, &readback.memory);
+    vkBindBufferMemory(device, readback.buffer, readback.memory, 0u);
+    end_pass();
+    transition(command_buffer, image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    VkBufferImageCopy copy{};
+    copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u};
+    copy.imageExtent = {target_extent.width, target_extent.height, 1u};
+    vkCmdCopyImageToBuffer(command_buffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.buffer, 1u, &copy);
+    transition(command_buffer, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    readbacks.push_back(readback);
+}
+
+void VulkanRenderer::Impl::write_readbacks() {
+    if (readbacks.empty()) return;
+    vkWaitForFences(device, 1u, &frame_fence, VK_TRUE, UINT64_MAX);
+    for (Readback &readback : readbacks) {
+        void *mapped = nullptr;
+        vkMapMemory(device, readback.memory, 0u, VK_WHOLE_SIZE, 0u, &mapped);
+        if (write_bmp(readback.path, static_cast<const std::uint8_t *>(mapped), target_extent.width,
+                      target_extent.height, false))
+            std::cout << "[render] interpolation capture -> " << readback.path << "\n";
+        vkUnmapMemory(device, readback.memory);
+        vkDestroyBuffer(device, readback.buffer, nullptr);
+        vkFreeMemory(device, readback.memory, nullptr);
+    }
+    readbacks.clear();
+}
+
+// Submits what has been recorded without presenting it.
+void VulkanRenderer::Impl::flush() {
+    if (!recording) return;
+    end_pass();
+    vkEndCommandBuffer(command_buffer);
+    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    submit.commandBufferCount = 1u;
+    submit.pCommandBuffers = &command_buffer;
+    vkQueueSubmit(queue, 1u, &submit, frame_fence);
+    recording = false;
+    write_readbacks();
+}
+
+bool VulkanRenderer::present(std::uint32_t display_address, std::uint64_t virtual_us) {
     Impl &impl = *impl_;
-    if (!impl.ready) return;
+    if (!impl.ready) return false;
     if (!impl.recording) begin_frame();
     impl.end_pass();
 
@@ -2609,14 +3082,51 @@ void VulkanRenderer::present(std::uint32_t display_address) {
     if (displayed == impl.targets.end()) displayed = impl.targets.find(impl.last_drawn_target);
     const VkImage source = displayed != impl.targets.end() ? displayed->second.color : VK_NULL_HANDLE;
     impl.presented_target = displayed != impl.targets.end() ? displayed->first : 0u;
-    if (impl.summarize_draws) impl.match_frame(impl.presented_target);
-    impl.submit_and_present(source, true);
+    if (impl.summarize_draws) impl.finish_frame(impl.presented_target, virtual_us);
+    if (!impl.interpolation_wanted() || source == VK_NULL_HANDLE || !impl.begin_cycle(source)) {
+        impl.schedule = Impl::Schedule{};
+        impl.cycle_capture.clear();
+        impl.submit_and_present(source, true);
+        impl.write_readbacks();
+        ++impl.frames;
+        return true;
+    }
     ++impl.frames;
+    return impl.present_slots(std::chrono::steady_clock::now(), false) != 0u;
+}
+
+void VulkanRenderer::present_due(std::chrono::steady_clock::time_point until) {
+    if (!impl_ || !impl_->ready) return;
+    for (std::uint32_t i = impl_->present_slots(until, true); i != 0u; --i) perf::count_present();
+}
+
+void VulkanRenderer::pause_interpolation() {
+    if (!impl_) return;
+    impl_->schedule = Impl::Schedule{};
+    impl_->cycle_capture.clear();
+}
+
+void VulkanRenderer::capture_interpolation(const std::string &prefix) {
+    if (impl_ && impl_->interpolation_wanted()) impl_->cycle_capture = prefix;
+}
+
+void VulkanRenderer::set_frame_interpolation(settings::FrameInterpolation mode) {
+    if (!impl_) return;
+    Impl &impl = *impl_;
+    if (impl.interpolation_mode == mode) return;
+    impl.interpolation_mode = mode;
+    impl.summarize_draws = impl.trace_interpolation || mode != settings::FrameInterpolation::Off;
+    // Frames recorded under the old mode lack what replaying them needs.
+    impl.reset_interpolation();
+    impl.record_replay = impl.interpolation_wanted();
 }
 
 bool VulkanRenderer::capture_frame(const std::string &path) {
     Impl &impl = *impl_;
     if (!impl.ready) return false;
+    // With frame interpolation the flip may leave its frame recorded but not
+    // yet submitted.
+    impl.flush();
     vkDeviceWaitIdle(impl.device);
 
     auto shown = impl.targets.find(impl.presented_target);
@@ -2735,6 +3245,12 @@ void VulkanRenderer::shutdown() {
     vkDestroyShaderModule(impl.device, impl.fragment_shader, nullptr);
     for (auto &[address, target] : impl.targets) impl.destroy_target(target);
     impl.targets.clear();
+    impl.destroy_target(impl.interpolated_target);
+    impl.destroy_target(impl.held_target);
+    for (Impl::Readback &readback : impl.readbacks) {
+        vkDestroyBuffer(impl.device, readback.buffer, nullptr);
+        vkFreeMemory(impl.device, readback.memory, nullptr);
+    }
     vkDestroyRenderPass(impl.device, impl.render_pass, nullptr);
     vkDestroySemaphore(impl.device, impl.image_available, nullptr);
     vkDestroySemaphore(impl.device, impl.render_finished, nullptr);

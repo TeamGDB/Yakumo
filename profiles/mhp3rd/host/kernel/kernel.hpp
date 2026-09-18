@@ -199,6 +199,11 @@ public:
     // after the game was paused, so it resumes at normal speed rather than
     // racing to make up the pause.
     void resync_real_time() noexcept { pacing_started_ = false; }
+    // Called while the kernel waits for real time to catch up with emulated
+    // time, with the moment it will wake up. The renderer presents the
+    // interpolated frames that fall due before then.
+    using IdleHook = std::function<void(std::chrono::steady_clock::time_point wake)>;
+    void set_idle_hook(IdleHook hook) { idle_hook_ = std::move(hook); }
 
     // Threads -------------------------------------------------------------
     [[nodiscard]] SceUID allocate_uid() noexcept { return next_uid_++; }
@@ -323,6 +328,7 @@ private:
     bool pacing_started_{};
     std::chrono::steady_clock::time_point pacing_real_base_{};
     std::uint64_t pacing_virtual_base_{};
+    IdleHook idle_hook_;
     std::uint64_t next_vblank_us_{kVBlankPeriodUs};
     std::uint64_t vblank_count_{};
     bool dispatch_enabled_{true};
