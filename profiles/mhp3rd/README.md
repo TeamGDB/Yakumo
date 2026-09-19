@@ -420,7 +420,7 @@ How it works:
 - **Checks.** `mhp3rd_interpolation_tests` runs the matching, the cut rules and the blending on made-up frames; it needs no game data.
 - **Pause.** The in-game menu stops the game and with it the in-between frames; the paused frame stays behind the menu. *Game speed: Unlimited* turns interpolation off, since the game then presents faster than its own rate anyway.
 
-Cost: recording an in-between frame of the village (about 7,700 draws, 960×544) takes about 2.4 ms of CPU on an Apple M1, and presenting takes about 8 ms per game frame at 60 in all, fence waits included.
+Cost, measured in the village on an Apple M1 at 60: recording one in-between frame (about 7,700 draws) takes 2.3–2.9 ms of CPU, and all presents of a game frame take 8–9.5 ms, fence waits included. At three times the PSP resolution the process went from about 32% to 53% of a CPU core and the GPU from about 23% to 51% busy; at twice the resolution the process used about 18 points of a core more. At 90 (`MHP3RD_INTERPOLATION_RATE=90`) the three presents of a game frame take about 18 ms.
 
 ## Host layout
 
