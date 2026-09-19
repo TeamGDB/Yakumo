@@ -23,13 +23,17 @@ struct State {
     Clock::duration overlay{};
     std::uint32_t lists{};
 
+    Clock::time_point last_present{Clock::now()};
+
     // Second in progress.
     Clock::time_point window_start{Clock::now()};
     std::uint64_t window_virtual_us{};
     bool window_has_clock{};
-    std::uint32_t frames{};
-    double frame_sum_ms{};
-    double frame_max_ms{};
+    std::uint32_t frames{};    // guest flips
+    double frame_sum_ms{};     // flip to flip
+    std::uint32_t presents{};
+    double present_sum_ms{};   // present to present
+    double present_max_ms{};
     Clock::duration render_sum{};
     Clock::duration wait_sum{};
     Clock::duration overlay_sum{};
@@ -82,13 +86,16 @@ void restart_measurement() {
     State &s = state();
     const Clock::time_point now = Clock::now();
     s.frame_start = now;
+    s.last_present = now;
     s.render = s.wait = s.overlay = Clock::duration{};
     s.lists = 0u;
     s.window_start = now;
     s.window_has_clock = false;
     s.frames = 0u;
     s.frame_sum_ms = 0.0;
-    s.frame_max_ms = 0.0;
+    s.presents = 0u;
+    s.present_sum_ms = 0.0;
+    s.present_max_ms = 0.0;
     s.render_sum = s.wait_sum = s.overlay_sum = Clock::duration{};
     s.list_sum = 0u;
 }
@@ -106,13 +113,24 @@ void set_display_info(const std::string &present_mode, std::uint32_t width, std:
     s.refresh_hz = refresh_hz;
 }
 
-void end_frame(std::uint64_t virtual_us) {
+void count_present() {
     State &s = state();
+    const Clock::time_point now = Clock::now();
+    const double present_ms = to_ms(now - s.last_present);
+    s.last_present = now;
+    s.history[s.cursor] = static_cast<float>(present_ms);
+    s.cursor = (s.cursor + 1u) % kHistoryFrames;
+    ++s.presents;
+    s.present_sum_ms += present_ms;
+    s.present_max_ms = std::max(s.present_max_ms, present_ms);
+}
+
+void end_frame(std::uint64_t virtual_us, bool presented) {
+    State &s = state();
+    if (presented) count_present();
     const Clock::time_point now = Clock::now();
     const double frame_ms = to_ms(now - s.frame_start);
     s.frame_start = now;
-    s.history[s.cursor] = static_cast<float>(frame_ms);
-    s.cursor = (s.cursor + 1u) % kHistoryFrames;
 
     if (!s.window_has_clock) {
         s.window_virtual_us = virtual_us;
@@ -120,7 +138,6 @@ void end_frame(std::uint64_t virtual_us) {
     }
     ++s.frames;
     s.frame_sum_ms += frame_ms;
-    s.frame_max_ms = std::max(s.frame_max_ms, frame_ms);
     s.render_sum += s.render;
     s.wait_sum += s.wait;
     s.overlay_sum += s.overlay;
@@ -135,16 +152,18 @@ void end_frame(std::uint64_t virtual_us) {
     const double frames = static_cast<double>(s.frames);
     const double virtual_ms = static_cast<double>(virtual_us - s.window_virtual_us) / 1000.0;
     out.valid = true;
-    out.fps = frames * 1000.0 / window_ms;
+    const double presents = static_cast<double>(s.presents);
+    out.fps = presents * 1000.0 / window_ms;
     out.game_fps = virtual_ms > 0.0 ? frames * 1000.0 / virtual_ms : 0.0;
     out.speed = virtual_ms / window_ms;
     out.lists = static_cast<double>(s.list_sum) * 1000.0 / window_ms;
-    out.frame_avg_ms = s.frame_sum_ms / frames;
-    out.frame_max_ms = s.frame_max_ms;
+    out.frame_avg_ms = s.presents != 0u ? s.present_sum_ms / presents : 0.0;
+    out.frame_max_ms = s.present_max_ms;
+    // Render and wait are per game frame, interpolated presents included.
     out.wait_ms = to_ms(s.wait_sum) / frames;
     // Waits happen inside the timed render calls; count them once.
     out.render_ms = std::max(0.0, to_ms(s.render_sum) / frames - out.wait_ms);
-    out.guest_ms = std::max(0.0, out.frame_avg_ms - out.render_ms - out.wait_ms);
+    out.guest_ms = std::max(0.0, s.frame_sum_ms / frames - out.render_ms - out.wait_ms);
     out.overlay_ms = to_ms(s.overlay_sum) / frames;
     out.present_mode = s.present_mode;
     out.width = s.width;
@@ -156,7 +175,9 @@ void end_frame(std::uint64_t virtual_us) {
     s.window_virtual_us = virtual_us;
     s.frames = 0u;
     s.frame_sum_ms = 0.0;
-    s.frame_max_ms = 0.0;
+    s.presents = 0u;
+    s.present_sum_ms = 0.0;
+    s.present_max_ms = 0.0;
     s.render_sum = s.wait_sum = s.overlay_sum = Clock::duration{};
     s.list_sum = 0u;
 }

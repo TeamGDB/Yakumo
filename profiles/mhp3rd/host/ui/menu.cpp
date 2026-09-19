@@ -237,6 +237,25 @@ void Menu::video() {
             settings::save();
         }
     }
+    {
+        static const char *const kFrameRates[] = {"30 (off)", "60", "Match display"};
+        RowOptions o = options_for("video.frame_interpolation",
+                                   "Frames in between the game's 30 per second, with blended movement. The picture "
+                                   "comes 17 ms (60) to 22 ms (90) later.");
+        if (s.unthrottled && !o.disabled) {
+            o.disabled = true;
+            o.note = "Game speed is unlimited";
+        }
+        const int current = static_cast<int>(s.frame_interpolation);
+        std::string value = kFrameRates[current];
+        if (s.frame_interpolation == settings::FrameInterpolation::Display && renderer().display_refresh() > 0.0f)
+            value += "   " + std::to_string(static_cast<int>(std::lround(renderer().display_refresh()))) + " Hz";
+        if (const int delta = choice_row("Frame rate", value, o)) {
+            s.frame_interpolation = static_cast<settings::FrameInterpolation>(cycle(current, delta, 3));
+            renderer().set_frame_interpolation(s.frame_interpolation);
+            settings::save();
+        }
+    }
     if (choice_row("Game speed", s.unthrottled ? "Unlimited" : "Normal",
                    options_for("video.unthrottled", "Normal holds the game to real time. Unlimited lets it run as "
                                                     "fast as frames can be drawn, which also speeds up the game."))) {
@@ -268,6 +287,7 @@ void Menu::video() {
         restore("video.sharp_screen", s.sharp_screen, d.sharp_screen);
         restore("video.sharp_textures", s.sharp_textures, d.sharp_textures);
         restore("video.present_mode", s.present_mode, d.present_mode);
+        restore("video.frame_interpolation", s.frame_interpolation, d.frame_interpolation);
         restore("video.unthrottled", s.unthrottled, d.unthrottled);
         restore("video.performance", s.perf, d.perf);
         renderer().set_internal_scale(s.internal_scale);
@@ -277,6 +297,7 @@ void Menu::video() {
         renderer().set_sharp_screen(s.sharp_screen);
         renderer().set_sharp_textures(s.sharp_textures);
         renderer().set_present_mode(s.present_mode);
+        renderer().set_frame_interpolation(s.frame_interpolation);
         renderer().set_perf_overlay(perf::options().overlay);
         settings::save();
     }

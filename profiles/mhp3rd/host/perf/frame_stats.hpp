@@ -21,7 +21,9 @@ struct Options {
 // Host frame statistics, cheap enough to collect all the time.
 //
 // A frame is the interval between two guest flips (sceDisplaySetFrameBuf),
-// which is also where the renderer presents. Within it, time spent turning
+// which is also where the renderer presents; with frame interpolation it
+// presents more often than that, and `fps`, the frame times and the graph
+// follow the presents while `game` and the time split follow the flips. Within it, time spent turning
 // display lists into Vulkan commands and recording the present is "render",
 // time blocked on the GPU — the frame fence, swapchain acquire, queue submit
 // and present, and texture uploads waiting for the queue — or holding the
@@ -35,7 +37,13 @@ void count_display_list();
 
 // Closes the current frame. `virtual_us` is the kernel's clock, which the
 // game's own frame rate and the emulation speed are measured against.
-void end_frame(std::uint64_t virtual_us);
+// `presented`: the flip also put a picture on the screen, which it does
+// unless frame interpolation schedules its presents for later.
+void end_frame(std::uint64_t virtual_us, bool presented = true);
+
+// A present between the game's flips: an interpolated frame, or the game's
+// own frame shown later than its flip.
+void count_present();
 
 // Drops the frame and the second in progress, so time spent paused in the
 // in-game menu shows up in neither the frame times nor the next log line.
@@ -48,7 +56,7 @@ void set_display_info(const std::string &present_mode, std::uint32_t width, std:
 // Averages over the last whole second of real time.
 struct Summary {
     bool valid{};
-    double fps{};             // frames presented per real second
+    double fps{};             // presents per real second
     double game_fps{};        // guest flips per emulated second
     double speed{};           // emulated time per real time, 1.0 = real time
     double lists{};           // display lists enqueued per real second
