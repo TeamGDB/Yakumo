@@ -113,6 +113,8 @@ The per-user directory is SDL's preference path for `Yakumo/MHP3rd`:
 
 It holds `EBOOT.ELF`, `disc.iso` when the image was copied, `settings.ini`, which records where the image is and keeps the settings of the [in-game menu](#in-game-menu), `ms0`, the memory stick with the [saves](#saving-and-loading), and `textures/NPJB40001` when you install an [HD texture pack](#hd-texture-packs). `MHP3RD_DATA_DIR` points the program at another directory. The Flatpak keeps this directory inside its own data directory, `~/.var/app/io.github.teamgdb.Yakumo/data/Yakumo/MHP3rd/`.
 
+Any of these folders, and the folder the disc image is in, may have names outside ASCII, such as a Windows user name in Cyrillic or Japanese: the program keeps paths as Unicode throughout and writes them to `settings.ini` as UTF-8. On Windows the console shows them only if its font has the characters.
+
 Saves made before `ms0` moved here stay where they were, in `profiles/mhp3rd/game/ms0`: a developer build keeps using them, and says so at start, until the per-user directory has an `ms0` of its own. Move the folder there to switch.
 
 The same setup runs without any screens from a terminal, for scripts and headless machines:

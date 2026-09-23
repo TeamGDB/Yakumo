@@ -5,6 +5,7 @@
 #include "hle_common.hpp"
 
 #include "overlays.hpp"
+#include "platform/utf8_path.hpp"
 
 #include "audio/audio_sink.hpp"
 #include "audio/sas_core.hpp"
@@ -264,18 +265,17 @@ void present_frame(Runtime &rt) {
     perf::end_frame(kernel().now_us(), presented);
 
     // Optional frame capture, independent of the window.
-    static const char *screenshot_dir = std::getenv("MHP3RD_SCREENSHOT_DIR");
+    static const std::filesystem::path screenshot_dir = environment_path("MHP3RD_SCREENSHOT_DIR");
     static const std::uint64_t screenshot_every = [] {
         const char *text = std::getenv("MHP3RD_SCREENSHOT_EVERY");
         return text != nullptr ? std::strtoull(text, nullptr, 10) : 60ull;
     }();
-    if (screenshot_dir != nullptr && screenshot_every != 0u &&
-        renderer.frames_presented() % screenshot_every == 0u) {
-        const std::string path = std::string(screenshot_dir) + "/frame_" +
-                                 std::to_string(renderer.frames_presented()) + ".bmp";
+    if (!screenshot_dir.empty() && screenshot_every != 0u && renderer.frames_presented() % screenshot_every == 0u) {
+        const std::filesystem::path path =
+            screenshot_dir / ("frame_" + std::to_string(renderer.frames_presented()) + ".bmp");
         if (renderer.capture_frame(path))
             std::cout << "[render] frame " << renderer.frames_presented() << " (" << renderer.draws_submitted()
-                      << " draws) -> " << path << "\n";
+                      << " draws) -> " << path_to_utf8(path) << "\n";
     }
     const bool window_open = renderer.pump_events();
     feed_mouse(renderer);
@@ -690,8 +690,8 @@ gpu::VulkanRenderer *ensure_renderer() {
     gpu::RendererConfig config;
     // Tells windows apart when several instances run side by side, e.g. two
     // players testing ad hoc play on one machine.
-    if (const char *title = std::getenv("MHP3RD_WINDOW_TITLE"); title != nullptr && *title != '\0')
-        config.title = title;
+    if (const std::optional<std::string> title = environment_utf8("MHP3RD_WINDOW_TITLE"); title && !title->empty())
+        config.title = *title;
     if (!renderer->initialize(config, error)) {
         std::cerr << "Renderer: unavailable (" << error << "); running headless\n";
         return nullptr;

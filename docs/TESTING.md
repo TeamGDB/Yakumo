@@ -88,6 +88,24 @@ For the manual check, use a throwaway data folder (`MHP3RD_DATA_DIR`, with a cop
 - *Use it where it is*: nothing is copied, `settings.ini` has `video.texture_pack_folder`, the textures stay. Rename the pack folder and turn *Texture pack* off and on: the row says *Pack folder missing: …*. *Stop using the pack folder* goes back to the installed pack.
 - With the keyboard and mouse: the same with clicks, and drag the pack folder from the file manager onto the window while the browser is open.
 
+### Folder names outside ASCII (#129)
+
+`mhp3rd_path_tests` (CTest) needs no game data. It works in a temporary folder named `Юникод_テスト` and checks the UTF-8 conversions and environment variables, `settings.ini` with UTF-8 paths in it, writing a save there (and that no `.tmp` file is left), exporting and importing it, finding, checking, copying and installing a texture pack whose image has a Cyrillic name, opening a font copied there (skipped when the system has none of the fonts it looks for), and opening a disc image and an executable there.
+
+The manual check matters most on Windows, where the standard library's narrow paths use the ANSI code page. Use a user folder, or a data folder, whose name that code page cannot hold: Cyrillic on a Western system, Japanese on a Russian one.
+
+- Either sign in as a user with such a name (for example `Юзер`), or set `MHP3RD_DATA_DIR` to a folder like `C:\Игры\ヤクモ データ` in the terminal you start Yakumo from (`$env:MHP3RD_DATA_DIR = 'C:\Игры\ヤクモ データ'` in PowerShell).
+- Put the disc image in a folder like `C:\Образы\モンハン` and run the setup (`Yakumo --install`, or delete `settings.ini` to get the screens): the file browser shows the folder names correctly, the checks pass, and both *Copy* and *Use in place* finish. `settings.ini` in the data folder, opened in Notepad as UTF-8, shows `disc_image=` with the full name.
+- Also from the terminal: `Yakumo --install "C:\Образы\モンハン\MHP3rd HD.iso" --in-place`, then `Yakumo` alone starts the game.
+- Save in game, quit, start again: the save loads. The console's `[savedata] saved … bytes to …` line names the folder (as `?` where the console font has no glyph, which is fine) and the game does not stop there.
+- In the menu's *Saves*: *Export save…* to a folder with such a name, *Import save…* back from it (the check passes, *Restart now* restarts Yakumo and the save loads), *Back up saves…* to such a folder; *Open the data folder* and *Open the backups folder* open Explorer in the right place.
+- *Import texture pack…* from a folder with such a name, both copied and *Use it where it is*; restart and check the pack still loads.
+- Put a `.ttf` with a Cyrillic file name into the data folder's `fonts` folder (*Open the fonts folder* under **Video → Font**) and pick it under *Font*: it is listed and used, and still used after a restart.
+- *Set up game data again…* in the menu restarts Yakumo into the setup.
+- *Save network log* under **Network** writes a file into `logs` in the data folder.
+- `MHP3RD_SCREENSHOT_DIR` set to a folder with such a name gets the screenshots.
+- *Import mod…* under **Mods** from a folder with such a name, and a mod whose own folder has such a name: it is listed, turns on, and applies after a restart.
+
 ### Mods (#79, #80, #82)
 
 `mhp3rd_mods_tests` (CTest) needs no game data: `mod.ini` reading (quoted values, lists, a quote left open, `Version` and the PSP default, `FilesHD`/`TargetHD`, packs, pseudo packs, equipment slots, code mods refused, missing files and bad targets), mhp3reload's files named by id, priority and conflicts, packs and dependencies, the saved choices, import and its backup, the `DATA.BIN` obfuscation from any byte, and a small archive served with a grown replacement, a smaller one, a patch and a moved verbatim entry, read whole and in pieces. `mhp3rd_mods_tests --check-disc <image.iso>` reads the real directory (only that) and checks that it encodes back to the disc's bytes.

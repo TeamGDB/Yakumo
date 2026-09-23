@@ -1,6 +1,7 @@
 #include "settings/settings.hpp"
 
 #include "install/user_data.hpp"
+#include "platform/utf8_path.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -394,9 +395,10 @@ void load(State &s) {
         if (const auto found = s.file.find(field.key); found != s.file.end() && !field.parse(s.values, found->second))
             std::cerr << "[settings] ignoring " << field.key << "=" << found->second << "\n";
         if (field.variable == nullptr) continue;
-        const char *text = std::getenv(field.variable);
-        if (text == nullptr) continue;
-        field.parse_variable(s.values, text);
+        // UTF-8, like settings.ini: MHP3RD_FONT and the folders are paths.
+        const std::optional<std::string> text = environment_utf8(field.variable);
+        if (!text) continue;
+        field.parse_variable(s.values, text->c_str());
         s.overrides[field.key] = field.variable;
     }
     // A fixed name in the environment is meant for unattended runs, which

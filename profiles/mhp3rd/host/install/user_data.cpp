@@ -2,7 +2,6 @@
 
 #include "psprecomp/common.hpp"
 
-#include <cstdlib>
 #include <fstream>
 #include <system_error>
 
@@ -24,26 +23,10 @@ std::string trim(const std::string &text) {
     return text.substr(first, last - first + 1u);
 }
 
-#if !defined(MHP3RD_HAS_SDL)
-std::filesystem::path environment_path(const char *name) {
-    const char *value = std::getenv(name);
-    return value != nullptr && *value != '\0' ? path_from_utf8(value) : std::filesystem::path{};
-}
-#endif
-
 } // namespace
 
-std::string path_to_utf8(const std::filesystem::path &path) {
-    const std::u8string text = path.u8string();
-    return {text.begin(), text.end()};
-}
-
-std::filesystem::path path_from_utf8(const std::string &text) {
-    return std::filesystem::path(std::u8string(text.begin(), text.end()));
-}
-
 std::filesystem::path user_data_directory() {
-    if (const char *dir = std::getenv("MHP3RD_DATA_DIR"); dir != nullptr && *dir != '\0') return path_from_utf8(dir);
+    if (std::filesystem::path dir = environment_path("MHP3RD_DATA_DIR"); !dir.empty()) return dir;
 #if defined(MHP3RD_HAS_SDL)
     char *pref = SDL_GetPrefPath(kOrganization, kApplication);
     if (pref == nullptr) throw psprecomp::Error(std::string("Cannot determine the user data directory: ") + SDL_GetError());

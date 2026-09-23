@@ -149,10 +149,10 @@ public:
 
     // Writes the last rendered frame as a BMP; returns false if it could not be
     // read back. Used for screenshots without touching the window system.
-    bool capture_frame(const std::string &path);
+    bool capture_frame(const std::filesystem::path &path);
     // Writes the next presented window image, with the interface over it, as
     // a BMP once it has been drawn.
-    void capture_window(const std::string &path);
+    void capture_window(const std::filesystem::path &path);
 
     // Display settings, applied at once. The initial values come from
     // settings::current() in initialize(). A scale of 0 follows the window's

@@ -10,6 +10,7 @@
 
 #include "install/game_identity.hpp"
 #include "install/user_data.hpp"
+#include "platform/utf8_path.hpp"
 
 #include "perf/frame_stats.hpp"
 #include "perf/perf_overlay.hpp"
@@ -329,7 +330,7 @@ const char *present_mode_name(VkPresentModeKHR mode) {
 
 // Writes 4-byte pixels, top row first, as a 24-bit bottom-up BMP: no encoder
 // needed and every viewer reads it.
-bool write_bmp(const std::string &path, const std::uint8_t *pixels, std::uint32_t width, std::uint32_t height,
+bool write_bmp(const std::filesystem::path &path, const std::uint8_t *pixels, std::uint32_t width, std::uint32_t height,
                bool bgra) {
     const std::uint32_t row_bytes = (width * 3u + 3u) & ~3u;
     const std::uint32_t image_bytes = row_bytes * height;
@@ -618,7 +619,7 @@ struct VulkanRenderer::Impl {
 
     // Window capture: the presented image is copied here and written after
     // its frame completes.
-    std::string capture_path;
+    std::filesystem::path capture_path;
     VkBuffer capture_buffer{};
     VkDeviceMemory capture_memory{};
     VkExtent2D capture_extent{};
@@ -1733,9 +1734,9 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
     } else {
         std::cout << "[texpack] unavailable: " << replacement_error << "\n";
     }
-    if (const char *dump = std::getenv("MHP3RD_TEXTURE_DUMP"); dump != nullptr && *dump != '\0') {
+    if (const std::filesystem::path dump = environment_path("MHP3RD_TEXTURE_DUMP"); !dump.empty()) {
         impl.dumper = std::make_unique<TextureDumper>(dump);
-        std::cout << "[texpack] writing new textures to " << dump << "\n";
+        std::cout << "[texpack] writing new textures to " << path_to_utf8(dump) << "\n";
     }
 
     // The overlay is optional: without it the game still runs, only unmeasured
@@ -2113,9 +2114,9 @@ void VulkanRenderer::Impl::write_capture(VkFence fence) {
     if (write_bmp(capture_path, static_cast<const std::uint8_t *>(mapped), capture_extent.width,
                   capture_extent.height, bgra))
         std::cout << "[render] window " << capture_extent.width << "x" << capture_extent.height << " -> "
-                  << capture_path << std::endl;
+                  << path_to_utf8(capture_path) << std::endl;
     else
-        std::cout << "[render] cannot write " << capture_path << std::endl;
+        std::cout << "[render] cannot write " << path_to_utf8(capture_path) << std::endl;
     vkUnmapMemory(device, capture_memory);
     vkDestroyBuffer(device, capture_buffer, nullptr);
     vkFreeMemory(device, capture_memory, nullptr);
@@ -2560,7 +2561,7 @@ void VulkanRenderer::Impl::apply_texture_pack() {
         return;
     }
     pack_status = std::to_string(pack->entry_count()) + " textures";
-    std::cout << "[texpack] " << pack->entry_count() << " textures from " << folder.string() << "\n";
+    std::cout << "[texpack] " << pack->entry_count() << " textures from " << path_to_utf8(folder) << "\n";
 }
 
 namespace {
@@ -3432,7 +3433,7 @@ void VulkanRenderer::set_perf_overlay(bool visible) {
     if (impl_) impl_->overlay_visible = impl_->overlay_ready && visible;
 }
 
-void VulkanRenderer::capture_window(const std::string &path) {
+void VulkanRenderer::capture_window(const std::filesystem::path &path) {
     if (!impl_ || !impl_->ready) return;
     if ((impl_->swapchain_usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0u) {
         std::cout << "[render] this swapchain cannot be read back; no window capture\n";
@@ -5190,12 +5191,12 @@ void VulkanRenderer::Impl::check_replay() {
                 "(%zu draw calls)\n",
                 static_cast<unsigned long long>(frames), differ, older_pixels.size(), older_frame.groups.size());
     std::fflush(stdout);
-    static const char *directory = std::getenv("MHP3RD_SCREENSHOT_DIR");
-    if (directory == nullptr) return;
-    const std::string prefix = std::string(directory) + "/replay_" + std::to_string(frames);
+    static const std::filesystem::path directory = environment_path("MHP3RD_SCREENSHOT_DIR");
+    if (directory.empty()) return;
+    const std::string prefix = "replay_" + std::to_string(frames);
     const auto write = [&](const std::string &name, const std::vector<std::uint32_t> &pixels) {
         if (!pixels.empty())
-            write_bmp(prefix + name, reinterpret_cast<const std::uint8_t *>(pixels.data()), target_extent.width,
+            write_bmp(directory / (prefix + name), reinterpret_cast<const std::uint8_t *>(pixels.data()), target_extent.width,
                       target_extent.height, false);
     };
     write("_older.bmp", older_pixels);
@@ -5454,7 +5455,7 @@ double VulkanRenderer::frame_rate_now() const noexcept {
     return impl_->governor.rate();
 }
 
-bool VulkanRenderer::capture_frame(const std::string &path) {
+bool VulkanRenderer::capture_frame(const std::filesystem::path &path) {
     Impl &impl = *impl_;
     if (!impl.ready) return false;
     vkDeviceWaitIdle(impl.device);
