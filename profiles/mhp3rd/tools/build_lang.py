@@ -71,22 +71,33 @@ def check_with_disc(rows, image):
     return bad == 0
 
 
+def escape(text):
+    """A real line break would split the line; the format's \\n keeps it."""
+    return text.replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n")
+
+
 def write_lang(code, name, rows, column):
     path = os.path.join(OUT, "%s.lang" % code)
-    # A file already written by hand keeps any extra rows it has; this writes
-    # the glossary's rows after a header, replacing the file.
+    # The format groups strings by the archive entry they come from, so the
+    # same table:index is not confused between blocks (docs/TEXT_TRANSLATION.md).
+    by_entry = {}
+    for entry, table, index, _en, pt, es in rows:
+        text = pt if column == "pt" else es
+        if text:
+            by_entry.setdefault(entry, []).append((table, index, text))
     with open(path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write("# %s\n" % name)
         handle.write("# Gerado de translations/glossary.tsv por tools/build_lang.py.\n")
         handle.write("# Entradas sem traducao aqui caem no texto do proprio jogo.\n")
         handle.write("language = %s\n" % code)
-        handle.write("name = %s\n\n" % name)
-        for _entry, table, index, _en, pt, es in rows:
-            text = pt if column == "pt" else es
-            if not text:
-                continue
-            handle.write("%d:%d = %s\n" % (table, index, text))
-    print("wrote", path, "(%d rows)" % sum(1 for r in rows if (r[4] if column == "pt" else r[5])))
+        handle.write("name = %s\n" % name)
+        count = 0
+        for entry in sorted(by_entry):
+            handle.write("\n[%d]\n" % entry)
+            for table, index, text in sorted(by_entry[entry]):
+                handle.write("%d:%d = %s\n" % (table, index, escape(text)))
+                count += 1
+    print("wrote", path, "(%d rows)" % count)
 
 
 def main(argv):

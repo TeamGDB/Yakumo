@@ -46,6 +46,16 @@ struct DiscRange {
 // Reads DATA.BIN as the game sees it, at an offset into the archive.
 std::size_t read_data_bin(std::uint64_t offset, std::span<std::uint8_t> out);
 
+// The archive entry that holds byte `offset` of DATA.BIN, and how far into it
+// that is, or nothing when the offset is inside the directory. The text
+// translation uses it to know which block a read brought in.
+struct EntryAt {
+    std::uint32_t entry{};
+    std::uint64_t into{};  // bytes from the entry's start
+    std::uint64_t size{};  // the entry's exact size
+};
+[[nodiscard]] std::optional<EntryAt> entry_at_offset(std::uint64_t offset);
+
 // The game flushed its instruction cache, which it does right after copying a
 // code overlay into place: the point where a code overlay has finished
 // loading. Writes the patches that go to memory outside a loaded overlay.

@@ -5,6 +5,7 @@
 #include "kernel/load_trace.hpp"
 #include "kernel/iso_image.hpp"
 #include "mods/mhp3rd_mods.hpp"
+#include "text/translation.hpp"
 
 #include "psprecomp/common.hpp"
 
@@ -282,6 +283,10 @@ void register_io(HleRegistrar &hle, const std::filesystem::path &disc_image, con
         if (file.kind == OpenFile::Kind::Disc) {
             load_trace::note_disc_read(buffer.size());
             fast_loading::note_disc_read();
+            // A read inside DATA.BIN may carry a text block the translation
+            // replaces, in place, before the game copies it out
+            // (text/translation.hpp).
+            if (file.archive) text::translate_read(file.archive_offset + file.position, buffer);
         } else {
             load_trace::note_memory_stick_read(buffer.size());
         }

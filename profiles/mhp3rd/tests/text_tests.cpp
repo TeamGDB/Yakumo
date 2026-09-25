@@ -76,17 +76,17 @@ void write_table(Memory &memory, std::uint32_t at, const std::vector<std::string
 // A text block with menu text at table 2 and item names at table 3, like the
 // game's own.
 void write_text(Memory &memory) {
-    const std::uint32_t menus = mhp3rd::text::kTextBlock + 0x1000u;
-    const std::uint32_t items = mhp3rd::text::kTextBlock + 0x3000u;
-    memory.store32(mhp3rd::text::kTextBlock + 2u * 4u, menus - mhp3rd::text::kTextBlock);
-    memory.store32(mhp3rd::text::kTextBlock + 3u * 4u, items - mhp3rd::text::kTextBlock);
+    const std::uint32_t menus = mhp3rd::text::kMainTextBlock + 0x1000u;
+    const std::uint32_t items = mhp3rd::text::kMainTextBlock + 0x3000u;
+    memory.store32(mhp3rd::text::kMainTextBlock + 2u * 4u, menus - mhp3rd::text::kMainTextBlock);
+    memory.store32(mhp3rd::text::kMainTextBlock + 3u * 4u, items - mhp3rd::text::kMainTextBlock);
     write_table(memory, menus, {"", "Qty", "Cancel", "Yes", "No"});
     write_table(memory, items, {"", "Guide", "Tonic"});
 }
 
 // Reads an entry the way the game does: table start plus the entry's offset.
 std::string read_entry(const Memory &memory, std::uint16_t table, std::uint32_t entry) {
-    const std::uint32_t at = mhp3rd::text::kTextBlock + memory.load32(mhp3rd::text::kTextBlock + table * 4u);
+    const std::uint32_t at = mhp3rd::text::kMainTextBlock + memory.load32(mhp3rd::text::kMainTextBlock + table * 4u);
     const std::uint32_t string = at + memory.load32(at + entry * 4u);
     std::string text;
     for (std::uint32_t i = 0; i < 256u; ++i) {
@@ -98,11 +98,13 @@ std::string read_entry(const Memory &memory, std::uint16_t table, std::uint32_t 
 }
 
 void test_parse() {
+    // The old shape (no [entry]): everything belongs to the main block, and
+    // escapes are understood.
     const std::string text =
         "# a comment\n"
         "; another\n"
         "language = pt-BR\n"
-        "name = Português (Brasil)\n"
+        "name = PortuguÃªs (Brasil)\n"
         "\n"
         "2:20 = Cancelar\n"
         "2:21 = Sim \\#1\n"
@@ -111,7 +113,7 @@ void test_parse() {
         "2:20 = Duplicado\n";
     const Translations t = Translations::parse(text, "xx");
     check(t.code() == "pt-BR", "the language line wins");
-    check(t.name() == "Português (Brasil)", "the name line is read");
+    check(t.name() == "PortuguÃªs (Brasil)", "the name line is read");
     check(t.size() == 3u, "comments and malformed lines are skipped");
     check(t.find(2u, 20u) != nullptr && *t.find(2u, 20u) == "Duplicado", "a repeated key keeps the last value");
     check(t.find(2u, 21u) != nullptr && *t.find(2u, 21u) == "Sim #1", "\\# unescapes");
@@ -119,10 +121,31 @@ void test_parse() {
     check(t.find(2u, 99u) == nullptr, "an unknown key is absent");
     check(t.arena_bytes() == t.find(2u, 20u)->size() + t.find(2u, 21u)->size() + t.find(3u, 1u)->size() + 3u,
           "the arena size counts every terminator");
+}
 
-    const Translations fallback = Translations::parse("2:1 = x\n", "es");
-    check(fallback.code() == "es", "the file name stands in for a language line");
-    check(fallback.name() == "es", "and for the name too");
+void test_blocks_and_rules() {
+    // The grouped shape: [entry] sections, a range and a wildcard.
+    const std::string text =
+        "language = pt-BR\n"
+        "name = Teste\n"
+        "\n"
+        "[16]\n"
+        "2:20 = Cancelar\n"
+        "3:1-3 = Faixa\n"
+        "2:* = Tudo\n"
+        "\n"
+        "[2835]\n"
+        "2:129 = Bem-vindo\n";
+    const auto blocks = Translations::parse_blocks(text, "xx");
+    check(blocks.size() == 2u, "two blocks are read");
+    const Translations &main = blocks.at(16);
+    check(main.find(2u, 20u) != nullptr && *main.find(2u, 20u) == "Cancelar", "an exact key in its block");
+    check(main.find(3u, 2u) != nullptr && *main.find(3u, 2u) == "Faixa", "a range matches inside");
+    check(main.find(3u, 4u) == nullptr, "a range stops at its end");
+    check(main.find(2u, 999u) != nullptr && *main.find(2u, 999u) == "Tudo", "a wildcard matches any index");
+    check(main.find(3u, 999u) == nullptr, "a wildcard of one table does not match another");
+    check(blocks.at(2835).find(2u, 129u) != nullptr, "the other block has its own keys");
+    check(blocks.at(2835).find(2u, 20u) == nullptr, "and does not see the first block's");
 }
 
 void test_apply() {
@@ -132,18 +155,18 @@ void test_apply() {
     Translations t;
     t.add(2u, 1u, "Qtd");        // shorter than "Qty"
     t.add(2u, 2u, "Cancelar");   // longer than "Cancel"
-    t.add(3u, 2u, "Tônico");     // longer than "Tonic"
+    t.add(3u, 2u, "TÃ´nico");     // longer than "Tonic"
     t.add(2u, 99u, "fora");      // the table has no such entry
 
-    const Arena arena{mhp3rd::text::kTextBlock + 0x8000u, mhp3rd::text::kTextBlock + 0x8000u + 0x400u};
-    const mhp3rd::text::ApplyResult result = mhp3rd::text::apply(memory, mhp3rd::text::kTextBlock, t, arena);
+    const Arena arena{mhp3rd::text::kMainTextBlock + 0x8000u, mhp3rd::text::kMainTextBlock + 0x8000u + 0x400u};
+    const mhp3rd::text::ApplyResult result = mhp3rd::text::apply(memory, mhp3rd::text::kMainTextBlock, t, arena);
     check(result.block, "the block is recognised");
     check(result.applied == 3u, "three entries are replaced");
     check(result.missing == 1u, "the entry the table lacks is counted");
     check(result.skipped == 0u, "nothing is skipped with room to spare");
     check(read_entry(memory, 2u, 1u) == "Qtd", "a shorter translation replaces in place");
     check(read_entry(memory, 2u, 2u) == "Cancelar", "a longer translation is read back whole");
-    check(read_entry(memory, 3u, 2u) == "Tônico", "a value with a multibyte character survives");
+    check(read_entry(memory, 3u, 2u) == "TÃ´nico", "a value with a multibyte character survives");
     check(read_entry(memory, 2u, 3u) == "Yes", "an entry with no translation falls back");
     check(read_entry(memory, 3u, 1u) == "Guide", "another table's entries fall back too");
 }
@@ -156,8 +179,8 @@ void test_apply_limited_arena() {
     t.add(2u, 1u, "Qtd");
     t.add(2u, 2u, "Cancelar");  // does not fit the arena below
 
-    const Arena arena{mhp3rd::text::kTextBlock + 0x8000u, mhp3rd::text::kTextBlock + 0x8000u + 5u};
-    const mhp3rd::text::ApplyResult result = mhp3rd::text::apply(memory, mhp3rd::text::kTextBlock, t, arena);
+    const Arena arena{mhp3rd::text::kMainTextBlock + 0x8000u, mhp3rd::text::kMainTextBlock + 0x8000u + 5u};
+    const mhp3rd::text::ApplyResult result = mhp3rd::text::apply(memory, mhp3rd::text::kMainTextBlock, t, arena);
     check(result.applied == 1u && result.skipped == 1u, "an entry with no room is skipped");
     check(read_entry(memory, 2u, 1u) == "Qtd", "the entry that did fit is applied");
     check(read_entry(memory, 2u, 2u) == "Cancel", "the skipped entry keeps the game's text");
@@ -168,8 +191,8 @@ void test_apply_before_load() {
 
     Translations t;
     t.add(2u, 2u, "Qtd");
-    const Arena arena{mhp3rd::text::kTextBlock + 0x8000u, mhp3rd::text::kTextBlock + 0x8000u + 0x400u};
-    const mhp3rd::text::ApplyResult result = mhp3rd::text::apply(memory, mhp3rd::text::kTextBlock, t, arena);
+    const Arena arena{mhp3rd::text::kMainTextBlock + 0x8000u, mhp3rd::text::kMainTextBlock + 0x8000u + 0x400u};
+    const mhp3rd::text::ApplyResult result = mhp3rd::text::apply(memory, mhp3rd::text::kMainTextBlock, t, arena);
     check(!result.block && result.applied == 0u, "nothing is applied before the game loads its text");
 }
 
@@ -177,6 +200,7 @@ void test_apply_before_load() {
 
 int main() {
     test_parse();
+    test_blocks_and_rules();
     test_apply();
     test_apply_limited_arena();
     test_apply_before_load();
