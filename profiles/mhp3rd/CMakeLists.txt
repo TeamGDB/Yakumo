@@ -187,6 +187,9 @@ set(MHP3RD_HOST_SOURCES
     host/mods/mhp3rd_data_bin.cpp
     host/mods/mhp3rd_mod_format.cpp
     host/mods/mhp3rd_mods.cpp
+    host/game/guest_ram.cpp
+    host/game/game_data.cpp
+    host/game/equipment_models.cpp
     third_party/tiny_aes/aes.c
 )
 # tiny-AES-c is C; the project only enables C++, which compiles it unchanged.
@@ -323,7 +326,8 @@ if(MHP3RD_DEBUG_MENU AND NOT MHP3RD_RELEASE)
     # The game's structures as the tools read and write them, on a buffer.
     add_executable(mhp3rd_debug_tools_tests
         tests/debug_tools_tests.cpp
-        host/debug/game_state.cpp)
+        host/debug/game_state.cpp
+        host/game/game_data.cpp)
     target_include_directories(mhp3rd_debug_tools_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
     set_target_properties(mhp3rd_debug_tools_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
     if(PSPRECOMP_BUILD_TESTS)
@@ -451,6 +455,18 @@ target_include_directories(mhp3rd_mods_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host
 set_target_properties(mhp3rd_mods_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 if(PSPRECOMP_BUILD_TESTS)
     add_test(NAME mhp3rd_mods_tests COMMAND mhp3rd_mods_tests)
+endif()
+
+# Which file holds a piece of equipment's model, read from the game's tables
+# as equipment mods need it, on a buffer standing for guest memory. No game data.
+add_executable(mhp3rd_equipment_models_tests
+    tests/equipment_models_tests.cpp
+    host/game/game_data.cpp
+    host/game/equipment_models.cpp)
+target_include_directories(mhp3rd_equipment_models_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+set_target_properties(mhp3rd_equipment_models_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_equipment_models_tests COMMAND mhp3rd_equipment_models_tests)
 endif()
 
 # Renderer helpers that need no GPU.
