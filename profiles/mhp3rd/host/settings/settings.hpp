@@ -77,6 +77,11 @@ struct Settings {
     std::uint32_t font_weight{1u};     // columns the game's glyphs are thickened by, 0 to kMaxFontWeight
     bool crisp_text{true};             // draw the game's glyph atlas again at the internal resolution
     UiTextures ui_textures{UiTextures::Off};
+    // The language of the game's own text, applied over it from the
+    // translations folder: "original" keeps the disc's own text, whatever
+    // language the image is in. A new language needs a restart
+    // (docs/TEXT_TRANSLATION.md).
+    std::string language{"original"};
 
     // Audio
     std::uint32_t volume{100u};        // percent
