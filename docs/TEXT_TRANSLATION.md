@@ -41,65 +41,94 @@ and `es.lang`; a build copies them next to the executable.
 language = pt-BR
 name = Português (Brasil)
 
+[16]                     # the shared block: menus, items, equipment
 2:20 = Cancelar
 2:21 = Sim
 2:115 = Missão concluída!
+
+[2835]                   # another archive block, of its own
+2:129 = Bem-vindo ao mundo de Monster Hunter.
 ```
 
 - `language` names the language and `name` what the menu shows. A file with no
   `language` line is named by its own file name (`de.lang` → `de`).
-- Every other line is `TABLE:ENTRY = TEXT`.
-  - `TABLE` and `ENTRY` are decimal indices into the game's text block. Table 2
-    holds the menu options and system messages, table 3 the item names, table 2
-    from entry 308 the monster names, and tables 5 to 38 the equipment names
-    and descriptions in pairs. `docs/DEBUG_MENU.md` describes how they were
-    found and lists the equipment tables.
-  - `TEXT` is UTF-8. `\n`, `\t`, `\\` and `\#` are understood; any other
-    character after a backslash is left as it is.
+- A `[entry]` header names the archive entry (a block) the lines below belong
+  to; `[main]` is a shorthand for `[16]`. A file written the old way (no
+  `[entry]`) is read as the main block, so older files still load.
+- Every other line is `TABLE:INDEX = TEXT`.
+  - In the main block, table 2 holds the menu options and system messages, table
+    3 the item names, tables 5 to 38 the equipment names and descriptions in
+    pairs (`docs/DEBUG_MENU.md`). In the dialogue block (4289) the numbers are
+    `id:index` instead (see *The dialogue block* below).
+  - A key may be a range (`2:308-382`) or a wildcard (`2:*`, `*:5`), which keeps
+    a file small when the same text repeats.
+  - `TEXT` is UTF-8. `\n`, `\r`, `\t`, `\\` and `\#` are understood.
   - The game's own formatting codes (`~B..` for a button glyph, `~C..` for a
-    colour) are copied as they are. A translation that changes a prompt must
-    keep them.
+    colour) are copied as they are, in order.
 - A repeated key keeps the last value; a line that is not a key is ignored.
 
-To find the entry to translate, run the game with a developer build
+To find a key to translate, run the game with a developer build
 (`MHP3RD_DEBUG_MENU=1`), open the menu's **Debug** page and use `table 2`, or
 `table 2 FIRST N` to start further in.
 
+### The dialogue block
+
+The NPC and quest dialogue is archive entry **4289**, in a different shape: a
+list of `(id, offset)` pairs, each a block of `(kind, offset)` pairs, each a
+string. It is not a text block, so its keys are `id:index`, e.g. `[4289]` with
+`0:4 = ...`. `tools/extract_dialogue.py` reads it and `host/text` applies it the
+same way (the strings go to the arena, the sub-block's offset is rewritten).
+
 ## How it works
 
-The game loads one block of its text at start (at `0x08A40640` on NPJB-40001,
-the executable Yakumo supports). The block is a header of offsets to tables;
-each table is a list of 32-bit offsets to UTF-8 strings, ended by `0xFFFFFFFF`
-(`host/debug/game_state.cpp` reads it the same way).
+The game keeps its text in several blocks, each an archive entry: the shared one
+(entry 16) loaded at a fixed address, and a quest's, a menu's or the dialogue's
+loaded as the game needs them, into buffers whose addresses change.
 
-When a language is chosen, between two frames (`host/hle/hle_media.cpp` calls
-`text::frame` at the flip):
+When a language is chosen, the text is applied between two frames
+(`host/hle/hle_media.cpp` calls `text::frame` at the flip):
 
-1. The block is checked and, once the game has loaded it, its tables are read.
-2. Each translated string is copied into a small arena reserved in guest memory
-   through the kernel's own allocator, and the table's offset for that entry is
-   pointed at it. Because the string lives in the arena, a translation may be
-   longer or shorter than the original.
-3. An entry with no translation, an entry the table does not have, or a string
-   that does not fit the arena is left alone: the game's own text is shown.
+1. The file I/O tells `text::translate_read` every read of `DATA.BIN`
+   (`hle_io.cpp`); a read that carries a block the file names, whole or gathered
+   in pieces, lets the block be found once the game has loaded it (the main
+   block by its fixed address, another by the first string it holds).
+2. Each translated string is copied into one arena reserved in guest memory
+   through the kernel's own allocator, and the table's (or sub-block's) offset
+   for that string is pointed at it. Because the string lives in the arena, a
+   translation may be longer or shorter than the original, and does not have to
+   fit the block.
+3. A block the file does not name, a string it does not translate, or a table it
+   cannot read is left alone: the game's own text is shown.
 
-Nothing is ever written before the game loads its text, and nothing reads the
-disc image: `host/text/` holds the file format (`language.{hpp,cpp}`) and the
-apply logic (`translation.{hpp,cpp}`); both are unit-tested in
-`tests/text_tests.cpp` on a buffer, with no game data.
+The archive is obfuscated per 2 KiB block, so a block read in pieces is
+decrypted whole before anything is read from it; a partial read is collected
+until enough has been seen. Nothing reads the disc image, and nothing is written
+before the game loads its text. `host/text/` holds the file format
+(`language.{hpp,cpp}`) and the apply logic (`translation.{hpp,cpp}`); both are
+unit-tested in `tests/text_tests.cpp` on a buffer, with no game data.
+
+### Fitting the box
+
+The game draws a string in the lines its own text had: a dialogue's are about 21
+characters, a menu's about 32. A translation wrapped differently is cut, and one
+with more lines overflows the box. `tools/build_lang.py` (and the local
+translation tool) wraps each translation to the source's **line count and
+width**, so it fits where the game puts it.
 
 ## Limits
 
 - **One language per run.** The choice is applied once, when the game's text
-  block loads. Changing it needs a restart, as the menu says.
+  loads. Changing it needs a restart, as the menu says.
 - **Entry 0 of a table cannot be translated.** Its offset word doubles as the
-  table's header, so Yakumo leaves it alone.
-- **Only tables the game lays out as this block does.** A table that fails the
-  sanity check (a bad end marker, entries out of order) is skipped whole, and
-  its entries fall back.
+  table's header, so Yakumo leaves it alone (35 such strings, `No Equipment`
+  among them).
+- **Only blocks the file names.** The eight text blocks and the dialogue block
+  are the game's text; the thousands of other archive entries are models,
+  textures and data, not text.
 - **A glyph the font lacks draws as its fallback.** A translation with
   accented letters needs a font that has them; install one with
-  `text.font` (see the profile README) if the game's own font does not.
+  `text.font` (see the profile README) if the game's own font does not. The
+  English patch's font has them.
 
 ## Adding a language
 
@@ -120,12 +149,17 @@ translation back into `.lang` files. Nothing they read or write is committed;
 both write under `docs/TEXT_DUMP/`, which is ignored.
 
 ```sh
-# Every string block of the image: docs/TEXT_DUMP/all_strings.tsv and one
-# readable file per entry. --no-runs skips the loose-text scan (slow).
-python3 profiles/mhp3rd/tools/extract_text.py game.iso docs/TEXT_DUMP --no-runs
+# The eight text blocks, with the exact table numbering the game uses:
+# entry, table, index, text (one row per string).
+python3 profiles/mhp3rd/tools/extract_blocks.py game.iso blocks.tsv
 
-# Classify as English or Japanese-leftover and build worksheets.
-python3 profiles/mhp3rd/tools/text_report.py docs/TEXT_DUMP     # strings.csv, strings_jp.csv, codes.txt
+# The dialogue of entry 4289: id, index, kind, text.
+python3 profiles/mhp3rd/tools/extract_dialogue.py game.iso dialogue.tsv
+
+# The whole image at once (slower), classified as English or Japanese-leftover,
+# into docs/TEXT_DUMP/strings.csv, strings_jp.csv and codes.txt.
+python3 profiles/mhp3rd/tools/extract_text.py game.iso docs/TEXT_DUMP --no-runs
+python3 profiles/mhp3rd/tools/text_report.py docs/TEXT_DUMP
 ```
 
 `strings.csv` holds every string as `entry,table,index,kind,has_format,codes,

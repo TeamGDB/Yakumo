@@ -161,6 +161,44 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes);
 // live in, through `allocate`, and applies the block the game loaded at start.
 void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate);
 
+// Applies a dialogue translation to the block at `address`, whose shape is a
+// list of (id, offset) pairs, each `offset` a sub-block, each sub-block a list
+// of (kind, offset) pairs, each `offset` a string (tools/extract_dialogue.py).
+// The keys are `id:index`. Returns how many strings were replaced. Memory is
+// anything with contains, load8/load32, store8/store32.
+template <typename Memory>
+std::uint32_t apply_dialogue(Memory &memory, std::uint32_t address, const Translations &translations,
+                             const Arena &arena, std::size_t &used) {
+    std::uint32_t applied = 0u;
+    for (std::uint32_t id = 0u; id < 512u; ++id) {
+        const std::uint32_t top = address + id * 8u;
+        if (!memory.contains(top, 8u)) break;
+        // The top list is (id, offset) pairs ended by 0xFFFFFFFF in the id.
+        if (memory.load32(top) == 0xFFFFFFFFu) break;
+        const std::uint32_t block_offset = memory.load32(top + 4u);
+        if (block_offset >= 0x00400000u) break;
+        const std::uint32_t block = address + block_offset;
+        if (!memory.contains(block, 8u)) continue;
+        for (std::uint32_t index = 0u; index < 4096u; ++index) {
+            const std::uint32_t at = block + index * 8u;
+            if (!memory.contains(at, 8u)) break;
+            if (memory.load32(at) == 0xFFFFFFFFu) break;
+            const std::string *text = translations.find(static_cast<std::uint16_t>(id), index);
+            if (text == nullptr) continue;
+            const std::size_t needed = text->size() + 1u;
+            if (used + needed > arena.end - arena.begin) continue;
+            const std::uint32_t into = arena.begin + static_cast<std::uint32_t>(used);
+            for (std::size_t i = 0; i < text->size(); ++i)
+                memory.store8(into + static_cast<std::uint32_t>(i), static_cast<std::uint8_t>((*text)[i]));
+            memory.store8(into + static_cast<std::uint32_t>(text->size()), 0u);
+            used += needed;
+            memory.store32(at + 4u, into - block);
+            ++applied;
+        }
+    }
+    return applied;
+}
+
 // The blocks translated so far this run, for the menu's diagnostics.
 struct AppliedBlock {
     std::uint32_t entry{};

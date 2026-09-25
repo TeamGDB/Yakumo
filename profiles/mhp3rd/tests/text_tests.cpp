@@ -97,6 +97,17 @@ std::string read_entry(const Memory &memory, std::uint16_t table, std::uint32_t 
     return text;
 }
 
+// The NUL-terminated string at an address.
+std::string read_text_at(const Memory &memory, std::uint32_t address) {
+    std::string text;
+    for (std::uint32_t i = 0; i < 256u; ++i) {
+        const char c = static_cast<char>(memory.load8(address + i));
+        if (c == '\0') break;
+        text += c;
+    }
+    return text;
+}
+
 void test_parse() {
     // The old shape (no [entry]): everything belongs to the main block, and
     // escapes are understood.
@@ -196,6 +207,63 @@ void test_apply_before_load() {
     check(!result.block && result.applied == 0u, "nothing is applied before the game loads its text");
 }
 
+// The dialogue shape: (id, offset) at the top, each offset a sub-block of
+// (kind, offset), each offset a string from the sub-block start.
+void write_dialogue(Memory &memory, std::uint32_t at, int blocks, int entries_per_block) {
+    // Layout: the top (id, offset) table, then each sub-block, then the strings.
+    // Every offset is relative to the base the game adds it to (the top table
+    // for a block, the block for a string).
+    const auto block_size = static_cast<std::uint32_t>(entries_per_block) * 8u + 16u +
+                            static_cast<std::uint32_t>(entries_per_block) * 24u;
+    std::uint32_t cursor = static_cast<std::uint32_t>(blocks) * 8u + 16u;
+    for (int id = 0; id < blocks; ++id) {
+        memory.store32(at + id * 8u, static_cast<std::uint32_t>(id));
+        memory.store32(at + id * 8u + 4u, cursor);
+        cursor += block_size;
+    }
+    memory.store32(at + blocks * 8u, 0xFFFFFFFFu);
+    for (int id = 0; id < blocks; ++id) {
+        const std::uint32_t relative = memory.load32(at + id * 8u + 4u);
+        const std::uint32_t block = at + relative;
+        const std::uint32_t strings = block + static_cast<std::uint32_t>(entries_per_block) * 8u + 16u;
+        for (int k = 0; k < entries_per_block; ++k) {
+            const std::string text = "d" + std::to_string(id) + "-" + std::to_string(k);
+            const std::uint32_t string = strings + static_cast<std::uint32_t>(k) * 16u;
+            for (std::size_t i = 0; i <= text.size(); ++i)
+                memory.store8(string + static_cast<std::uint32_t>(i),
+                              i < text.size() ? static_cast<std::uint8_t>(text[i]) : 0u);
+            memory.store32(block + k * 8u, 0u);
+            memory.store32(block + k * 8u + 4u, string - block);
+        }
+        memory.store32(block + entries_per_block * 8u, 0xFFFFFFFFu);
+    }
+}
+
+void test_apply_dialogue() {
+    Memory memory(kBase, kSize);
+    const std::uint32_t at = kBase + 0x1000u;
+    write_dialogue(memory, at, 2, 3);
+
+    Translations t;
+    t.add(0u, 1u, "olá");
+    t.add(1u, 2u, "adeus");
+    t.add(5u, 0u, "não existe");
+
+    Arena arena{at + 0x8000u, at + 0x8000u + 0x400u};
+    std::size_t used = 0u;
+    const std::uint32_t applied = mhp3rd::text::apply_dialogue(memory, at, t, arena, used);
+    check(applied == 2u, "two dialogue strings are replaced");
+    // Read one back the way the game would: base plus the relative offset.
+    const std::uint32_t block0 = at + memory.load32(at + 4u);
+    const std::uint32_t string0 = block0 + memory.load32(block0 + 1u * 8u + 4u);
+    check(read_text_at(memory, string0) == "olá", "the first string reads back translated");
+    const std::uint32_t block1 = at + memory.load32(at + 8u + 4u);
+    const std::uint32_t string1 = block1 + memory.load32(block1 + 2u * 8u + 4u);
+    check(read_text_at(memory, string1) == "adeus", "the second block's string too");
+    const std::uint32_t untouched = block0 + memory.load32(block0 + 0u * 8u + 4u);
+    check(read_text_at(memory, untouched) == "d0-0", "a string with no translation keeps the game's text");
+}
+
 } // namespace
 
 int main() {
@@ -204,6 +272,7 @@ int main() {
     test_apply();
     test_apply_limited_arena();
     test_apply_before_load();
+    test_apply_dialogue();
     if (failures != 0) {
         std::cerr << failures << " failure(s)\n";
         return 1;
