@@ -19,10 +19,17 @@ namespace {
 // main one (entry 16) is loaded once at a fixed address; the rest are read as
 // the game needs them (docs/DATA_BIN.md). kMainEntry is in language.hpp.
 const std::uint32_t kTargets[] = {kMainEntry, 2835u, 2836u, 2837u, 2838u, 2839u, 2840u, 2841u};
-// The NPC/quest dialogue: a different shape from the text blocks (a list of
+// The NPC/quest dialogue, in a different shape from the text blocks: a list of
 // (id, offset) pairs, each block another list of (kind, offset) pairs, each
-// offset a string; tools/extract_dialogue.py).
-constexpr std::uint32_t kDialogueEntry = 4289u;
+// offset a string (tools/extract_dialogue.py). The ids number across the
+// entries (4289 is 0..16, 4290 is 17..23, 4291 is 24..27), so a key is unique.
+const std::uint32_t kDialogues[] = {4289u, 4290u, 4291u};
+
+bool is_dialogue(std::uint32_t entry) {
+    for (const std::uint32_t dialogue : kDialogues)
+        if (dialogue == entry) return true;
+    return false;
+}
 // 0x08800000-0x0A800000 is the game's writable RAM (host/kernel/kernel.hpp).
 constexpr std::uint32_t kRamBegin = 0x08800000u;
 constexpr std::uint32_t kRamEnd = 0x0A800000u;
@@ -61,7 +68,7 @@ bool is_original(const std::string &code) {
 }
 
 bool is_target(std::uint32_t entry) {
-    if (entry == kDialogueEntry) return true;
+    if (is_dialogue(entry)) return true;
     for (const std::uint32_t target : kTargets)
         if (target == entry) return true;
     return false;
@@ -288,7 +295,7 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
     // The probe is the first non-empty string and where it sits in the entry, so
     // the entry can be found in RAM by that string alone (the dialogue has no
     // header to look for).
-    if (at->entry == kDialogueEntry) {
+    if (is_dialogue(at->entry)) {
         // (id, offset) pairs at the top; the first block's first string.
         for (std::uint32_t k = 0u; k < 64u && pending.probe.empty(); ++k) {
             const std::uint32_t id = read32(k * 8u);
@@ -374,7 +381,7 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
 
         std::uint32_t address = 0u;
         if (entry == kMainEntry) address = kMainTextBlock;
-        else if (entry == kDialogueEntry) address = find_dialogue(memory, pending.probe, pending.probe_into);
+        else if (is_dialogue(entry)) address = find_dialogue(memory, pending.probe, pending.probe_into);
         else if (!pending.probe.empty()) address = find_block(memory, pending.probe);
         static const bool trace = std::getenv("MHP3RD_TRACE_TEXT") != nullptr;
         if (address == 0u) {
@@ -383,7 +390,7 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
         }
 
         // The dialogue has its own shape; the text blocks share one.
-        if (entry == kDialogueEntry) {
+        if (is_dialogue(entry)) {
             const std::size_t before = s.arena_used;
             const std::uint32_t applied = apply_dialogue(memory, address, translations->second, *s.arena, s.arena_used);
             if (applied == 0u) continue;

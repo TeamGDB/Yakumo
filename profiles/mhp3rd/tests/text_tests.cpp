@@ -239,6 +239,29 @@ void write_dialogue(Memory &memory, std::uint32_t at, int blocks, int entries_pe
     }
 }
 
+// The dialogue's ids need not start at 0: one archive entry is numbered from
+// where the previous left off (a block of 17 packs ids 0..16, the next 17..23).
+void test_apply_dialogue_offset_ids() {
+    Memory memory(kBase, kSize);
+    const std::uint32_t at = kBase + 0x2000u;
+    // Two blocks whose ids are 17 and 18, like entry 4290.
+    write_dialogue(memory, at, 2, 3);
+    memory.store32(at + 0u, 17u);
+    memory.store32(at + 8u, 18u);
+
+    Translations t;
+    t.add(17u, 0u, "primeiro");
+    t.add(18u, 1u, "segundo");
+
+    Arena arena{at + 0x8000u, at + 0x8000u + 0x400u};
+    std::size_t used = 0u;
+    const std::uint32_t applied = mhp3rd::text::apply_dialogue(memory, at, t, arena, used);
+    check(applied == 2u, "an id that does not start at 0 is found");
+    const std::uint32_t block0 = at + memory.load32(at + 4u);
+    const std::uint32_t s0 = block0 + memory.load32(block0 + 4u);
+    check(read_text_at(memory, s0) == "primeiro", "the first block's string with its own id");
+}
+
 void test_apply_dialogue() {
     Memory memory(kBase, kSize);
     const std::uint32_t at = kBase + 0x1000u;
@@ -273,6 +296,7 @@ int main() {
     test_apply_limited_arena();
     test_apply_before_load();
     test_apply_dialogue();
+    test_apply_dialogue_offset_ids();
     if (failures != 0) {
         std::cerr << failures << " failure(s)\n";
         return 1;

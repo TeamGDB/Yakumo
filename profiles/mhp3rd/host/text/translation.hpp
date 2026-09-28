@@ -170,11 +170,14 @@ template <typename Memory>
 std::uint32_t apply_dialogue(Memory &memory, std::uint32_t address, const Translations &translations,
                              const Arena &arena, std::size_t &used) {
     std::uint32_t applied = 0u;
-    for (std::uint32_t id = 0u; id < 512u; ++id) {
-        const std::uint32_t top = address + id * 8u;
+    // The top list is (id, offset) pairs; the ids need not start at 0 (a block
+    // of dialogue is numbered from wherever the game left off), so they are read
+    // from each pair rather than assumed from the position.
+    for (std::uint32_t slot = 0u; slot < 512u; ++slot) {
+        const std::uint32_t top = address + slot * 8u;
         if (!memory.contains(top, 8u)) break;
-        // The top list is (id, offset) pairs ended by 0xFFFFFFFF in the id.
-        if (memory.load32(top) == 0xFFFFFFFFu) break;
+        const std::uint32_t id = memory.load32(top);
+        if (id == 0xFFFFFFFFu) break;
         const std::uint32_t block_offset = memory.load32(top + 4u);
         if (block_offset >= 0x00400000u) break;
         const std::uint32_t block = address + block_offset;

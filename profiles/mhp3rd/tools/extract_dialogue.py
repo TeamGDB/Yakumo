@@ -72,17 +72,19 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("image")
     parser.add_argument("out")
-    parser.add_argument("--entry", type=int, default=4289)
+    parser.add_argument("--entries", default="4289,4290,4291",
+                        help="the DATA.BIN entries that hold dialogue")
     options = parser.parse_args(argv)
 
     archive = databin.Archive(options.image)
-    data = archive.read(options.entry)
     total = 0
     with open(options.out, "w", encoding="utf-8", newline="\n") as out:
         out.write("id\tindex\tkind\ttext\n")
-        for ident, index, kind, text in dialogue_of(data):
-            out.write("%d\t%d\t%d\t%s\n" % (ident, index, kind, text.replace("\n", "\\n")))
-            total += 1
+        for entry in (int(x) for x in options.entries.split(",") if x):
+            data = archive.read(entry)
+            for ident, index, kind, text in dialogue_of(data):
+                out.write("%d\t%d\t%d\t%s\n" % (ident, index, kind, text.replace("\n", "\\n")))
+                total += 1
     print("wrote %s, %d dialogue strings" % (options.out, total))
 
 
