@@ -518,9 +518,7 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
 
         // A quest file's strings are repointed at the arena (any length), in
         // every copy in RAM and again on every re-read, all pointing at one
-        // slice so the strings are not copied twice. A structure that captured a
-        // pointer to the game's own string before this frame (the quest keeps
-        // one) is pointed at the translation too.
+        // slice so the strings are not copied twice.
         if (is_quest(entry)) {
             if (pending.arena_bytes == 0u) {
                 const std::size_t need = translations->second.arena_bytes();
@@ -531,37 +529,16 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
             }
             const Arena slice{s.arena->begin + pending.arena_offset,
                               s.arena->begin + pending.arena_offset + pending.arena_bytes};
-            std::map<std::uint32_t, std::uint32_t> english_to_arena;
             std::uint32_t applied = 0u;
             for (const std::uint32_t copy : quest_copies) {
                 std::size_t used = 0u;
                 applied += apply_quest(memory, copy, translations->second, slice, used);
-                const std::uint32_t first = memory.load32(copy);
-                const bool relative_copy = first != 0u && first < pending.size;
-                for (const auto &[id, text] : translations->second.entries()) {
-                    const std::uint32_t ref = copy + table_of(id);
-                    if (!memory.contains(ref, 4u)) continue;
-                    const std::uint32_t word = memory.load32(ref);
-                    const std::uint32_t arena = relative_copy ? copy + word : word;
-                    english_to_arena[copy + index_of(id)] = arena;
-                }
-            }
-            // One pass over RAM: wherever an absolute pointer still holds the
-            // address of one of the game's own quest strings, point it at the
-            // translation instead.
-            std::size_t pointers = 0u;
-            for (std::uint32_t at = kRamBegin; at + 4u < kRamEnd; at += 4u) {
-                const auto found = english_to_arena.find(memory.load32(at));
-                if (found == english_to_arena.end()) continue;
-                memory.store32(at, found->second);
-                ++pointers;
             }
             pending.applied = true;
-            if (applied > 0u || pointers > 0u || trace) {
+            if (applied > 0u || trace) {
                 s.applied[entry] = AppliedBlock{entry, address, applied};
                 std::cout << "[text] quest " << entry << " at " << psprecomp::hex32(address) << ": applied " << applied
-                          << " in " << quest_copies.size() << " copy/copies, " << pointers << " pointer(s), "
-                          << pending.arena_bytes << " bytes\n";
+                          << " in " << quest_copies.size() << " copy/copies, " << pending.arena_bytes << " bytes\n";
             }
             continue;
         }
