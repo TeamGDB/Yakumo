@@ -146,10 +146,58 @@ and holds each translation to the field's own box.
 2. Translate the lines you want, keeping the `TABLE:ENTRY` keys and any `~B..`
    or `~C..` codes.
 3. Put the file in the data directory's `translations` folder, then choose the
-   language in **System → Text** and restart.
+   language in **System -> Text** and restart.
 
 An entry left untranslated is not an error: it falls back to the game's own
-text, so a file may cover one screen at a time.
+text, so a file may cover one screen at a time. A few things to keep in mind
+while translating:
+
+- **Keep the codes.** `~Cnn` sets a colour and `~Bnn` draws a button glyph; copy
+  every one, in order. `%s`, `%d` and friends are the game's own substitutions.
+- **Use `\n` for a line break.** The file is one line per key, so a real break is
+  written `\n`. `\\`, `\r`, `\t` and `\#` are understood too.
+- **Keys may be a range or a wildcard.** `2:308-382 = ...` sets a whole run and
+  `2:*` every entry of a table, which keeps a file short when a word repeats.
+- **Quote the quest names.** The game's own text wraps a name in the "mountain
+  bracket" (`<<...>>` / `…`); use ordinary double quotes instead.
+- **Keep each text inside its field.** See *Field sizes* below; a text that is
+  too wide is wrapped by the game without stopping at a space and splits a word,
+  and one with too many lines runs past the box.
+
+## Field sizes
+
+The game draws each string in a field sized to the text it was authored for, so
+the translation has to fit that field, not the screen. The rule of thumb is the
+source's own line count and width; a few fields are narrower, and one skill
+panel is wider. These are the fields that were measured:
+
+| Where | Key | Field |
+| --- | --- | --- |
+| Dialogue (NPCs, quests, shops) | `[4289]`-`[4291]`, `id:index` | the source's own lines and width; never wider, or the game wraps it and splits a word |
+| Menu labels and system messages | `[16] 2:*` | one line, about the source's width; the item-box menus hold 16 |
+| Item and equipment names | `[16] 3:*` and the even tables to `38` | one line, the source's width |
+| Item and equipment descriptions | `[16] 4:*` and the odd tables to `38` | the source's lines; the item detail box shows three and a half lines |
+| Smithy and item-box options | `[2838] 2:*` | 16-17 |
+| Change-equipment menu | `[2838] 2:283-322` | 17 |
+| Guild card page and card list | `[2838] 2:733-763` | 17 |
+| Status screen skill names | `[16] 2:1090-1189` | 15 |
+| The "Expert" title | `[16] 2:936` | 10 |
+| Skill descriptions | `[2838] 5:*`, `[2840] 3:*` | the source's lines; 30 wide when three lines or fewer, 19 otherwise |
+| The smithy's armor entries | `[2838] 2:36`, `2:97` | shortened to `Armdr` / `Forjar Armdr` |
+
+Two more rules the fields taught:
+
+- **No space before a punctuation mark.** The model sometimes writes `item .`;
+  when the text is wrapped the mark is left alone on a line. Portuguese sets no
+  space before it either, so it is joined to the word (`item.`).
+- **A word is never wider than the field.** The game has nowhere to break there
+  and splits the word, so a too-long word is replaced by a shorter one (the
+  smithy's `Armor` becomes `Armdr`, `Heavy Bowgun` becomes `Fuzil. Pesado`).
+
+A translation is wrapped to the field's width, and one that still needs too many
+lines is shortened, never widened. The Brazilian Portuguese file was checked
+against these rules with a small harness of its own; the rules above are the
+ones it enforces, kept here so another language can be checked the same way.
 
 ## Working from the disc's whole text
 
