@@ -278,15 +278,12 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
         if (pending.partial_have < from + bytes.size()) pending.partial_have = from + bytes.size();
         stored.assign(pending.partial.begin(), pending.partial.begin() + pending.partial_have);
     }
+    // The obfuscation is one keystream seeded from the block the entry starts
+    // at and running through the whole entry, not a fresh one every 2 KiB
+    // (mods::p3rd::decrypt does the entry from `block`, offset 0).
     std::vector<std::uint8_t> clear = stored;
-    const std::uint64_t entry_start_block = (offset - at->into) / mods::p3rd::kBlock;
-    for (std::size_t at_byte = 0u; at_byte < clear.size();) {
-        const std::size_t in_block = at_byte % mods::p3rd::kBlock;
-        const std::size_t run = std::min<std::size_t>(mods::p3rd::kBlock - in_block, clear.size() - at_byte);
-        const std::uint32_t block = static_cast<std::uint32_t>(entry_start_block + at_byte / mods::p3rd::kBlock);
-        mods::p3rd::decrypt(std::span<std::uint8_t>(clear.data() + at_byte, run), block, in_block);
-        at_byte += run;
-    }
+    const std::uint32_t entry_start_block = static_cast<std::uint32_t>((offset - at->into) / mods::p3rd::kBlock);
+    mods::p3rd::decrypt(clear, entry_start_block, 0u);
     const auto read32 = [&](std::uint32_t i) -> std::uint32_t {
         return static_cast<std::uint32_t>(clear[i]) | (static_cast<std::uint32_t>(clear[i + 1u]) << 8u) |
                (static_cast<std::uint32_t>(clear[i + 2u]) << 16u) |
@@ -339,8 +336,7 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
     }
     pending.read = true;
     if (trace)
-        std::cout << "[text] block " << at->entry << " read: probe \"" << pending.probe << "\" (clear "
-                  << clear.size() << ", u32[1]=" << (clear.size() >= 8u ? read32(4u) : 0u) << ")\n";
+        std::cout << "[text] block " << at->entry << " read: probe \"" << pending.probe << "\"\n";
 }
 
 void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
