@@ -62,8 +62,11 @@ name = Português (Brasil)
 - Every other line is `TABLE:INDEX = TEXT`.
   - In the main block, table 2 holds the menu options and system messages, table
     3 the item names, tables 5 to 38 the equipment names and descriptions in
-    pairs (`docs/DEBUG_MENU.md`). In the dialogue block (4289) the numbers are
-    `id:index` instead (see *The dialogue block* below).
+    pairs, table 40 the save/load screen and tables 45–50 the Felyne (Amigato)
+    equipment descriptions and names (`docs/DEBUG_MENU.md`). Tables 41–43 are the
+    chat profanity filter, not text the game draws, and are left alone. In the
+    dialogue block (4289) the numbers are `id:index` instead (see *The dialogue
+    block* below), and in a quest file they are `ref:offset` (see *Quest files*).
   - A key may be a range (`2:308-382`) or a wildcard (`2:*`, `*:5`), which keeps
     a file small when the same text repeats.
   - `TEXT` is UTF-8. `\n`, `\r`, `\t`, `\\` and `\#` are understood.
@@ -82,6 +85,19 @@ list of `(id, offset)` pairs, each a block of `(kind, offset)` pairs, each a
 string. It is not a text block, so its keys are `id:index`, e.g. `[4289]` with
 `0:4 = ...`. `tools/extract_dialogue.py` reads it and `host/text` applies it the
 same way (the strings go to the arena, the sub-block's offset is rewritten).
+
+### Quest files
+
+The village quests are archive entries **4059–4066** and **4070–4073**, each a
+list of records: the record offsets sit at the top, and every record holds a
+table of offsets (absolute in the entry) to its fields — the title, the
+objective, the result line, the description, the monsters and the client. Those
+offsets are the keys' `ref:offset`: the position of the offset word, and the
+offset it holds, e.g. `[4059]` with `1624:1192 = Derrota Jaggi` (the title
+"Jaggi Takedown", whose offset word is at 1624 and points at 1192). The run-time
+patch finds the file in RAM by its first title and rewrites each word to point
+into the arena, so a quest translation may be any length, unlike a fixed field.
+`tools/extract_text.py` reads these too (`quest_block`).
 
 ## How it works
 
@@ -133,9 +149,12 @@ and holds each translation to the field's own box.
 - **Entry 0 of a table cannot be translated.** Its offset word doubles as the
   table's header, so Yakumo leaves it alone (35 such strings, `No Equipment`
   among them).
-- **Only blocks the file names.** The eight text blocks and the dialogue block
-  are the game's text; the thousands of other archive entries are models,
-  textures and data, not text.
+- **Only blocks the file names.** The eight text blocks, the dialogue block and
+  the twelve quest files are the game's text; the thousands of other archive
+  entries are models, textures and data, not text.
+- **The chat filter is not translated.** Entry 16 tables 41–43 are the word list
+  the chat censor uses, not text the game draws; a `.lang` must not name them, or
+  translating would break the filter.
 - **A glyph the font lacks draws as its fallback.** A translation with
   accented letters needs a font that has them; install one with
   `text.font` (see the profile README) if the game's own font does not. The
@@ -186,6 +205,10 @@ panel is wider. These are the fields that were measured:
 | The "Expert" title | `[16] 2:936` | 10 |
 | Skill descriptions | `[2838] 5:*`, `[2840] 3:*` | the source's lines; 30 wide when three lines or fewer, 19 otherwise |
 | The smithy's armor entries | `[2838] 2:36`, `2:97` | shortened to `Armdr` / `Forjar Armdr` |
+| Save/load screen | `[16] 40:*` | the source's lines; the short labels (`MONEY`, `TIME`) are one line, the source's width plus the label slack |
+| Felyne (Amigato) equipment names | `[16] 46:*`, `48:*`, `50:*` | one line, the source's width plus the label slack |
+| Felyne (Amigato) descriptions | `[16] 45:*`, `47:*`, `49:*` | the source's own lines and width |
+| Quest fields | `[4059]`–`[4073]`, `ref:offset` | the source's own lines and width (the box the English already wraps to) |
 
 Two more rules the fields taught:
 
@@ -220,7 +243,8 @@ python3 profiles/mhp3rd/tools/extract_blocks.py game.iso blocks.tsv
 python3 profiles/mhp3rd/tools/extract_dialogue.py game.iso dialogue.tsv
 
 # The whole image at once (slower), classified as English or Japanese-leftover,
-# into docs/TEXT_DUMP/strings.csv, strings_jp.csv and codes.txt.
+# into docs/TEXT_DUMP/strings.csv, strings_jp.csv and codes.txt. It reads the
+# eight text blocks and the twelve quest files (4059-4073).
 python3 profiles/mhp3rd/tools/extract_text.py game.iso docs/TEXT_DUMP --no-runs
 python3 profiles/mhp3rd/tools/text_report.py docs/TEXT_DUMP
 ```
@@ -228,8 +252,8 @@ python3 profiles/mhp3rd/tools/text_report.py docs/TEXT_DUMP
 `strings.csv` holds every string as `entry,table,index,kind,has_format,codes,
 text`: `kind` is `en`, `jp`, `misto` or `sym`, and `has_format` marks the rows
 that carry the game's own `~Cnn`/`~Bnn` codes. Entries 2835–2841 are the
-quest/menu tables, 16 the big block (menu, items, equipment), 4703–4716 the
-download quests.
+quest/menu tables, 16 the big block (menu, items, equipment, save/load, Felyne
+equipment), 4059–4073 the village quests, 4703–4716 the download quests.
 
 The translations themselves live in `translations/glossary.tsv`, one row per
 string: `entry, table, index, english, portuguese, spanish`. The English column
