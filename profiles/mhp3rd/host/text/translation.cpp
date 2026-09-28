@@ -7,6 +7,7 @@
 #include "psprecomp/guest_memory.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -239,8 +240,6 @@ std::vector<std::uint32_t> find_quest_copies(const psprecomp::GuestMemory &memor
     return copies;
 }
 
-std::uint32_t align4(std::uint32_t value) { return (value + 3u) & ~3u; }
-
 // The game's own quest structure holds the six strings of the quest inline (not
 // by offset), so it is a copy the file I/O never sees. It is found by its title
 // followed by the other fields at the game's slots (each field's length rounded
@@ -272,30 +271,41 @@ std::uint32_t apply_quest_struct(psprecomp::GuestMemory &memory,
     for (std::uint32_t at = kRamBegin; at + 4u < end; ++at) {
         const std::uint32_t here = at - kRamBegin;
         for (const std::uint32_t r : by_first[ram[here]]) {
-            if (in_copy(at)) break;
+            if (in_copy(at)) continue;
             const std::vector<QuestField> &fields = records[r];
             const std::string &title = fields[0].text;
             if (title.size() > end - at) continue;
             if (std::memcmp(ram + here, title.data(), title.size()) != 0) continue;
-            std::uint32_t offsets[8]{};
-            std::uint32_t pos = 0u;
+            // The game's structure keeps the strings with the file's own gaps:
+            // each field sits at its file offset relative to the first, and its
+            // slot is the distance to the next field (the last, to the zeros
+            // that follow the strings).
+            std::uint32_t pos[8]{};
+            std::uint32_t slot[8]{};
             bool ok = true;
             for (std::uint32_t n = 0u; n < fields.size() && n < 8u && ok; ++n) {
-                offsets[n] = pos;
-                const std::string &want = fields[n].text;
-                if (want.size() > end - at - pos) { ok = false; break; }
-                if (n != 0u && std::memcmp(ram + here + pos, want.data(), want.size()) != 0) ok = false;
-                pos += align4(static_cast<std::uint32_t>(want.size()) + 1u);
+                pos[n] = fields[n].offset - fields[0].offset;
+                if (n + 1u < fields.size() && n + 1u < 8u) {
+                    slot[n] = fields[n + 1u].offset - fields[n].offset;
+                } else {
+                    std::uint32_t stop = pos[n] + static_cast<std::uint32_t>(fields[n].text.size()) + 1u;
+                    while (stop < 4096u && here + stop < span && ram[here + stop] == 0u) ++stop;
+                    slot[n] = stop - pos[n];
+                }
+                if (pos[n] + fields[n].text.size() > end - at) { ok = false; break; }
+                if (n != 0u && std::memcmp(ram + here + pos[n], fields[n].text.data(), fields[n].text.size()) != 0)
+                    ok = false;
             }
             if (!ok) continue;
             for (std::uint32_t n = 0u; n < fields.size() && n < 8u; ++n) {
                 const std::string *text =
                     translations.find(static_cast<std::uint16_t>(fields[n].ref), fields[n].offset);
                 if (text == nullptr) continue;
-                const std::uint32_t slot = align4(static_cast<std::uint32_t>(fields[n].text.size()) + 1u);
-                if (text->size() + 1u > slot) continue;
-                const std::uint32_t base = at + offsets[n];
-                for (std::uint32_t i = 0u; i < slot; ++i)
+                const std::uint32_t need = std::max(static_cast<std::uint32_t>(fields[n].text.size()) + 1u,
+                                                    static_cast<std::uint32_t>(text->size()) + 1u);
+                if (need > slot[n]) continue;  // does not fit the game's slot
+                const std::uint32_t base = at + pos[n];
+                for (std::uint32_t i = 0u; i < need; ++i)
                     memory.store8(base + i, i < text->size() ? static_cast<std::uint8_t>((*text)[i]) : 0u);
                 ++written;
             }
@@ -529,6 +539,7 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
         // starts; search for it a few times over the next minutes.
         pending.struct_checks = 20u;
         pending.struct_next = 0u;
+        std::cout << "[text] quest " << at->entry << ": parsed " << pending.records.size() << " record(s)\n";
     } else if (clear.size() >= 12u && read32(4u) == 8u) {
         for (std::uint32_t word = 2u; word < 64u && pending.probe.empty(); ++word) {
             const std::uint32_t table_offset = read32(word * 4u);
@@ -603,7 +614,7 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
                 std::cout << "[text] quest " << entry << ": patched " << patched
                           << " field(s) in the quest structure\n";
             } else if (--pending.struct_checks > 0u) {
-                pending.struct_next = s.frames + (pending.struct_checks > 15u ? 180u : 900u);
+                pending.struct_next = s.frames + (pending.struct_checks > 14u ? 60u : 300u);
             }
         }
         if (!pending.read || pending.applied) continue;

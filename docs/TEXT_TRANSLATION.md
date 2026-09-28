@@ -102,9 +102,9 @@ during the quest), so the patch re-applies the translation to each new buffer,
 and to every copy of the file it finds in RAM, all sharing one arena slice. The
 game also keeps its own quest structure, with the six strings inline and no
 offsets to rewrite; the patch finds it by those strings and overwrites each
-field in place when the translation fits the game's own slot (the field's
-length rounded up to four). The in-quest **Detalhes Missão** screen reads that
-structure. `tools/extract_text.py` reads these too (`quest_block`).
+field in place when the translation fits the game's own slot (the distance to
+the next field, the gaps the file itself lays the strings out with). The
+in-quest **Detalhes Missão** screen reads that structure. `tools/extract_text.py` reads these too (`quest_block`).
 
 ## How it works
 
