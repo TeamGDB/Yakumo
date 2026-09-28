@@ -124,29 +124,29 @@
 16	2	1999	Equipment	Equip.	Equipo
 
 # --- items (table 3) ---
-16	3	1	Book of Combos 1	Livro de Combos 1	Libro de combos 1
-16	3	2	Book of Combos 2	Livro de Combos 2	Libro de combos 2
-16	3	3	Book of Combos 3	Livro de Combos 3	Libro de combos 3
-16	3	4	Book of Combos 4	Livro de Combos 4	Libro de combos 4
-16	3	5	Book of Combos 5	Livro de Combos 5	Libro de combos 5
-16	3	6	Organizer Guide	Guia do Organizador	Guía del organizador
-16	3	7	Pack Rat Guide	Guia do Acumulador	Guía del acaparador
+16	3	1	Book of Combos 1	Livro Comb. 1	Libro de combos 1
+16	3	2	Book of Combos 2	Livro Comb. 2	Libro de combos 2
+16	3	3	Book of Combos 3	Livro Comb. 3	Libro de combos 3
+16	3	4	Book of Combos 4	Livro Comb. 4	Libro de combos 4
+16	3	5	Book of Combos 5	Livro Comb. 5	Libro de combos 5
+16	3	6	Organizer Guide	Guia Organiz.	Guía del organizador
+16	3	7	Pack Rat Guide	Guia Acum.	Guía del acaparador
 16	3	8	Potion	Poção	Poción
 16	3	9	Mega Potion	Mega Poção	Megapoción
 16	3	10	Nutrients	Nutrientes	Nutrientes
 16	3	11	Mega Nutrients	Mega Nutrientes	Meganutrientes
 16	3	12	Antidote	Antídoto	Antídoto
-16	3	13	Herbal Medicine	Remédio de Ervas	Medicina herbaria
+16	3	13	Herbal Medicine	Remédio Ervas	Medicina herbaria
 16	3	14	Immunizer	Imunizante	Inmunizador
-16	3	15	Energy Drink	Bebida Energética	Bebida energética
+16	3	15	Energy Drink	Bebida Energ.	Bebida energética
 16	3	16	Dash Juice	Suco de Corrida	Zumo de velocidad
-16	3	17	Mega Dash Juice	Megassuco de Corrida	Megazumo de velocidad
+16	3	17	Mega Dash Juice	Megass. Corr.	Megazumo de velocidad
 16	3	18	Demondrug	Droga Demoníaca	Droga demoníaca
-16	3	19	Mega Demondrug	Mega Droga Demoníaca	Megadroga demoníaca
+16	3	19	Mega Demondrug	Mega Droga Dem.	Megadroga demoníaca
 16	3	20	Might Pill	Pílula da Força	Píldora de fuerza
-16	3	21	Armorskin	Pele de Armadura	Piel de armadura
-16	3	22	Mega Armorskin	Mega Pele de Armadura	Megapiel de armadura
-16	3	23	Adamant Pill	Pílula de Adamante	Píldora de adamante
+16	3	21	Armorskin	Pele Arm.	Piel de armadura
+16	3	22	Mega Armorskin	Mega Pele Arm.	Megapiel de armadura
+16	3	23	Adamant Pill	Pílula Adam.	Píldora de adamante
 16	3	24	Cool Drink	Bebida Gelada	Bebida fría
 16	3	25	Hot Drink	Bebida Quente	Bebida caliente
 16	3	26	Cleanser	Purificador	Limpiador
@@ -154,20 +154,20 @@
 16	3	28	Psychoserum	Psicossoro	Psicosuero
 16	3	29	Max Potion	Poção Máxima	Poción máxima
 16	3	30	Ancient Potion	Poção Antiga	Poción antigua
-16	3	31	Lifecrystals	Cristais de Vida	Cristales vitales
+16	3	31	Lifecrystals	Cristais Vida	Cristales vitales
 16	3	32	Lifepowder	Pó de Vida	Polvo vital
 16	3	33	Catalyst	Catalisador	Catalizador
 16	3	34	Tranquilizer	Tranquilizante	Tranquilizante
-16	3	35	Powercharm	Amuleto de Força	Amuleto de fuerza
+16	3	35	Powercharm	Amuleto Força	Amuleto de fuerza
 16	3	36	Powertalon	Garra de Força	Garra de fuerza
-16	3	37	Armorcharm	Amuleto de Armadura	Amuleto de armadura
-16	3	38	Armortalon	Garra de Armadura	Garra de armadura
+16	3	37	Armorcharm	Amuleto Arm.	Amuleto de armadura
+16	3	38	Armortalon	Garra Arm.	Garra de armadura
 16	3	39	Raw Meat	Carne Crua	Carne cruda
-16	3	40	Poisoned Meat	Carne Envenenada	Carne envenenada
+16	3	40	Poisoned Meat	Carne Enven.	Carne envenenada
 16	3	41	Tinged Meat	Carne Drogada	Carne drogada
 16	3	42	Drugged Meat	Carne Sedada	Carne sedada
 16	3	43	Rare Steak	Bife Raro	Filete poco hecho
-16	3	44	Well-done Steak	Bife Bem Passado	Filete hecho
+16	3	44	Well-done Steak	Bife Bem Pass.	Filete hecho
 16	3	45	Burnt Meat	Carne Queimada	Carne quemada
 16	3	46	Chilled Meat	Carne Gelada	Carne helada
 16	3	47	Hot Meat	Carne Quente	Carne caliente
@@ -176,62 +176,62 @@
 16	3	50	Burnt Fish	Peixe Queimado	Pescado quemado
 16	3	51	Yukumo Egg	Ovo de Yukumo	Huevo de Yukumo
 16	3	52	Boomerang	Bumerangue	Bumerán
-16	3	53	Throwing Knife	Faca de Arremesso	Cuchillo arrojadizo
+16	3	53	Throwing Knife	Faca Arrem.	Cuchillo arrojadizo
 16	3	54	Poison Knife	Faca Venenosa	Cuchillo venenoso
 16	3	55	Sleep Knife	Faca Sonífera	Cuchillo somnífero
-16	3	56	Paralysis Knife	Faca Paralisante	Cuchillo paralizante
-16	3	57	Tranq Knife	Faca Tranquilizante	Cuchillo tranquilizante
-16	3	58	Bomb Casing	Carcaça de Bomba	Carcasa de bomba
+16	3	56	Paralysis Knife	Faca Paralis.	Cuchillo paralizante
+16	3	57	Tranq Knife	Faca Tranq.	Cuchillo tranquilizante
+16	3	58	Bomb Casing	Carc. Bomba	Carcasa de bomba
 16	3	59	Paintball	Bola de Tinta	Bola de pintura
 16	3	60	Flash Bomb	Bomba de Luz	Bomba de luz
 16	3	61	Sonic Bomb	Bomba Sônica	Bomba sónica
 16	3	62	Dung	Esterco	Estiércol
-16	3	63	Wyvern Dung	Esterco de Wyvern	Estiércol de wyvern
-16	3	64	Dung Bomb	Bomba de Esterco	Bomba de estiércol
+16	3	63	Wyvern Dung	Est. Wyv.	Estiércol de wyvern
+16	3	64	Dung Bomb	Bomba Est.	Bomba de estiércol
 16	3	65	Smoke Bomb	Bomba de Fumaça	Bomba de humo
-16	3	66	Poison Smoke Bmb	Bomba de Fumaça Venenosa	Bomba de humo venenoso
+16	3	66	Poison Smoke Bmb	Bomba Fumaça V.	Bomba de humo venenoso
 16	3	67	Farcaster	Teleportador	Teletransportador
-16	3	68	Tranq Bomb	Bomba Tranquilizante	Bomba tranquilizante
+16	3	68	Tranq Bomb	Bomba Tranq.	Bomba tranquilizante
 16	3	69	Spider Web	Teia de Aranha	Telaraña
 16	3	70	Net	Rede	Red
-16	3	71	Trap Tool	Kit de Armadilha	Kit de trampa
-16	3	72	Pitfall Trap	Armadilha de Fosso	Trampa de foso
-16	3	73	Shock Trap	Armadilha Elétrica	Trampa eléctrica
+16	3	71	Trap Tool	Kit Armad.	Kit de trampa
+16	3	72	Pitfall Trap	Armad. Fosso	Trampa de foso
+16	3	73	Shock Trap	Armad. Elét.	Trampa eléctrica
 16	3	74	Gunpowder	Pólvora	Pólvora
 16	3	75	Small Barrel	Barril Pequeno	Barril pequeño
 16	3	76	Large Barrel	Barril Grande	Barril grande
-16	3	77	Barrel Bomb S	Bomba de Barril P	Bomba de barril P
-16	3	78	Barrel Bomb L	Bomba de Barril G	Bomba de barril G
-16	3	79	Barrel Bomb L+	Bomba de Barril G+	Bomba de barril G+
-16	3	80	Bounce Bomb	Bomba Saltitante	Bomba rebotante
-16	3	81	Felvine Bomb	Bomba de Felvina	Bomba de felvina
-16	3	82	JUMP Barrel Bomb	Bomba de Barril SALTO	Bomba de barril SALTO
+16	3	77	Barrel Bomb S	Bomba Barril P	Bomba de barril P
+16	3	78	Barrel Bomb L	Bomba Barril G	Bomba de barril G
+16	3	79	Barrel Bomb L+	Bomba Barril G+	Bomba de barril G+
+16	3	80	Bounce Bomb	Bomba Saltit.	Bomba rebotante
+16	3	81	Felvine Bomb	Bomba Felv.	Bomba de felvina
+16	3	82	JUMP Barrel Bomb	Bomba Barril S.	Bomba de barril SALTO
 16	3	83	Polytan Bomb	Bomba Polytan	Bomba polytan
 16	3	84	Old Pickaxe	Picareta Velha	Pico viejo
-16	3	85	Iron Pickaxe	Picareta de Ferro	Pico de hierro
+16	3	85	Iron Pickaxe	Pic. Ferro	Pico de hierro
 16	3	86	Mega Pickaxe	Megapicareta	Megapico
-16	3	87	Old Bug Net	Rede de Insetos Velha	Red de insectos vieja
+16	3	87	Old Bug Net	Rede Velha	Red de insectos vieja
 16	3	88	Bug Net	Rede de Insetos	Red de insectos
-16	3	89	Mega Bug Net	Megarrede de Insetos	Megared de insectos
-16	3	90	BBQ Spit	Espeto de Churrasco	Asador
+16	3	89	Mega Bug Net	Megarrede	Megared de insectos
+16	3	90	BBQ Spit	Espeto Churr.	Asador
 16	3	91	Whetstone	Pedra de Amolar	Piedra de afilar
 16	3	92	Huskberry	Baga Casca	Baya cascarilla
 16	3	93	Bone Husk	Casca de Osso	Cáscara de hueso
 16	3	138	Worm	Minhoca	Gusano
-16	3	139	Mega Fishing Fly	Megamosca de Pesca	Megamosca de pesca
-16	3	140	Goldenfish Bait	Isca de Peixe Dourado	Cebo de pez dorado
+16	3	139	Mega Fishing Fly	Megamosca Pesca	Megamosca de pesca
+16	3	140	Goldenfish Bait	Isca P. Dourado	Cebo de pez dorado
 16	3	141	Burst Bait	Isca Explosiva	Cebo explosivo
 16	3	142	Bountiful Bait	Isca Abundante	Cebo abundante
 16	3	143	Binoculars	Binóculos	Prismáticos
 16	3	144	Garbage	Lixo	Basura
 16	3	145	Field Horn	Trompa de Campo	Cuerno de campo
 16	3	146	Health Horn	Trompa de Vida	Cuerno vital
-16	3	147	Antidote Horn	Trompa de Antídoto	Cuerno de antídoto
-16	3	148	Demon Horn	Trompa Demoníaca	Cuerno demoníaco
-16	3	149	Armor Horn	Trompa de Armadura	Cuerno de armadura
+16	3	147	Antidote Horn	Trompa Antídoto	Cuerno de antídoto
+16	3	148	Demon Horn	Trompa Dem.	Cuerno demoníaco
+16	3	149	Armor Horn	Trompa Arm.	Cuerno de armadura
 16	3	150	Honey	Mel	Miel
 16	3	151	Herb	Erva	Hierba
-16	3	152	Antidote Herb	Erva de Antídoto	Hierba de antídoto
+16	3	152	Antidote Herb	Erva Antídoto	Hierba de antídoto
 16	3	153	Fire Herb	Erva de Fogo	Hierba de fuego
 16	3	154	Snow Herb	Erva de Neve	Hierba de nieve
 16	3	155	Ivy	Hera	Hiedra
@@ -244,98 +244,98 @@
 16	3	162	Blue Mushroom	Cogumelo Azul	Seta azul
 16	3	163	Nitroshroom	Nitroshroom	Seta nitro
 16	3	164	Parashroom	Paraseta	Seta para
-16	3	165	Toadstool	Cogumelo Venenoso	Seta venenosa
-16	3	166	Exciteshroom	Cogumelo Excitação	Seta excitante
-16	3	167	Wearyshroom	Cogumelo Exausto	Seta agotadora
+16	3	165	Toadstool	Cogum. Venenoso	Seta venenosa
+16	3	166	Exciteshroom	Cog. Excitação	Seta excitante
+16	3	167	Wearyshroom	Cogum. Exausto	Seta agotadora
 16	3	168	Dragon Toadstool	Cogumelo Dragão	Seta dragón
 16	3	169	Bindshroom	Cogumelo Amarra	Seta atadora
-16	3	170	Pickaxe Mushroom	Cogumelo Picareta	Seta pico
+16	3	170	Pickaxe Mushroom	Cogumelo Pic.	Seta pico
 16	3	171	Paintberry	Baga de Tinta	Baya de pintura
-16	3	172	Might Seed	Semente da Força	Semilla de fuerza
-16	3	173	Adamant Seed	Semente de Adamante	Semilla de adamante
+16	3	172	Might Seed	Semente Força	Semilla de fuerza
+16	3	173	Adamant Seed	Semente Adam.	Semilla de adamante
 16	3	174	Nulberry	Baga Nula	Baya nula
 16	3	175	Dragonfell Berry	Baga Dragão	Baya de dragón
 16	3	176	Scatternut	Noz Dispersa	Nuez dispersa
 16	3	177	Needleberry	Baga Espinho	Baya aguja
 16	3	178	Spikeberry	Baga Espigão	Baya púa
 16	3	179	Bomberry	Baga Bomba	Baya bomba
-16	3	180	Red Seed	Semente Vermelha	Semilla roja
+16	3	180	Red Seed	Sem. Vermelha	Semilla roja
 16	3	181	Green Seed	Semente Verde	Semilla verde
-16	3	182	Bumblepumpkin	Abóbora Zumbidora	Calabaza zumbadora
-16	3	183	Yukumo Wood	Madeira de Yukumo	Madera de Yukumo
-16	3	184	Yukumo Wood+	Madeira de Yukumo+	Madera de Yukumo+
-16	3	185	High Quality Ash	Cinza de Alta Qualidade	Ceniza de alta calidad
+16	3	182	Bumblepumpkin	Abób. Zumbidora	Calabaza zumbadora
+16	3	183	Yukumo Wood	Madeira Yukumo	Madera de Yukumo
+16	3	184	Yukumo Wood+	Madeira Yukumo+	Madera de Yukumo+
+16	3	185	High Quality Ash	Cinza A. Qual.	Ceniza de alta calidad
 16	3	186	Whetfish	Peixe de Amolar	Pez de afilar
 16	3	187	Sushifish	Peixe Sushi	Pez sushi
 16	3	188	Sleepyfish	Peixe Sonolento	Pez dormilón
 16	3	189	Pin Tuna	Atum Agulha	Atún aguja
 16	3	190	Popfish	Peixe Pipoca	Pez palomita
 16	3	191	Scatterfish	Peixe Disperso	Pez disperso
-16	3	192	Burst Arowana	Aruanã Explosiva	Arowana explosiva
+16	3	192	Burst Arowana	Aruanã Expl.	Arowana explosiva
 16	3	193	Bomb Arowana	Aruanã Bomba	Arowana bomba
-16	3	194	Small Goldenfish	Peixe Dourado Pequeno	Pez dorado pequeño
+16	3	194	Small Goldenfish	Peixe Dour. P.	Pez dorado pequeño
 16	3	195	Wanchovy	Anchova	Anchoa
 16	3	196	Ancient Fish	Peixe Antigo	Pez antiguo
 16	3	197	Blue Cutthroat	Truta Azul	Trucha azul
-16	3	198	Humspun Conch	Concha Ronronante	Caracola zumbante
-16	3	199	Armored Beakfish	Peixe Bico Blindado	Pez pico blindado
+16	3	198	Humspun Conch	Concha Ronr.	Caracola zumbante
+16	3	199	Armored Beakfish	Peixe Bico	Pez pico blindado
 16	3	200	Sharqskin	Pele de Sharq	Piel de sharq
 16	3	201	Insect Husk	Casca de Inseto	Cáscara de insecto
-16	3	202	Hawkmoth Larva	Larva de Mariposa	Larva de mariposa
+16	3	202	Hawkmoth Larva	Larva Mariposa	Larva de mariposa
 16	3	203	Stinkhopper	Saltador Fétido	Saltamontes fétido
-16	3	204	Snakebee Larva	Larva de Abelha-Serpente	Larva de abeja serpiente
+16	3	204	Snakebee Larva	Larva Abelha	Larva de abeja serpiente
 16	3	205	Godbug	Inseto Divino	Bicho divino
 16	3	206	Bitterbug	Inseto Amargo	Bicho amargo
-16	3	207	Flashbug	Inseto Relâmpago	Bicho destello
+16	3	207	Flashbug	Inseto Relâmp.	Bicho destello
 16	3	208	Thunderbug	Inseto Trovão	Bicho trueno
-16	3	209	Carpenterbug	Inseto Carpinteiro	Bicho carpintero
-16	3	210	Killer Beetle	Besouro Assassino	Escarabajo asesino
+16	3	209	Carpenterbug	Inseto Carp.	Bicho carpintero
+16	3	210	Killer Beetle	Besouro Assas.	Escarabajo asesino
 16	3	211	Hercudrome	Hercudrome	Hercudrome
-16	3	212	Fulgurbug	Inseto Fulgurante	Bicho fulgurante
+16	3	212	Fulgurbug	Inseto Fulg.	Bicho fulgurante
 16	3	213	King Scarab	Escaravelho Rei	Escarabajo rey
-16	3	214	Rare Scarab	Escaravelho Raro	Escarabajo raro
+16	3	214	Rare Scarab	Escarav. Raro	Escarabajo raro
 16	3	215	Blossom Cricket	Grilo Florido	Grillo florido
-16	3	216	Butterfly Beetle	Besouro Borboleta	Escarabajo mariposa
+16	3	216	Butterfly Beetle	Besouro Borb.	Escarabajo mariposa
 16	3	217	Stone	Pedra	Piedra
-16	3	218	Iron Ore	Minério de Ferro	Mena de hierro
-16	3	219	Earth Crystal	Cristal de Terra	Cristal de tierra
-16	3	220	Machalite Ore	Minério de Machalita	Mena de machalita
-16	3	221	Pelagicite Ore	Minério de Pelagita	Mena de pelagita
-16	3	222	Bealite Ore	Minério de Bealita	Mena de bealita
+16	3	218	Iron Ore	Minério Ferro	Mena de hierro
+16	3	219	Earth Crystal	Cristal Terra	Cristal de tierra
+16	3	220	Machalite Ore	Mín. Machalita	Mena de machalita
+16	3	221	Pelagicite Ore	Mín. Pelagita	Mena de pelagita
+16	3	222	Bealite Ore	Minério Bealita	Mena de bealita
 16	3	223	Isisium	Isísio	Isisio
 16	3	224	Lightcrystal	Cristal de Luz	Cristal de luz
-16	3	225	Dragonite Ore	Minério de Dragonita	Mena de dragonita
+16	3	225	Dragonite Ore	Mín. Dragonita	Mena de dragonita
 16	3	226	Lava Nugget	Pepita de Lava	Pepita de lava
 16	3	227	Firestone	Pedra de Fogo	Piedra de fuego
-16	3	228	Carbalite Ore	Minério de Carbalita	Mena de carbalita
-16	3	229	Bathycite Ore	Minério de Batícita	Mena de baticita
-16	3	230	Fucium Ore	Minério de Fúcio	Mena de fucio
+16	3	228	Carbalite Ore	Mín. Carbalita	Mena de carbalita
+16	3	229	Bathycite Ore	Mín. Batícita	Mena de baticita
+16	3	230	Fucium Ore	Minério Fúcio	Mena de fucio
 16	3	231	Gracium	Grácio	Gracio
-16	3	232	Firecell Stone	Pedra de Célula Ígnea	Piedra de célula ígnea
+16	3	232	Firecell Stone	Pedra Cél. Ígn.	Piedra de célula ígnea
 16	3	233	Ice Crystal	Cristal de Gelo	Cristal de hielo
-16	3	234	Rainbow Crystal	Cristal Arco-Íris	Cristal arcoíris
+16	3	234	Rainbow Crystal	Cristal A-Íris	Cristal arcoíris
 16	3	235	Mystery Bone	Osso Misterioso	Hueso misterioso
-16	3	236	Unknown Skull	Crânio Desconhecido	Cráneo desconocido
+16	3	236	Unknown Skull	Crânio Desc.	Cráneo desconocido
 16	3	237	Bone	Osso	Hueso
-16	3	238	Monster Bone S	Osso de Monstro P	Hueso de monstruo P
-16	3	239	Monster Bone M	Osso de Monstro M	Hueso de monstruo M
-16	3	240	Monster Bone L	Osso de Monstro G	Hueso de monstruo G
-16	3	241	Monster Bone+	Osso de Monstro+	Hueso de monstruo+
-16	3	242	Monster Keenbone	Osso Afiado de Monstro	Hueso afilado de monstruo
-16	3	243	Monster Hardbone	Osso Duro de Monstro	Hueso duro de monstruo
-16	3	244	Avian Finebone	Osso Fino de Ave	Hueso fino de ave
+16	3	238	Monster Bone S	Osso Monstro P	Hueso de monstruo P
+16	3	239	Monster Bone M	Osso Monstro M	Hueso de monstruo M
+16	3	240	Monster Bone L	Osso Monstro G	Hueso de monstruo G
+16	3	241	Monster Bone+	Osso Monstro+	Hueso de monstruo+
+16	3	242	Monster Keenbone	Osso Afiado	Hueso afilado de monstruo
+16	3	243	Monster Hardbone	Osso Duro	Hueso duro de monstruo
+16	3	244	Avian Finebone	Osso Fino Ave	Hueso fino de ave
 16	3	245	Jumbo Bone	Osso Jumbo	Hueso jumbo
 16	3	246	Stoutbone	Osso Robusto	Hueso robusto
-16	3	247	Dragonbone Relic	Relíquia de Osso de Dragão	Reliquia de hueso de dragón
+16	3	247	Dragonbone Relic	Rel. Osso Drag.	Reliquia de hueso de dragón
 16	3	248	Wyvern Fang	Presa de Wyvern	Colmillo de wyvern
-16	3	250	Bird Wyvern Gem	Gema de Wyvern Ave	Gema de wyvern ave
+16	3	250	Bird Wyvern Gem	Gema Wyv. Ave	Gema de wyvern ave
 16	3	251	Wyvern Stone	Pedra de Wyvern	Piedra de wyvern
-16	3	252	ElderDragonBlood	Sangue de Dragão Ancião	Sangre de dragón anciano
+16	3	252	ElderDragonBlood	Sangue Drag.	Sangre de dragón anciano
 16	3	253	Screamer	Gritador	Chillón
 16	3	254	Poison Sac	Bolsa de Veneno	Saco de veneno
 16	3	255	Toxin Sac	Bolsa de Toxina	Saco de toxina
-16	3	256	Paralysis Sac	Bolsa de Paralisia	Saco de parálisis
-16	3	257	Omniplegia Sac	Bolsa de Omniplegia	Saco de omniplejía
+16	3	256	Paralysis Sac	Bolsa Paralisia	Saco de parálisis
+16	3	257	Omniplegia Sac	Bolsa Omnipleg.	Saco de omniplejía
 16	3	258	Sleep Sac	Bolsa Sonífera	Saco somnífero
 16	3	259	Coma Sac	Bolsa de Coma	Saco de coma
 16	3	260	Flame Sac	Bolsa de Chama	Saco de llama

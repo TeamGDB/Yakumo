@@ -175,7 +175,7 @@ panel is wider. These are the fields that were measured:
 | --- | --- | --- |
 | Dialogue (NPCs, quests, shops) | `[4289]`-`[4291]`, `id:index` | the source's own lines and width; never wider, or the game wraps it and splits a word |
 | Menu labels and system messages | `[16] 2:*` | one line, about the source's width; the item-box menus hold 16 |
-| Item and equipment names | `[16] 3:*` and the even tables to `38` | one line, the source's width |
+| Item and equipment names | `[16] 3:*` and the even tables to `38` | item names are one line of at most 15 |
 | Item and equipment descriptions | `[16] 4:*` and the odd tables to `38` | the source's lines; the item detail box shows three and a half lines |
 | Smithy and item-box options | `[2838] 2:*` | 16-17 |
 | Change-equipment menu | `[2838] 2:283-322` | 17 |
@@ -193,6 +193,10 @@ Two more rules the fields taught:
 - **A word is never wider than the field.** The game has nowhere to break there
   and splits the word, so a too-long word is replaced by a shorter one (the
   smithy's `Armor` becomes `Armdr`, `Heavy Bowgun` becomes `Fuzil. Pesado`).
+- **A name may be abbreviated with a period** when the field is narrow and the
+  sense survives: `Armadura` -> `Arm.`, `Peixe Dourado Pequeno` ->
+  `Peixe Dour. P.`. Item names are capped at fifteen characters; a translation
+  that needs more is shortened, never left to overflow.
 
 A translation is wrapped to the field's width, and one that still needs too many
 lines is shortened, never widened. The Brazilian Portuguese file was checked
