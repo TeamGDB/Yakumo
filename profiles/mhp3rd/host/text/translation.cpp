@@ -79,6 +79,7 @@ struct State {
     std::map<std::uint32_t, AppliedBlock> applied;
     bool warned_arena{};
     std::size_t arena_used{};
+    std::uint64_t frames{};  // to spread the quest re-scans over frames
 };
 
 State &state() {
@@ -214,7 +215,11 @@ std::vector<std::uint32_t> find_quest_copies(const psprecomp::GuestMemory &memor
         if (base < kRamBegin || base >= kRamEnd || !memory.contains(base, 8u)) continue;
         const std::uint32_t first = memory.load32(base);
         const std::uint32_t second = memory.load32(base + 4u);
-        if (first == 0u || first >= size || second <= first || second >= size) continue;
+        // The record array holds file offsets (the archive image as it is) or
+        // absolute pointers when the game relocated the copy.
+        const bool relative = first != 0u && first < size && second > first && second < size;
+        const bool absolute = first > base && first - base < size && second > first && second - base < size;
+        if (!relative && !absolute) continue;
         copies.push_back(base);
     }
     return copies;
@@ -446,6 +451,7 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
 void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
     State &s = state();
     if (!s.loaded || s.blocks.empty()) return;
+    ++s.frames;
 
     // The main block sits at its fixed address as soon as the game has loaded
     // it; the others are found in RAM by their first string once read.
@@ -457,7 +463,7 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
 
     bool any = false;
     for (const auto &[entry, pending] : s.pending)
-        if (pending.read && !pending.applied) any = true;
+        if (pending.read && (!pending.applied || is_quest(entry))) any = true;
     if (!any) return;
 
     if (!s.arena) {
@@ -475,7 +481,15 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
     }
 
     for (auto &[entry, pending] : s.pending) {
-        if (!pending.read || pending.applied) continue;
+        if (!pending.read) continue;
+        if (pending.applied) {
+            // A quest file is in RAM in more than one copy, one of them made at
+            // a time the file I/O does not see (the quest keeps its own); look
+            // again now and then for a copy that is still English. The scans are
+            // spread over frames, one entry at a time.
+            if (!is_quest(entry) || (s.frames + entry) % 20u != 0u) continue;
+            pending.applied = false;
+        }
         const auto translations = s.blocks.find(entry);
         if (translations == s.blocks.end()) continue;
 
@@ -489,6 +503,12 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
         } else if (!pending.probe.empty()) address = find_block(memory, pending.probe);
         static const bool trace = std::getenv("MHP3RD_TRACE_TEXT") != nullptr;
         if (address == 0u) {
+            if (is_quest(entry)) {
+                // No copy in RAM right now; the next re-scan tries again, so do
+                // not scan every frame in between.
+                pending.applied = true;
+                continue;
+            }
             // A probe that never matches must not be retried forever: scanning
             // the whole of RAM each frame is what dropped the frame rate.
             if (++pending.missed > 300u) {
@@ -531,9 +551,11 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
                 applied += apply_quest(memory, copy, translations->second, slice, used);
             }
             pending.applied = true;
-            s.applied[entry] = AppliedBlock{entry, address, applied};
-            std::cout << "[text] quest " << entry << " at " << psprecomp::hex32(address) << ": applied " << applied
-                      << " in " << quest_copies.size() << " copy/copies, " << pending.arena_bytes << " bytes\n";
+            if (applied > 0u) {
+                s.applied[entry] = AppliedBlock{entry, address, applied};
+                std::cout << "[text] quest " << entry << " at " << psprecomp::hex32(address) << ": applied " << applied
+                          << " in " << quest_copies.size() << " copy/copies, " << pending.arena_bytes << " bytes\n";
+            }
             continue;
         }
 

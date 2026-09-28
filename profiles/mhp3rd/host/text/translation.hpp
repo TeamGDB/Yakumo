@@ -217,9 +217,13 @@ std::uint32_t apply_quest(Memory &memory, std::uint32_t address, const Translati
         const std::uint32_t ref = address + table_of(id);
         const std::uint32_t string_offset = index_of(id);
         if (!memory.contains(ref, 4u)) continue;
-        // The word must still hold the offset the file gave it; a mismatch is a
-        // different record layout and is left alone.
-        if (memory.load32(ref) != string_offset) continue;
+        // The word holds the file offset (the archive image is loaded as it is)
+        // or an absolute pointer, when the game relocated the copy (the quest
+        // keeps its own); anything else is a different layout and is left alone.
+        const std::uint32_t word = memory.load32(ref);
+        const bool relative = word == string_offset;
+        const bool absolute = word == address + string_offset;
+        if (!relative && !absolute) continue;
         const std::size_t needed = text.size() + 1u;
         if (used + needed > arena.end - arena.begin) continue;
         const std::uint32_t into = arena.begin + static_cast<std::uint32_t>(used);
@@ -227,7 +231,7 @@ std::uint32_t apply_quest(Memory &memory, std::uint32_t address, const Translati
             memory.store8(into + static_cast<std::uint32_t>(i), static_cast<std::uint8_t>(text[i]));
         memory.store8(into + static_cast<std::uint32_t>(text.size()), 0u);
         used += needed;
-        memory.store32(ref, into - address);
+        memory.store32(ref, relative ? (into - address) : into);
         ++applied;
     }
     return applied;
