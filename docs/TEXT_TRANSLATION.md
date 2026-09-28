@@ -31,8 +31,10 @@ Files must end in `.lang`. To add a language, drop a file into the data
 directory's `translations` folder (the menu shows that folder) and set the
 language, normally through the menu.
 
-The repository ships two examples, `profiles/mhp3rd/translations/pt-BR.lang`
-and `es.lang`; a build copies them next to the executable.
+The repository ships the full Brazilian Portuguese translation,
+`profiles/mhp3rd/translations/pt-BR.lang` (machine translated, with a
+hand-checked glossary), and `es.lang`, a shorter Spanish example; a build copies
+them next to the executable.
 
 ## The file format
 
@@ -114,6 +116,13 @@ characters, a menu's about 32. A translation wrapped differently is cut, and one
 with more lines overflows the box. `tools/build_lang.py` (and the local
 translation tool) wraps each translation to the source's **line count and
 width**, so it fits where the game puts it.
+
+The width is a hard limit: the game wraps a line that runs past the field's edge
+without stopping at a space, so a translation wider than the source splits a
+word. A translation that does not fit is shortened, never widened. A few fields
+are narrower than their source text (some menu labels, the status screen's skill
+names, an item description's three and a half lines); the local tool names them
+and holds each translation to the field's own box.
 
 ## Limits
 
