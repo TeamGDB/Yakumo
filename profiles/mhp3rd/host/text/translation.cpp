@@ -327,7 +327,10 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
     // A quest file is read again every time its screen opens; a read that starts
     // at the entry's first byte is a fresh load, so its translation is applied
     // again to the new buffer (which came back with the game's own offsets).
-    if (at->into == 0u && is_quest(at->entry)) {
+    // A read that starts at the entry's first byte is a fresh load: the block
+    // is translated again, because the game reloads a block it already had
+    // (leaving a quest reloads the menus), which puts its own offsets back.
+    if (at->into == 0u) {
         pending.read = false;
         pending.applied = false;
         pending.missed = 0u;
@@ -504,15 +507,26 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
             continue;
         }
 
-        // The dialogue has its own shape; the text blocks share one.
+        // The dialogue has its own shape; the text blocks share one. Each block
+        // gets its own slice of the arena, reserved once and reused, so a block
+        // translated again after the game reloads it does not grow the arena.
         if (is_dialogue(entry)) {
-            const std::size_t before = s.arena_used;
-            const std::uint32_t applied = apply_dialogue(memory, address, translations->second, *s.arena, s.arena_used);
+            if (pending.arena_bytes == 0u) {
+                const std::size_t need = translations->second.arena_bytes();
+                if (need == 0u || s.arena_used + need > s.arena->end - s.arena->begin) continue;
+                pending.arena_offset = static_cast<std::uint32_t>(s.arena_used);
+                pending.arena_bytes = static_cast<std::uint32_t>(need);
+                s.arena_used += need;
+            }
+            const Arena slice{s.arena->begin + pending.arena_offset,
+                              s.arena->begin + pending.arena_offset + pending.arena_bytes};
+            std::size_t used = 0u;
+            const std::uint32_t applied = apply_dialogue(memory, address, translations->second, slice, used);
             if (applied == 0u) continue;
             pending.applied = true;
             s.applied[entry] = AppliedBlock{entry, address, applied};
             std::cout << "[text] dialogue " << entry << " at " << psprecomp::hex32(address) << ": applied " << applied
-                      << " of " << translations->second.size() << ", " << (s.arena_used - before) << " bytes\n";
+                      << " of " << translations->second.size() << ", " << used << " bytes\n";
             continue;
         }
 
@@ -543,12 +557,20 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
             continue;
         }
 
-        // Move the arena's cursor for this block, so the block's strings land
-        // one after another below the previous block's.
-        Arena slice{s.arena->begin + static_cast<std::uint32_t>(s.arena_used), s.arena->end};
+        // This block's own slice of the arena, reserved once and reused, so a
+        // block translated again after the game reloads it does not grow the
+        // arena.
+        if (pending.arena_bytes == 0u) {
+            const std::size_t need = translations->second.arena_bytes();
+            if (need == 0u || s.arena_used + need > s.arena->end - s.arena->begin) continue;
+            pending.arena_offset = static_cast<std::uint32_t>(s.arena_used);
+            pending.arena_bytes = static_cast<std::uint32_t>(need);
+            s.arena_used += need;
+        }
+        const Arena slice{s.arena->begin + pending.arena_offset,
+                          s.arena->begin + pending.arena_offset + pending.arena_bytes};
         const ApplyResult result = apply(memory, address, translations->second, slice);
         if (!result.block) continue;
-        s.arena_used += result.bytes;
         pending.applied = true;
         s.applied[entry] = AppliedBlock{entry, address, result.applied};
         std::cout << "[text] block " << entry << " at " << psprecomp::hex32(address) << ": applied "
