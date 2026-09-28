@@ -72,13 +72,18 @@ def blocks_of(data):
     """(index, [strings]) for every table the game would find, or an empty list."""
     if len(data) < 12 or u32(data, 4) != 8:
         return []
+    slots = u32(data, 0)
+    if not 0 < slots <= 62:
+        return []
     tables = []
-    for word in range(2, 64):
+    for word in range(2, 2 + slots):
         if (word + 1) * 4 > len(data):
             break
         strings = table_at(data, 0, u32(data, word * 4))
+        # An empty slot is skipped, not the end of the header: entry 16 has a
+        # 0xFFFFFFFF between its two groups of tables (slots 2..38 and 40..50).
         if strings is None:
-            break
+            continue
         tables.append((word, strings))
     return tables
 

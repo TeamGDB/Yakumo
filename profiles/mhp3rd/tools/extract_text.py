@@ -47,34 +47,30 @@ def parse_table(data, table):
     """A list of u32 offsets relative to `table`, ended by 0xFFFFFFFF; each
     points at a NUL-terminated string. Returns [str] or None.
 
-    Offsets are relative to the table start and the table may be unaligned
-    (entry 16 has its first table at offset 49), so nothing here requires a
-    4-byte alignment."""
-    if table < 0 or table + 4 > len(data):
+    The shape is the one the game itself indexes (host/text/translation.cpp
+    `table_count`): the table's first word is its own size in bytes, a multiple
+    of 4 that is at least 8, and the word after the offsets is 0xFFFFFFFF. A
+    table that does not have that shape is one the game could never read, so it
+    is rejected here as well (`extract_blocks.py` and the run-time patch use the
+    same rule, which is why a key here is a key the game can apply)."""
+    if table < 0 or table + 8 > len(data):
         return None
-    count = None
-    max_words = min(20000, (len(data) - table) // 4)
-    for k in range(1, max_words):
-        value = u32(data, table + k * 4)
-        if value == 0xFFFFFFFF:
-            count = k
-            break
-        if value > len(data) and k < 2:
-            return None
-    if count is None or count < 2:
+    first = u32(data, table)
+    if first < 8 or first % 4 != 0:
+        return None
+    count = first // 4 - 1
+    if count < 2 or count > 8192:
+        return None
+    if table + first > len(data):
+        return None
+    if u32(data, table + count * 4) != 0xFFFFFFFF:
         return None
     strings = []
-    previous = -1
     for k in range(count):
         offset = u32(data, table + k * 4)
         if offset == 0:
             strings.append("")
             continue
-        # The game's tables list strings in order, so the offsets grow; a
-        # random word that happens to end in 0xFFFFFFFF does not.
-        if offset < previous:
-            return None
-        previous = offset
         text = read_cstr(data, table + offset)
         if text is None:
             return None
@@ -90,41 +86,104 @@ def parse_table(data, table):
 def find_block(data):
     """The string block of an entry, as (header offset, [tables]) or None.
 
-    The layout is the one the debug tools read (`host/debug/game_state.cpp`):
-    a header of 32-bit offsets, each the position of a table relative to the
-    block start; table N is at `u32[N]`. Entry 16's u32[0] and u32[1] are
-    header fields of their own (49 and 8), not table offsets, so a header
-    starts at index 0 but the first two entries are skipped when they do not
-    parse as tables.
+    The layout is the one the debug tools read (`host/debug/game_state.cpp`) and
+    the run-time patch uses (`host/text/translation.cpp`): a header whose
+    `u32[1]` is 8, whose `u32[0]` is the number of table slots that follow, and
+    whose words 2 .. 1 + u32[0] are the tables' offsets. A slot that is 0 or
+    out of range is empty and skipped, not the end of the header: entry 16 has
+    a 0xFFFFFFFF between its two groups of tables (slots 2..38 and 40..50 in a
+    run of 49). A table the game could not read - one whose first word is not
+    its own size ending in 0xFFFFFFFF (`parse_table`) - is not a table.
 
-    A block is recognised when it yields several tables with text; the header
-    is assumed to start at the entry's first bytes.
+    Entry 16's u32[0] and u32[1] are header fields of their own; the first
+    table slot is always index 2.
     """
+    if len(data) < 12 or u32(data, 4) != 8:
+        return None
+    slots = u32(data, 0)
+    if not 0 < slots <= 62:
+        return None
     tables = []
-    first_valid = None
-    for index in range(0, 512):
+    for index in range(2, 2 + slots):
         slot = index * 4
         if slot + 4 > len(data):
             break
         offset = u32(data, slot)
-        # The end of the header run: an offset of 0 or a value past the file.
         if offset == 0 or offset >= len(data):
-            if tables:
-                break
             continue
         table = parse_table(data, offset)
         if not table or len(table) < 2:
-            # A header field before the tables (entry 16's u32[0], u32[1]);
-            # once tables have started a break ends the run.
-            if tables:
-                break
             continue
-        if first_valid is None:
-            first_valid = index
         tables.append((index, table))
-    if first_valid is None or sum(len(t) for _, t in tables) < 8:
+    if not tables or sum(len(t) for _, t in tables) < 8:
         return None
     return (0, tables)
+
+
+def quest_block(data):
+    """The strings of a quest file (entries 4059-4073 and friends), as
+    [(ref_offset, string_offset, text)], or None.
+
+    A quest entry is not an offset-table block: it is an array of record
+    offsets at its start (u32s that increase, ended by 0), and each record
+    holds, near its end, a table of u32 offsets (absolute in the entry) to its
+    own strings - the title, the objective, the result line, the description,
+    the monsters and the client. The run of increasing offsets that point at
+    printable strings is that table; the game reads each string at
+    `base + offset`, so the run-time patch repoints those words at the arena
+    (host/text/translation.cpp, the quest path) and prints any length.
+
+    Returns the (position of the offset word, the offset it holds, the string)
+    of every field of every record, or None when the entry has no records.
+    """
+    if len(data) < 16:
+        return None
+    records = []
+    index = 0
+    while index * 4 + 4 <= len(data) and index < 64:
+        value = u32(data, index * 4)
+        if value == 0 or (records and value <= records[-1]) or value >= len(data):
+            break
+        records.append(value)
+        index += 1
+    if len(records) < 2:
+        return None
+
+    fields = []
+    for k, start in enumerate(records):
+        end = records[k + 1] if k + 1 < len(records) else len(data)
+        # The title is at a fixed 72 bytes into the record; its offset anchors
+        # the record's string table (a run of increasing offsets that each
+        # point at a printable string, at most the six fields the game reads).
+        anchor = start + 72
+        best = None  # (position, [offsets])
+        position = start
+        while position + 4 <= end:
+            run = []
+            at = position
+            while at + 4 <= end and len(run) < 8:
+                value = u32(data, at)
+                if value == 0 or value >= len(data) or not 32 <= data[value] < 127:
+                    break
+                if run and value <= run[-1]:
+                    break
+                run.append(value)
+                at += 4
+            if run and run[0] == anchor and (best is None or len(run) > len(best[1])):
+                best = (position, run)
+            position += 4
+        if best is None or len(best[1]) < 3:
+            continue
+        position, run = best
+        for n, string_offset in enumerate(run):
+            text = read_cstr(data, string_offset)
+            if text:
+                fields.append((position + n * 4, string_offset, text))
+    # A real quest file has several records of five or six fields; a handful
+    # of fields is a binary entry that happened to look like one.
+    if len(fields) < 10:
+        return None
+    return fields
 
 
 def loose_runs(data, min_length=4):
@@ -186,10 +245,12 @@ def main(argv=None):
         # already cover, and never for huge binary entries: they cost time and
         # a model would swamp the output.
         block = find_block(data)
+        quest = quest_block(data) if not block else None
         runs = []
-        if not block and not options.no_runs and (not options.skip_large or len(data) <= options.skip_large):
+        if not block and not quest and not options.no_runs and (
+                not options.skip_large or len(data) <= options.skip_large):
             runs = loose_runs(data)
-        if not block and not runs:
+        if not block and not quest and not runs:
             continue
 
         strings_here = 0
@@ -206,12 +267,23 @@ def main(argv=None):
                         all_strings.write("%d\t%d\t%d\t%s\n" % (index, table_index, k, text.replace("\n", "\\n")))
                         strings_here += 1
                         total_strings += 1
+            if quest:
+                # A quest field is keyed by `ref:offset`: the word that holds
+                # the offset (the run-time patch rewrites that word), and the
+                # offset it holds. The table column is the word's position.
+                out.write("\n== quest fields (%d)\n" % len(quest))
+                for ref_offset, string_offset, text in quest:
+                    out.write("%d\t%d\t%s\n" % (ref_offset, string_offset, text.replace("\n", "\\n")))
+                    all_strings.write("%d\t%d\t%d\t%s\n" % (index, ref_offset, string_offset,
+                                                            text.replace("\n", "\\n")))
+                    strings_here += 1
+                    total_strings += 1
             if runs:
                 out.write("\n== loose text runs (%d)\n" % len(runs))
                 for text in runs:
                     out.write("%s\n" % text.replace("\n", "\\n"))
 
-        report.append((index, len(data), 1 if block else 0, strings_here, len(runs)))
+        report.append((index, len(data), 1 if (block or quest) else 0, strings_here, len(runs)))
         if len(report) % 200 == 0:
             print("...", index, "entries with text:", len(report), flush=True)
 
