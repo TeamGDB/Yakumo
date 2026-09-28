@@ -39,6 +39,12 @@ struct Pending {
     bool applied{};
     std::string probe;      // the first non-empty string of the block, to find it in RAM
     std::uint32_t probe_into{};  // where the probe string sits inside the entry
+    // A dialogue's ids number across its entries (4289 is 0..16, 4290 is 17..23),
+    // so the first id is not always 0; it tells the entry apart in RAM.
+    std::uint32_t first_id{};
+    // A block not found after many frames has a probe that will not match; stop
+    // scanning (scanning the whole of RAM every frame drops the frame rate).
+    std::uint32_t missed{};
     // The game may read a large entry in pieces; the pieces are collected here
     // as they come.
     std::vector<std::uint8_t> partial;
@@ -107,7 +113,8 @@ std::string peek_string(const psprecomp::GuestMemory &memory, std::uint32_t addr
 
 // Looks for the loaded dialogue entry: finds the probe string in RAM and works
 // back to the entry start by the offset the string had inside it.
-std::uint32_t find_dialogue(const psprecomp::GuestMemory &memory, const std::string &probe, std::uint32_t into) {
+std::uint32_t find_dialogue(const psprecomp::GuestMemory &memory, const std::string &probe, std::uint32_t into,
+                            std::uint32_t first_id) {
     if (probe.empty()) return 0u;
     const auto equal = [&](std::uint32_t at) {
         for (std::size_t i = 0; i < probe.size(); ++i) {
@@ -121,9 +128,10 @@ std::uint32_t find_dialogue(const psprecomp::GuestMemory &memory, const std::str
         if (!equal(at)) continue;
         const std::uint32_t base = at - into;
         if (base < kRamBegin || base >= kRamEnd) continue;
-        // Sanity: the top-level list is (id, offset) pairs, the first id 0 and
-        // the first offset inside the entry.
-        if (memory.load32(base) != 0u) continue;
+        // Sanity: the top-level list is (id, offset) pairs, the first id being
+        // this entry's (0 for 4289, 17 for 4290, ...) and the first offset
+        // inside the entry.
+        if (memory.load32(base) != first_id) continue;
         const std::uint32_t first = memory.load32(base + 4u);
         if (first == 0u || first >= 0x00400000u) continue;
         return base;
@@ -293,6 +301,9 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
     // the entry can be found in RAM by that string alone (the dialogue has no
     // header to look for).
     if (is_dialogue(at->entry)) {
+        // The first id of the entry (4289 starts at 0, 4290 at 17, ...), which
+        // tells the entry apart from the others in RAM.
+        pending.first_id = read32(0u);
         // (id, offset) pairs at the top; the first block's first string.
         for (std::uint32_t k = 0u; k < 64u && pending.probe.empty(); ++k) {
             const std::uint32_t id = read32(k * 8u);
@@ -377,11 +388,18 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
 
         std::uint32_t address = 0u;
         if (entry == kMainEntry) address = kMainTextBlock;
-        else if (is_dialogue(entry)) address = find_dialogue(memory, pending.probe, pending.probe_into);
+        else if (is_dialogue(entry)) address = find_dialogue(memory, pending.probe, pending.probe_into, pending.first_id);
         else if (!pending.probe.empty()) address = find_block(memory, pending.probe);
         static const bool trace = std::getenv("MHP3RD_TRACE_TEXT") != nullptr;
         if (address == 0u) {
-            if (trace) std::cout << "[text] block " << entry << ": not found in RAM yet\n";
+            // A probe that never matches must not be retried forever: scanning
+            // the whole of RAM each frame is what dropped the frame rate.
+            if (++pending.missed > 300u) {
+                pending.read = false;
+                if (trace) std::cout << "[text] block " << entry << ": gave up looking for it\n";
+            } else if (trace) {
+                std::cout << "[text] block " << entry << ": not found in RAM yet\n";
+            }
             continue;
         }
 
