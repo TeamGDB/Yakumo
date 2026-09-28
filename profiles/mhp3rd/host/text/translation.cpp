@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <map>
 #include <vector>
@@ -44,6 +45,12 @@ bool is_quest(std::uint32_t entry) {
 constexpr std::uint32_t kRamBegin = 0x08800000u;
 constexpr std::uint32_t kRamEnd = 0x0A800000u;
 
+struct QuestField {
+    std::uint32_t ref{};      // position of the offset word in the file
+    std::uint32_t offset{};   // the string's offset in the file
+    std::string text;         // the game's own string
+};
+
 struct Pending {
     bool read{};            // the game has read this entry (whole)
     bool applied{};
@@ -66,6 +73,12 @@ struct Pending {
     // slice, so the same strings are not copied twice.
     std::uint32_t arena_offset{};
     std::uint32_t arena_bytes{};
+    // The quest's records (title, objective, result, description, monsters,
+    // client), parsed from the file, to find and patch the game's own quest
+    // structure, which holds the strings inline (not by offset).
+    std::vector<std::vector<QuestField>> records;
+    std::uint32_t struct_checks{};  // remaining searches for that structure
+    std::uint64_t struct_next{};    // frame of the next search
 };
 
 struct State {
@@ -79,6 +92,7 @@ struct State {
     std::map<std::uint32_t, AppliedBlock> applied;
     bool warned_arena{};
     std::size_t arena_used{};
+    std::uint64_t frames{};  // for the timed quest-structure searches
 };
 
 State &state() {
@@ -222,6 +236,63 @@ std::vector<std::uint32_t> find_quest_copies(const psprecomp::GuestMemory &memor
         copies.push_back(base);
     }
     return copies;
+}
+
+std::uint32_t align4(std::uint32_t value) { return (value + 3u) & ~3u; }
+
+// The game's own quest structure holds the six strings of the quest inline (not
+// by offset), so it is a copy the file I/O never sees. It is found by its title
+// followed by the other fields at the game's slots (each field's length rounded
+// up to four), and every field is overwritten in place with the translation
+// when it fits the slot. Returns how many fields were written.
+std::uint32_t apply_quest_struct(psprecomp::GuestMemory &memory,
+                                 const std::vector<std::vector<QuestField>> &records,
+                                 const Translations &translations) {
+    if (records.empty()) return 0u;
+    std::uint32_t end = kRamEnd;
+    while (end > kRamBegin + 0x100000u && !memory.contains(end - 4u, 4u)) end -= 0x100000u;
+    const std::uint32_t span = end - kRamBegin;
+    const std::uint8_t *ram = memory.raw_pointer(kRamBegin, span);
+    if (ram == nullptr) return 0u;
+    std::vector<std::uint32_t> by_first[256];
+    for (std::uint32_t r = 0u; r < records.size(); ++r)
+        if (!records[r].empty() && !records[r][0].text.empty())
+            by_first[static_cast<std::uint8_t>(records[r][0].text[0])].push_back(r);
+
+    std::uint32_t written = 0u;
+    for (std::uint32_t at = kRamBegin; at + 4u < end; ++at) {
+        const std::uint32_t here = at - kRamBegin;
+        for (const std::uint32_t r : by_first[ram[here]]) {
+            const std::vector<QuestField> &fields = records[r];
+            const std::string &title = fields[0].text;
+            if (title.size() > end - at) continue;
+            if (std::memcmp(ram + here, title.data(), title.size()) != 0) continue;
+            std::uint32_t offsets[8]{};
+            std::uint32_t pos = 0u;
+            bool ok = true;
+            for (std::uint32_t n = 0u; n < fields.size() && n < 8u && ok; ++n) {
+                offsets[n] = pos;
+                const std::string &want = fields[n].text;
+                if (want.size() > end - at - pos) { ok = false; break; }
+                if (n != 0u && std::memcmp(ram + here + pos, want.data(), want.size()) != 0) ok = false;
+                pos += align4(static_cast<std::uint32_t>(want.size()) + 1u);
+            }
+            if (!ok) continue;
+            for (std::uint32_t n = 0u; n < fields.size() && n < 8u; ++n) {
+                const std::string *text =
+                    translations.find(static_cast<std::uint16_t>(fields[n].ref), fields[n].offset);
+                if (text == nullptr) continue;
+                const std::uint32_t slot = align4(static_cast<std::uint32_t>(fields[n].text.size()) + 1u);
+                if (text->size() + 1u > slot) continue;
+                const std::uint32_t base = at + offsets[n];
+                for (std::uint32_t i = 0u; i < slot; ++i)
+                    memory.store8(base + i, i < text->size() ? static_cast<std::uint8_t>((*text)[i]) : 0u);
+                ++written;
+            }
+            break;
+        }
+    }
+    return written;
 }
 
 } // namespace
@@ -393,32 +464,58 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
         }
     } else if (is_quest(at->entry)) {
         // A quest file: an array of record offsets at the top, each record
-        // holding a string table at `record + 72`. Its first string (the title)
-        // is the probe; the record array at the found base tells it apart.
-        std::uint32_t records[64];
+        // holding a string table at `record + 72`. Every field is kept: the
+        // upload repoints the file's offsets, but the game's own quest
+        // structure holds the strings inline, with no offsets, so its fields
+        // are found by these and overwritten in place (frame).
+        pending.records.clear();
+        std::uint32_t starts[64];
         std::uint32_t count = 0u;
         for (; count < 64u; ++count) {
             if ((count + 1u) * 4u > clear.size()) break;
             const std::uint32_t value = read32(count * 4u);
-            if (value == 0u || (count != 0u && value <= records[count - 1u]) || value >= clear.size()) break;
-            records[count] = value;
+            if (value == 0u || (count != 0u && value <= starts[count - 1u]) || value >= clear.size()) break;
+            starts[count] = value;
         }
-        if (count >= 1u) {
-            const std::uint32_t start = records[0];
-            const std::uint32_t end = count > 1u ? records[1] : static_cast<std::uint32_t>(clear.size());
+        for (std::uint32_t k = 0u; k < count; ++k) {
+            const std::uint32_t start = starts[k];
+            const std::uint32_t end = k + 1u < count ? starts[k + 1u] : static_cast<std::uint32_t>(clear.size());
             const std::uint32_t anchor = start + 72u;
+            std::uint32_t best_pos = 0u, best_len = 0u;
             for (std::uint32_t at = start; at + 4u <= end; at += 4u) {
-                if (read32(at) != anchor) continue;
-                std::string text;
-                for (std::uint32_t c = anchor; c < clear.size() && clear[c] != 0u && text.size() < 64u; ++c)
-                    text.push_back(static_cast<char>(clear[c]));
-                if (text.size() >= 4u) {
-                    pending.probe = text;
-                    pending.probe_into = anchor;
+                std::uint32_t run[8];
+                std::uint32_t len = 0u;
+                for (std::uint32_t p = at; p + 4u <= end && len < 8u;) {
+                    const std::uint32_t value = read32(p);
+                    if (value == 0u || value >= clear.size() || clear[value] < 32u || clear[value] >= 127u) break;
+                    if (len != 0u && value <= run[len - 1u]) break;
+                    run[len++] = value;
+                    p += 4u;
                 }
-                break;
+                if (len >= 3u && run[0] == anchor && len > best_len) {
+                    best_len = len;
+                    best_pos = at;
+                }
             }
+            if (best_len < 3u) continue;
+            std::vector<QuestField> fields;
+            for (std::uint32_t n = 0u; n < best_len; ++n) {
+                const std::uint32_t string = read32(best_pos + n * 4u);
+                std::string text;
+                for (std::uint32_t c = string; c < clear.size() && clear[c] != 0u && text.size() < 256u; ++c)
+                    text.push_back(static_cast<char>(clear[c]));
+                fields.push_back(QuestField{best_pos + n * 4u, string, std::move(text)});
+            }
+            if (!fields.empty()) pending.records.push_back(std::move(fields));
         }
+        if (!pending.records.empty() && !pending.records[0].empty()) {
+            pending.probe = pending.records[0][0].text;
+            pending.probe_into = pending.records[0][0].offset;
+        }
+        // The game's own quest structure may be made now or when the quest
+        // starts; search for it a few times over the next seconds.
+        pending.struct_checks = 6u;
+        pending.struct_next = 0u;
     } else if (clear.size() >= 12u && read32(4u) == 8u) {
         for (std::uint32_t word = 2u; word < 64u && pending.probe.empty(); ++word) {
             const std::uint32_t table_offset = read32(word * 4u);
@@ -450,6 +547,7 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
 void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
     State &s = state();
     if (!s.loaded || s.blocks.empty()) return;
+    ++s.frames;
 
     // The main block sits at its fixed address as soon as the game has loaded
     // it; the others are found in RAM by their first string once read.
@@ -461,7 +559,7 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
 
     bool any = false;
     for (const auto &[entry, pending] : s.pending)
-        if (pending.read && !pending.applied) any = true;
+        if (pending.read && (!pending.applied || (is_quest(entry) && pending.struct_checks > 0u))) any = true;
     if (!any) return;
 
     if (!s.arena) {
@@ -479,6 +577,21 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
     }
 
     for (auto &[entry, pending] : s.pending) {
+        // A quest file is read once, but the game's own quest structure (the
+        // strings inline) may be made when the quest starts; look for it a few
+        // times over the next seconds and overwrite its fields in place.
+        if (is_quest(entry) && pending.struct_checks > 0u && s.frames >= pending.struct_next) {
+            const auto quest = s.blocks.find(entry);
+            std::uint32_t patched = 0u;
+            if (quest != s.blocks.end()) patched = apply_quest_struct(memory, pending.records, quest->second);
+            if (patched > 0u) {
+                pending.struct_checks = 0u;
+                std::cout << "[text] quest " << entry << ": patched " << patched
+                          << " field(s) in the quest structure\n";
+            } else if (--pending.struct_checks > 0u) {
+                pending.struct_next = s.frames + 240u;
+            }
+        }
         if (!pending.read || pending.applied) continue;
         const auto translations = s.blocks.find(entry);
         if (translations == s.blocks.end()) continue;
