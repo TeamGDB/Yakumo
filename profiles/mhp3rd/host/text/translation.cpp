@@ -60,6 +60,12 @@ struct Pending {
     // as they come.
     std::vector<std::uint8_t> partial;
     std::size_t partial_have{};  // how many bytes of the entry have been read
+    // A quest file is read again every time its screen opens (the quest list,
+    // and again in the quest), each read loading the game's own offsets. Its
+    // translation is re-applied to the new buffer, always into the same arena
+    // slice, so the same strings are not copied twice.
+    std::uint32_t arena_offset{};
+    std::uint32_t arena_bytes{};
 };
 
 struct State {
@@ -184,12 +190,15 @@ std::uint32_t find_block(const psprecomp::GuestMemory &memory, const std::string
     return 0u;
 }
 
-// Looks for the loaded quest file: finds the probe string (the first record's
-// title) in RAM, works back to the entry start by the offset it had inside it,
-// and checks that the record array at the top looks like a quest's.
-std::uint32_t find_quest(const psprecomp::GuestMemory &memory, const std::string &probe, std::uint32_t into,
-                         std::uint32_t size) {
-    if (probe.empty()) return 0u;
+// Every loaded copy of the quest file: the probe string (the first record's
+// title) is found in RAM and the entry start worked back from the offset it had
+// inside it, with the record array at the top checked. A quest file is in RAM
+// more than once (the quest list's buffer, the quest's own), so the patch
+// translates every copy it can find.
+std::vector<std::uint32_t> find_quest_copies(const psprecomp::GuestMemory &memory, const std::string &probe,
+                                             std::uint32_t into, std::uint32_t size) {
+    std::vector<std::uint32_t> copies;
+    if (probe.empty()) return copies;
     const auto equal = [&](std::uint32_t at) {
         for (std::size_t i = 0; i < probe.size(); ++i) {
             if (!memory.contains(at + i, 1u) || memory.load8(at + i) != static_cast<std::uint8_t>(probe[i]))
@@ -206,9 +215,9 @@ std::uint32_t find_quest(const psprecomp::GuestMemory &memory, const std::string
         const std::uint32_t first = memory.load32(base);
         const std::uint32_t second = memory.load32(base + 4u);
         if (first == 0u || first >= size || second <= first || second >= size) continue;
-        return base;
+        copies.push_back(base);
     }
-    return 0u;
+    return copies;
 }
 
 } // namespace
@@ -311,7 +320,19 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
     // collected. The pieces are gathered until the entry is whole.
     Pending &pending = s.pending[at->entry];
     pending.size = static_cast<std::uint32_t>(at->size);
-    if (pending.read) return;
+    // A quest file is read again every time its screen opens; a read that starts
+    // at the entry's first byte is a fresh load, so its translation is applied
+    // again to the new buffer (which came back with the game's own offsets).
+    if (at->into == 0u && is_quest(at->entry)) {
+        pending.read = false;
+        pending.applied = false;
+        pending.missed = 0u;
+        pending.probe.clear();
+        pending.partial.clear();
+        pending.partial_have = 0u;
+    } else if (pending.read) {
+        return;
+    }
     // Collect the entry's stored bytes, then decrypt them in 2 KiB blocks (the
     // keystream is seeded per block, so a piece is not decrypted on its own).
     // The game may never read the whole entry (a dialogue can be read up to the
@@ -459,10 +480,13 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
         if (translations == s.blocks.end()) continue;
 
         std::uint32_t address = 0u;
+        std::vector<std::uint32_t> quest_copies;
         if (entry == kMainEntry) address = kMainTextBlock;
         else if (is_dialogue(entry)) address = find_dialogue(memory, pending.probe, pending.probe_into, pending.first_id);
-        else if (is_quest(entry)) address = find_quest(memory, pending.probe, pending.probe_into, pending.size);
-        else if (!pending.probe.empty()) address = find_block(memory, pending.probe);
+        else if (is_quest(entry)) {
+            quest_copies = find_quest_copies(memory, pending.probe, pending.probe_into, pending.size);
+            address = quest_copies.empty() ? 0u : quest_copies.front();
+        } else if (!pending.probe.empty()) address = find_block(memory, pending.probe);
         static const bool trace = std::getenv("MHP3RD_TRACE_TEXT") != nullptr;
         if (address == 0u) {
             // A probe that never matches must not be retried forever: scanning
@@ -488,15 +512,28 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
             continue;
         }
 
-        // A quest file's strings are repointed at the arena (any length).
+        // A quest file's strings are repointed at the arena (any length), in
+        // every copy in RAM and again on every re-read, all pointing at one
+        // slice so the strings are not copied twice.
         if (is_quest(entry)) {
-            const std::size_t before = s.arena_used;
-            const std::uint32_t applied = apply_quest(memory, address, translations->second, *s.arena, s.arena_used);
-            if (applied == 0u) continue;
+            if (pending.arena_bytes == 0u) {
+                const std::size_t need = translations->second.arena_bytes();
+                if (need == 0u || s.arena_used + need > s.arena->end - s.arena->begin) continue;
+                pending.arena_offset = static_cast<std::uint32_t>(s.arena_used);
+                pending.arena_bytes = static_cast<std::uint32_t>(need);
+                s.arena_used += need;
+            }
+            const Arena slice{s.arena->begin + pending.arena_offset,
+                              s.arena->begin + pending.arena_offset + pending.arena_bytes};
+            std::uint32_t applied = 0u;
+            for (const std::uint32_t copy : quest_copies) {
+                std::size_t used = 0u;
+                applied += apply_quest(memory, copy, translations->second, slice, used);
+            }
             pending.applied = true;
             s.applied[entry] = AppliedBlock{entry, address, applied};
             std::cout << "[text] quest " << entry << " at " << psprecomp::hex32(address) << ": applied " << applied
-                      << " of " << translations->second.size() << ", " << (s.arena_used - before) << " bytes\n";
+                      << " in " << quest_copies.size() << " copy/copies, " << pending.arena_bytes << " bytes\n";
             continue;
         }
 

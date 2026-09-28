@@ -97,6 +97,9 @@ offset it holds, e.g. `[4059]` with `1624:1192 = Derrota Jaggi` (the title
 "Jaggi Takedown", whose offset word is at 1624 and points at 1192). The run-time
 patch finds the file in RAM by its first title and rewrites each word to point
 into the arena, so a quest translation may be any length, unlike a fixed field.
+The file is read again every time its screen opens (the quest list, and again
+during the quest), so the patch re-applies the translation to each new buffer,
+and to every copy of the file it finds in RAM, all sharing one arena slice.
 `tools/extract_text.py` reads these too (`quest_block`).
 
 ## How it works

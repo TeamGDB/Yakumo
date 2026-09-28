@@ -330,6 +330,29 @@ void test_apply_quest() {
     check(read_text_at(memory, untouched) == "Body0", "a field with no translation keeps the game's text");
 }
 
+// A quest file is in RAM more than once (the list's buffer, the quest's), and
+// is read again every time its screen opens; every copy shares one arena slice.
+void test_apply_quest_copies() {
+    Memory memory(kBase, kSize);
+    const std::uint32_t first = kBase + 0x4000u;
+    const std::uint32_t second = kBase + 0x20000u;
+    write_quest(memory, first);
+    write_quest(memory, second);
+
+    Translations t;
+    t.add(0x100u, 0x400u, "Titulo");
+
+    Arena slice{first + 0x10000u, first + 0x10000u + 0x400u};
+    std::uint32_t applied = 0u;
+    for (const std::uint32_t base : {first, second}) {
+        std::size_t used = 0u;
+        applied += mhp3rd::text::apply_quest(memory, base, t, slice, used);
+    }
+    check(applied == 2u, "every copy of the file is translated");
+    check(read_text_at(memory, first + memory.load32(first + 0x100u)) == "Titulo", "the first copy reads back");
+    check(read_text_at(memory, second + memory.load32(second + 0x100u)) == "Titulo", "the second copy reads back");
+}
+
 } // namespace
 
 int main() {
@@ -341,6 +364,7 @@ int main() {
     test_apply_dialogue();
     test_apply_dialogue_offset_ids();
     test_apply_quest();
+    test_apply_quest_copies();
     if (failures != 0) {
         std::cerr << failures << " failure(s)\n";
         return 1;
