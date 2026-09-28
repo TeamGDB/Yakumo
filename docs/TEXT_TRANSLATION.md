@@ -118,7 +118,9 @@ When a language is chosen, the text is applied between two frames
 1. The file I/O tells `text::translate_read` every read of `DATA.BIN`
    (`hle_io.cpp`); a read that carries a block the file names, whole or gathered
    in pieces, lets the block be found once the game has loaded it (the main
-   block by its fixed address, another by the first string it holds).
+   block by its fixed address, another by the first string it holds). A block the
+   game loads again - leaving a quest reloads the menus - is translated again,
+   each block keeping one slice of the arena.
 2. Each translated string is copied into one arena reserved in guest memory
    through the kernel's own allocator, and the table's (or sub-block's) offset
    for that string is pointed at it. Because the string lives in the arena, a
