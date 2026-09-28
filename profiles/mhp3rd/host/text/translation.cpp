@@ -79,6 +79,7 @@ struct Pending {
     std::vector<std::vector<QuestField>> records;
     std::uint32_t struct_checks{};  // remaining searches for that structure
     std::uint64_t struct_next{};    // frame of the next search
+    std::vector<std::uint32_t> copy_bases;  // the file copies to leave alone
 };
 
 struct State {
@@ -247,7 +248,8 @@ std::uint32_t align4(std::uint32_t value) { return (value + 3u) & ~3u; }
 // when it fits the slot. Returns how many fields were written.
 std::uint32_t apply_quest_struct(psprecomp::GuestMemory &memory,
                                  const std::vector<std::vector<QuestField>> &records,
-                                 const Translations &translations) {
+                                 const Translations &translations, const std::vector<std::uint32_t> &copies,
+                                 std::uint32_t copy_size) {
     if (records.empty()) return 0u;
     std::uint32_t end = kRamEnd;
     while (end > kRamBegin + 0x100000u && !memory.contains(end - 4u, 4u)) end -= 0x100000u;
@@ -258,11 +260,19 @@ std::uint32_t apply_quest_struct(psprecomp::GuestMemory &memory,
     for (std::uint32_t r = 0u; r < records.size(); ++r)
         if (!records[r].empty() && !records[r][0].text.empty())
             by_first[static_cast<std::uint8_t>(records[r][0].text[0])].push_back(r);
+    // The quest file itself (and the buffer the game read it into) holds the
+    // same strings in the same order; only the game's own structure is patched.
+    const auto in_copy = [&](std::uint32_t at) {
+        for (const std::uint32_t base : copies)
+            if (at >= base && at - base < copy_size) return true;
+        return false;
+    };
 
     std::uint32_t written = 0u;
     for (std::uint32_t at = kRamBegin; at + 4u < end; ++at) {
         const std::uint32_t here = at - kRamBegin;
         for (const std::uint32_t r : by_first[ram[here]]) {
+            if (in_copy(at)) break;
             const std::vector<QuestField> &fields = records[r];
             const std::string &title = fields[0].text;
             if (title.size() > end - at) continue;
@@ -516,8 +526,8 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
             pending.probe_into = pending.records[0][0].offset;
         }
         // The game's own quest structure may be made now or when the quest
-        // starts; search for it a few times over the next seconds.
-        pending.struct_checks = 6u;
+        // starts; search for it a few times over the next minutes.
+        pending.struct_checks = 20u;
         pending.struct_next = 0u;
     } else if (clear.size() >= 12u && read32(4u) == 8u) {
         for (std::uint32_t word = 2u; word < 64u && pending.probe.empty(); ++word) {
@@ -583,16 +593,17 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
         // A quest file is read once, but the game's own quest structure (the
         // strings inline) may be made when the quest starts; look for it a few
         // times over the next seconds and overwrite its fields in place.
-        if (is_quest(entry) && pending.struct_checks > 0u && s.frames >= pending.struct_next) {
+        if (is_quest(entry) && pending.applied && pending.struct_checks > 0u && s.frames >= pending.struct_next) {
             const auto quest = s.blocks.find(entry);
             std::uint32_t patched = 0u;
-            if (quest != s.blocks.end()) patched = apply_quest_struct(memory, pending.records, quest->second);
+            if (quest != s.blocks.end())
+                patched = apply_quest_struct(memory, pending.records, quest->second, pending.copy_bases, pending.size);
             if (patched > 0u) {
                 pending.struct_checks = 0u;
                 std::cout << "[text] quest " << entry << ": patched " << patched
                           << " field(s) in the quest structure\n";
             } else if (--pending.struct_checks > 0u) {
-                pending.struct_next = s.frames + 240u;
+                pending.struct_next = s.frames + (pending.struct_checks > 15u ? 180u : 900u);
             }
         }
         if (!pending.read || pending.applied) continue;
@@ -657,6 +668,7 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
             const Arena slice{s.arena->begin + pending.arena_offset,
                               s.arena->begin + pending.arena_offset + pending.arena_bytes};
             std::uint32_t applied = 0u;
+            pending.copy_bases = quest_copies;
             for (const std::uint32_t copy : quest_copies) {
                 std::size_t used = 0u;
                 applied += apply_quest(memory, copy, translations->second, slice, used);
