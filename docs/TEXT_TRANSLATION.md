@@ -25,7 +25,9 @@ In order, the first match for the chosen language wins:
 
 1. `MHP3RD_TRANSLATIONS_DIR`, when set
 2. `translations/` in the per-user data directory
-3. `translations/` next to the executable
+3. The translations the release ships: `translations/` next to the executable,
+   `Yakumo.app/Contents/Resources/translations` in the macOS bundle, or the
+   unpacked assets of the Android app
 
 Files must end in `.lang`. To add a language, drop a file into the data
 directory's `translations` folder (the menu shows that folder) and set the

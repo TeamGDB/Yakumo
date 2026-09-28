@@ -326,6 +326,12 @@ printf 'APPL????' > "$contents/PkgInfo"
 cp "$packaging/Yakumo.icns" "$resources/Yakumo.icns"
 
 cp "$sources/NotoSansCJKjp-Regular.otf" "$resources/fonts/"
+
+# The translations the loader finds in Contents/Resources/translations.
+mkdir -p "$resources/translations"
+if compgen -G "$build_dir/bin/translations/*.lang" > /dev/null; then
+    cp "$build_dir"/bin/translations/*.lang "$resources/translations/"
+fi
 licenses="$resources/licenses"
 cp "$repo_dir/LICENSE" "$licenses/Yakumo-LICENSE.txt"
 cp "$notices" "$licenses/THIRD_PARTY_NOTICES.md"

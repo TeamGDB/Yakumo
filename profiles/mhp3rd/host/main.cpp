@@ -390,8 +390,8 @@ std::vector<std::filesystem::path> translation_directories() {
         directories.push_back(mhp3rd::install::user_data_directory() / "translations");
     } catch (const std::exception &) {
     }
-    if (const std::filesystem::path executable = mhp3rd::executable_directory(); !executable.empty())
-        directories.push_back(executable / "translations");
+    if (const std::filesystem::path shipped = mhp3rd::bundled_translation_directory(); !shipped.empty())
+        directories.push_back(shipped);
     return directories;
 }
 

@@ -90,6 +90,11 @@ std::filesystem::path bundled_font_directory() {
     return shipped_directory("Resources", "fonts");
 }
 
+std::filesystem::path bundled_translation_directory() {
+    if (!bundled_resource_directory().empty()) return bundled_resource_directory() / "translations";
+    return shipped_directory("Resources", "translations");
+}
+
 std::vector<std::filesystem::path> bundled_fonts() {
     std::vector<std::filesystem::path> fonts;
     const std::filesystem::path directory = bundled_font_directory();
