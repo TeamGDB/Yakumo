@@ -202,6 +202,37 @@ std::uint32_t apply_dialogue(Memory &memory, std::uint32_t address, const Transl
     return applied;
 }
 
+// Applies a quest translation to the quest file at `address`. A quest file is
+// an array of record offsets at its top, then the records, each holding a table
+// of offsets (absolute in the entry) to its strings (tools/extract_text.py
+// `quest_block`). The keys are `ref:offset`: the position of the offset word and
+// the offset it holds. The word is repointed into the arena, so a translation
+// may be any length (unlike a fixed field). Returns how many strings were
+// replaced. Memory is anything with contains, load32, store8/store32.
+template <typename Memory>
+std::uint32_t apply_quest(Memory &memory, std::uint32_t address, const Translations &translations,
+                          const Arena &arena, std::size_t &used) {
+    std::uint32_t applied = 0u;
+    for (const auto &[id, text] : translations.entries()) {
+        const std::uint32_t ref = address + table_of(id);
+        const std::uint32_t string_offset = index_of(id);
+        if (!memory.contains(ref, 4u)) continue;
+        // The word must still hold the offset the file gave it; a mismatch is a
+        // different record layout and is left alone.
+        if (memory.load32(ref) != string_offset) continue;
+        const std::size_t needed = text.size() + 1u;
+        if (used + needed > arena.end - arena.begin) continue;
+        const std::uint32_t into = arena.begin + static_cast<std::uint32_t>(used);
+        for (std::size_t i = 0; i < text.size(); ++i)
+            memory.store8(into + static_cast<std::uint32_t>(i), static_cast<std::uint8_t>(text[i]));
+        memory.store8(into + static_cast<std::uint32_t>(text.size()), 0u);
+        used += needed;
+        memory.store32(ref, into - address);
+        ++applied;
+    }
+    return applied;
+}
+
 // The blocks translated so far this run, for the menu's diagnostics.
 struct AppliedBlock {
     std::uint32_t entry{};

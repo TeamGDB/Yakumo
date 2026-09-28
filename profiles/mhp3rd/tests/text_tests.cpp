@@ -287,6 +287,49 @@ void test_apply_dialogue() {
     check(read_text_at(memory, untouched) == "d0-0", "a string with no translation keeps the game's text");
 }
 
+// A quest file: an array of record offsets at the top, then each record's
+// string table (here a run of entry-relative offsets) and the strings.
+void write_quest(Memory &memory, std::uint32_t at) {
+    memory.store32(at + 0u, 0x100u);  // record 0
+    memory.store32(at + 4u, 0x200u);  // record 1
+    // Record 0's six fields, at their offsets, then record 1's.
+    const char *titles[] = {"Title", "Objective", "Result", "Body", "Monsters", "Client"};
+    for (std::uint32_t field = 0; field < 6u; ++field) {
+        const std::uint32_t string = 0x400u + field * 0x20u;
+        memory.store32(at + 0x100u + field * 4u, string);
+        const std::string text = std::string(titles[field]) + "0";
+        for (std::size_t i = 0; i <= text.size(); ++i)
+            memory.store8(at + string + static_cast<std::uint32_t>(i),
+                          i < text.size() ? static_cast<std::uint8_t>(text[i]) : 0u);
+    }
+}
+
+void test_apply_quest() {
+    Memory memory(kBase, kSize);
+    const std::uint32_t at = kBase + 0x4000u;
+    write_quest(memory, at);
+
+    // The keys are `ref:offset`: the word that holds the offset, and the offset.
+    Translations t;
+    t.add(0x100u, 0x400u, "Titulo");      // record 0's title
+    t.add(0x104u, 0x420u, "Um objetivo bem mais longo");  // any length
+    t.add(0x108u, 0x999u, "deslocado");   // the word does not hold 0x999
+
+    Arena arena{at + 0x8000u, at + 0x8000u + 0x400u};
+    std::size_t used = 0u;
+    const std::uint32_t applied = mhp3rd::text::apply_quest(memory, at, t, arena, used);
+    check(applied == 2u, "two quest fields are replaced");
+    const std::uint32_t title = at + memory.load32(at + 0x100u);
+    check(read_text_at(memory, title) == "Titulo", "the title is repointed and reads back");
+    const std::uint32_t objective = at + memory.load32(at + 0x104u);
+    check(read_text_at(memory, objective) == "Um objetivo bem mais longo",
+          "a longer translation is stored whole");
+    check(memory.load32(at + 0x108u) == 0x999u || read_text_at(memory, at + memory.load32(at + 0x108u)) != "deslocado",
+          "a word that no longer matches is left alone");
+    const std::uint32_t untouched = at + memory.load32(at + 0x10Cu);
+    check(read_text_at(memory, untouched) == "Body0", "a field with no translation keeps the game's text");
+}
+
 } // namespace
 
 int main() {
@@ -297,6 +340,7 @@ int main() {
     test_apply_before_load();
     test_apply_dialogue();
     test_apply_dialogue_offset_ids();
+    test_apply_quest();
     if (failures != 0) {
         std::cerr << failures << " failure(s)\n";
         return 1;
