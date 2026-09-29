@@ -2427,6 +2427,7 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
     if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
         std::cout << "[pad] no gamepad support: " << SDL_GetError() << "\n";
     } else {
+        SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
         // The player's own mappings first, so a controller they set up is a
         // gamepad from the start; then every joystick, logged once.
         input::devices::load_mappings();
