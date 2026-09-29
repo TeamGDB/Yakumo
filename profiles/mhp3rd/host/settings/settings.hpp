@@ -83,6 +83,8 @@ struct Settings {
     // Audio
     std::uint32_t volume{100u};        // percent
     bool mute{};
+    // Silence while the game is in the background.
+    bool background_mute{};
 
     // Controls
     bool confirm_south{};              // confirm (circle) on the south face button

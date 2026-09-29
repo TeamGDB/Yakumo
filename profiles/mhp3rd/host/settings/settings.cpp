@@ -290,6 +290,7 @@ const std::vector<Field> &fields() {
          [](Settings &s, const std::string &t) { return parse_uint(t, 0u, 100u, s.volume); },
          [](const Settings &s) { return std::to_string(s.volume); }, nullptr},
         BOOL_FIELD("audio.mute", mute),
+        BOOL_FIELD("audio.background_mute", background_mute),
         {"input.confirm", "MHP3RD_PAD_FACE",
          [](Settings &s, const std::string &t) {
              if (t == "south") s.confirm_south = true;
