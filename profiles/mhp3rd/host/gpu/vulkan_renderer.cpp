@@ -22,6 +22,7 @@
 #include "input/gamepad_devices.hpp"
 #include "input/bindings.hpp"
 #include "input/chords.hpp"
+#include "audio/audio_sink.hpp"
 #include "settings/settings.hpp"
 
 #if defined(MHP3RD_ANDROID_APP)
@@ -5630,6 +5631,12 @@ bool VulkanRenderer::pump_events() {
         if (event.type == SDL_EVENT_WINDOW_SAFE_AREA_CHANGED) {
             impl_->update_content_rect();
             impl_->resize_now = true;
+        }
+        if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED || event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+            const settings::Settings &player = settings::current();
+            const bool focused = event.type == SDL_EVENT_WINDOW_FOCUS_GAINED;
+            const bool muted = player.mute || (!focused && player.background_mute);
+            audio::AudioSink::instance().set_volume(muted ? 0.0f : static_cast<float>(player.volume) / 100.0f);
         }
 #if defined(__ANDROID__)
         if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) impl_->log_layout("pixel size changed");
