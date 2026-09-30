@@ -261,6 +261,19 @@ std::uint64_t data_bin_size() {
     return s.range ? s.range->size : 0u;
 }
 
+std::optional<EntryAt> entry_at_offset(std::uint64_t offset) {
+    State &s = state();
+    if (!s.directory) return std::nullopt;
+    const Directory &d = *s.directory;
+    const std::uint64_t block = offset / p3rd::kBlock;
+    if (block * p3rd::kBlock != offset) return std::nullopt;  // only block boundaries name an entry
+    const std::int64_t last = d.entry_at(static_cast<std::uint32_t>(block));
+    if (last < 0) return std::nullopt;
+    const std::uint64_t start = static_cast<std::uint64_t>(d.blocks[last]) * p3rd::kBlock;
+    const auto entry = static_cast<std::uint32_t>(last);
+    return EntryAt{entry, offset - start, d.size(entry)};
+}
+
 std::size_t read_data_bin(std::uint64_t offset, std::span<std::uint8_t> out) {
     State &s = state();
     if (!s.serving || !s.view) return raw_read(offset, out);

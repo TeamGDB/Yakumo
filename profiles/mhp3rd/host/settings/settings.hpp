@@ -79,6 +79,11 @@ struct Settings {
     // default on every platform since settings.version 2 (#210, #212).
     bool crisp_text{};
     UiTextures ui_textures{UiTextures::Off};
+    // The language of the game's own text, applied over it from the
+    // translations folder: "original" keeps the disc's own text, whatever
+    // language the image is in. A new language needs a restart
+    // (docs/TEXT_TRANSLATION.md).
+    std::string language{"original"};
 
     // Audio
     std::uint32_t volume{100u}; // percent
