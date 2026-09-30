@@ -6,6 +6,8 @@
 
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -375,6 +377,39 @@ void test_apply_quest_fields() {
     check(memory.load32(at + 0x118u) == 0x118u, "the table's sentinel word is left alone");
 }
 
+// Importing a `.lang` file the player downloaded: a real translation is read
+// and copied under its own code, and a file that is not one is refused.
+void test_import_translation() {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path dir = fs::temp_directory_path(ec) / "mhp3rd_text_import_test";
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir, ec);
+    const fs::path folder = dir / "translations";
+
+    const fs::path source = dir / "Baixado.lang";
+    {
+        std::ofstream out(source);
+        out << "language = pt-BR\nname = Portugues (Brasil)\n[16]\n2:20 = Cancelar\n";
+    }
+    const mhp3rd::text::TranslationImport imported = mhp3rd::text::import_translation_file(source, folder);
+    check(imported.error.empty(), "a translation file imports");
+    check(imported.code == "pt-BR", "its language code is read");
+    check(imported.name == "Portugues (Brasil)", "its name is read");
+    check(fs::exists(folder / "pt-BR.lang", ec), "it is copied under its code");
+
+    const fs::path junk = dir / "not.txt";
+    {
+        std::ofstream out(junk);
+        out << "hello, this is not a translation\n";
+    }
+    const mhp3rd::text::TranslationImport refused = mhp3rd::text::import_translation_file(junk, folder);
+    check(!refused.error.empty(), "a file that is not a translation is refused");
+    check(!fs::exists(folder / "not.lang", ec), "nothing is written for it");
+
+    fs::remove_all(dir, ec);
+}
+
 } // namespace
 
 int main() {
@@ -388,6 +423,7 @@ int main() {
     test_apply_quest();
     test_apply_quest_fields();
     test_apply_quest_copies();
+    test_import_translation();
     if (failures != 0) {
         std::cerr << failures << " failure(s)\n";
         return 1;
