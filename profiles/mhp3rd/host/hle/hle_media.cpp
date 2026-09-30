@@ -30,6 +30,7 @@
 #include "input/bindings.hpp"
 #include "settings/settings.hpp"
 #include "gpu/game_hud.hpp"
+#include "text/translation.hpp"
 #include "gpu/ge_state.hpp"
 #include "perf/frame_stats.hpp"
 #if defined(MHP3RD_HAS_RENDERER)
@@ -431,6 +432,16 @@ void present_frame(Runtime &rt) {
     game::attach(rt);
     // Layered armor puts its wrappers in place here, between two frames.
     game::layered::frame(rt);
+    // The game's text, in the player's language when one is chosen: applied
+    // once the game has loaded its text block, between two frames.
+    text::frame(rt.memory(), [](std::size_t bytes) -> std::optional<text::Arena> {
+        const std::int32_t uid = kernel().allocate_block("text translation", 1u,
+                                                         static_cast<std::uint32_t>(bytes), 0u);
+        if (uid < 0) return std::nullopt;
+        const MemoryBlock *block = kernel().find_block(uid);
+        if (block == nullptr) return std::nullopt;
+        return text::Arena{block->address, block->address + block->size};
+    });
 #if defined(MHP3RD_DEBUG_MENU)
     // Between two game frames: the developer tools' queued writes and held
     // cheats land here, never while guest code runs.
