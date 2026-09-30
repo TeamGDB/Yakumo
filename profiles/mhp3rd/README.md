@@ -523,6 +523,12 @@ Measured on an M1 (MoltenVK) at ×5 with the village's start menu open for 45 se
 
 The steady cost is within the noise of the measurement: sharp bilinear adds a few instructions to the 2D interface's pixels only. What costs is making the copies, once per texture and scale: a glyph atlas page took 3.3 ms on average (8 ms at most) at ×4, and it is drawn again when the game adds glyphs to it; an MMPX copy took 6 ms on average and 16 ms at most (a 512×512 texture doubled to 1024×1024), made on a thread of its own so that no frame waits for it (the original is drawn meanwhile). The copies take at most 64 MiB of GPU memory together; a texture larger than 256 texels is only ever doubled once. Phones were not measured: expect the one-time costs to be several times higher there, and use *Sharp text* and *Sharp bilinear*, which cost next to nothing, if MMPX's copies arrive late.
 
+### Translating the text
+
+The text the game shows — menu options, button prompts, system messages — can be replaced with a translation, without changing the disc image. A translation file names only the entries it changes; every other entry falls back to the game's own text, so a file may cover one screen at a time. The files are plain UTF-8 text and hold no game data.
+
+*Game text language* in the menu's System page lists English and every translation found in the `translations` folder of the per-user directory (or next to the executable), and applies at the next start, like a mod's choice. No translation ships with Yakumo: download one from a community link and use *Import translation…* in System → Text (or drop the `.lang` file in that folder). [TEXT_TRANSLATION.md](../../docs/TEXT_TRANSLATION.md) describes the file format, where the files are looked for, and how to write one.
+
 ## HD texture packs
 
 Yakumo loads HD texture packs made for PPSSPP, in its `textures.ini` format, without conversion. None is included or downloaded: install one from the menu (below), or copy the pack's folder, the one that holds `textures.ini`, to `textures/NPJB40001` in the [per-user directory](#installer) yourself:
@@ -840,6 +846,8 @@ The settings a player needs are in the [in-game menu](#in-game-menu). Environmen
 | `MHP3RD_BACKUP_REMINDER` | unset | `0`: never ask to back up the saves this run; `1`: ask at every start, even in a scripted run or with the setting off. Unset, the reminder follows the menu setting and skips runs driven by `MHP3RD_INPUT_SCRIPT`, `MHP3RD_INPUT_LIVE` or `MHP3RD_AUTO_CONFIRM` |
 | `MHP3RD_FONT` | a system CJK font | Font to draw the game's text with: a `.ttf`, `.otf`, `.ttc` or `.otc` file, with `#N` after the path for the Nth face of a collection. Glyphs it lacks come from the default, a Japanese system font (Hiragino on macOS, Noto Sans CJK on Linux, MS Gothic or Meiryo on Windows; inside a Flatpak, the host's Noto Sans CJK under `/run/host/fonts`), and last the font a release ships in `fonts/` next to the executable |
 | `MHP3RD_UI_FONT` | a system font | TrueType font for Yakumo's menu and setup screens |
+| `MHP3RD_LANGUAGE` | `en` | Language of the game's own text, from a file in the [translations folder](#translating-the-games-text); `en` keeps the disc's own text (menu: System → Game text language) |
+| `MHP3RD_TRANSLATIONS_DIR` | unset | Look for translation files in this folder first, ahead of the data directory's `translations/` and the one next to the executable |
 
 ### Video
 
@@ -1299,6 +1307,7 @@ host/main.cpp                    Entry point: finding the game data, executable 
 host/app_paths.{hpp,cpp}         The executable's own location, and what a release ships next to it
 host/install/                    First-run installer: per-user directory, image checks, executable preparation
 host/settings/                   Player settings: settings.ini, environment overrides, defaults
+host/text/                       The game's own text in the player's language: translation files and applying one to the running game
 host/camera/                     Camera input from every device, the driver for the game's own camera, its view's shape, the free camera
 host/input/                      Bindings and control presets: names, settings.ini spelling, combinations, what held inputs press; the touch controls' logic
 host/ui/                         Yakumo's own interface (Dear ImGui): in-game menu, setup screens, file browser, on-screen keyboard

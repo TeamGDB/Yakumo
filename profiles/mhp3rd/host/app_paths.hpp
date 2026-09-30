@@ -27,6 +27,11 @@ namespace mhp3rd {
 // after the system's own fonts.
 [[nodiscard]] std::vector<std::filesystem::path> bundled_fonts();
 
+// Where the translations a release ships are: translations/ next to the
+// executable, Contents/Resources/translations in a macOS app bundle, or the
+// unpacked assets of an Android app.
+[[nodiscard]] std::filesystem::path bundled_translation_directory();
+
 // Where fonts/ is found instead of next to the executable. An Android app
 // ships its font inside the APK and unpacks it to its own storage first.
 void set_bundled_resource_directory(std::filesystem::path directory);

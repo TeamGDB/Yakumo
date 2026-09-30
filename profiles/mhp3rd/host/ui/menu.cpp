@@ -17,6 +17,7 @@
 #include "ui/mods_screen.hpp"
 #include "ui/save_screen.hpp"
 #include "ui/texture_pack_screen.hpp"
+#include "ui/translation_screen.hpp"
 #include "ui/text_input.hpp"
 #include "ui/touch_editor.hpp"
 #include "ui/touch_overlay.hpp"
@@ -40,6 +41,7 @@
 #include "perf/frame_stats.hpp"
 #include "save_data/save_transfer.hpp"
 #include "settings/settings.hpp"
+#include "text/translation.hpp"
 #include "yakumo_version.hpp"
 #if defined(MHP3RD_ANDROID_APP)
 #include "platform/android_fatal.hpp"
@@ -200,7 +202,7 @@ bool Menu::frame() {
     bool font_list_was_open = (tab_ == 0 && (font_list_open() || texture_pack_screen_open())) ||
                               (tab_ == 2 && controllers_screen_open()) ||
                               (tab_ == 4 && (mods_screen_open() || layered_armor_screen_open())) ||
-                              (tab_ == 5 && save_screen_open());
+                              (tab_ == 5 && (save_screen_open() || translation_screen_open()));
 #if defined(MHP3RD_DEBUG_MENU)
     font_list_was_open = font_list_was_open || (tab_ == 6 && debug_screen_open());
 #endif
@@ -1539,6 +1541,7 @@ void Menu::mods() {
 }
 
 void Menu::system() {
+    if (translation_screen(back_)) return;
     if (save_screen(back_)) {
         if (take_restart_request()) {
             install::request_restart_on_exit();
@@ -1590,6 +1593,29 @@ void Menu::system() {
                                "the menu opens."))) {
         s.menu_pause_multiplayer = !s.menu_pause_multiplayer;
         settings::save();
+    }
+
+    section("Text");
+    {
+        const TextLanguages &available = text_languages();
+        int index = 0;
+        for (std::size_t i = 0; i < available.codes.size(); ++i)
+            if (available.codes[i] == s.language || (s.language == "en" && available.codes[i] == "original"))
+                index = static_cast<int>(i);
+        const int delta =
+            choice_row("Game text language", available.names[static_cast<std::size_t>(index)],
+                       options_for("text.language",
+                                   "The language of the game's text itself, with the entries named in a "
+                                   "translation file of the translations folder replaced. Original keeps the "
+                                   "disc's own text, which is English on a patched image and Japanese on an "
+                                   "original one, and any entry a translation leaves out falls back to it. A "
+                                   "change applies the next time the game starts."));
+        if (delta != 0) {
+            index = cycle(index, delta, static_cast<int>(available.codes.size()));
+            s.language = available.codes[static_cast<std::size_t>(index)];
+            settings::save();
+        }
+        translation_rows();
     }
 #if defined(MHP3RD_ANDROID_APP)
     // An Android app's data folder is out of the file manager's reach; its
