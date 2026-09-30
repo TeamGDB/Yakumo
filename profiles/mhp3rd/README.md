@@ -527,7 +527,7 @@ The steady cost is within the noise of the measurement: sharp bilinear adds a fe
 
 The text the game shows — menu options, button prompts, system messages — can be replaced with a translation, without changing the disc image. A translation file names only the entries it changes; every other entry falls back to the game's own text, so a file may cover one screen at a time. The files are plain UTF-8 text and hold no game data.
 
-*Game text language* in the menu's System page lists English and every translation found in the `translations` folder of the per-user directory (or next to the executable), and applies at the next start, like a mod's choice. No translation ships with Yakumo: download one from a community link and drop it in that folder. [TEXT_TRANSLATION.md](../../docs/TEXT_TRANSLATION.md) describes the file format, where the files are looked for, and how to write one.
+*Game text language* in the menu's System page lists English and every translation found in the `translations` folder of the per-user directory (or next to the executable), and applies at the next start, like a mod's choice. No translation ships with Yakumo: download one from a community link and use *Import translation…* in System → Text (or drop the `.lang` file in that folder). [TEXT_TRANSLATION.md](../../docs/TEXT_TRANSLATION.md) describes the file format, where the files are looked for, and how to write one.
 
 ## HD texture packs
 
