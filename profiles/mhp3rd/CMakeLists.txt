@@ -145,6 +145,7 @@ if(MHP3RD_RENDERER)
             host/ui/touch_editor.cpp
             host/ui/touch_overlay.cpp
             host/ui/texture_pack_screen.cpp
+            host/ui/translation_screen.cpp
             host/ui/widgets.cpp
             third_party/imgui/imgui.cpp
             third_party/imgui/imgui_draw.cpp

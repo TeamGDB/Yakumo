@@ -149,4 +149,20 @@ private:
 // language line and no name takes its file name. Unreadable files are skipped.
 [[nodiscard]] std::vector<Language> scan_languages(const std::filesystem::path &directory);
 
+// What importing one translation file did.
+struct TranslationImport {
+    std::string code;             // the language's own code, or its file name
+    std::string name;             // for the menu
+    std::filesystem::path saved;  // where it was copied
+    std::string error;            // why it could not be imported; empty on success
+};
+
+// Reads `source` as a translation file and copies it into `folder` under its own
+// language code (`<code>.lang`), so the loader finds it at the next start. The
+// file is read first, so a file that is not a translation is refused; the folder
+// is created when missing, and a file of the same code is replaced. Nothing is
+// written when the source cannot be read.
+[[nodiscard]] TranslationImport import_translation_file(const std::filesystem::path &source,
+                                                        const std::filesystem::path &folder);
+
 } // namespace mhp3rd::text
