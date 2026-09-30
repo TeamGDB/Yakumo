@@ -235,6 +235,8 @@ set(MHP3RD_HOST_SOURCES
     host/install/installer_dialogs.cpp
     host/install/user_data.cpp
     host/settings/settings.cpp
+    host/text/language.cpp
+    host/text/translation.cpp
     host/mods/file_overlay.cpp
     host/mods/mod_import.cpp
     host/mods/mod_ini.cpp
@@ -542,6 +544,17 @@ target_link_libraries(mhp3rd_screenshot_tests PRIVATE psprecomp_core Threads::Th
 set_target_properties(mhp3rd_screenshot_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 if(PSPRECOMP_BUILD_TESTS)
     add_test(NAME mhp3rd_screenshot_tests COMMAND mhp3rd_screenshot_tests)
+endif()
+
+# The game-text translations: the file format, and applying one to a text
+# block on a buffer. No game data and no disc image.
+add_executable(mhp3rd_text_tests
+    tests/text_tests.cpp
+    host/text/language.cpp)
+target_include_directories(mhp3rd_text_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+set_target_properties(mhp3rd_text_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_text_tests COMMAND mhp3rd_text_tests)
 endif()
 
 # Fast loading's decision: when a load runs ahead of real time.
