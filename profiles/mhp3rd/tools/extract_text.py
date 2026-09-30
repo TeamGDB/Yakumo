@@ -167,6 +167,11 @@ def quest_block(data):
                     break
                 if run and value <= run[-1]:
                     break
+                # The string table ends with a sentinel holding the table's own
+                # position; it is not a string, and its low byte often reads as
+                # printable, so stop before it instead of taking a seventh field.
+                if run and value == position:
+                    break
                 run.append(value)
                 at += 4
             if run and run[0] == anchor and (best is None or len(run) > len(best[1])):

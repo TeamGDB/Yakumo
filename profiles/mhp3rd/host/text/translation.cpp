@@ -512,6 +512,11 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
                     const std::uint32_t value = read32(p);
                     if (value == 0u || value >= clear.size() || clear[value] < 32u || clear[value] >= 127u) break;
                     if (len != 0u && value <= run[len - 1u]) break;
+                    // The record's string table ends with a sentinel that holds
+                    // the table's own position; it is not a string, and its low
+                    // byte often reads as printable, so it was mistaken for a
+                    // seventh field (the high-rank quests' crash). Stop before it.
+                    if (len != 0u && value == at) break;
                     run[len++] = value;
                     p += 4u;
                 }
@@ -680,9 +685,15 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
                               s.arena->begin + pending.arena_offset + pending.arena_bytes};
             std::uint32_t applied = 0u;
             pending.copy_bases = quest_copies;
+            // Only the fields the parser found are repointed: a `.lang` may hold
+            // a key for the table's sentinel word (from an extraction that read
+            // it as a seventh string), and rewriting it corrupts the record.
+            std::vector<std::uint32_t> field_refs;
+            for (const std::vector<QuestField> &record : pending.records)
+                for (const QuestField &field : record) field_refs.push_back(field.ref);
             for (const std::uint32_t copy : quest_copies) {
                 std::size_t used = 0u;
-                applied += apply_quest(memory, copy, translations->second, slice, used);
+                applied += apply_quest(memory, copy, translations->second, slice, used, field_refs);
             }
             pending.applied = true;
             if (applied > 0u || trace) {

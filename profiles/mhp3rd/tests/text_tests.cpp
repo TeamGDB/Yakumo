@@ -353,6 +353,28 @@ void test_apply_quest_copies() {
     check(read_text_at(memory, second + memory.load32(second + 0x100u)) == "Titulo", "the second copy reads back");
 }
 
+// A `.lang` may name the string table's sentinel word (an extraction that read
+// it as a seventh string); apply_quest must only touch the fields it is given.
+void test_apply_quest_fields() {
+    Memory memory(kBase, kSize);
+    const std::uint32_t at = kBase + 0x4000u;
+    write_quest(memory, at);
+
+    // Record 0's six offset words are at 0x100..0x114; 0x118 is the sentinel.
+    memory.store32(at + 0x118u, 0x118u);
+
+    Translations t;
+    t.add(0x100u, 0x400u, "Titulo");  // a real field
+    t.add(0x118u, 0x118u, "Lixo");    // the sentinel's position, not a field
+
+    Arena arena{at + 0x8000u, at + 0x8000u + 0x400u};
+    std::size_t used = 0u;
+    const std::vector<std::uint32_t> fields{0x100u, 0x104u, 0x108u, 0x10Cu, 0x110u, 0x114u};
+    const std::uint32_t applied = mhp3rd::text::apply_quest(memory, at, t, arena, used, fields);
+    check(applied == 1u, "only the field the parser found is replaced");
+    check(memory.load32(at + 0x118u) == 0x118u, "the table's sentinel word is left alone");
+}
+
 } // namespace
 
 int main() {
@@ -364,6 +386,7 @@ int main() {
     test_apply_dialogue();
     test_apply_dialogue_offset_ids();
     test_apply_quest();
+    test_apply_quest_fields();
     test_apply_quest_copies();
     if (failures != 0) {
         std::cerr << failures << " failure(s)\n";

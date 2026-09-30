@@ -207,14 +207,20 @@ std::uint32_t apply_dialogue(Memory &memory, std::uint32_t address, const Transl
 // of offsets (absolute in the entry) to its strings (tools/extract_text.py
 // `quest_block`). The keys are `ref:offset`: the position of the offset word and
 // the offset it holds. The word is repointed into the arena, so a translation
-// may be any length (unlike a fixed field). Returns how many strings were
-// replaced. Memory is anything with contains, load32, store8/store32.
+// may be any length (unlike a fixed field). `fields`, when given, is the set of
+// offset-word positions the record parser found; a key whose position is not in
+// it (a `.lang` that names the table's sentinel word) is left alone. Returns how
+// many strings were replaced. Memory is anything with contains, load32,
+// store8/store32.
 template <typename Memory>
 std::uint32_t apply_quest(Memory &memory, std::uint32_t address, const Translations &translations,
-                          const Arena &arena, std::size_t &used) {
+                          const Arena &arena, std::size_t &used,
+                          const std::vector<std::uint32_t> &fields = {}) {
     std::uint32_t applied = 0u;
     for (const auto &[id, text] : translations.entries()) {
-        const std::uint32_t ref = address + table_of(id);
+        const std::uint32_t position = table_of(id);
+        if (!fields.empty() && std::find(fields.begin(), fields.end(), position) == fields.end()) continue;
+        const std::uint32_t ref = address + position;
         const std::uint32_t string_offset = index_of(id);
         if (!memory.contains(ref, 4u)) continue;
         // The word holds the file offset (the archive image is loaded as it is)
