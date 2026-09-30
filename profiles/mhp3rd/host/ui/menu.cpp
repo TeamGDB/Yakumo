@@ -17,6 +17,7 @@
 #include "ui/mods_screen.hpp"
 #include "ui/save_screen.hpp"
 #include "ui/texture_pack_screen.hpp"
+#include "ui/translation_screen.hpp"
 #include "ui/text_input.hpp"
 #include "ui/touch_editor.hpp"
 #include "ui/touch_overlay.hpp"
@@ -201,7 +202,7 @@ bool Menu::frame() {
     bool font_list_was_open = (tab_ == 0 && (font_list_open() || texture_pack_screen_open())) ||
                               (tab_ == 2 && controllers_screen_open()) ||
                               (tab_ == 4 && (mods_screen_open() || layered_armor_screen_open())) ||
-                              (tab_ == 5 && save_screen_open());
+                              (tab_ == 5 && (save_screen_open() || translation_screen_open()));
 #if defined(MHP3RD_DEBUG_MENU)
     font_list_was_open = font_list_was_open || (tab_ == 6 && debug_screen_open());
 #endif
@@ -1540,6 +1541,7 @@ void Menu::mods() {
 }
 
 void Menu::system() {
+    if (translation_screen(back_)) return;
     if (save_screen(back_)) {
         if (take_restart_request()) {
             install::request_restart_on_exit();
@@ -1595,21 +1597,7 @@ void Menu::system() {
 
     section("Text");
     {
-        // Read once: a file added to the folder needs a restart to apply anyway.
-        struct Languages {
-            std::vector<std::string> codes;
-            std::vector<std::string> names;
-        };
-        static const Languages available = [] {
-            Languages list;
-            list.codes.emplace_back("original");
-            list.names.emplace_back("Original");
-            for (const text::Language &language : text::languages()) {
-                list.codes.push_back(language.code);
-                list.names.push_back(language.name);
-            }
-            return list;
-        }();
+        const TextLanguages &available = text_languages();
         int index = 0;
         for (std::size_t i = 0; i < available.codes.size(); ++i)
             if (available.codes[i] == s.language || (s.language == "en" && available.codes[i] == "original"))
@@ -1627,6 +1615,7 @@ void Menu::system() {
             s.language = available.codes[static_cast<std::size_t>(index)];
             settings::save();
         }
+        translation_rows();
     }
 #if defined(MHP3RD_ANDROID_APP)
     // An Android app's data folder is out of the file manager's reach; its

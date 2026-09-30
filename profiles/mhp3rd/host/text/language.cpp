@@ -259,4 +259,72 @@ std::vector<Language> scan_languages(const std::filesystem::path &directory) {
     return languages;
 }
 
+namespace {
+
+// A language code cut down to what is safe in a file name: letters, digits,
+// '-', '_' and '.'. Anything else becomes '_'.
+std::string file_safe(const std::string &code) {
+    std::string out;
+    out.reserve(code.size());
+    for (const char c : code) {
+        const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+                        c == '-' || c == '_' || c == '.';
+        out += ok ? c : '_';
+    }
+    return out.empty() ? std::string("translation") : out;
+}
+
+} // namespace
+
+TranslationImport import_translation_file(const std::filesystem::path &source,
+                                          const std::filesystem::path &folder) {
+    TranslationImport result;
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(source, ec)) {
+        result.error = "not a file: " + source.string();
+        return result;
+    }
+    // Read it first: a file that is not a translation is refused before anything
+    // is written into the loader's folder.
+    std::string error;
+    const auto blocks = Translations::from_file(source, error);
+    if (!blocks || blocks->empty()) {
+        result.error = error.empty() ? "not a translation file" : error;
+        return result;
+    }
+    // A file with no string at all (a text file that is not a translation) is
+    // refused, so importing junk does not leave a dead entry in the choice.
+    bool any = false;
+    for (const auto &[entry, translations] : *blocks)
+        if (!translations.empty()) {
+            any = true;
+            break;
+        }
+    if (!any) {
+        result.error = "no strings in it";
+        return result;
+    }
+    const Translations &main = blocks->begin()->second;
+    result.code = main.code();
+    result.name = main.name();
+    if (result.code.empty()) result.code = source.stem().string();
+    if (result.code.empty()) result.code = "translation";
+
+    std::filesystem::create_directories(folder, ec);
+    if (ec) {
+        result.error = "cannot make " + folder.string() + ": " + ec.message();
+        return result;
+    }
+    const std::filesystem::path destination = folder / (file_safe(result.code) + ".lang");
+    if (!std::filesystem::equivalent(source, destination, ec)) {
+        std::filesystem::copy_file(source, destination, std::filesystem::copy_options::overwrite_existing, ec);
+        if (ec) {
+            result.error = "cannot copy to " + destination.string() + ": " + ec.message();
+            return result;
+        }
+    }
+    result.saved = destination;
+    return result;
+}
+
 } // namespace mhp3rd::text
