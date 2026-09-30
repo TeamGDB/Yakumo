@@ -34,8 +34,9 @@ directory's `translations` folder (the menu shows that folder) and set the
 language, normally through the menu.
 
 No translation ships with Yakumo. Community translations are linked from the
-project README; download one and drop the `.lang` file in one of the folders
-above.
+project README; download one and use **Import translation…** in
+**System → Text**, which copies the file into the per-user folder for you, or
+drop the `.lang` file in one of the folders above yourself.
 
 ## The file format
 
