@@ -291,6 +291,12 @@ const std::vector<Field> &fields() {
         {"text.weight", nullptr,
             [](Settings &s, const std::string &t) { return parse_uint(t, 0u, kMaxFontWeight, s.font_weight); },
             [](const Settings &s) { return std::to_string(s.font_weight); }, nullptr},
+        {"text.language", "MHP3RD_LANGUAGE",
+            [](Settings &s, const std::string &t) {
+                s.language = t;
+                return true;
+            },
+            [](const Settings &s) { return s.language; }, [](Settings &s, const char *t) { s.language = t; }},
         {"audio.volume", nullptr, [](Settings &s, const std::string &t) { return parse_uint(t, 0u, 100u, s.volume); },
             [](const Settings &s) { return std::to_string(s.volume); }, nullptr},
         BOOL_FIELD("audio.mute", mute),
