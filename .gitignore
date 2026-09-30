@@ -50,6 +50,9 @@ overlay_*.bin
 # Local dumps next to the repository root
 /dump/
 
+# Extracted game text (the game's own strings; never committed)
+/docs/TEXT_DUMP/
+
 # Generated scratch output
 *.generated
 *.tmp
