@@ -28,7 +28,10 @@
 #if defined(MHP3RD_ANDROID_APP)
 #include "platform/android_display.hpp"
 #include "platform/android_fatal.hpp"
+#include "platform/android_gpu_driver.hpp"
 #include "platform/android_jni.hpp"
+#include <adrenotools/driver.h>
+#include <dlfcn.h>
 #endif
 #if defined(__ANDROID__)
 #include <sys/system_properties.h>
@@ -36,7 +39,14 @@
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
+// The Android app resolves vk* through volk's function-pointer table instead
+// of linking libvulkan.so directly, so a custom GPU driver (adrenotools) can
+// back it instead of the system one; see descriptor_pools.hpp.
+#if defined(MHP3RD_ANDROID_APP)
+#include <volk.h>
+#else
 #include <vulkan/vulkan.h>
+#endif
 
 #include "backends/imgui_impl_vulkan.h"
 #include "imgui.h"
@@ -683,6 +693,11 @@ struct VulkanRenderer::Impl {
 
     RendererConfig config;
     SDL_Window *window{};
+#if defined(MHP3RD_ANDROID_APP)
+    // The custom GPU driver's dlopen-like handle (android::open_custom_gpu_driver),
+    // when one is in use; closed in shutdown(). Null: the system driver.
+    void *gpu_driver_handle{};
+#endif
     VkInstance instance{};
     VkSurfaceKHR surface{};
     VkPhysicalDevice physical_device{};
@@ -2455,6 +2470,41 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
     }
     audio::AudioSink::instance().set_window_focused((SDL_GetWindowFlags(impl.window) & SDL_WINDOW_INPUT_FOCUS) != 0u);
 
+#if defined(MHP3RD_ANDROID_APP)
+    // A custom GPU driver (host/platform/android_gpu_driver.hpp), opened
+    // through adrenotools, backs volk's function-pointer table instead of the
+    // system libvulkan.so; failing to open or initialize it falls back to the
+    // system driver at once (ponytail: a failure once vkCreateInstance has
+    // succeeded with it, e.g. in vkCreateDevice below, does not retry with a
+    // fresh instance and system driver; it is reported the same way any other
+    // device failure is, naming the custom driver, so the player knows to
+    // clear it in Settings; add the deeper retry if that proves not enough).
+    const std::string wanted_driver = player.custom_gpu_driver;
+    bool volk_ready = false;
+    if (!wanted_driver.empty()) {
+        std::string driver_error;
+        void *handle = android::open_custom_gpu_driver(wanted_driver, driver_error);
+        PFN_vkGetInstanceProcAddr get_proc = nullptr;
+        if (handle != nullptr) {
+            get_proc = reinterpret_cast<PFN_vkGetInstanceProcAddr>(dlsym(handle, "vkGetInstanceProcAddr"));
+            if (get_proc == nullptr) driver_error = "the custom driver has no vkGetInstanceProcAddr";
+        }
+        if (get_proc != nullptr) {
+            volkInitializeCustom(get_proc);
+            impl.gpu_driver_handle = handle;
+            volk_ready = true;
+            std::cout << "[render] custom GPU driver: " << wanted_driver << "\n";
+        } else {
+            if (handle != nullptr) dlclose(handle);
+            std::cout << "[render] custom GPU driver unavailable (" << driver_error << "); using the phone's own\n";
+        }
+    }
+    if (!volk_ready && volkInitialize() != VK_SUCCESS) {
+        error = "volkInitialize failed: no Vulkan loader on this device";
+        return false;
+    }
+#endif
+
     std::uint32_t extension_count = 0u;
     const char *const *sdl_extensions = SDL_Vulkan_GetInstanceExtensions(&extension_count);
     std::vector<const char *> extensions(sdl_extensions, sdl_extensions + extension_count);
@@ -2480,7 +2530,22 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
     // MoltenVK reports itself as a portability driver and refuses the instance
     // without this flag.
     if (portability_enumeration) instance_info.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#if defined(MHP3RD_ANDROID_APP)
+    VkResult instance_result = vkCreateInstance(&instance_info, nullptr, &impl.instance);
+    if (instance_result != VK_SUCCESS && impl.gpu_driver_handle != nullptr) {
+        std::cout << "[render] the custom GPU driver would not create a Vulkan instance (VkResult "
+                  << static_cast<int>(instance_result) << "); falling back to the phone's own driver\n";
+        dlclose(impl.gpu_driver_handle);
+        impl.gpu_driver_handle = nullptr;
+        instance_result = volkInitialize() == VK_SUCCESS
+                              ? vkCreateInstance(&instance_info, nullptr, &impl.instance)
+                              : instance_result;
+    }
+    if (!check(instance_result, "vkCreateInstance", error)) return false;
+    volkLoadInstance(impl.instance);
+#else
     if (!check(vkCreateInstance(&instance_info, nullptr, &impl.instance), "vkCreateInstance", error)) return false;
+#endif
 
 #if defined(__ANDROID__)
     SDL_AddEventWatch(&Impl::watch_lifecycle, &impl);
@@ -2614,8 +2679,15 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
     device_info.pQueueCreateInfos = &queue_info;
     device_info.enabledExtensionCount = static_cast<std::uint32_t>(enabled_device_extensions.size());
     device_info.ppEnabledExtensionNames = enabled_device_extensions.data();
-    if (!check(vkCreateDevice(impl.physical_device, &device_info, nullptr, &impl.device), "vkCreateDevice", error))
+    if (!check(vkCreateDevice(impl.physical_device, &device_info, nullptr, &impl.device), "vkCreateDevice", error)) {
+#if defined(MHP3RD_ANDROID_APP)
+        if (impl.gpu_driver_handle != nullptr) error = "custom GPU driver " + wanted_driver + ": " + error;
+#endif
         return false;
+    }
+#if defined(MHP3RD_ANDROID_APP)
+    volkLoadDevice(impl.device);
+#endif
     vkGetDeviceQueue(impl.device, impl.queue_family, 0u, &impl.queue);
     if (impl.breadcrumbs.available) {
         Impl::Breadcrumbs &b = impl.breadcrumbs;
@@ -9022,6 +9094,9 @@ void VulkanRenderer::shutdown() {
 #endif
     if (impl.surface != VK_NULL_HANDLE) vkDestroySurfaceKHR(impl.instance, impl.surface, nullptr);
     vkDestroyInstance(impl.instance, nullptr);
+#if defined(MHP3RD_ANDROID_APP)
+    if (impl.gpu_driver_handle != nullptr) dlclose(impl.gpu_driver_handle);
+#endif
     if (impl.window != nullptr) SDL_DestroyWindow(impl.window);
     impl = Impl{};
 }
