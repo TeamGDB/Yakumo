@@ -1,3 +1,12 @@
+# The project above only declares CXX: adrenotools' own CMakeLists.txt (below)
+# is the first to need C, with a fresh project(... LANGUAGES CXX C), and the
+# NDK's toolchain file only wires up a language's flags and sysroot at the
+# project() call that first enables it. Enabling C here, before that nested
+# project() runs, instead of leaving the NDK to wire it up lazily and
+# incompletely there, is what a plain configure needs to generate rather than
+# failing with "CMAKE_C_COMPILE_OBJECT" unset.
+enable_language(C)
+
 # A custom Vulkan ICD the player can pick instead of the phone's own vendor
 # driver (a Turnip/Mesa build for their Adreno GPU), as Winlator, Skyline and
 # yuzu-Android already let players do. adrenotools (github.com/bylaws/
@@ -80,5 +89,10 @@ add_subdirectory("${_mhp3rd_adrenotools_src}" "${CMAKE_BINARY_DIR}/_deps/adrenot
 
 # Packed into the APK beside libmain.so (build_apk.sh), where
 # adrenotools_open_libvulkan's hookLibDir (the app's own nativeLibraryDir)
-# expects to find them.
+# expects to find them. Neither is a dependency Yakumo links against (they
+# are dlopen'd at run time through the isolated namespace, never by name at
+# link time), so without this a plain build of the Yakumo target - what
+# release_android.sh and a first-time build both do - would leave them
+# unbuilt and build_apk.sh would find nothing to pack.
 set_target_properties(main_hook hook_impl PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/lib")
+add_dependencies(Yakumo main_hook hook_impl)
