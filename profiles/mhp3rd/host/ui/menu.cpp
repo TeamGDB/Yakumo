@@ -603,18 +603,21 @@ void Menu::video() {
     }
 #if defined(MHP3RD_ANDROID_APP)
     {
-        info_row("Custom GPU driver", s.custom_gpu_driver.empty() ? "System default" : s.custom_gpu_driver);
-        if (button_row("Pick a driver folder…",
+        const std::string driver_name = android::driver_display_name(s.custom_gpu_driver);
+        info_row("Custom GPU driver", driver_name.empty() ? "System default" : driver_name);
+        if (button_row("Pick a driver package…",
                        {false,
                         {},
                         "A custom Vulkan driver (a Turnip/Mesa build for your Adreno GPU) instead of the phone's "
-                        "own, from a folder you extracted it to. Applies when Yakumo starts next; if it fails to "
-                        "load, the phone's own driver is used instead."})) {
+                        "own, from a .zip such as Winlator, Skyline or the Adreno Tools driver repositories "
+                        "distribute (meta.json and a .so). Applies when Yakumo starts next; if it fails to load, "
+                        "the phone's own driver is used instead."})) {
             if (const std::optional<android::PickedDriver> picked = android::pick_custom_gpu_driver()) {
                 if (picked->error.empty()) {
                     s.custom_gpu_driver = picked->library;
                     settings::save();
-                    gpu_driver_status() = "Picked " + picked->library + "; restart Yakumo to use it.";
+                    gpu_driver_status() =
+                        "Installed " + android::driver_display_name(picked->library) + ". Restart Yakumo to use it.";
                 } else {
                     gpu_driver_status() = picked->error;
                 }
@@ -626,7 +629,7 @@ void Menu::video() {
             s.custom_gpu_driver.clear();
             android::clear_custom_gpu_driver();
             settings::save();
-            gpu_driver_status().clear();
+            gpu_driver_status() = "Back to the phone's own driver. Restart Yakumo to use it.";
         }
     }
 #endif
