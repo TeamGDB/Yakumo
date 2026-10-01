@@ -45,6 +45,7 @@
 #include "yakumo_version.hpp"
 #if defined(MHP3RD_ANDROID_APP)
 #include "platform/android_fatal.hpp"
+#include "platform/android_gpu_driver.hpp"
 #endif
 
 #include "imgui.h"
@@ -612,6 +613,35 @@ void Menu::video() {
             settings::save();
         }
     }
+#if defined(MHP3RD_ANDROID_APP)
+    {
+        info_row("Custom GPU driver", s.custom_gpu_driver.empty() ? "System default" : s.custom_gpu_driver);
+        if (button_row("Pick a driver folder…",
+                       {false,
+                        {},
+                        "A custom Vulkan driver (a Turnip/Mesa build for your Adreno GPU) instead of the phone's "
+                        "own, from a folder you extracted it to. Applies when Yakumo starts next; if it fails to "
+                        "load, the phone's own driver is used instead."})) {
+            if (const std::optional<android::PickedDriver> picked = android::pick_custom_gpu_driver()) {
+                if (picked->error.empty()) {
+                    s.custom_gpu_driver = picked->library;
+                    settings::save();
+                    gpu_driver_status() = "Picked " + picked->library + "; restart Yakumo to use it.";
+                } else {
+                    gpu_driver_status() = picked->error;
+                }
+            }
+        }
+        if (!gpu_driver_status().empty()) info_row("Driver pick", gpu_driver_status());
+        if (!s.custom_gpu_driver.empty() &&
+            button_row("Use the phone's own driver", {false, {}, "Back to the system's Vulkan driver."})) {
+            s.custom_gpu_driver.clear();
+            android::clear_custom_gpu_driver();
+            settings::save();
+            gpu_driver_status().clear();
+        }
+    }
+#endif
     font_rows();
     ImGui::Dummy({0.0f, font_gap()});
     if (button_row("Restore video defaults", {false, {}, "Every setting on this page back to how Yakumo ships."})) {
@@ -1354,6 +1384,15 @@ std::string &saved_log_path() {
     static std::string path;
     return path;
 }
+
+#if defined(MHP3RD_ANDROID_APP)
+// What "Pick a driver folder…" found, for the row under it: empty before the
+// player has picked, or after a pick that needs no comment.
+std::string &gpu_driver_status() {
+    static std::string status;
+    return status;
+}
+#endif
 
 // "MHP3Q000" is Hall 01 in the game's list.
 std::string group_name(const std::string &group) {

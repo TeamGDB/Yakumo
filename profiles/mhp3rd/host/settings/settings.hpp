@@ -71,6 +71,10 @@ struct Settings {
     bool frame_rate_auto{true}; // lower the frame rate rather than slow the game
     PerfDisplay perf{PerfDisplay::Off};
     GpuCompat gpu_compat{GpuCompat::Auto};
+    // Android only: a custom Vulkan driver's main library, by file name, as
+    // platform/android_gpu_driver.hpp installed it; empty, the phone's own
+    // driver (gpu/vulkan_renderer.cpp, host/ui/menu.cpp's Video tab).
+    std::string custom_gpu_driver;
 
     // Text
     std::string font;              // the game's text font: path, "#face" for a collection; empty: the default
