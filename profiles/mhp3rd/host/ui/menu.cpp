@@ -309,6 +309,15 @@ bool Menu::frame() {
     return !close_;
 }
 
+#if defined(MHP3RD_ANDROID_APP)
+// What "Pick a driver folder…" found, for the row under it: empty before the
+// player has picked, or after a pick that needs no comment.
+std::string &gpu_driver_status() {
+    static std::string status;
+    return status;
+}
+#endif
+
 void Menu::video() {
     if (font_list(back_)) return;
     if (texture_pack_screen(back_)) return;
@@ -1330,15 +1339,6 @@ std::string &saved_log_path() {
     static std::string path;
     return path;
 }
-
-#if defined(MHP3RD_ANDROID_APP)
-// What "Pick a driver folder…" found, for the row under it: empty before the
-// player has picked, or after a pick that needs no comment.
-std::string &gpu_driver_status() {
-    static std::string status;
-    return status;
-}
-#endif
 
 // "MHP3Q000" is Hall 01 in the game's list.
 std::string group_name(const std::string &group) {
