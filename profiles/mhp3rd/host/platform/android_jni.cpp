@@ -183,4 +183,27 @@ int open_document(const std::string &uri, const char *mode) {
     return fd;
 }
 
+std::optional<std::vector<std::string>> install_gpu_driver_zip(const std::string &document_uri,
+                                                                 const std::string &dest_dir) {
+    Call call;
+    if (!call.ok()) return std::nullopt;
+    jmethodID id = call.method("installGpuDriverZip", "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;");
+    if (id == nullptr) return std::nullopt;
+    jstring document = call.string(document_uri);
+    jstring dest = call.string(dest_dir);
+    auto array = static_cast<jobjectArray>(call.env->CallStaticObjectMethod(call.type, id, document, dest));
+    call.env->DeleteLocalRef(document);
+    call.env->DeleteLocalRef(dest);
+    if (call.failed() || array == nullptr) return std::nullopt;
+    std::vector<std::string> libraries;
+    const jsize count = call.env->GetArrayLength(array);
+    for (jsize i = 0; i < count; ++i) {
+        if (std::optional<std::string> name = call.text(call.env->GetObjectArrayElement(array, i))) {
+            libraries.push_back(*name);
+        }
+    }
+    call.env->DeleteLocalRef(array);
+    return libraries;
+}
+
 } // namespace mhp3rd::android

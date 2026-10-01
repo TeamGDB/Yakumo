@@ -19,19 +19,26 @@ struct PickedDriver {
     std::string library;  // the main driver's file name (settings.custom_gpu_driver); empty on error
     std::string error;    // empty: picking and installing it worked
 };
-// Asks for a folder holding an extracted Adreno driver package (see
-// libadrenotools' tools/ADPKG.md: a main .so and, often, further .so's it
-// depends on) and copies every .so in it into the app's private storage,
-// where adrenotools can load them from (a content:// folder is not a path it
-// can open). The main driver is the only .so found, or, among several, the
-// one whose name holds "vulkan"; meta.json's "libraryName" is not read
-// (ponytail: parse it instead, if a package with several unrelated .so's and
-// none named "vulkan" ever needs it). Nothing when the player cancels.
+// Asks for a driver package .zip (as Winlator, Skyline and the Adreno Tools
+// driver repositories distribute them: meta.json and a main .so, often with
+// further .so's it depends on) and extracts every .so in it into the app's
+// private storage, where adrenotools can load them from (a content:// zip is
+// not a path it can open). The main driver is the only .so found, or, among
+// several, the one whose name holds "vulkan"; meta.json's "libraryName" is
+// not read (ponytail: parse it instead, if a package with several unrelated
+// .so's and none named "vulkan" ever needs it). Nothing when the player
+// cancels.
 [[nodiscard]] std::optional<PickedDriver> pick_custom_gpu_driver();
 
 // Removes a driver pick_custom_gpu_driver() installed, so "System default"
 // starts clean the next time one is picked.
 void clear_custom_gpu_driver();
+
+// `library`'s driver package's meta.json "name", for the Video tab's row
+// (Winlator and Skyline show this instead of the bare file name); `library`
+// itself when there is no meta.json or it cannot be read, empty when
+// `library` is.
+[[nodiscard]] std::string driver_display_name(const std::string &library);
 
 // Opens `library` (as pick_custom_gpu_driver named it) through adrenotools:
 // a dlopen-like handle for libvulkan.so whose driver is redirected to it, to

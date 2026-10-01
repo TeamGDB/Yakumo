@@ -9,38 +9,15 @@
 #include <SDL3/SDL_system.h>
 
 #include <dlfcn.h>
-#include <fcntl.h>
-#include <unistd.h>
 
-#include <array>
-#include <cerrno>
 #include <fstream>
+#include <iterator>
 #include <vector>
 
 namespace mhp3rd::android {
 namespace {
 
 namespace fs = std::filesystem;
-
-bool copy_document_to_file(const std::string &uri, const fs::path &target) {
-    const int fd = open_document(uri, "r");
-    if (fd < 0) return false;
-    std::ofstream out(target, std::ios::binary | std::ios::trunc);
-    std::array<char, 1 << 16> buffer{};
-    bool ok = static_cast<bool>(out);
-    while (ok) {
-        const ssize_t got = ::read(fd, buffer.data(), buffer.size());
-        if (got < 0 && errno == EINTR) continue;
-        if (got <= 0) {
-            ok = got == 0;
-            break;
-        }
-        out.write(buffer.data(), got);
-        ok = static_cast<bool>(out);
-    }
-    ::close(fd);
-    return ok;
-}
 
 // Where installed driver files live: the app's private storage, which
 // adrenotools insists on (not removable storage, which any app could tamper
@@ -53,38 +30,33 @@ fs::path driver_directory() {
 } // namespace
 
 std::optional<PickedDriver> pick_custom_gpu_driver() {
-    const std::optional<std::string> tree = pick_folder();
-    if (!tree) return std::nullopt;
+    const std::optional<std::string> document = pick_document();
+    if (!document) return std::nullopt;
     PickedDriver picked;
     const fs::path directory = driver_directory();
     if (directory.empty()) {
-        picked.error = "no private storage to copy the driver into";
-        return picked;
-    }
-    const auto entries = list_folder(tree_root(*tree));
-    if (!entries) {
-        picked.error = "Android would not let Yakumo read that folder.";
+        picked.error = "no private storage to install the driver into";
         return picked;
     }
     std::error_code ec;
     fs::remove_all(directory, ec);
     fs::create_directories(directory, ec);
-    std::vector<std::string> libraries;  // every .so copied, to pick the main one among them
-    for (const Entry &entry : *entries) {
-        if (entry.directory || !entry.name.ends_with(".so")) continue;
-        if (copy_document_to_file(entry.uri, directory / entry.name)) libraries.push_back(entry.name);
+    const std::optional<std::vector<std::string>> libraries = install_gpu_driver_zip(*document, directory.string());
+    if (!libraries) {
+        picked.error = "Android would not let Yakumo read that file.";
+        return picked;
     }
-    if (libraries.empty()) {
-        picked.error = "no .so file in the chosen folder";
+    if (libraries->empty()) {
+        picked.error = "not a driver package: no .so file in that .zip";
         fs::remove_all(directory, ec);
         return picked;
     }
     // The main driver: the only one, or, among several, the one naming
     // "vulkan" (libadrenotools' tools/ADPKG.md calls it meta.json's
     // "libraryName", which is not read here).
-    picked.library = libraries.front();
-    if (libraries.size() > 1u)
-        for (const std::string &name : libraries)
+    picked.library = libraries->front();
+    if (libraries->size() > 1u)
+        for (const std::string &name : *libraries)
             if (name.find("vulkan") != std::string::npos) {
                 picked.library = name;
                 break;
@@ -95,6 +67,26 @@ std::optional<PickedDriver> pick_custom_gpu_driver() {
 void clear_custom_gpu_driver() {
     std::error_code ec;
     fs::remove_all(driver_directory(), ec);
+}
+
+std::string driver_display_name(const std::string &library) {
+    if (library.empty()) return {};
+    std::ifstream in(driver_directory() / "meta.json", std::ios::binary);
+    if (!in) return library;
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    // A hand-rolled read of one string field, not a JSON parser: meta.json is
+    // a flat object (schemaVersion, name, description, ..., libraryName) with
+    // no nesting, and "name" is the only field this needs.
+    std::size_t at = text.find("\"name\"");
+    at = at == std::string::npos ? at : text.find(':', at + 6u);
+    at = at == std::string::npos ? at : text.find('"', at);
+    if (at == std::string::npos) return library;
+    std::string name;
+    for (++at; at < text.size() && text[at] != '"'; ++at) {
+        if (text[at] == '\\' && at + 1u < text.size()) ++at;  // skip the escape, keep the escaped character
+        name += text[at];
+    }
+    return name.empty() ? library : name;
 }
 
 void *open_custom_gpu_driver(const std::string &library, std::string &error) {
