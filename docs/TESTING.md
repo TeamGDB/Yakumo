@@ -27,14 +27,14 @@ For suspected vulnerabilities, follow [SECURITY.md](../SECURITY.md) and report p
 
 ### Native ASan and UBSan
 
-The separate `.github/workflows/sanitizers.yml` job uses Ubuntu 24.04 and the versioned Clang 18 toolchain packages (including compiler-rt and llvm-symbolizer). Distribution security updates remain available; the job prints the effective compiler version. Normal builds keep `PSPRECOMP_SANITIZERS=OFF`. The opt-in configuration instruments compilation and linking of the framework, profile test sources and dependency implementations with `-fsanitize=address,undefined`, debug information, frame pointers and `-O1`. UBSan recovery is disabled; ASan/UBSan reports and detected leaks fail the check. No suppressions or test exclusions are configured.
+The separate `.github/workflows/sanitizers.yml` job uses Ubuntu 24.04 and the versioned Clang 18 toolchain packages (including compiler-rt and llvm-symbolizer). Distribution security updates remain available; the job prints the effective compiler version. Normal builds keep `PSPRECOMP_SANITIZERS=OFF`. The opt-in configuration instruments compilation and linking of the framework, profile test sources and dependency implementations with `-fsanitize=address,undefined`, debug information, frame pointers and `-O1`. UBSan recovery is disabled; ASan/UBSan reports and detected leaks fail the check. Sanitizer failures use direct nonzero exits instead of SIGABRT, so the existing negative tests cannot mistake a report for an expected assertion abort. No suppressions or test exclusions are configured.
 
 Reproduce it on native Linux with Clang 18 installed:
 
 ```sh
 cmake -S . -B out/sanitizers -G Ninja -DCMAKE_CXX_COMPILER=clang++-18 -DCMAKE_BUILD_TYPE=Debug -DPSPRECOMP_SANITIZERS=ON -DPSPRECOMP_PROFILE=mhp3rd -DPSPRECOMP_BUILD_TESTS=ON -DMHP3RD_RENDERER=OFF -DMHP3RD_FFMPEG=OFF
-export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=1
-export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
+export ASAN_OPTIONS=detect_leaks=1:halt_on_error=1:abort_on_error=0:exitcode=99
+export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1:abort_on_error=0:exitcode=98
 export ASAN_SYMBOLIZER_PATH=/usr/bin/llvm-symbolizer-18
 python3 scripts/ci/check_sanitizers.py out/sanitizers
 cmake --build out/sanitizers --target psprecomp_test_binaries -j2

@@ -19,8 +19,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
-      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=1
-      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+      ASAN_OPTIONS: detect_leaks=1:halt_on_error=1:abort_on_error=0:exitcode=99
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1:abort_on_error=0:exitcode=98
       ASAN_SYMBOLIZER_PATH: /usr/bin/llvm-symbolizer-18
     steps:
       - name: Checkout

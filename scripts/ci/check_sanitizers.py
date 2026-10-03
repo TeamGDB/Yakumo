@@ -31,7 +31,7 @@ def main():
     # These examples exist only in a temporary project, never as normal CTest
     # targets. Each process must fail with its specific diagnostic, not timeout.
     probes = {
-        "address": ("#include <cstdlib>\nint main() { auto* p = static_cast<volatile char*>(std::malloc(1)); std::free(const_cast<char*>(p)); return *p; }\n", "AddressSanitizer: heap-use-after-free"),
+        "address": ("#include <cstdlib>\n#include <csignal>\nint main() { std::signal(SIGABRT, [](int) { std::_Exit(0); }); auto* p = static_cast<volatile char*>(std::malloc(1)); std::free(const_cast<char*>(p)); return *p; }\n", "AddressSanitizer: heap-use-after-free"),
         "undefined": ("#include <climits>\nint main(int argc, char**) { volatile int value = INT_MAX; return value + argc; }\n", "runtime error: signed integer overflow"),
         "leak": ("#include <cstdlib>\nint main() { void* p = std::malloc(16); asm volatile(\"\" : : \"r\"(p) : \"memory\"); p = nullptr; }\n", "LeakSanitizer: detected memory leaks"),
     }
