@@ -106,6 +106,13 @@ mkdir -p "$stage/$name/overlays" "$stage/$name/licenses" "$dist"
 root="$stage/$name"
 cp "$bin/Yakumo.exe" "$root/"
 cp "$bin"/overlays/ovl*.dll "$root/overlays/"
+# The translations the loader finds in translations/ next to the executable.
+translation_count=0
+if compgen -G "$bin/translations/*.lang" > /dev/null; then
+    mkdir -p "$root/translations"
+    cp "$bin"/translations/*.lang "$root/translations/"
+    translation_count="$(find "$root/translations" -name '*.lang' | wc -l)"
+fi
 cp "$sdl3_dll" "$root/"
 for dll in "${ffmpeg_dlls[@]}"; do cp "$bin/$dll" "$root/"; done
 for dll in "${crt_dlls[@]}"; do cp "$crt/$dll" "$root/"; done
@@ -128,6 +135,7 @@ Compiler: MSVC ${compiler_version:-$(basename "$compiler")}
 SDL3: $sdl3_version
 FFmpeg: bundled LGPL shared build ($(sed -n 's/^Build: *//p' "$bin/FFmpeg-SOURCE.txt" | sed 's#.*/##'))
 Overlay DLLs: $built_overlays
+Translations: $translation_count
 EOF
 
 step "Checking the DLLs every binary imports"
@@ -205,6 +213,8 @@ write_readme() {
             echo "For a portable copy that keeps everything next to Yakumo.exe, use the"
             echo "-portable zip, or create an empty file named portable.txt here."
         fi
+        echo "A Brazilian Portuguese translation of the game's text is included."
+        echo "Choose it in System, Text, Game text language."
         echo "Press Esc, or L3+R3 on a gamepad, to open the Yakumo menu."
         echo
         echo "A Vulkan-capable graphics driver is required. SDL3, FFmpeg and the Microsoft"

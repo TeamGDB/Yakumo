@@ -130,6 +130,12 @@ while [[ ${#pending[@]} -gt 0 ]]; do
 done
 
 cp "$sources/NotoSansCJKjp-Regular.otf" "$stage/fonts/"
+
+# The translations the loader finds in translations/ next to the executable.
+if compgen -G "$build/bin/translations/*.lang" > /dev/null; then
+    mkdir -p "$stage/translations"
+    cp "$build"/bin/translations/*.lang "$stage/translations/"
+fi
 cp "$repo_dir/LICENSE" "$stage/licenses/Yakumo-LICENSE.txt"
 cp "$here/../THIRD_PARTY_NOTICES.md" "$stage/licenses/THIRD_PARTY_NOTICES.md"
 cp "$deps_build/SDL3-$SDL3_VERSION/LICENSE.txt" "$stage/licenses/SDL3-LICENSE.txt"

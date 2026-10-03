@@ -40,6 +40,7 @@
 #include "perf/frame_stats.hpp"
 #include "save_data/save_transfer.hpp"
 #include "settings/settings.hpp"
+#include "text/translation.hpp"
 #include "yakumo_version.hpp"
 #if defined(MHP3RD_ANDROID_APP)
 #include "platform/android_fatal.hpp"
@@ -1590,6 +1591,42 @@ void Menu::system() {
                                "the menu opens."))) {
         s.menu_pause_multiplayer = !s.menu_pause_multiplayer;
         settings::save();
+    }
+
+    section("Text");
+    {
+        // Read once: a file added to the folder needs a restart to apply anyway.
+        struct Languages {
+            std::vector<std::string> codes;
+            std::vector<std::string> names;
+        };
+        static const Languages available = [] {
+            Languages list;
+            list.codes.emplace_back("original");
+            list.names.emplace_back("Original");
+            for (const text::Language &language : text::languages()) {
+                list.codes.push_back(language.code);
+                list.names.push_back(language.name);
+            }
+            return list;
+        }();
+        int index = 0;
+        for (std::size_t i = 0; i < available.codes.size(); ++i)
+            if (available.codes[i] == s.language || (s.language == "en" && available.codes[i] == "original"))
+                index = static_cast<int>(i);
+        const int delta =
+            choice_row("Game text language", available.names[static_cast<std::size_t>(index)],
+                       options_for("text.language",
+                                   "The language of the game's text itself, with the entries named in a "
+                                   "translation file of the translations folder replaced. Original keeps the "
+                                   "disc's own text, which is English on a patched image and Japanese on an "
+                                   "original one, and any entry a translation leaves out falls back to it. A "
+                                   "change applies the next time the game starts."));
+        if (delta != 0) {
+            index = cycle(index, delta, static_cast<int>(available.codes.size()));
+            s.language = available.codes[static_cast<std::size_t>(index)];
+            settings::save();
+        }
     }
 #if defined(MHP3RD_ANDROID_APP)
     // An Android app's data folder is out of the file manager's reach; its

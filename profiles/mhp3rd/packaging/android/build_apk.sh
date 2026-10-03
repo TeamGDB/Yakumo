@@ -59,8 +59,14 @@ cp "$here/../THIRD_PARTY_NOTICES.md" "$work/assets/licenses/"
 cp "$sdl_dir/LICENSE.txt" "$work/assets/licenses/SDL3-LICENSE.txt"
 cp "$build_dir"/bin/lib/FFmpeg-COPYING.LGPLv2.1.txt "$build_dir"/bin/lib/FFmpeg-SOURCE.txt "$work/assets/licenses/"
 if [[ -n "${FONT_DIR:-}" ]]; then
-    mkdir -p "$work/assets/fonts"
-    cp "$FONT_DIR/NotoSansCJKjp-Regular.otf" "$work/assets/fonts/"
+mkdir -p "$work/assets/fonts"
+cp "$FONT_DIR/NotoSansCJKjp-Regular.otf" "$work/assets/fonts/"
+
+# The translations, which the app unpacks and the loader reads from there.
+if compgen -G "$build_dir/bin/translations/*.lang" > /dev/null; then
+    mkdir -p "$work/assets/translations"
+    cp "$build_dir"/bin/translations/*.lang "$work/assets/translations/"
+fi
     cp "$FONT_DIR/NotoSansCJK-LICENSE.txt" "$work/assets/licenses/NotoSansCJK-OFL.txt"
 fi
 assets=(-A "$work/assets")

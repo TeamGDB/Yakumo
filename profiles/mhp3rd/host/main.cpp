@@ -14,6 +14,8 @@
 #include "kernel/kernel.hpp"
 #include "camera/game_aspect.hpp"
 #include "camera/game_camera.hpp"
+#include "settings/settings.hpp"
+#include "text/translation.hpp"
 
 #include "psprecomp/common.hpp"
 #include "psprecomp/elf32.hpp"
@@ -377,6 +379,22 @@ int run_adhoc_server(int argc, char **argv) {
     return 0;
 }
 
+// Where translation files are looked for, in order: the one the environment
+// names, the per-user data folder, then next to the executable (a checkout's
+// bin/translations, or a bundle's).
+std::vector<std::filesystem::path> translation_directories() {
+    std::vector<std::filesystem::path> directories;
+    if (const char *dir = std::getenv("MHP3RD_TRANSLATIONS_DIR"); dir != nullptr && *dir != '\0')
+        directories.emplace_back(dir);
+    try {
+        directories.push_back(mhp3rd::install::user_data_directory() / "translations");
+    } catch (const std::exception &) {
+    }
+    if (const std::filesystem::path shipped = mhp3rd::bundled_translation_directory(); !shipped.empty())
+        directories.push_back(shipped);
+    return directories;
+}
+
 } // namespace
 
 #if defined(MHP3RD_ANDROID_APP)
@@ -460,6 +478,7 @@ int main(int argc, char **argv) {
             return 3;
         }
 
+        mhp3rd::text::set_language(mhp3rd::settings::current().language, translation_directories());
         runtime.run(elf.runtime_entry(mhp3rd::kLoadBase), configured_max_dispatches());
         std::cout << "Runtime stopped: " << runtime.stop_reason() << "\n";
         // Quit from the menu, a closed window or the game ending: the network

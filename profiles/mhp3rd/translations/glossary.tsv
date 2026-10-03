@@ -1,0 +1,537 @@
+# Glossary for the game's own text, one row per string.
+# Columns: entry, table, index, english, portuguese, spanish
+# English is what the patched disc shows (the key); tools/build_lang.py
+# turns the Portuguese and Spanish columns into pt-BR.lang and es.lang.
+# The game's formatting codes (~Cnn colour, ~Bnn button) are kept in the text.
+#
+# Entries not listed here fall back to the game's own text.
+16	2	4	Qty	Qtd	Cant.
+16	2	18	Cfrm	Conf	Conf
+16	2	20	Cancel	Cancelar	Cancelar
+16	2	21	Yes	Sim	Sí
+16	2	22	No	Não	No
+16	2	43	~B00Cfrm	~B00Conf	~B00Conf
+16	2	44	~B01Back	~B01Voltar	~B01Atrás
+16	2	45	~B03Back	~B03Voltar	~B03Atrás
+16	2	46	~B03~B01Back	~B03~B01Voltar	~B03~B01Atrás
+16	2	47	~B02Info	~B02Info	~B02Info
+16	2	48	~B03Skill Info	~B03Info. hab.	~B03Info. hab.
+16	2	49	~B03Equip Info	~B03Info. equi.	~B03Info. equi.
+16	2	50	~B00Slct	~B00Sel.	~B00Sel.
+16	2	51	~B00Unselect	~B00Desmarc.	~B00Deselec.
+16	2	52	~B06　Finish	~B06 Terminar	~B06 Acabar
+16	2	53	~B07　Sort	~B07 Ordenar	~B07 Ordenar
+16	2	54	~B06　Camera Settings	~B06 Câmera	~B06 Cámara
+16	2	55	~B08Rotate	~B08Girar	~B08Girar
+16	2	56	~B09Camera	~B09Câmera	~B09Cámara
+16	2	57	~B06　Menu	~B06 Menu	~B06 Menú
+16	2	58	~B01Confirm and Exit	~B01Salir	~B01Salir
+16	2	59	~B00Color	~B00Cor	~B00Color
+16	2	60	~B03Switch Equipment	~B03Equip.	~B03Equipo
+16	2	61	~B03~B00Cfrm	~B03~B00Conf	~B03~B00Conf
+16	2	62	~B06　Edit Set Name	~B06 Nome	~B06 Nombre
+16	2	63	~B06　Reg Set	~B06 Regist.	~B06 Regist.
+16	2	64	~B01Cancel	~B01Cancel.	~B01Cancel.
+16	2	65	~B07　View by Name	~B07 Por nome	~B07 Por nombre
+16	2	66	~B07　View by Skills	~B07 Por habil.	~B07 Por habil.
+16	2	67	~B07　Change Class	~B07 Trocar	~B07 Cambiar
+16	2	68	~B03Map Zoom In	~B03Aproximar	~B03Acercar
+16	2	69	~B03Map Zoom Out	~B03Afastar	~B03Alejar
+16	2	70	~B02Beacon	~B02Sinal	~B02Señal
+16	2	71	~B03Move List	~B03Mover	~B03Mover
+16	2	72	~B02Set Order	~B02Ordem	~B02Orden
+16	2	73	~B02Order List	~B02Ordenar	~B02Ordenar
+16	2	74	~B07　Default	~B07 Padrão	~B07 Defecto
+16	2	75	~B02Amount	~B02Qtd	~B02Cant.
+16	2	76	~B06　Begin	~B06 Iniciar	~B06 Empezar
+16	2	78	~B06　Back	~B06 Voltar	~B06 Atrás
+16	2	79	~B03Switch	~B03Trocar	~B03Cambiar
+16	2	80	~B02Details	~B02Detalhes	~B02Detalles
+16	2	82	~B03More Details	~B03Mais	~B03Más
+16	2	83	~B07　View	~B07 Ver	~B07 Ver
+16	2	84	~B02Sell	~B02Vender	~B02Vender
+16	2	85	~B03Compare	~B03Comparar	~B03Comparar
+16	2	86	~B03Details	~B03Detalhes	~B03Detalles
+16	2	87	~B03Hide Weapon	~B03Ocultar arma	~B03Ocultar arma
+16	2	88	~B03Show Weapon	~B03Mostrar arma	~B03Mostrar arma
+16	2	89	~B01Unselect	~B01Desmarc.	~B01Deselec.
+16	2	90	~B03Skill Info	~B03Info. hab.	~B03Info. hab.
+16	2	91	~B00Screen Effect Settings	~B00Efeitos de tela	~B00Efectos
+16	2	95	Item has been exchanged.	Item trocado.	Objeto intercambiado.
+16	2	99	Sell remaining items and exit.	Vender o que resta e sair.	Vender lo restante y salir.
+16	2	105	Sell remaining items?	Vender o que resta?	¿Vender lo restante?
+16	2	113	Returning to village in 20 seconds	Voltando à vila em 20 segundos	Volviendo a la aldea en 20 segundos
+16	2	114	Returning to village in 1 minute	Voltando à vila em 1 minuto	Volviendo a la aldea en 1 minuto
+16	2	115	Quest completed!	Missão concluída!	¡Misión completada!
+16	2	116	Reward decreased by %dz	Recompensa reduzida em %dz	Recompensa reducida en %dz
+16	2	117	Time Left: %dmin	Tempo restante: %dmin	Tiempo restante: %dmin
+16	2	118	Good work!	Bom trabalho!	¡Buen trabajo!
+16	2	119	Quest failed...	Missão fracassou...	Misión fallida...
+16	2	120	Time limit: %dmin	Limite de tempo: %dmin	Límite de tiempo: %dmin
+16	2	121	Time's up!	Tempo esgotado!	¡Se acabó el tiempo!
+16	2	122	Supply items delivered.	Itens de suprimento entregues.	Objetos de suministro entregados.
+16	2	123	Deliveries possible for 20 secs!	Entregas possíveis por 20 segs!	Entregas posibles por 20 seg.
+16	2	124	Objective cleared!	Objetivo cumprido!	¡Objetivo cumplido!
+16	2	125	Victory!	Vitória!	¡Victoria!
+16	2	136	Entering the Final Showdown.	Entrando no confronto final.	Entrando al enfrentamiento final.
+16	2	137	Dragonator is ready for use.	Dragonator pronto para usar.	Dragonator listo para usar.
+16	2	138	Hunting Gong is ready for use.	Gongo de caça pronto para usar.	Gong de caza listo para usar.
+16	2	139	Ballista Binder is ready for use.	Balista pronta para usar.	Balista lista para usar.
+16	2	509	Send to Box	Enviar ao baú	Enviar a caja
+16	2	543	Item Bag	Bolsa	Bolsa
+16	2	545	Quest Pouch	Bolsa Missão	Bolsa Mis.
+16	2	550	Status	Status	Estado
+16	2	551	Equipment	Equip.	Equipo
+16	2	552	Name	Nome	Nombre
+16	2	553	Weapon	Arma	Arma
+16	2	554	Locatn	Local	Lugar
+16	2	555	Money	Dinheiro	Dinero
+16	2	556	Yukumo Points	Pts Yukumo	Pts Yukumo
+16	2	557	Guild Points	Pts Guilda	Pts Gremio
+16	2	559	Health	Vida	Vida
+16	2	560	Stamina	Vigor	Aguante
+16	2	561	Attack	Ataque	Ataque
+16	2	562	Defense	Defesa	Defensa
+16	2	563	Fire Res	Res. Fogo	Res. Fuego
+16	2	564	Water Res	Res. Água	Res. Agua
+16	2	565	Thndr Res	Res. Trovão	Res. Rayo
+16	2	566	Ice Res	Res. Gelo	Res. Hielo
+16	2	567	Drgn Res	Res. Dragão	Res. Dragón
+16	2	569	Great Sword	Espadão	Mandoble
+16	2	570	Sword & Shield	Espada e Escudo	Espada y Escudo
+16	2	571	Hammer	Martelo	Martillo
+16	2	572	Lance	Lança	Lanza
+16	2	573	Heavy Bowgun	Fuzilarco Pesado	Fusilpesado
+16	2	574	Medium Bowgun	Fuzilarco Médio	Fusilpesado Medio
+16	2	575	Light Bowgun	Fuzilarco Leve	Fusilpesado Ligero
+16	2	576	Longsword	Espada Longa	Sable Largo
+16	2	577	Switch Axe	Transmachado	Hacha Transmutable
+16	2	578	Gunlance	Lançarma	Lanza-Cañón
+16	2	579	Bow	Arco	Arco
+16	2	580	Dual Blades	Lâminas Duplas	Hojas Dobles
+16	2	581	Hunting Horn	Berrante de Caça	Cuerno de Caza
+16	2	585	C	C	C
+16	2	586	Skill Info	Info. habil.	Info. habilidad
+16	2	587	Skill Name	Habilidade	Habilidad
+16	2	588	Pts	Pts	Pts
+16	2	590	 E 	E	E
+16	2	601	Slots	Espaços	Espacios
+16	2	602	Affinity	Afinidade	Afinidad
+16	2	606	Defense	Defesa	Defensa
+16	2	951	Status	Status	Estado
+16	2	1562	Send to Item Box	Enviar ao baú	Enviar a caja
+16	2	1998	Status	Status	Estado
+16	2	1999	Equipment	Equip.	Equipo
+
+# --- items (table 3) ---
+16	3	1	Book of Combos 1	Livro Comb. 1	Libro de combos 1
+16	3	2	Book of Combos 2	Livro Comb. 2	Libro de combos 2
+16	3	3	Book of Combos 3	Livro Comb. 3	Libro de combos 3
+16	3	4	Book of Combos 4	Livro Comb. 4	Libro de combos 4
+16	3	5	Book of Combos 5	Livro Comb. 5	Libro de combos 5
+16	3	6	Organizer Guide	Guia Organiz.	Guía del organizador
+16	3	7	Pack Rat Guide	Guia Acum.	Guía del acaparador
+16	3	8	Potion	Poção	Poción
+16	3	9	Mega Potion	Mega Poção	Megapoción
+16	3	10	Nutrients	Nutrientes	Nutrientes
+16	3	11	Mega Nutrients	Mega Nutrientes	Meganutrientes
+16	3	12	Antidote	Antídoto	Antídoto
+16	3	13	Herbal Medicine	Remédio Ervas	Medicina herbaria
+16	3	14	Immunizer	Imunizante	Inmunizador
+16	3	15	Energy Drink	Bebida Energ.	Bebida energética
+16	3	16	Dash Juice	Suco de Corrida	Zumo de velocidad
+16	3	17	Mega Dash Juice	Megass. Corr.	Megazumo de velocidad
+16	3	18	Demondrug	Droga Demoníaca	Droga demoníaca
+16	3	19	Mega Demondrug	Mega Droga Dem.	Megadroga demoníaca
+16	3	20	Might Pill	Pílula da Força	Píldora de fuerza
+16	3	21	Armorskin	Pele Arm.	Piel de armadura
+16	3	22	Mega Armorskin	Mega Pele Arm.	Megapiel de armadura
+16	3	23	Adamant Pill	Pílula Adam.	Píldora de adamante
+16	3	24	Cool Drink	Bebida Gelada	Bebida fría
+16	3	25	Hot Drink	Bebida Quente	Bebida caliente
+16	3	26	Cleanser	Purificador	Limpiador
+16	3	27	Deodorant	Desodorante	Desodorante
+16	3	28	Psychoserum	Psicossoro	Psicosuero
+16	3	29	Max Potion	Poção Máxima	Poción máxima
+16	3	30	Ancient Potion	Poção Antiga	Poción antigua
+16	3	31	Lifecrystals	Cristais Vida	Cristales vitales
+16	3	32	Lifepowder	Pó de Vida	Polvo vital
+16	3	33	Catalyst	Catalisador	Catalizador
+16	3	34	Tranquilizer	Tranquilizante	Tranquilizante
+16	3	35	Powercharm	Amuleto Força	Amuleto de fuerza
+16	3	36	Powertalon	Garra de Força	Garra de fuerza
+16	3	37	Armorcharm	Amuleto Arm.	Amuleto de armadura
+16	3	38	Armortalon	Garra Arm.	Garra de armadura
+16	3	39	Raw Meat	Carne Crua	Carne cruda
+16	3	40	Poisoned Meat	Carne Enven.	Carne envenenada
+16	3	41	Tinged Meat	Carne Drogada	Carne drogada
+16	3	42	Drugged Meat	Carne Sedada	Carne sedada
+16	3	43	Rare Steak	Bife Raro	Filete poco hecho
+16	3	44	Well-done Steak	Bife Bem Pass.	Filete hecho
+16	3	45	Burnt Meat	Carne Queimada	Carne quemada
+16	3	46	Chilled Meat	Carne Gelada	Carne helada
+16	3	47	Hot Meat	Carne Quente	Carne caliente
+16	3	48	Rare Fish	Peixe Raro	Pescado poco hecho
+16	3	49	Gourmet Fish	Peixe Gourmet	Pescado gourmet
+16	3	50	Burnt Fish	Peixe Queimado	Pescado quemado
+16	3	51	Yukumo Egg	Ovo de Yukumo	Huevo de Yukumo
+16	3	52	Boomerang	Bumerangue	Bumerán
+16	3	53	Throwing Knife	Faca Arrem.	Cuchillo arrojadizo
+16	3	54	Poison Knife	Faca Venenosa	Cuchillo venenoso
+16	3	55	Sleep Knife	Faca Sonífera	Cuchillo somnífero
+16	3	56	Paralysis Knife	Faca Paralis.	Cuchillo paralizante
+16	3	57	Tranq Knife	Faca Tranq.	Cuchillo tranquilizante
+16	3	58	Bomb Casing	Carc. Bomba	Carcasa de bomba
+16	3	59	Paintball	Bola de Tinta	Bola de pintura
+16	3	60	Flash Bomb	Bomba de Luz	Bomba de luz
+16	3	61	Sonic Bomb	Bomba Sônica	Bomba sónica
+16	3	62	Dung	Esterco	Estiércol
+16	3	63	Wyvern Dung	Est. Wyv.	Estiércol de wyvern
+16	3	64	Dung Bomb	Bomba Est.	Bomba de estiércol
+16	3	65	Smoke Bomb	Bomba de Fumaça	Bomba de humo
+16	3	66	Poison Smoke Bmb	Bomba Fumaça V.	Bomba de humo venenoso
+16	3	67	Farcaster	Teleportador	Teletransportador
+16	3	68	Tranq Bomb	Bomba Tranq.	Bomba tranquilizante
+16	3	69	Spider Web	Teia de Aranha	Telaraña
+16	3	70	Net	Rede	Red
+16	3	71	Trap Tool	Kit Armad.	Kit de trampa
+16	3	72	Pitfall Trap	Armad. Fosso	Trampa de foso
+16	3	73	Shock Trap	Armad. Elét.	Trampa eléctrica
+16	3	74	Gunpowder	Pólvora	Pólvora
+16	3	75	Small Barrel	Barril Pequeno	Barril pequeño
+16	3	76	Large Barrel	Barril Grande	Barril grande
+16	3	77	Barrel Bomb S	Bomba Barril P	Bomba de barril P
+16	3	78	Barrel Bomb L	Bomba Barril G	Bomba de barril G
+16	3	79	Barrel Bomb L+	Bomba Barril G+	Bomba de barril G+
+16	3	80	Bounce Bomb	Bomba Saltit.	Bomba rebotante
+16	3	81	Felvine Bomb	Bomba Felv.	Bomba de felvina
+16	3	82	JUMP Barrel Bomb	Bomba Barril S.	Bomba de barril SALTO
+16	3	83	Polytan Bomb	Bomba Polytan	Bomba polytan
+16	3	84	Old Pickaxe	Picareta Velha	Pico viejo
+16	3	85	Iron Pickaxe	Pic. Ferro	Pico de hierro
+16	3	86	Mega Pickaxe	Megapicareta	Megapico
+16	3	87	Old Bug Net	Rede Velha	Red de insectos vieja
+16	3	88	Bug Net	Rede de Insetos	Red de insectos
+16	3	89	Mega Bug Net	Megarrede	Megared de insectos
+16	3	90	BBQ Spit	Espeto Churr.	Asador
+16	3	91	Whetstone	Pedra de Amolar	Piedra de afilar
+16	3	92	Huskberry	Baga Casca	Baya cascarilla
+16	3	93	Bone Husk	Casca de Osso	Cáscara de hueso
+16	3	138	Worm	Minhoca	Gusano
+16	3	139	Mega Fishing Fly	Megamosca Pesca	Megamosca de pesca
+16	3	140	Goldenfish Bait	Isca P. Dourado	Cebo de pez dorado
+16	3	141	Burst Bait	Isca Explosiva	Cebo explosivo
+16	3	142	Bountiful Bait	Isca Abundante	Cebo abundante
+16	3	143	Binoculars	Binóculos	Prismáticos
+16	3	144	Garbage	Lixo	Basura
+16	3	145	Field Horn	Trompa de Campo	Cuerno de campo
+16	3	146	Health Horn	Trompa de Vida	Cuerno vital
+16	3	147	Antidote Horn	Trompa Antídoto	Cuerno de antídoto
+16	3	148	Demon Horn	Trompa Dem.	Cuerno demoníaco
+16	3	149	Armor Horn	Trompa Arm.	Cuerno de armadura
+16	3	150	Honey	Mel	Miel
+16	3	151	Herb	Erva	Hierba
+16	3	152	Antidote Herb	Erva Antídoto	Hierba de antídoto
+16	3	153	Fire Herb	Erva de Fogo	Hierba de fuego
+16	3	154	Snow Herb	Erva de Neve	Hierba de nieve
+16	3	155	Ivy	Hera	Hiedra
+16	3	156	Sleep Herb	Erva Sonífera	Hierba somnífera
+16	3	157	Sap Plant	Planta de Seiva	Planta de savia
+16	3	158	Felvine	Felvina	Felvina
+16	3	159	Cactus Flower	Flor de Cacto	Flor de cactus
+16	3	160	Hot Pepper	Pimenta	Guindilla
+16	3	161	Hypnotic Pollen	Pólen Hipnótico	Polen hipnótico
+16	3	162	Blue Mushroom	Cogumelo Azul	Seta azul
+16	3	163	Nitroshroom	Nitroshroom	Seta nitro
+16	3	164	Parashroom	Paraseta	Seta para
+16	3	165	Toadstool	Cogum. Venenoso	Seta venenosa
+16	3	166	Exciteshroom	Cog. Excitação	Seta excitante
+16	3	167	Wearyshroom	Cogum. Exausto	Seta agotadora
+16	3	168	Dragon Toadstool	Cogumelo Dragão	Seta dragón
+16	3	169	Bindshroom	Cogumelo Amarra	Seta atadora
+16	3	170	Pickaxe Mushroom	Cogumelo Pic.	Seta pico
+16	3	171	Paintberry	Baga de Tinta	Baya de pintura
+16	3	172	Might Seed	Semente Força	Semilla de fuerza
+16	3	173	Adamant Seed	Semente Adam.	Semilla de adamante
+16	3	174	Nulberry	Baga Nula	Baya nula
+16	3	175	Dragonfell Berry	Baga Dragão	Baya de dragón
+16	3	176	Scatternut	Noz Dispersa	Nuez dispersa
+16	3	177	Needleberry	Baga Espinho	Baya aguja
+16	3	178	Spikeberry	Baga Espigão	Baya púa
+16	3	179	Bomberry	Baga Bomba	Baya bomba
+16	3	180	Red Seed	Sem. Vermelha	Semilla roja
+16	3	181	Green Seed	Semente Verde	Semilla verde
+16	3	182	Bumblepumpkin	Abób. Zumbidora	Calabaza zumbadora
+16	3	183	Yukumo Wood	Madeira Yukumo	Madera de Yukumo
+16	3	184	Yukumo Wood+	Madeira Yukumo+	Madera de Yukumo+
+16	3	185	High Quality Ash	Cinza A. Qual.	Ceniza de alta calidad
+16	3	186	Whetfish	Peixe de Amolar	Pez de afilar
+16	3	187	Sushifish	Peixe Sushi	Pez sushi
+16	3	188	Sleepyfish	Peixe Sonolento	Pez dormilón
+16	3	189	Pin Tuna	Atum Agulha	Atún aguja
+16	3	190	Popfish	Peixe Pipoca	Pez palomita
+16	3	191	Scatterfish	Peixe Disperso	Pez disperso
+16	3	192	Burst Arowana	Aruanã Expl.	Arowana explosiva
+16	3	193	Bomb Arowana	Aruanã Bomba	Arowana bomba
+16	3	194	Small Goldenfish	Peixe Dour. P.	Pez dorado pequeño
+16	3	195	Wanchovy	Anchova	Anchoa
+16	3	196	Ancient Fish	Peixe Antigo	Pez antiguo
+16	3	197	Blue Cutthroat	Truta Azul	Trucha azul
+16	3	198	Humspun Conch	Concha Ronr.	Caracola zumbante
+16	3	199	Armored Beakfish	Peixe Bico	Pez pico blindado
+16	3	200	Sharqskin	Pele de Sharq	Piel de sharq
+16	3	201	Insect Husk	Casca de Inseto	Cáscara de insecto
+16	3	202	Hawkmoth Larva	Larva Mariposa	Larva de mariposa
+16	3	203	Stinkhopper	Saltador Fétido	Saltamontes fétido
+16	3	204	Snakebee Larva	Larva Abelha	Larva de abeja serpiente
+16	3	205	Godbug	Inseto Divino	Bicho divino
+16	3	206	Bitterbug	Inseto Amargo	Bicho amargo
+16	3	207	Flashbug	Inseto Relâmp.	Bicho destello
+16	3	208	Thunderbug	Inseto Trovão	Bicho trueno
+16	3	209	Carpenterbug	Inseto Carp.	Bicho carpintero
+16	3	210	Killer Beetle	Besouro Assas.	Escarabajo asesino
+16	3	211	Hercudrome	Hercudrome	Hercudrome
+16	3	212	Fulgurbug	Inseto Fulg.	Bicho fulgurante
+16	3	213	King Scarab	Escaravelho Rei	Escarabajo rey
+16	3	214	Rare Scarab	Escarav. Raro	Escarabajo raro
+16	3	215	Blossom Cricket	Grilo Florido	Grillo florido
+16	3	216	Butterfly Beetle	Besouro Borb.	Escarabajo mariposa
+16	3	217	Stone	Pedra	Piedra
+16	3	218	Iron Ore	Minério Ferro	Mena de hierro
+16	3	219	Earth Crystal	Cristal Terra	Cristal de tierra
+16	3	220	Machalite Ore	Mín. Machalita	Mena de machalita
+16	3	221	Pelagicite Ore	Mín. Pelagita	Mena de pelagita
+16	3	222	Bealite Ore	Minério Bealita	Mena de bealita
+16	3	223	Isisium	Isísio	Isisio
+16	3	224	Lightcrystal	Cristal de Luz	Cristal de luz
+16	3	225	Dragonite Ore	Mín. Dragonita	Mena de dragonita
+16	3	226	Lava Nugget	Pepita de Lava	Pepita de lava
+16	3	227	Firestone	Pedra de Fogo	Piedra de fuego
+16	3	228	Carbalite Ore	Mín. Carbalita	Mena de carbalita
+16	3	229	Bathycite Ore	Mín. Batícita	Mena de baticita
+16	3	230	Fucium Ore	Minério Fúcio	Mena de fucio
+16	3	231	Gracium	Grácio	Gracio
+16	3	232	Firecell Stone	Pedra Cél. Ígn.	Piedra de célula ígnea
+16	3	233	Ice Crystal	Cristal de Gelo	Cristal de hielo
+16	3	234	Rainbow Crystal	Cristal A-Íris	Cristal arcoíris
+16	3	235	Mystery Bone	Osso Misterioso	Hueso misterioso
+16	3	236	Unknown Skull	Crânio Desc.	Cráneo desconocido
+16	3	237	Bone	Osso	Hueso
+16	3	238	Monster Bone S	Osso Monstro P	Hueso de monstruo P
+16	3	239	Monster Bone M	Osso Monstro M	Hueso de monstruo M
+16	3	240	Monster Bone L	Osso Monstro G	Hueso de monstruo G
+16	3	241	Monster Bone+	Osso Monstro+	Hueso de monstruo+
+16	3	242	Monster Keenbone	Osso Afiado	Hueso afilado de monstruo
+16	3	243	Monster Hardbone	Osso Duro	Hueso duro de monstruo
+16	3	244	Avian Finebone	Osso Fino Ave	Hueso fino de ave
+16	3	245	Jumbo Bone	Osso Jumbo	Hueso jumbo
+16	3	246	Stoutbone	Osso Robusto	Hueso robusto
+16	3	247	Dragonbone Relic	Rel. Osso Drag.	Reliquia de hueso de dragón
+16	3	248	Wyvern Fang	Presa de Wyvern	Colmillo de wyvern
+16	3	250	Bird Wyvern Gem	Gema Wyv. Ave	Gema de wyvern ave
+16	3	251	Wyvern Stone	Pedra de Wyvern	Piedra de wyvern
+16	3	252	ElderDragonBlood	Sangue Drag.	Sangre de dragón anciano
+16	3	253	Screamer	Gritador	Chillón
+16	3	254	Poison Sac	Bolsa de Veneno	Saco de veneno
+16	3	255	Toxin Sac	Bolsa de Toxina	Saco de toxina
+16	3	256	Paralysis Sac	Bolsa Paralisia	Saco de parálisis
+16	3	257	Omniplegia Sac	Bolsa Omnipleg.	Saco de omniplejía
+16	3	258	Sleep Sac	Bolsa Sonífera	Saco somnífero
+16	3	259	Coma Sac	Bolsa de Coma	Saco de coma
+16	3	260	Flame Sac	Bolsa de Chama	Saco de llama
+
+# --- quest menu and monster names (table 2) ---
+16	2	77	~B01Cancel	~B01Cancel.	~B01Cancel.
+16	2	81	~B06　Edit Set Name	~B06 Editar nome	~B06 Nombre
+16	2	96	Sell remaining items?\nOK?　	Vender o que resta?\nOK?　	¿Vender lo restante?\n¿OK?　
+16	2	102	~C02Item box is full.	~C02Baú de itens cheio.	~C02Caja de objetos llena.
+16	2	106	Sell remaining items?	Vender o que resta?	¿Vender lo restante?
+16	2	107	Sell remaining items?	Vender o que resta?	¿Vender lo restante?
+16	2	126	One monster left!	Falta 1 monstro!	¡Queda 1 monstruo!
+16	2	127	Two monsters left!	Faltam 2 monstros!	¡Quedan 2 monstruos!
+16	2	128	Five monsters left!	Faltam 5 monstros!	¡Quedan 5 monstruos!
+16	2	129	10 monsters left!	Faltam 10 monstros!	¡Quedan 10 monstruos!
+16	2	130	20 monsters left!	Faltam 20 monstros!	¡Quedan 20 monstruos!
+16	2	140	Ship has been destroyed.	O navio foi destruído.	El barco ha sido destruido.
+16	2	146	Value	Valor	Valor
+16	2	147	Amount	Quantidade	Cantidad
+16	2	150	Required Slots	Espaços necessários	Espacios necesarios
+16	2	151	Time Left	Tempo restante	Tiempo restante
+16	2	152	Quest Items	Itens da missão	Objetos de misión
+16	2	153	Subtotal	Subtotal	Subtotal
+16	2	154	Yukumo Points	Pts Yukumo	Pts Yukumo
+16	2	155	Current Total	Total atual	Total actual
+16	2	156	Total Yukumo Points	Total de Pts Yukumo	Total de Pts Yukumo
+16	2	157	Discard	Descartar	Descartar
+16	2	158	Give	Dar	Dar
+16	2	159	Deliver	Entregar	Entregar
+16	2	160	Exchange	Trocar	Intercambiar
+16	2	161	Exchange	Trocar	Intercambiar
+16	2	162	Discard	Descartar	Descartar
+16	2	164	Quit	Sair	Salir
+16	2	165	Combo List	Lista de combos	Lista de combos
+16	2	166	Monster List	Lista de monstros	Lista de monstruos
+16	2	167	Comrade Status	Status do camarada	Estado del camarada
+16	2	176	Name	Nome	Nombre
+16	2	177	Alias	Alcunha	Alias
+16	2	178	Type	Tipo	Tipo
+16	2	179	Risk	Risco	Riesgo
+16	2	180	No. (Capture)	Nº (captura)	N.º (captura)
+16	2	181	Largest	Maior	Mayor
+16	2	182	Smallest	Menor	Menor
+16	2	189	Lynian	Lynian	Lynian
+16	2	190	Neopteron	Neopteron	Neopteron
+16	2	191	Piscine Wyvern	Wyvern Aquático	Wyvern acuático
+16	2	192	Herbivore	Herbívoro	Herbívoro
+16	2	193	Bird Wyvern	Wyvern Ave	Wyvern ave
+16	2	194	Fanged Beast	Besta Presa	Bestia colmilluda
+16	2	195	Flying Wyvern	Wyvern Voador	Wyvern volador
+16	2	196	Fanged Wyvern	Wyvern Presa	Wyvern colmilludo
+16	2	197	Brute Wyvern	Wyvern Brutal	Wyvern brutal
+16	2	309	Rathian	Rathian	Rathian
+16	2	310	Rathalos	Rathalos	Rathalos
+16	2	311	Qurupeco	Qurupeco	Qurupeco
+16	2	312	Gigginox	Gigginox	Gigginox
+16	2	313	Barioth	Barioth	Barioth
+16	2	314	Diablos	Barroth	Barroth
+16	2	315	Deviljho	Diablos	Diablos
+16	2	316	Barroth	Bnahabra	Bnahabra
+16	2	317	Uragaan	Rhenoplos	Rhenoplos
+16	2	318	Jaggi	Aptonoth	Aptonoth
+16	2	319	Jaggia	Epioth	Epioth
+16	2	320	Great Jaggi	Popo	Popo
+16	2	321	Baggi	Anteka	Anteka
+16	2	322	Great Baggi	Slagtoth	Slagtoth
+16	2	323	Rathian	Kelbi	Kelbi
+16	2	324	Royal Ludroth	Bullfango	Bullfango
+16	2	325	Ludroth	Felyne	Felyne
+16	2	326	Rathalos	Melynx	Melynx
+16	2	327	Agnaktor	Jaggi	Jaggi
+16	2	328	Diablos	Jaggia	Jaggia
+16	2	329	Uroktor	Grande Jaggi	Gran Jaggi
+16	2	330	Delex	Baggi	Baggi
+16	2	331	Tigrex	Grande Baggi	Gran Baggi
+16	2	332	Alatreon	Wroggi	Wroggi
+16	2	333	Jhen Mohran	Grande Wroggi	Gran Wroggi
+16	2	334	Giggi	Arzuros	Arzuros
+16	2	335	Aptonoth	Lagombi	Lagombi
+16	2	336	Popo	Volvidon	Volvidon
+16	2	337	Rhenoplos	Qurupeco	Qurupeco
+16	2	338	Felyne	Ludroth	Ludroth
+16	2	339	Melynx	Ludroth Real	Ludroth Real
+16	2	340	Nargacuga	Gobul	Gobul
+16	2	341	Altaroth	Nibelsnarf	Nibelsnarf
+16	2	342	Kelbi	Agnaktor	Agnaktor
+16	2	343	Gigginox Egg	Agnaktor Glacial	Agnaktor Glacial
+16	2	344	Bnahabra	Uragaan	Uragaan
+16	2	345	Bnahabra (Plains)	Uragaan de Aço	Uragaan de acero
+16	2	346	Bnahabra (Tundra)	Duramboros	Duramboros
+16	2	347	Bnahabra (Volcano)	Nargacuga	Nargacuga
+16	2	348	Zinogre	Nargacuga Verde	Nargacuga verde
+16	2	349	Amatsu Magatsuchi	Barioth	Barioth
+16	2	350	Arzuros	Barioth da Areia	Barioth de arena
+16	2	351	Lagombi	Tigrex	Tigrex
+16	2	352	Volvidon	Tigrex Brutal	Tigrex brutal
+16	2	353	Great Wroggi	Diablos	Diablos
+16	2	354	Duramboros	Diablos Negra	Diablos negra
+16	2	355	Nibelsnarf	Rathalos	Rathalos
+16	2	356	Wroggi	Rathalos Prateado	Rathalos plateado
+16	2	357	Slagtoth	Rathian	Rathian
+16	2	358	Gargwa	Rathian Dourada	Rathian dorada
+16	2	359	Qurupeco	Zinogre	Zinogre
+16	2	360	Gigginox	Zinogre Infernal	Zinogre estigio
+16	2	361	Barioth	Alatreon	Alatreon
+16	2	362	Barroth	Amatsu	Amatsu
+16	2	363	Uragaan	Deviljho	Deviljho
+16	2	364	Royal Ludroth	Rajang	Rajang
+16	2	365	Agnaktor	Yian Kut-Ku	Yian Kut-Ku
+16	2	366	Tigrex	Yian Kut-Ku Azul	Yian Kut-Ku azul
+16	2	367	Nargacuga	Gypceros	Gypceros
+16	2	368	Akantor	Gypceros Roxo	Gypceros morado
+16	2	369	Ukanlos	Khezu	Khezu
+16	2	370	Bulldrome	Khezu Vermelho	Khezu rojo
+16	2	371	Bullfango	Basarios	Basarios
+16	2	372	Anteka	Basarios Rubi	Basarios rubí
+16	2	373	Cart Felyne	Gravios	Gravios
+16	2	374	Nyanjiro	Gravios Negro	Gravios negro
+16	2	375	Veggie Elder	Kirin	Kirin
+16	2	376	Slagtoth	Kirin Oroshi	Kirin oroshi
+16	2	377	Rock	Plesioth	Plesioth
+16	2	378	Rock (Plains)	Plesioth Verde	Plesioth verde
+16	2	379	Rock (Forest)	Chameleos	Chameleos
+16	2	380	Rock (Tundra)	Teostra	Teostra
+16	2	381	Rock (Volcano)	Lunastra	Lunastra
+16	2	382	Rock (Peaks)	Kushala Daora	Kushala Daora
+16	2	383	ＮＯ　ＤＡＴＡ	Kushala Daora Enferrujado	Kushala Daora oxidado
+16	2	384	Rathian	Akantor	Akantor
+16	2	385	Rathalos	Ukanlos	Ukanlos
+16	2	386	Qurupeco	Fatalis	Fatalis
+
+# --- the game's Options menu (table 2) ---
+16	2	1304	LANGUAGE	IDIOMA	IDIOMA
+16	2	1305	SOUND	SOM	SONIDO
+16	2	1306	BGM LEVEL	VOLUME BGM	VOLUMEN BGM
+16	2	1307	SFX LEVEL	VOLUME EFEITOS	VOLUMEN EFECTOS
+16	2	1308	QUICK CONTINUE	CONTINUAR RÁPIDO	CONTINUAR RÁPIDO
+16	2	1309	SCREEN EFFECTS	EFEITOS DE TELA	EFECTOS DE PANTALLA
+16	2	1310	EFFECTS	EFEITOS	EFECTOS
+16	2	1311	DEFAULT SETTINGS	AJUSTES PADRÃO	AJUSTES PREDETERMINADOS
+16	2	1314	ENGLISH	INGLÊS	INGLÉS
+16	2	1315	GERMAN	ALEMÃO	ALEMÁN
+16	2	1316	FRENCH	FRANCÊS	FRANCÉS
+16	2	1317	SPANISH	ESPANHOL	ESPAÑOL
+16	2	1318	ITALIAN	ITALIANO	ITALIANO
+16	2	1319	STEREO	ESTÉREO	ESTÉREO
+16	2	1320	DOLBY PRO LOGIC Ⅱ	DOLBY PRO LOGIC Ⅱ	DOLBY PRO LOGIC Ⅱ
+16	2	1321	BOOST	REFORÇO	REFUERZO
+16	2	1322	MIN	MÍN	MÍN
+16	2	1323	MAX	MÁX	MÁX
+16	2	1324	OFF	DESLIG.	APAGADO
+16	2	1325	ON	LIG.	ENCENDIDO
+16	2	1326	NORMAL	NORMAL	NORMAL
+16	2	1327	REDUCED	REDUZIDO	REDUCIDO
+16	2	1330	Set BGM output volume.	Ajusta o volume da música.	Ajusta el volumen de la música.
+16	2	1340	Return to Game Menu.	Voltar ao menu do jogo.	Volver al menú del juego.
+16	2	1351	Combine items.	Combinar itens.	Combinar objetos.
+16	2	1355	Pause game.	Pausar o jogo.	Pausar el juego.
+16	2	1362	Recheck the advice.	Rever os conselhos.	Revisar los consejos.
+16	2	1364	Check your Guild Card.	Ver sua carta de guilda.	Ver tu carta de gremio.
+16	2	1365	Edit your Guild Card.	Editar sua carta de guilda.	Editar tu carta de gremio.
+16	2	1371	Dismiss a Comrade.	Dispensar um camarada.	Despedir a un camarada.
+16	2	1377	Options	Opções	Opciones
+16	2	1378	Status Display	Mostrar status	Mostrar estado
+16	2	1379	Map Display	Mostrar mapa	Mostrar mapa
+16	2	1380	Initial Camera View	Câmera inicial	Cámara inicial
+16	2	1381	Camera Settings	Config. câmera	Ajustes cámara
+16	2	1382	Scope Targeting	Mira	Mira
+16	2	1383	Aiming Controls	Controles de mira	Controles de puntería
+16	2	1384	Camera Type	Tipo de câmera	Tipo de cámara
+16	2	1385	Mid-Evasion Type	Esquiva	Esquiva
+16	2	1386	Sight Type	Tipo de mira	Tipo de mira
+16	2	1387	Sound	Som	Sonido
+16	2	1388	Screen Effects	Efeitos de tela	Efectos de pantalla
+16	2	1389	DEFAULT SETTINGS	AJUSTES PADRÃO	AJUSTES PREDETERMINADOS
+16	2	1394	NORMAL	NORMAL	NORMAL
+16	2	1395	REVERSE1	INVERT. 1	INVERTIR 1
+16	2	1396	REVERSE2	INVERT. 2	INVERTIR 2
+16	2	1397	TYPE1	TIPO 1	TIPO 1
+16	2	1398	TYPE2	TIPO 2	TIPO 2
+16	2	1399	TYPE3	TIPO 3	TIPO 3
+16	2	1400	TYPE4	TIPO 4	TIPO 4
+16	2	1401	TYPE5	TIPO 5	TIPO 5
+16	2	1402	STEREO	ESTÉREO	ESTÉREO
+16	2	1403	DPLⅡ	DPLⅡ	DPLⅡ
+16	2	1404	BOOST	REFORÇO	REFUERZO
+16	2	1405	AUTO	AUTO	AUTO
+16	2	1406	MANUAL	MANUAL	MANUAL
+16	2	1407	Display the HUD.	Mostrar a interface.	Mostrar la interfaz.
+16	2	1408	Don't display the HUD.	Não mostrar a interface.	No mostrar la interfaz.
+16	2	1409	Display the map.	Mostrar o mapa.	Mostrar el mapa.
+16	2	1410	Don't display the map.	Não mostrar o mapa.	No mostrar el mapa.
+16	2	1448	Item has been sent.	Item enviado.	Objeto enviado.
+16	2	1452	Discard selected item?	Descartar o item selecionado?	¿Descartar el objeto elegido?
+16	2	1453	Select hunter.	Selecione o caçador.	Elige al cazador.
+16	2	1454	Is this OK?	Confirmar?	¿Está bien?
+16	2	1457	Deliver these items?	Entregar estes itens?	¿Entregar estos objetos?
+16	2	1458	Sort items?	Ordenar itens?	¿Ordenar objetos?
+16	2	1461	Unknown	Desconhecido	Desconocido
