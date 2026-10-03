@@ -1,5 +1,7 @@
 #pragma once
 
+// Historical native-layout notes for the original layered armor catalog.
+// The live selector now lives in mods/transmog.cpp.
 // Layered armor: the hunter drawn in other armor than it wears, part by part,
 // while the game keeps the real pieces for defense, skills, the save and what
 // it sends to other players. The choices live in the port's settings
@@ -24,22 +26,14 @@
 //   the character or the equipment box, so the save and what the game sends
 //   to other players keep the real pieces.
 //
-// So layered armor replaces that one function while it is on: for record 0
-// and a part with a chosen piece it returns the chosen piece's model for the
-// record's sex, exactly as the game would for that piece; anything else runs
-// the game's own code. It also wraps the hunter's load step so that a changed
-// look shows at the game's next load (below). Off from the start, nothing is
-// registered and the game runs as built.
+// The appearance-only catalog below still supplies the Mods picker. The live
+// selector and resource refresh are implemented in mods/transmog.cpp.
 
 #include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
-
-namespace psprecomp {
-class Runtime;
-}
 
 namespace mhp3rd::game {
 
@@ -118,14 +112,6 @@ inline constexpr std::uint32_t kLoadDone = 3u;
 // Starts the hunter's load over, as the game's own request does once a load
 // is done.
 void restart_load(Ram &ram, std::uint32_t object);
-
-// Called at every flip, between two frames: puts the replacement in place
-// when the setting is on, and gives the game its own lookup back when it is
-// turned off. Off from the start, it never registers anything.
-void frame(psprecomp::Runtime &runtime);
-
-// Whether the replacement is in place, for the menu.
-[[nodiscard]] bool installed();
 
 } // namespace layered
 } // namespace mhp3rd::game

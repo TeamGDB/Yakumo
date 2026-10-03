@@ -12,6 +12,7 @@
 #include "install/user_data.hpp"
 #include "mods/mhp3rd_mods.hpp"
 #include "mods/mod_import.hpp"
+#include "settings/settings.hpp"
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -574,6 +575,16 @@ void list(ModSession &session) {
                     "Off: the game reads only its own files, whatever is turned on below, for a clean comparison."})) {
         library.set_master(!library.master());
         session.commit();
+    }
+    auto &player_settings = settings::current();
+    RowOptions layered_options{false, {}, "Enable live armor and weapon appearance choices in Layered Sets."};
+    if (const char *variable = settings::overridden_by("look.layered_armor")) {
+        layered_options.disabled = true;
+        layered_options.note = std::string("Set by ") + variable;
+    }
+    if (toggle_row("Layered Sets", player_settings.layered_armor, layered_options)) {
+        player_settings.layered_armor = !player_settings.layered_armor;
+        settings::save();
     }
     if (button_row("Import mod…",
                    {false, {},

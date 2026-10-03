@@ -1,9 +1,11 @@
 # Layered armor: how the hunter's look is kept apart from its armor
 
+> Historical trace of the original same-sex, next-load implementation. The current live armor and weapon editor, persistence and GE-fenced refresh are described in the [profile README](../profiles/mhp3rd/README.md#layered-sets) and implemented under `profiles/mhp3rd/host/mods/transmog*`. The original hook below is no longer installed.
+
 Layered armor draws the hunter played on this machine in other armor pieces
 than it wears, part by part, while the game keeps the real pieces for
 everything else. The player's side is in the profile README
-([Layered armor](../profiles/mhp3rd/README.md#layered-armor)); this page says
+([Layered Sets](../profiles/mhp3rd/README.md#layered-sets)); this page says
 what the game does, how that was found, and why the rest of the game cannot
 see the difference.
 
@@ -18,8 +20,9 @@ the 100% test save (a female hunter in the Silver Sol set).
 
 The code is `profiles/mhp3rd/host/game/layered_armor.{hpp,cpp}` (pure
 functions over a `Ram`, tested on made-up tables in
-`tests/equipment_models_tests.cpp`) and `layered_armor_hook.cpp` (what is put
-in the game's place), and the page is `host/ui/layered_armor_screen.cpp`.
+`tests/equipment_models_tests.cpp`). The original `layered_armor_hook.cpp`
+and page behavior described below remain in repository history; the current
+picker routes through `host/ui/transmog_screen.cpp`.
 
 ## Where the game decides what a hunter looks like
 
