@@ -227,3 +227,39 @@ Useful settings while testing — all described in [the profile README](../profi
 - `MHP3RD_TRACE_PAD=1` shows whether input is reaching the game.
 - `MHP3RD_TRACE_AUDIO=1` shows audio levels and dropped frames.
 - `PSPRECOMP_HLE_HISTOGRAM=1` prints which system calls the game made.
+
+## Complementary Cppcheck analysis
+
+Stage 4 (#253) pins **Cppcheck 2.17.1** by release source SHA-256. Its independent
+parser/dataflow analysis complements clang-tidy's focused AST checks with array
+bounds, uninitialized variables, null dereferences and resource lifetime
+errors. The initial policy blocks first-party `error` diagnostics; `warning`
+diagnostics are uploaded for review without blocking. Style, portability,
+performance, inconclusive and `--enable=all` checks are not enabled.
+See the [official manual](https://cppcheck.sourceforge.io/manual.html).
+
+From a clean public checkout without game-generated code:
+
+```sh
+python3 scripts/ci/install_cppcheck.py out/cppcheck-tool
+cmake -S . -B out/cppcheck -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -DPSPRECOMP_PROFILE=mhp3rd -DPSPRECOMP_BUILD_TESTS=ON \
+  -DMHP3RD_RENDERER=OFF -DMHP3RD_FFMPEG=OFF
+python3 scripts/ci/cppcheck.py out/cppcheck --tool out/cppcheck-tool/install/bin/cppcheck
+```
+
+The filtered database retains actual compile commands for first-party runtime,
+profile host and tests, including each target's include paths and definitions.
+The analysis declares C++20 and the Unix 64-bit platform explicitly. Required
+vendor headers remain available to the parser, while diagnostics whose primary
+location is vendor/generated code do not block first-party changes. No source
+suppression or synthetic compile flags hide first-party errors. Reports include
+raw XML, progress and a structured first-party summary. The Linux hosted job
+is bounded to 25 minutes, with a 15-minute analysis deadline and `-j2`.
+
+This headless configuration excludes Vulkan/SDL renderer branches, FFmpeg,
+Android JNI, Windows-specific branches, shaders and game-generated code. It
+does not replace compiler warnings, runtime sanitizer tests, clang-tidy or
+device validation. Local macOS runs use the Unix model and native compile
+commands, rather than claiming Windows/Android analysis coverage.
