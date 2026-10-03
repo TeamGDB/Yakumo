@@ -39,6 +39,8 @@ def parse_header(data, base):
         raise SystemExit(f"image loads at {load:#010x}, not at {base:#010x}")
     name = data[32:HEADER_BYTES].split(b"\0")[0].decode("ascii", "replace")
     name = re.sub(r"\W", "_", os.path.splitext(name)[0])
+    if not re.fullmatch(r"[A-Za-z0-9_]+", name):
+        raise SystemExit("overlay name must normalize to a nonempty ASCII identifier")
     return name, HEADER_BYTES + code_size + data_size, code_size
 
 
@@ -51,9 +53,17 @@ def main(argv):
     parser.add_argument("dump_path")
     parser.add_argument("base_text")
     options = parser.parse_args(argv[1:])
-    build_dir, dump_path, base_text = options.build_dir, options.dump_path, options.base_text
-    base = int(base_text, 0)
-    data = open(dump_path, "rb").read()
+    build_dir = os.path.abspath(options.build_dir)
+    dump_path = os.path.abspath(options.dump_path)
+    base = int(options.base_text, 0)
+    if base < 0 or base > 0xFFFFFFFF or base % 4:
+        parser.error("base address must be an aligned 32-bit unsigned address")
+    if options.jobs < 1:
+        parser.error("jobs must be positive")
+    base_text = f"0x{base:08X}"
+    recompiler = "psp_recomp.exe" if os.name == "nt" else "./psp_recomp"
+    with open(dump_path, "rb") as handle:
+        data = handle.read()
     name, image_size, code_size = parse_header(data, base)
     # Only the header and the code identify the image: the game writes into the
     # data section of a loaded overlay.
@@ -65,8 +75,8 @@ def main(argv):
     elf_path = os.path.join(target, "overlay.elf")
     subprocess.run([sys.executable, os.path.join(PROFILE_DIR, "tools", "wrap_overlay.py"),
                     dump_path, base_text, elf_path], check=True)
-    subprocess.run([os.path.join(build_dir, "psp_recomp"), elf_path, "--auto", target,
-                    base_text, "--prefix", prefix], check=True)
+    subprocess.run([recompiler, elf_path, "--auto", target,
+                    base_text, "--prefix", prefix], cwd=build_dir, check=True)
     # The metadata the host identifies the corpus by. CMake reads it to configure
     # the library entry point. The build does not need an explicit reconfigure:
     # the CONFIGURE_DEPENDS glob over overlays/*/meta.txt notices the new
