@@ -2,6 +2,7 @@
 """Cppcheck's independent bounds, lifetime and dataflow diagnostics."""
 
 import argparse
+import hashlib
 import json
 import os
 import signal
@@ -90,16 +91,21 @@ def main():
                             'line': locations[0].get('line') if locations else None})
     # Cppcheck 2.17.1 invalidates every iterator on vector::erase, but C++
     # preserves those before the erased element. Bound this reviewed exception
-    # to the exact statement, location and diagnostic; retain it in reports.
+    # to the diagnostic, location and the entire reviewed free_block function;
+    # a changed erase operation must never inherit this exception.
     exception = ('invalidContainer', 'profiles/mhp3rd/host/kernel/kernel.cpp', '805')
-    statement = 'if (position != free_ranges_.begin() && (position - 1)->address + (position - 1)->size == position->address) {'
+    context_sha256 = '739ca78e1ae11f8f64bfd3fd3a8df12e7f0d034e3de30125ef80fbef4bae5926'
     waived = []
     failures = []
     for diagnostic in diagnostics:
         if diagnostic['severity'] != 'error':
             continue
         key = (diagnostic['id'], diagnostic['file'], diagnostic['line'])
-        if key == exception and (ROOT / key[1]).read_text().splitlines()[804].strip() == statement:
+        context_matches = False
+        if key == exception:
+            lines = (ROOT / key[1]).read_text().splitlines()
+            context_matches = hashlib.sha256('\n'.join(lines[791:810]).encode()).hexdigest() == context_sha256
+        if context_matches:
             waived.append(diagnostic)
         else:
             failures.append(diagnostic)

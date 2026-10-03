@@ -278,9 +278,10 @@ Cppcheck produced three additional diagnostics, reviewed as follows:
 - `invalidContainer`, `host/kernel/kernel.cpp:805`: a reviewed false positive.
   `free_block` erases `position + 1`; `position` is before that element and
   remains valid under the [C++ vector erase rules](https://eel.is/c++draft/vector.modifiers#4).
-  The runner waives only this exact diagnostic, file, line and source statement,
+  The runner waives only this exact diagnostic, file, line and a SHA-256 fingerprint of the
+  complete reviewed `free_block` function,
   and retains the finding in raw XML and `reviewed_exceptions`. A moved or changed
-  statement fails again for review. No kernel code is rewritten to silence it.
+  function fails again for review. No kernel code is rewritten to silence it.
 - `danglingLifetime`, `tests/imgui_security_tests.cpp`: the child signal-handler
   harness never returns; both expected abort and unexpected success end with
   `_Exit`. The watched texture now has static storage to express the handler's
