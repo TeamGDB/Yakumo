@@ -23,7 +23,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Build pinned analyzer
-        run: python3 scripts/ci/install_cppcheck.py out/cppcheck-tool
+        run: python3 scripts/ci/install_cppcheck.py
       - name: Configure public compilation database
         run: >-
           cmake -S . -B out/cppcheck -G Ninja
@@ -31,7 +31,7 @@ jobs:
           -DPSPRECOMP_PROFILE=mhp3rd -DPSPRECOMP_BUILD_TESTS=ON
           -DMHP3RD_RENDERER=OFF -DMHP3RD_FFMPEG=OFF
       - name: Analyze first-party sources
-        run: python3 scripts/ci/cppcheck.py out/cppcheck --tool out/cppcheck-tool/install/bin/cppcheck
+        run: python3 scripts/ci/cppcheck.py
       - name: Upload analysis diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

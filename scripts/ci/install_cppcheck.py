@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Build the hash-pinned Cppcheck CLI locally, without Qt or upstream tests."""
 
-import argparse
 import hashlib
 import subprocess
 from pathlib import Path
@@ -12,10 +11,7 @@ URL = f'https://github.com/cppcheck-opensource/cppcheck/archive/refs/tags/{VERSI
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('directory', type=Path)
-    args = parser.parse_args()
-    directory = args.directory.resolve()
+    directory = Path(__file__).resolve().parents[2] / 'out/cppcheck-tool'
     directory.mkdir(parents=True, exist_ok=True)
     archive = directory / 'source.tar.gz'
     subprocess.run(['curl', '--fail', '--location', '--silent', '--show-error',

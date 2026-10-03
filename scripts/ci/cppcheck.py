@@ -22,14 +22,13 @@ def relative_path(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('build_dir', type=Path)
-    parser.add_argument('--tool', required=True)
     parser.add_argument('--timeout', type=int, default=900, help='whole analysis deadline in seconds')
     args = parser.parse_args()
-    version = subprocess.check_output([args.tool, '--version'], text=True).strip()
+    tool = ROOT / 'out/cppcheck-tool/install/bin/cppcheck'
+    version = subprocess.check_output([str(tool), '--version'], text=True).strip()
     if version != 'Cppcheck 2.17.1':
         parser.error('Cppcheck 2.17.1 is required')
-    build = args.build_dir.resolve()
+    build = ROOT / 'out/cppcheck'
     database = json.loads((build / 'compile_commands.json').read_text())
     entries = []
     for entry in database:
@@ -43,7 +42,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     project = output / 'compile_commands.json'
     project.write_text(json.dumps(entries, indent=2) + '\n')
-    command = [args.tool, f'--project={project}', '--std=c++20', '--platform=unix64',
+    command = [str(tool), f'--project={project}', '--std=c++20', '--platform=unix64',
                '--enable=warning', '--xml', '--xml-version=2', '--max-configs=1',
                '--check-level=normal', '-j2']
     started = time.monotonic()

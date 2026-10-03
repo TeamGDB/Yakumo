@@ -241,12 +241,12 @@ See the [official manual](https://cppcheck.sourceforge.io/manual.html).
 From a clean public checkout without game-generated code:
 
 ```sh
-python3 scripts/ci/install_cppcheck.py out/cppcheck-tool
+python3 scripts/ci/install_cppcheck.py
 cmake -S . -B out/cppcheck -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
   -DPSPRECOMP_PROFILE=mhp3rd -DPSPRECOMP_BUILD_TESTS=ON \
   -DMHP3RD_RENDERER=OFF -DMHP3RD_FFMPEG=OFF
-python3 scripts/ci/cppcheck.py out/cppcheck --tool out/cppcheck-tool/install/bin/cppcheck
+python3 scripts/ci/cppcheck.py
 ```
 
 The filtered database retains actual compile commands for first-party runtime,
