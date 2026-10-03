@@ -246,7 +246,7 @@ cmake -S . -B out/tidy -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
   -DPSPRECOMP_PROFILE=mhp3rd -DPSPRECOMP_BUILD_TESTS=ON \
   -DMHP3RD_RENDERER=OFF -DMHP3RD_FFMPEG=OFF
-python3 scripts/ci/clang_tidy.py out/tidy --tool out/tidy-tools/bin/clang-tidy
+python3 scripts/ci/clang_tidy.py
 ```
 
 The runner selects first-party `src/`, framework tests, profile host and profile

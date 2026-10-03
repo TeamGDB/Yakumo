@@ -15,14 +15,13 @@ SOURCE_ROOTS = ('src/', 'tests/', 'profiles/mhp3rd/host/', 'profiles/mhp3rd/test
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('build_dir', type=Path)
-    parser.add_argument('--tool', default='clang-tidy')
     parser.add_argument('--timeout', type=int, default=120, help='seconds per translation unit')
     args = parser.parse_args()
-    version = subprocess.check_output([args.tool, '--version'], text=True)
+    tool = ROOT / 'out/tidy-tools/bin/clang-tidy'
+    version = subprocess.check_output([str(tool), '--version'], text=True)
     if not re.search(r'\bLLVM version 22\.1\.8\b', version):
         parser.error('clang-tidy 22.1.8 is required')
-    build = args.build_dir.resolve()
+    build = ROOT / 'out/tidy'
     database = json.loads((build / 'compile_commands.json').read_text())
     files = set()
     excluded = set()
@@ -48,7 +47,7 @@ def main():
     started = time.monotonic()
     failures = []
     for index, source in enumerate(sorted(files), 1):
-        command = [args.tool, '-p', str(build), '--config-file', str(ROOT / '.clang-tidy'),
+        command = [str(tool), '-p', str(build), '--config-file', str(ROOT / '.clang-tidy'),
                    '--quiet', str(ROOT / source)]
         try:
             result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
