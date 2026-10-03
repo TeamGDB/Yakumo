@@ -88,12 +88,31 @@ def main():
         diagnostics.append({'id': error.get('id'), 'severity': error.get('severity'),
                             'message': error.get('msg'), 'file': primary,
                             'line': locations[0].get('line') if locations else None})
-    failures = [d for d in diagnostics if d['severity'] == 'error']
+    # Cppcheck 2.17.1 invalidates every iterator on vector::erase, but C++
+    # preserves those before the erased element. Bound this reviewed exception
+    # to the exact statement, location and diagnostic; retain it in reports.
+    exception = ('invalidContainer', 'profiles/mhp3rd/host/kernel/kernel.cpp', '805')
+    statement = 'if (position != free_ranges_.begin() && (position - 1)->address + (position - 1)->size == position->address) {'
+    waived = []
+    failures = []
+    for diagnostic in diagnostics:
+        if diagnostic['severity'] != 'error':
+            continue
+        key = (diagnostic['id'], diagnostic['file'], diagnostic['line'])
+        if key == exception and (ROOT / key[1]).read_text().splitlines()[804].strip() == statement:
+            waived.append(diagnostic)
+        else:
+            failures.append(diagnostic)
+
     summary = {'version': version, 'compile_commands': len(entries),
                'elapsed_seconds': round(time.monotonic() - started, 2),
-               'diagnostics': diagnostics, 'blocking_errors': failures}
+               'diagnostics': diagnostics, 'reviewed_exceptions': waived, 'blocking_errors': failures}
     (output / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
-    print(json.dumps(summary, indent=2), flush=True)
+    visible = [d for d in diagnostics if d['severity'] != 'information']
+    print(json.dumps({'compile_commands': len(entries),
+                      'elapsed_seconds': summary['elapsed_seconds'],
+                      'diagnostics': visible, 'reviewed_exceptions': waived,
+                      'blocking_errors': failures}, indent=2), flush=True)
     return bool(failures)
 
 

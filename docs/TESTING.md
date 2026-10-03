@@ -267,3 +267,32 @@ commands, rather than claiming Windows/Android analysis coverage.
 The runner prepares public headers with the existing CMake generators directly.
 It runs only version and NID-table generation from
 tracked metadata; it does not compile the game stub, AOT or overlays.
+
+### Cppcheck baseline review
+
+The initial Linux baseline analyzed 224 target compile commands in 52.83 seconds;
+the native macOS baseline used 224 commands in 75.56 seconds. The seven selected
+clang-tidy checks found no first-party issues in the same headless source set.
+Cppcheck produced three additional diagnostics, reviewed as follows:
+
+- `invalidContainer`, `host/kernel/kernel.cpp:805`: a reviewed false positive.
+  `free_block` erases `position + 1`; `position` is before that element and
+  remains valid under the [C++ vector erase rules](https://eel.is/c++draft/vector.modifiers#4).
+  The runner waives only this exact diagnostic, file, line and source statement,
+  and retains the finding in raw XML and `reviewed_exceptions`. A moved or changed
+  statement fails again for review. No kernel code is rewritten to silence it.
+- `danglingLifetime`, `tests/imgui_security_tests.cpp`: the child signal-handler
+  harness never returns; both expected abort and unexpected success end with
+  `_Exit`. The watched texture now has static storage to express the handler's
+  lifetime explicitly. This changes only the synthetic test harness.
+- `constStatement`, `src/interpreter.cpp:424`: an advisory false positive on the
+  `VIIM` instruction's array initializer. The nested cast interprets a 16-bit
+  immediate as signed before converting it to a float consumed by the VFPU;
+  removing it changes values such as `0xFFFF` from -1. This warning remains
+  visible and nonblocking; no cast or interpreter behavior is changed.
+
+Cppcheck's normal analysis level bounds branch exploration, and `--max-configs=1`
+bounds speculative preprocessing per recorded command. Informational limit
+messages remain in reports: a clean result does not mean exhaustive path or
+feature-configuration coverage. System C++ APIs use Cppcheck's shipped library
+models rather than treating its parser as a replacement compiler frontend.
