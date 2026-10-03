@@ -34,7 +34,7 @@ jobs:
           python -m pip install --only-binary=:all: --require-hashes -r scripts/requirements-format.txt
 
       - name: Report the existing baseline
-        run: python scripts/format_cpp.py report --json out/format-review/baseline.json
+        run: python scripts/format_cpp.py report --json
 
       - name: Preview representative sources
         run: python scripts/format_cpp.py report --samples --diff > out/format-review/samples.diff

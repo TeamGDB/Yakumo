@@ -25,7 +25,8 @@ From the repository root on macOS/Linux:
 ```sh
 python3 -m venv out/format-venv
 out/format-venv/bin/python -m pip install --only-binary=:all: --require-hashes -r scripts/requirements-format.txt
-python3 scripts/format_cpp.py report --samples --diff --clang-format out/format-venv/bin/clang-format
+. out/format-venv/bin/activate
+python scripts/format_cpp.py report --samples --diff
 ```
 
 On Windows, use the equivalent virtual environment executables:
@@ -33,7 +34,8 @@ On Windows, use the equivalent virtual environment executables:
 ```powershell
 py -3 -m venv out/format-venv
 out/format-venv/Scripts/python.exe -m pip install --only-binary=:all: --require-hashes -r scripts/requirements-format.txt
-py -3 scripts/format_cpp.py report --samples --diff --clang-format out/format-venv/Scripts/clang-format.exe
+& out/format-venv/Scripts/Activate.ps1
+python scripts/format_cpp.py report --samples --diff
 ```
 
 The wrapper selects only Git-tracked regular C/C++ files in `include/psprecomp`,
@@ -77,11 +79,13 @@ inspect actual repository code without a mechanical rewrite.
 
 ## Local checks and gradual enforcement
 
-Put the exact formatter on PATH, or append `--clang-format PATH` to each command.
+Put the exact formatter on PATH, for example by activating the environment above.
+The wrapper invokes the fixed command `clang-format`; it does not accept an
+arbitrary executable from command-line input.
 
 ```sh
 # Preview all existing differences; does not write source or fail for differences.
-python3 scripts/format_cpp.py report --json out/format-review/baseline.json
+python3 scripts/format_cpp.py report --json
 # Preview the representative review set.
 python3 scripts/format_cpp.py report --samples --diff > out/format-review/samples.diff
 # Check just explicit files (exit 1 if formatting differs).
@@ -91,6 +95,9 @@ python3 scripts/format_cpp.py check --base origin/main --diff
 # Format one staged/committed file in a dedicated mechanical commit.
 python3 scripts/format_cpp.py format profiles/mhp3rd/tests/guest_pcm_tests.cpp
 ```
+
+`--json` writes the fixed repository-local `out/format-review/baseline.json`
+path; arbitrary report output paths are not accepted.
 
 `check` returns 0 for conforming files, 1 for formatting differences and 2 for a
 tool/version/input failure. `report` returns 0 for differences but still returns

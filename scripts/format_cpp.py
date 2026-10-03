@@ -50,7 +50,7 @@ def tracked_sources(root):
 def run(args):
     root = Path(subprocess.check_output(
         ["git", "rev-parse", "--show-toplevel"], text=True).strip())
-    version = subprocess.check_output([args.clang_format, "--version"], text=True).strip()
+    version = subprocess.check_output(["clang-format", "--version"], text=True).strip()
     if not re.search(r"\bclang-format version " + re.escape(VERSION) + r"(?:\s|$)", version):
         raise ValueError(f"Expected clang-format {VERSION}; found {version}")
     eligible = tracked_sources(root)
@@ -60,14 +60,15 @@ def run(args):
             raise ValueError("A formatting sample is absent from the tracked source scope")
     elif args.paths:
         # Paths are root-relative, even when invoked from a subdirectory.
-        selected = set(args.paths)
-        invalid = selected - eligible
+        invalid = set(args.paths) - eligible
         if invalid:
             raise ValueError("Outside tracked first-party scope: " + ", ".join(sorted(invalid)))
+        selected = {name for name in eligible if name in args.paths}
     elif args.base:
         base = git(root, "merge-base", args.base, "HEAD").decode().strip()
         names = git(root, "diff", "--name-only", "--diff-filter=ACMR", "-z", base)
-        selected = eligible.intersection(n.decode("utf-8") for n in names.split(b"\0") if n)
+        changed_names = {n.decode("utf-8") for n in names.split(b"\0") if n}
+        selected = {name for name in eligible if name in changed_names}
     else:
         selected = eligible
     changed = []
@@ -83,7 +84,7 @@ def run(args):
             continue  # A tracked file deleted in the worktree needs no formatting.
         original = path.read_bytes()
         formatted = subprocess.check_output([
-            args.clang_format, f"--style=file:{root / '.clang-format'}",
+            "clang-format", f"--style=file:{root / '.clang-format'}",
             f"--assume-filename={name}", "--Werror",
         ], input=original, cwd=root)
         checked += 1
@@ -98,7 +99,7 @@ def run(args):
             path.write_bytes(formatted)
     summary = {"version": VERSION, "checked": checked, "different": len(changed), "files": changed}
     if args.json:
-        output = Path(args.json)
+        output = root / "out/format-review/baseline.json"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     print(f"clang-format {VERSION}: {checked} checked, {len(changed)} differ ({args.mode})", file=sys.stderr)
@@ -113,9 +114,9 @@ def main():
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--base", help="select files changed since merge-base with this ref")
     selection.add_argument("--samples", action="store_true", help="select six review samples")
-    parser.add_argument("--clang-format", default="clang-format", help="executable path")
     parser.add_argument("--diff", action="store_true", help="print proposed unified diffs")
-    parser.add_argument("--json", help="write a machine-readable summary")
+    parser.add_argument("--json", action="store_true",
+                        help="write out/format-review/baseline.json")
     args = parser.parse_args()
     if args.paths and (args.base or args.samples):
         parser.error("choose paths, --base or --samples, not more than one")
