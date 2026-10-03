@@ -246,7 +246,6 @@ cmake -S . -B out/cppcheck -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
   -DPSPRECOMP_PROFILE=mhp3rd -DPSPRECOMP_BUILD_TESTS=ON \
   -DMHP3RD_RENDERER=OFF -DMHP3RD_FFMPEG=OFF
-cmake --build out/cppcheck --target mhp3rd_version profiles/mhp3rd/generated_nids/nid_table.inc -j2
 python3 scripts/ci/cppcheck.py
 ```
 
@@ -265,5 +264,6 @@ does not replace compiler warnings, runtime sanitizer tests, clang-tidy or
 device validation. Local macOS runs use the Unix model and native compile
 commands, rather than claiming Windows/Android analysis coverage.
 
-The public header preparation runs only version and NID-table generation from
+The runner prepares public headers with the existing CMake generators directly.
+It runs only version and NID-table generation from
 tracked metadata; it does not compile the game stub, AOT or overlays.

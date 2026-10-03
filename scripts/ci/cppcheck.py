@@ -29,6 +29,16 @@ def main():
     if version != 'Cppcheck 2.17.1':
         parser.error('Cppcheck 2.17.1 is required')
     build = ROOT / 'out/cppcheck'
+    # Reuse the build's public header generators directly. Requesting Ninja's
+    # NID output target also pulls in object-library dependencies unnecessarily.
+    subprocess.run(['cmake', f'-DINPUT={ROOT / "configs/nids.csv"}',
+                    f'-DOUTPUT={build / "profiles/mhp3rd/generated_nids/nid_table.inc"}',
+                    '-P', str(ROOT / 'profiles/mhp3rd/tools/embed_nids.cmake')],
+                   check=True, timeout=30)
+    subprocess.run(['cmake', f'-DSOURCE_DIR={ROOT}',
+                    f'-DOUTPUT={build / "profiles/mhp3rd/generated_version/yakumo_version.hpp"}',
+                    '-P', str(ROOT / 'profiles/mhp3rd/tools/write_version.cmake')],
+                   check=True, timeout=30)
     database = json.loads((build / 'compile_commands.json').read_text())
     entries = []
     for entry in database:
