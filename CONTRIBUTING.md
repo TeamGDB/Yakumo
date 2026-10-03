@@ -43,13 +43,13 @@ ctest --test-dir out/mhp3rd
 
 Bound game runs with a timeout and inspect logs and captures. For regressions, compare a known-good build and your change with the same scripted input and game state. Measure performance changes before and after rather than relying on impressions. See [TESTING.md](docs/TESTING.md) for testing workflows and the profile README's [Diagnostics](profiles/mhp3rd/README.md#diagnostics) section for tracing options.
 
-## Proposed C++ formatting
+## C++ formatting
 
 [FORMATTING.md](docs/FORMATTING.md) describes the pinned clang-format 21.1.8
-commands, first-party scope and representative style samples. Formatting is
-currently a proposal: CI reports differences for review without blocking on the
-existing baseline. Keep any adopted mechanical formatting separate from behavior
-changes, and avoid repository-wide rewrites before style approval.
+commands and first-party scope. Run `python3 scripts/format_cpp.py check` with
+the pinned formatter on PATH before submitting C++ changes; CI checks the full
+scoped baseline. Keep mechanical formatting in dedicated commits, separate from
+behavior changes. Review style/version changes before reformatting the baseline.
 
 ## Submitting a pull request
 

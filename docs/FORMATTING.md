@@ -1,7 +1,7 @@
-# C++ formatting proposal
+# C++ formatting
 
-This stage proposes a style for review; it does not adopt a repository-wide
-rewrite or a blocking formatting gate. See [#251](https://github.com/TeamGDB/Yakumo/issues/251)
+The first-party C++ style was approved before the initial mechanical formatting
+commit. CI now checks the complete scoped baseline with the pinned tool. See [#251](https://github.com/TeamGDB/Yakumo/issues/251)
 and its parent [#249](https://github.com/TeamGDB/Yakumo/issues/249).
 
 ## Tool and scope
@@ -47,15 +47,15 @@ The `.clang-format-ignore` file also protects direct file invocations. Use the
 wrapper for bulk operations: editor integrations and stdin invocations may not
 respect ignore-file discovery in the same way.
 
-## Style choices for review
+## Adopted style
 
 The inspected samples cover a runtime header and implementation, a host input
 module, profile and framework tests, and a command-line tool. Existing code
 usually uses four spaces, attached braces, unindented namespaces and pointer
 stars beside the variable, but mixes line widths and compact control flow.
-The proposal retains those common choices:
+The adopted policy retains those common choices:
 
-| Choice | Proposal |
+| Choice | Policy |
 | --- | --- |
 | Indentation | Four spaces, no tabs; four-space continuation and braced-initializer indentation |
 | Wrapped expressions | Fixed continuation indentation rather than horizontal alignment with opening brackets or operands |
@@ -64,21 +64,23 @@ The proposal retains those common choices:
 | Line width | 120 columns; clang-format may leave indivisible tokens longer |
 | Compact statements | Short `if` without `else` and short loops may stay on one line |
 | Functions | Short class-inline functions may stay on one line; ordinary function bodies expand |
-| Includes | Preserve ordering and blocks, including platform-dependent ordering |
+| Includes and using declarations | Preserve ordering and blocks, including platform-dependent ordering |
 | Comments | Do not reflow text or add namespace comments |
-| Code transformations | Do not insert braces or reorder qualifiers |
+| Code transformations | Do not insert braces, reorder qualifiers or split string literals |
 
-Review **120 columns**, compact control flow, inline function treatment and
-the remaining LLVM bin-packing defaults before accepting the proposal. The
-sample diffs also show stream-expression repacking and constructor wrapping.
-No production source is reformatted in this PR.
+The initial scoped rewrite follows the reviewed four-space continuation policy,
+120-column width and compact-control-flow choices. It keeps literals intact and
+does not sort using declarations. Before the mechanical commit, the earlier
+proposal differed in 215 of 260 scoped files; after adoption, **all 260 match**.
+That inventory measures formatting, not code defects.
 
-At baseline `e0b0573`, **215 of 260** scoped files differ. This is a formatting
-inventory, not a list of code defects. The CI job reports the count and uploads
-`baseline.json` plus six complete `samples.diff` previews, so reviewers can
-inspect actual repository code without a mechanical rewrite.
+The mechanical change was checked with Clang raw lexical tokens across all 260
+files, retaining literal spellings, preprocessor directive boundaries and
+function-like macro adjacency. Whitespace, comments and source locations are
+excluded from token comparison. This is stronger than stripping whitespace
+inside strings, but is not a substitute for compilation or device tests.
 
-## Local checks and gradual enforcement
+## Local checks and enforcement
 
 Put the exact formatter on PATH, for example by activating the environment above.
 The wrapper invokes the fixed command `clang-format`; it does not accept an
@@ -87,13 +89,17 @@ arbitrary executable from command-line input.
 ```sh
 # Preview all existing differences; does not write source or fail for differences.
 python3 scripts/format_cpp.py report --json
-# Preview the representative review set.
+# Preview the representative source set.
 python3 scripts/format_cpp.py report --samples --diff > out/format-review/samples.diff
+# Check the complete first-party scope (also used by CI).
+python3 scripts/format_cpp.py check
 # Check just explicit files (exit 1 if formatting differs).
 python3 scripts/format_cpp.py check profiles/mhp3rd/tests/guest_pcm_tests.cpp --diff
 # Select changed files since the merge-base with main, including local tracked edits.
 python3 scripts/format_cpp.py check --base origin/main --diff
-# Format one staged/committed file in a dedicated mechanical commit.
+# Format the complete scope; keep mechanical changes in their own commit.
+python3 scripts/format_cpp.py format
+# Or format one staged/committed file.
 python3 scripts/format_cpp.py format profiles/mhp3rd/tests/guest_pcm_tests.cpp
 ```
 
@@ -103,19 +109,16 @@ path; arbitrary report output paths are not accepted.
 `check` returns 0 for conforming files, 1 for formatting differences and 2 for a
 tool/version/input failure. `report` returns 0 for differences but still returns
 2 on a tool failure. `format` writes only selected source files. Without paths,
-`--base` or `--samples`, any mode selects the full scoped baseline: do not use a
-bare `format` command for this review stage.
+`--base` or `--samples`, any mode selects the full scoped baseline.
 
-The separate GitHub Actions job is **advisory for formatting differences**. It
-uses ordinary hosted runners, reads no game data and builds no game code or
-overlays. It does not use `continue-on-error`: formatter/tool failures remain
-visible. It is not intended as a required style check while policy is unsettled.
+The separate GitHub Actions job checks **the complete first-party scope**.
+Formatting differences and formatter/tool failures both fail the job. It uses
+ordinary hosted runners, reads no game data and builds no game code or overlays.
+It does not change repository branch-protection settings or release builds.
 
-After style approval, the proposed next step is to require formatting for new
-files and deliberately opted-in existing files. Reformat each adopted existing
-file in a separate mechanical commit, then enable its blocking check. The
-`--base` option is available for an eventual changed-file policy, but that policy
-would check whole touched files, including old untouched lines; do not enable it
-as a blocking gate until maintainers accept that cost. Configuration/version
-changes need a fresh sample and baseline review. No baseline suppression list or
-mass rewrite is introduced here.
+New tracked first-party files must match this policy, as must changes to existing
+files. For staged work, `--base` remains a useful smaller local check; CI checks
+all scoped files so a configuration change cannot silently invalidate untouched
+files. Keep mechanical formatting in dedicated commits, separate from behavioral
+changes. Configuration/version changes require fresh sample review and an
+idempotent baseline. No suppression list is used.

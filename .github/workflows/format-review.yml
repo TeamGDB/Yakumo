@@ -1,4 +1,4 @@
-name: C++ formatting review
+name: C++ formatting
 
 on:
   pull_request:
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   review:
-    name: Formatting baseline (advisory)
+    name: C++ formatting check
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -33,13 +33,13 @@ jobs:
         run: >-
           python -m pip install --only-binary=:all: --require-hashes -r scripts/requirements-format.txt
 
-      - name: Report the existing baseline
-        run: python scripts/format_cpp.py report --json
+      - name: Check the complete first-party scope
+        run: python scripts/format_cpp.py check --json
 
       - name: Preview representative sources
         run: python scripts/format_cpp.py report --samples --diff > out/format-review/samples.diff
 
-      - name: Summarize proposed formatting
+      - name: Summarize formatting check
         shell: python
         run: |
           import json
@@ -47,11 +47,11 @@ jobs:
           from pathlib import Path
           report = json.loads(Path('out/format-review/baseline.json').read_text())
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
-              summary.write(f"Proposed clang-format {report['version']} policy: "
+              summary.write(f"clang-format {report['version']} policy: "
                             f"{report['different']} of {report['checked']} tracked first-party files differ.\n\n"
-                            "Formatting differences are advisory while maintainers review the style. "
+                            "All scoped first-party files must match the approved formatting policy. "
                             "The artifact contains the source list and six representative sample diffs. "
-                            "Tool failures still fail this job. No source files were changed.\n")
+                            "Formatting differences and tool failures fail this job. No source files were changed.\n")
 
       - name: Upload review artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
