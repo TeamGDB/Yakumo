@@ -30,6 +30,8 @@ jobs:
           -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
           -DPSPRECOMP_PROFILE=mhp3rd -DPSPRECOMP_BUILD_TESTS=ON
           -DMHP3RD_RENDERER=OFF -DMHP3RD_FFMPEG=OFF
+      - name: Prepare public generated headers
+        run: cmake --build out/cppcheck --target mhp3rd_version profiles/mhp3rd/generated_nids/nid_table.inc -j2
       - name: Analyze first-party sources
         run: python3 scripts/ci/cppcheck.py
       - name: Upload analysis diagnostics
