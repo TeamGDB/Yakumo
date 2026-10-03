@@ -3,6 +3,8 @@
 
 import argparse
 import json
+import os
+import signal
 import subprocess
 import time
 import xml.etree.ElementTree as ET
@@ -56,19 +58,27 @@ def main():
                '--enable=warning', '--xml', '--xml-version=2', '--max-configs=1',
                '--check-level=normal', '-j2']
     started = time.monotonic()
-    try:
-        result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                timeout=args.timeout, check=False)
-    except subprocess.TimeoutExpired:
-        (output / 'timeout.txt').write_text(f'Analysis exceeded {args.timeout}s\n')
-        return 1
-    (output / 'progress.log').write_text(result.stdout)
-    (output / 'diagnostics.xml').write_text(result.stderr)
+    with subprocess.Popen(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          start_new_session=True) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=args.timeout)
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            # Cppcheck's parallel executor may fork workers. Stop the owned
+            # process group, rather than leaving work alive after the deadline.
+            os.killpg(process.pid, signal.SIGKILL)
+            stdout, stderr = process.communicate()
+            (output / 'progress.log').write_text(stdout)
+            (output / 'diagnostics.xml').write_text(stderr)
+            (output / 'timeout.txt').write_text(f'Analysis interrupted or exceeded {args.timeout}s\n')
+            return 1
+        status = process.returncode
+    (output / 'progress.log').write_text(stdout)
+    (output / 'diagnostics.xml').write_text(stderr)
     # A malformed report or invocation failure must never produce a green job.
-    if result.returncode != 0:
-        print(result.stderr)
+    if status != 0:
+        print(stderr)
         return 1
-    report = ET.fromstring(result.stderr)
+    report = ET.fromstring(stderr)
     diagnostics = []
     for error in report.findall('errors/error'):
         locations = error.findall('location')
