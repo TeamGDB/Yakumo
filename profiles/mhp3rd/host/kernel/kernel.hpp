@@ -272,6 +272,9 @@ public:
     using GuestCallReturn = std::function<void(AllegrexContext &, std::uint32_t)>;
     void call_guest(AllegrexContext &ctx, std::uint32_t function, const std::array<std::uint32_t, 4> &arguments,
                     GuestCallReturn on_return);
+    // Wait through the scheduler, then resume this thread through a guest
+    // continuation callback while other threads keep running.
+    void delay_guest_callback(AllegrexContext &ctx, std::uint64_t microseconds, GuestCallReturn on_return);
     void set_dispatch_enabled(bool enabled) noexcept { dispatch_enabled_ = enabled; }
     [[nodiscard]] bool dispatch_enabled() const noexcept { return dispatch_enabled_; }
 

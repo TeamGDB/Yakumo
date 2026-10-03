@@ -238,10 +238,22 @@ struct BlockTransfer {
     std::uint32_t bytes_per_pixel{};
 };
 
+// Per-display-list control state survives stalls independently for each GE
+// list submitted by the guest. Register and draw state remains in GeState.
+struct ListExecutionState {
+    struct CallFrame {
+        std::uint32_t return_pc{};
+        std::uint32_t offset_address{};
+    };
+    std::vector<CallFrame> call_stack;
+    std::uint32_t offset_address{};
+};
+
 // Executes display lists and reports the draw calls they produce. The backend
 // installs a sink; with no sink the lists are still parsed (for callbacks).
 class GeState {
 public:
+    using ListExecutionState = ::mhp3rd::gpu::ListExecutionState;
     using DrawSink = std::function<void(const DrawCall &)>;
     using SignalSink = std::function<void(std::uint32_t signal, std::uint32_t pc)>;
     using TransferSink = std::function<void(const BlockTransfer &)>;
@@ -267,6 +279,8 @@ public:
     // Runs commands from `pc` until `stall` (0 = no stall) or END. Returns the
     // address execution stopped at; `finished` reports whether the list ended.
     std::uint32_t execute(const GuestMemory &memory, std::uint32_t pc, std::uint32_t stall, bool &finished);
+    std::uint32_t execute(const GuestMemory &memory, ListExecutionState &list_state, std::uint32_t pc,
+                          std::uint32_t stall, bool &finished);
 
     [[nodiscard]] const RenderTarget &target() const noexcept { return target_; }
     [[nodiscard]] std::uint64_t draw_count() const noexcept { return draw_count_; }
@@ -278,7 +292,9 @@ public:
 private:
     // Resolves a display-list address operand against BASE and OFFSET_ADDR.
     [[nodiscard]] std::uint32_t relative_address(std::uint32_t data) const noexcept {
-        return (offset_address_ + (base_extended_ | (data & 0x00FFFFFFu))) & 0x0FFFFFFFu;
+        const std::uint32_t offset = active_list_state_ != nullptr
+            ? active_list_state_->offset_address : legacy_list_state_.offset_address;
+        return (offset + (base_extended_ | (data & 0x00FFFFFFu))) & 0x0FFFFFFFu;
     }
 
     void handle_command(const GuestMemory &memory, std::uint32_t command, std::uint32_t data);
@@ -307,7 +323,8 @@ private:
     std::uint32_t vertex_address_{};
     std::uint32_t index_address_{};
     std::uint32_t base_extended_{};   // BASE: bits 16..19 become address bits 24..27
-    std::uint32_t offset_address_{};  // OFFSET_ADDR: added to every relative address
+    ListExecutionState legacy_list_state_;
+    ListExecutionState *active_list_state_{};
     std::array<float, 16> world_{};
     std::array<float, 16> view_{};
     std::array<float, 16> projection_{};
@@ -322,7 +339,6 @@ private:
     std::uint32_t texture_write_index_{};
     std::uint32_t bone_write_index_{};
 
-    std::vector<std::uint32_t> call_stack_;
     std::uint32_t command_pc_{};
     DrawCall call_;  // reused by draw_primitive for every draw
     DrawSink draw_sink_;

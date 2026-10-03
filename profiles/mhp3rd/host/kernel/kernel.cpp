@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <thread>
 
 namespace mhp3rd {
@@ -946,6 +947,18 @@ void Kernel::guest_call_return_stub(AllegrexContext &ctx) {
     ctx.set_gpr(31, call.return_address);
     ctx.pc = call.return_address;
     call.on_return(ctx, ctx.gpr[2]);
+}
+
+void Kernel::delay_guest_callback(AllegrexContext &ctx, std::uint64_t microseconds, GuestCallReturn on_return) {
+    if (current_thread() == nullptr || in_interrupt())
+        throw psprecomp::Error("Cannot delay a guest continuation without a calling thread or from an interrupt.");
+    if (!on_return)
+        throw psprecomp::Error("Cannot delay a guest continuation without a return callback.");
+    if (std::max<std::uint64_t>(microseconds, 1u) > std::numeric_limits<std::uint64_t>::max() - now_us_)
+        throw psprecomp::Error("Cannot delay a guest continuation beyond the emulated clock's range.");
+    guest_calls_[current_uid_].push_back(GuestCall{ctx.gpr[31], std::move(on_return)});
+    ctx.set_gpr(31, kGuestCallReturnStub);
+    delay_current(ctx, microseconds);
 }
 
 void Kernel::idle_stub(AllegrexContext &ctx) {

@@ -13,11 +13,11 @@
 #endif
 #include "ui/input_script.hpp"
 #include "ui/layer.hpp"
-#include "ui/layered_armor_screen.hpp"
 #include "ui/mods_screen.hpp"
 #include "ui/save_screen.hpp"
 #include "ui/texture_pack_screen.hpp"
 #include "ui/text_input.hpp"
+#include "ui/transmog_screen.hpp"
 #include "ui/touch_editor.hpp"
 #include "ui/touch_overlay.hpp"
 #include "ui/widgets.hpp"
@@ -36,6 +36,7 @@
 #include "install/installer.hpp"
 #include "install/user_data.hpp"
 #include "kernel/fast_forward.hpp"
+#include "mods/transmog.hpp"
 #include "platform/utf8_path.hpp"
 #include "perf/frame_stats.hpp"
 #include "save_data/save_transfer.hpp"
@@ -104,7 +105,7 @@ int cycle(int value, int delta, int count) { return ((value + delta) % count + c
 
 float gain(const settings::Settings &s) { return s.mute ? 0.0f : static_cast<float>(s.volume) / 100.0f; }
 
-constexpr const char *kTabs[] = {"Video", "Audio", "Controls", "Network", "Mods", "System", "Debug"};
+constexpr const char *kTabs[] = {"Video", "Audio", "Controls", "Network", "Mods", "Layered Sets", "System", "Debug"};
 constexpr int kTabCount = static_cast<int>(std::size(kTabs));
 
 // Where the menu was when it last closed (#189): its page, how far that page
@@ -152,6 +153,7 @@ public:
     // One frame; false once the menu closes.
     bool frame();
     [[nodiscard]] bool quit() const noexcept { return quit_; }
+    [[nodiscard]] bool transmog_live_preview_requested() const noexcept { return transmog_live_preview_; }
 
 private:
     enum class Confirm { None, Quit, Setup, DeletePreset };
@@ -162,6 +164,7 @@ private:
     void preset_rows();
     void network();
     void mods();
+    void transmog();
     void system();
     bool confirm_dialog();
 
@@ -172,6 +175,7 @@ private:
     bool first_frame_{true};
     bool close_{};
     bool quit_{};
+    bool transmog_live_preview_{};
     bool was_editing_{};
     bool back_{};  // the back button was pressed this frame
     Confirm confirm_{Confirm::None};
@@ -199,10 +203,11 @@ bool Menu::frame() {
     // closes the menu.
     bool font_list_was_open = (tab_ == 0 && (font_list_open() || texture_pack_screen_open())) ||
                               (tab_ == 2 && controllers_screen_open()) ||
-                              (tab_ == 4 && (mods_screen_open() || layered_armor_screen_open())) ||
-                              (tab_ == 5 && save_screen_open());
+                              (tab_ == 4 && mods_screen_open()) ||
+                              (tab_ == 6 && save_screen_open());
+    const bool transmog_subpage_was_open = tab_ == 5 && transmog_subpage_open();
 #if defined(MHP3RD_DEBUG_MENU)
-    font_list_was_open = font_list_was_open || (tab_ == 6 && debug_screen_open());
+    font_list_was_open = font_list_was_open || (tab_ == 7 && debug_screen_open());
 #endif
     back_ = back || pad_back;
 
@@ -213,17 +218,25 @@ bool Menu::frame() {
         return true;
     }
 
-    begin_panel("##menu", "Yakumo", paused_ ? "Paused" : "Running", true);
+    const bool transmog_preview = !paused_ && tab_ == 5;
+    begin_panel("##menu", "Yakumo", paused_ ? "Paused" : "Running", !transmog_preview,
+                transmog_preview, transmog_preview);
 #if defined(MHP3RD_DEBUG_MENU)
     // The developer tools' page, in developer builds run with MHP3RD_DEBUG_MENU=1.
-    const int tab_count = debug::enabled() ? 7 : 6;
+    const int tab_count = debug::enabled() ? 8 : 7;
 #else
-    const int tab_count = 6;
+    const int tab_count = 7;
 #endif
     // A page that is not there this run (Debug) gives way to the first.
     if (tab_ >= tab_count) tab_ = 0;
     const bool opening = first_frame_;
-    const bool switched = tab_bar(kTabs, tab_count, tab_) || first_frame_;
+    const int previous_tab = tab_;
+    const bool switched = tab_bar(kTabs, tab_count, tab_, transmog_preview) || first_frame_;
+    if (previous_tab == 5 && tab_ != previous_tab) {
+        if (mods::transmog::preview_active()) mods::transmog::cancel_preview();
+        reset_transmog_page();
+    }
+    if (previous_tab != 5 && tab_ == 5) reset_transmog_page();
     first_frame_ = false;
     begin_content();
     MenuPlace &place = menu_place();
@@ -248,8 +261,9 @@ bool Menu::frame() {
     case 2: controls(); break;
     case 3: network(); break;
     case 4: mods(); break;
+    case 5: transmog(); break;
 #if defined(MHP3RD_DEBUG_MENU)
-    case 6:
+    case 7:
         debug_page(back_);
         if (debug_page_resume()) close_ = true;
         break;
@@ -299,7 +313,7 @@ bool Menu::frame() {
 
     if (confirm_ != Confirm::None) {
         if ((back || pad_back) && confirm_opened_) confirm_ = Confirm::None;
-    } else if (!font_list_was_open && (((back || pad_back) && !was_editing_) || start)) {
+    } else if (!font_list_was_open && (((back || pad_back) && !was_editing_ && !transmog_subpage_was_open) || start)) {
         close_ = true;
     }
     if (close_ && !quit_ && texture_pack_import_busy()) close_ = false;
@@ -1528,14 +1542,21 @@ void Menu::network() {
 }
 
 void Menu::mods() {
-    if (layered_armor_screen(back_)) return;
-    if (!mods_screen_open()) layered_armor_row();
     mods_page(back_);
     if (take_mods_restart_request()) {
         install::request_restart_on_exit();
         quit_ = true;
         close_ = true;
     }
+}
+
+void Menu::transmog() {
+    if (!transmog_page(back_, paused_)) close_ = true;
+    if (paused_ && transmog_page_open()) {
+        transmog_live_preview_ = true;
+        close_ = true;
+    }
+    if (take_transmog_close_request()) close_ = true;
 }
 
 void Menu::system() {
@@ -2055,6 +2076,7 @@ void draw_over_game() {
         layer.set_interactive(false);
         layer.renderer().set_game_input(true);
         note_menu_closed(quit);
+        if (mods::transmog::preview_active()) mods::transmog::cancel_preview();
         if (quit) quit_requested() = true;
     }
     layer.end_frame();
@@ -2094,9 +2116,15 @@ bool run_menu() {
     layer.set_interactive(true);
     Menu menu(true);
     const bool window_open = layer.run([&] { return menu.frame(); }, true);
+    const bool live_preview = menu.transmog_live_preview_requested();
     layer.set_interactive(false);
     layer.renderer().set_game_input(true);
     note_menu_closed(menu.quit());
+    if (live_preview && window_open && !menu.quit()) {
+        open_menu_over_game();
+    } else if (mods::transmog::preview_active()) {
+        mods::transmog::cancel_preview();
+    }
     return window_open && !menu.quit();
 }
 

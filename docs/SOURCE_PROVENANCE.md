@@ -45,6 +45,8 @@ The built-in server (`server.cpp`, used by *Host a session* and `--adhoc-server`
 
 A profile owns its generated AOT corpus, address-specific lowering, HLE behavior and native fast paths. Those files remain isolated under `profiles/<id>` so they do not become hidden dependencies of the generic framework.
 
+The armor and weapon appearance feature in `profiles/mhp3rd/host/mods/transmog*` is credited to **SolarGhost**. It was developed for this profile from analysis of the supported NPJB-40001 executable and native runtime behavior; the PR contains no game data or third-party mod payload.
+
 ## Analog camera
 
 `profiles/mhp3rd/host/camera/` was written from this project's own NPJB-40001 executable analysis and run-time traces. The camera caller, structure offsets, 16-bit yaw format and height-filter coefficient are observed facts. Continuous pitch uses an independently written spherical-orbit calculation. No third-party camera-mod code is included or adapted.

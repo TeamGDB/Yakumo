@@ -14,6 +14,8 @@
 #include "kernel/kernel.hpp"
 #include "camera/game_aspect.hpp"
 #include "camera/game_camera.hpp"
+#include "mods/transmog.hpp"
+#include "mods/transmog_weapon.hpp"
 
 #include "psprecomp/common.hpp"
 #include "psprecomp/elf32.hpp"
@@ -26,6 +28,14 @@
 // this signature.
 namespace psprecomp {
 void MHP3RD_CAMERA_HELPER_UNIT(Runtime &, AllegrexContext &);
+}
+#endif
+
+#if defined(MHP3RD_TRANSMOG_HELPER_UNIT)
+namespace psprecomp {
+void MHP3RD_TRANSMOG_HELPER_UNIT(Runtime &, AllegrexContext &);
+void MHP3RD_TRANSMOG_CONVERTER_UNIT(Runtime &, AllegrexContext &);
+void MHP3RD_TRANSMOG_WEAPON_UNIT(Runtime &, AllegrexContext &);
 }
 #endif
 
@@ -440,6 +450,16 @@ int main(int argc, char **argv) {
         (void)elf.load_and_relocate(runtime.memory(), mhp3rd::kLoadBase);
         psprecomp::register_generated_functions(runtime);
         mhp3rd::install_profile(runtime, elf, paths);
+#if defined(MHP3RD_TRANSMOG_HELPER_UNIT)
+        if (sha256 == mhp3rd::install::kExecutableSha256) {
+            mhp3rd::mods::transmog::install(runtime,
+                {&psprecomp::MHP3RD_TRANSMOG_HELPER_UNIT, &psprecomp::MHP3RD_TRANSMOG_CONVERTER_UNIT}, sha256);
+            mhp3rd::mods::transmog::weapon::install(runtime, &psprecomp::MHP3RD_TRANSMOG_WEAPON_UNIT,
+                mhp3rd::mods::transmog::store(), &mhp3rd::mods::transmog::enabled,
+                {&mhp3rd::mods::transmog::equipment_names, &mhp3rd::mods::transmog::equipment_count},
+                &mhp3rd::mods::transmog::visual_selection, sha256);
+        }
+#endif
         if (sha256 == mhp3rd::install::kExecutableSha256) (void)mhp3rd::camera::prepare_game_aspect(runtime);
 #if defined(MHP3RD_CAMERA_HELPER_UNIT)
         // CMake names the generated unit that holds the camera's rotation

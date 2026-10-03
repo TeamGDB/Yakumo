@@ -37,7 +37,8 @@ ImGuiStyle make_style(float scale, float font_size);
 //
 //   begin_panel(...); tab_bar(...); begin_content(); rows...;
 //   begin_footer(); hints(...); end_panel();
-void begin_panel(const char *id, const std::string &title, const std::string &subtitle, bool dim_game);
+void begin_panel(const char *id, const std::string &title, const std::string &subtitle, bool dim_game,
+                 bool beside_game = false, bool compact_side = false);
 void begin_content();
 // A drag with a finger scrolls the current window, as on any touch screen;
 // ImGui itself scrolls only with a wheel. Call before ending the window.
@@ -47,7 +48,7 @@ void end_panel();
 
 // Tabs switched with L1/R1 (Q/W on the keyboard) or the mouse. Returns true
 // when `selected` changed.
-bool tab_bar(const char *const *labels, int count, int &selected);
+bool tab_bar(const char *const *labels, int count, int &selected, bool compact = false);
 
 struct RowOptions {
     bool disabled{};

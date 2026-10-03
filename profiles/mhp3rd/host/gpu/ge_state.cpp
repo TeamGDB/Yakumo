@@ -1,5 +1,6 @@
 #include "ge_state.hpp"
 
+#include "psprecomp/common.hpp"
 #include "perf/frame_stats.hpp"
 
 #include <algorithm>
@@ -618,7 +619,10 @@ void GeState::handle_command(const GuestMemory &memory, std::uint32_t command, s
     case kIndexAddress: index_address_ = relative_address(data); break;
     case kBase: base_extended_ = (data & 0x000F0000u) << 8u; break;
     case kVertexType: vertex_type_ = data; break;
-    case kOffsetAddress: offset_address_ = data << 8u; break;
+    case kOffsetAddress:
+        (active_list_state_ != nullptr ? active_list_state_->offset_address : legacy_list_state_.offset_address) =
+            data << 8u;
+        break;
     case kOrigin: break;  // handled in execute(), where the list pc is known
 
     case kCullFaceEnable: culling_enabled_ = (data & 1u) != 0u; break;
@@ -972,7 +976,9 @@ void GeState::draw_primitive(const GuestMemory &memory, std::uint32_t data) {
     call.index_address = index_type != 0u ? index_address_ : 0u;
     call.primitive_count = count;
     call.command_address = command_pc_;
-    call.call_return = call_stack_.empty() ? 0u : call_stack_.back();
+    const ListExecutionState *list_state = active_list_state_ != nullptr
+        ? active_list_state_ : &legacy_list_state_;
+    call.call_return = list_state->call_stack.empty() ? 0u : list_state->call_stack.back().return_pc;
     call.material_color = material_color_;
     call.lighting_enabled = lighting_enabled_;
     call.has_vertex_color = ((vertex_type_ >> 2u) & 7u) != 0u;
@@ -1099,7 +1105,24 @@ void GeState::draw_primitive(const GuestMemory &memory, std::uint32_t data) {
 }
 
 std::uint32_t GeState::execute(const GuestMemory &memory, std::uint32_t pc, std::uint32_t stall, bool &finished) {
+    return execute(memory, legacy_list_state_, pc, stall, finished);
+}
+
+std::uint32_t GeState::execute(const GuestMemory &memory, ListExecutionState &list_state, std::uint32_t pc,
+                               std::uint32_t stall, bool &finished) {
+    struct ActiveListGuard {
+        ListExecutionState *&slot;
+        ListExecutionState *previous;
+        ActiveListGuard(ListExecutionState *&active, ListExecutionState &state) : slot(active), previous(active) {
+            slot = &state;
+        }
+        ~ActiveListGuard() { slot = previous; }
+    } active_guard(active_list_state_, list_state);
+    constexpr std::uint32_t kMaximumCallDepth = 1024u;
+    constexpr std::uint32_t kMaximumCommands = 2'000'000u;
     finished = false;
+    const std::uint32_t start_pc = pc;
+    std::uint32_t last_command{};
     if (world_[15] == 0.0f) {
         identity(world_);
         identity(view_);
@@ -1107,10 +1130,15 @@ std::uint32_t GeState::execute(const GuestMemory &memory, std::uint32_t pc, std:
         identity(texture_matrix_);
     }
 
-    for (std::uint32_t steps = 0; steps < 2'000'000u; ++steps) {
+    for (std::uint32_t steps = 0; steps < kMaximumCommands; ++steps) {
         if (stall != 0u && pc == stall) return pc;
-        if (!memory.contains(pc, 4u)) return pc;
+        if (!memory.contains(pc, 4u))
+            throw psprecomp::Error("[ge] Display list from " + psprecomp::hex32(start_pc) +
+                " reached unmapped command " + psprecomp::hex32(pc) + " after " + std::to_string(steps) +
+                " commands (last=" + psprecomp::hex32(last_command) + ", stall=" +
+                psprecomp::hex32(stall) + "). Check the list builder or resource lifetime.");
         const std::uint32_t word = memory.load32(pc);
+        last_command = word;
         const std::uint32_t command = word >> 24u;
         const std::uint32_t data = word & 0x00FFFFFFu;
         // Where the camera came from: the display list the game built holds the
@@ -1125,25 +1153,38 @@ std::uint32_t GeState::execute(const GuestMemory &memory, std::uint32_t pc, std:
             continue;
         case kOrigin:
             // ORIGIN makes later relative addresses count from this command.
-            offset_address_ = pc - 4u;
+            list_state.offset_address = pc - 4u;
             continue;
         case kConditionalJump:
             // The bounding-box test is not evaluated; taking the jump would skip
             // geometry, so fall through to the next command instead.
             continue;
         case kCall:
-            call_stack_.push_back(pc);
+            if (list_state.call_stack.size() >= kMaximumCallDepth)
+                throw psprecomp::Error("[ge] Display list from " + psprecomp::hex32(start_pc) +
+                    " exceeded the CALL depth limit of " + std::to_string(kMaximumCallDepth) +
+                    " at " + psprecomp::hex32(pc - 4u) + ". Check for a cyclic or malformed list.");
+            list_state.call_stack.push_back({pc, list_state.offset_address});
             pc = relative_address(data) & 0x0FFFFFFCu;
             continue;
         case kReturn:
-            if (!call_stack_.empty()) {
-                pc = call_stack_.back();
-                call_stack_.pop_back();
+            if (!list_state.call_stack.empty()) {
+                pc = list_state.call_stack.back().return_pc;
+                list_state.offset_address = list_state.call_stack.back().offset_address;
+                list_state.call_stack.pop_back();
             }
             continue;
-        case kEnd:
+        case kEnd: {
+            // FINISH and SIGNAL are the only list terminators. A bare END is
+            // an in-list marker: it neither completes the list nor returns
+            // from a called sublist. RETURN owns that stack transition.
+            const std::uint32_t preceding_command = pc >= 8u && memory.contains(pc - 8u, 4u)
+                ? memory.load32(pc - 8u) >> 24u : 0u;
+            if (preceding_command != kFinish && preceding_command != kSignal) continue;
+            list_state.call_stack.clear();
             finished = true;
             return pc;
+        }
         case kFinish:
             if (signal_sink_) signal_sink_(0x10000u | (data & 0xFFFFu), pc);
             continue;
@@ -1165,7 +1206,10 @@ std::uint32_t GeState::execute(const GuestMemory &memory, std::uint32_t pc, std:
             continue;
         }
     }
-    return pc;
+    throw psprecomp::Error("[ge] Display list from " + psprecomp::hex32(start_pc) +
+        " exceeded " + std::to_string(kMaximumCommands) + " commands at " + psprecomp::hex32(pc) +
+        " (last=" + psprecomp::hex32(last_command) + ", stall=" + psprecomp::hex32(stall) +
+        "). Check for a cyclic or malformed display list.");
 }
 
 } // namespace mhp3rd::gpu

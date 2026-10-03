@@ -10,6 +10,7 @@
 #include "overlays.hpp"
 #include "game/guest_ram.hpp"
 #include "game/layered_armor.hpp"
+#include "mods/transmog.hpp"
 #include "platform/utf8_path.hpp"
 
 #include "audio/audio_sink.hpp"
@@ -77,10 +78,12 @@ struct GeCallback {
 };
 
 struct GeList {
+    std::uint32_t start{};
     std::uint32_t pc{};
     std::uint32_t stall{};
     std::int32_t callback{-1};
     bool done{};
+    gpu::GeState::ListExecutionState execution;
 };
 
 struct AudioChannel {
@@ -173,14 +176,16 @@ void run_ge_list(Runtime &rt, std::uint32_t id) {
     if (const auto cb = media().ge_callbacks.find(list.callback); cb != media().ge_callbacks.end())
         callback = &cb->second;
 
-    media().ge.set_signal_sink([callback](std::uint32_t signal, std::uint32_t pc) {
+    media().ge.set_signal_sink([callback, id](std::uint32_t signal, std::uint32_t pc) {
         if (callback == nullptr) return;
         const bool finish = (signal & 0x10000u) != 0u;
+        if (finish) mods::transmog::ge_finish_queued(id);
         const std::uint32_t function = finish ? callback->finish_function : callback->signal_function;
         if (function == 0u) return;
         InterruptCall call{};
         call.function = function;
         call.arguments = {signal & 0xFFFFu, finish ? callback->finish_argument : callback->signal_argument, pc, 0u};
+        if (finish) call.on_return = [id](std::uint32_t) { mods::transmog::ge_finish_returned(id); };
         kernel().queue_interrupt(std::move(call));
     });
 #if defined(MHP3RD_HAS_RENDERER)
@@ -198,13 +203,14 @@ void run_ge_list(Runtime &rt, std::uint32_t id) {
     bool finished = false;
     try {
         const perf::SplitScope split(perf::Split::Lists);
-        list.pc = media().ge.execute(rt.memory(), list.pc, list.stall, finished);
+        list.pc = media().ge.execute(rt.memory(), list.execution, list.pc, list.stall, finished);
     } catch (const psprecomp::Error &error) {
         // A malformed list must not take the whole run down: drop it and carry on.
         log_once("ge-list-error", std::string("[ge] display list aborted: ") + error.what());
         finished = true;
     }
     list.done = finished;
+    mods::transmog::ge_list_finished(id, finished);
     media().ge.set_draw_sink(nullptr);
     media().ge.set_view_hook(nullptr);
     media().ge.set_transfer_sink(nullptr);
@@ -431,7 +437,8 @@ void present_frame(Runtime &rt) {
     // The menu, drawn below, reads the game's memory between frames.
     game::attach(rt);
     // Layered armor puts its wrappers in place here, between two frames.
-    game::layered::frame(rt);
+    // Transmog owns the appearance hooks; the old layered selector is retained
+    // only as a legacy settings migration input.
 #if defined(MHP3RD_DEBUG_MENU)
     // Between two game frames: the developer tools' queued writes and held
     // cheats land here, never while guest code runs.
@@ -580,11 +587,15 @@ void register_display_ctrl(HleRegistrar &hle) {
     });
     // The guest flipping the framebuffer is the end of a frame.
     hle.add("sceDisplay", "sceDisplaySetFrameBuf", [](Runtime &rt, AllegrexContext &ctx) {
+        const auto execution = psprecomp::capture_runtime_execution_context();
+        const auto import_pc = ctx.pc;
         media().display.framebuffer = arg(ctx, 0);
         media().display.buffer_width = arg(ctx, 1);
         media().display.pixel_format = arg(ctx, 2);
         present_frame(rt);
         kernel().finish(ctx, 0u);
+        if (psprecomp::runtime_execution_context_matches(execution) && !kernel().in_interrupt() && ctx.pc == import_pc)
+            mods::transmog::frame(rt, ctx);
     });
 
     hle.add("sceCtrl", "sceCtrlSetSamplingCycle", [](Runtime &, AllegrexContext &ctx) {
@@ -709,10 +720,12 @@ void register_ge(HleRegistrar &hle) {
     const auto enqueue = [](Runtime &rt, AllegrexContext &ctx) {
         const std::uint32_t id = media().next_ge_list++;
         GeList list{};
-        list.pc = arg(ctx, 0) & 0x0FFFFFFFu;
+        list.start = arg(ctx, 0) & 0x0FFFFFFFu;
+        list.pc = list.start;
         list.stall = arg(ctx, 1) & 0x0FFFFFFFu;
         list.callback = static_cast<std::int32_t>(arg(ctx, 2));
         media().ge_lists[id] = std::move(list);
+        mods::transmog::ge_list_started(id, media().ge_lists[id].start, kernel().current_uid());
         perf::count_display_list();
         run_ge_list(rt, id);
         kernel().finish(ctx, id);
