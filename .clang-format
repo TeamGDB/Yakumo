@@ -4,6 +4,9 @@ BasedOnStyle: LLVM
 Language: Cpp
 IndentWidth: 4
 ContinuationIndentWidth: 4
+AlignAfterOpenBracket: DontAlign
+AlignOperands: DontAlign
+BracedInitializerIndentWidth: 4
 TabWidth: 4
 UseTab: Never
 ColumnLimit: 120

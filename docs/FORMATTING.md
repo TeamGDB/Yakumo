@@ -57,7 +57,8 @@ The proposal retains those common choices:
 
 | Choice | Proposal |
 | --- | --- |
-| Indentation | Four spaces, no tabs; four-space continuation indentation |
+| Indentation | Four spaces, no tabs; four-space continuation and braced-initializer indentation |
+| Wrapped expressions | Fixed continuation indentation rather than horizontal alignment with opening brackets or operands |
 | Braces and namespaces | Attached braces; namespaces do not indent their contents |
 | Pointer and reference placement | `Type *pointer`, `Type &reference` |
 | Line width | 120 columns; clang-format may leave indivisible tokens longer |
@@ -68,11 +69,11 @@ The proposal retains those common choices:
 | Code transformations | Do not insert braces or reorder qualifiers |
 
 Review **120 columns**, compact control flow, inline function treatment and
-LLVM's continuation/bin-packing defaults before accepting the proposal. The
+the remaining LLVM bin-packing defaults before accepting the proposal. The
 sample diffs also show stream-expression repacking and constructor wrapping.
 No production source is reformatted in this PR.
 
-At baseline `e0b0573`, **208 of 260** scoped files differ. This is a formatting
+At baseline `e0b0573`, **215 of 260** scoped files differ. This is a formatting
 inventory, not a list of code defects. The CI job reports the count and uploads
 `baseline.json` plus six complete `samples.diff` previews, so reviewers can
 inspect actual repository code without a mechanical rewrite.
