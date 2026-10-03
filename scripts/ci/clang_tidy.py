@@ -22,6 +22,16 @@ def main():
     if not re.search(r'\bLLVM version 22\.1\.8\b', version):
         parser.error('clang-tidy 22.1.8 is required')
     build = ROOT / 'out/tidy'
+    # Reuse the build's public header generators directly. Requesting Ninja's
+    # NID output target also pulls in object-library dependencies unnecessarily.
+    subprocess.run(['cmake', f'-DINPUT={ROOT / "configs/nids.csv"}',
+                    f'-DOUTPUT={build / "profiles/mhp3rd/generated_nids/nid_table.inc"}',
+                    '-P', str(ROOT / 'profiles/mhp3rd/tools/embed_nids.cmake')],
+                   check=True, timeout=30)
+    subprocess.run(['cmake', f'-DSOURCE_DIR={ROOT}',
+                    f'-DOUTPUT={build / "profiles/mhp3rd/generated_version/yakumo_version.hpp"}',
+                    '-P', str(ROOT / 'profiles/mhp3rd/tools/write_version.cmake')],
+                   check=True, timeout=30)
     database = json.loads((build / 'compile_commands.json').read_text())
     files = set()
     excluded = set()
