@@ -17,7 +17,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--timeout', type=int, default=120, help='seconds per translation unit')
     args = parser.parse_args()
-    tool = ROOT / 'out/tidy-tools/bin/clang-tidy'
+    # Invoke the native analyzer directly: the wheel's Python console wrapper
+    # forks a child which subprocess.run's timeout would otherwise orphan.
+    binaries = list(ROOT.glob('out/tidy-tools/lib/python*/site-packages/clang_tidy/data/bin/clang-tidy'))
+    if len(binaries) != 1:
+        parser.error('install the pinned analyzer in out/tidy-tools first')
+    tool = binaries[0]
     version = subprocess.check_output([str(tool), '--version'], text=True)
     if not re.search(r'\bLLVM version 22\.1\.8\b', version):
         parser.error('clang-tidy 22.1.8 is required')
