@@ -50,4 +50,11 @@ struct Entry {
 // truncating); -1 on failure.
 [[nodiscard]] int open_document(const std::string &uri, const char *mode);
 
+// Extracts a driver package .zip a picked document names into dest_dir
+// (already made and cleared by the caller): every .so file name found,
+// flattening away any folder the zip holds them in; empty if none. Nothing
+// when the document cannot be read at all (not a zip, or Android refuses it).
+[[nodiscard]] std::optional<std::vector<std::string>> install_gpu_driver_zip(const std::string &document_uri,
+                                                                              const std::string &dest_dir);
+
 } // namespace mhp3rd::android

@@ -30,7 +30,11 @@ import android.widget.TextView;
 
 import org.libsdl.app.SDLActivity;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.util.ArrayList;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /**
  * SDL's activity with what the host needs from Android and SDL does not
@@ -364,5 +368,38 @@ public class YakumoActivity extends SDLActivity {
         } catch (Exception e) {
             return -1;
         }
+    }
+
+    /**
+     * Extracts a document's .zip into destDir (made and cleared by the
+     * caller), flattening away any folder the zip holds its entries in.
+     * Returns every .so file name extracted (the caller picks the main one
+     * among them; empty if none), or null when the document cannot be read
+     * at all.
+     */
+    public static String[] installGpuDriverZip(String documentUri, String destDir) {
+        ArrayList<String> libraries = new ArrayList<>();
+        try {
+            ParcelFileDescriptor descriptor =
+                mSingleton.getContentResolver().openFileDescriptor(Uri.parse(documentUri), "r");
+            if (descriptor == null) return null;
+            byte[] buffer = new byte[1 << 16];
+            try (ZipInputStream zip = new ZipInputStream(new ParcelFileDescriptor.AutoCloseInputStream(descriptor))) {
+                ZipEntry entry;
+                while ((entry = zip.getNextEntry()) != null) {
+                    if (entry.isDirectory()) continue;
+                    String name = new File(entry.getName()).getName();
+                    if (name.isEmpty()) continue;
+                    try (FileOutputStream out = new FileOutputStream(new File(destDir, name))) {
+                        int read;
+                        while ((read = zip.read(buffer)) > 0) out.write(buffer, 0, read);
+                    }
+                    if (name.endsWith(".so")) libraries.add(name);
+                }
+            }
+        } catch (Exception e) {
+            return null;
+        }
+        return libraries.toArray(new String[0]);
     }
 }

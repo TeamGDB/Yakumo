@@ -267,6 +267,12 @@ const std::vector<Field> &fields() {
              if (kGpuCompats.parse(t, s.gpu_compat)) return;
              if (parse_bool(t, on)) s.gpu_compat = on ? GpuCompat::On : GpuCompat::Off;
          }},
+        {"video.custom_gpu_driver", nullptr,
+         [](Settings &s, const std::string &t) {
+             s.custom_gpu_driver = t;
+             return true;
+         },
+         [](const Settings &s) { return s.custom_gpu_driver; }, nullptr},
         {"text.font", "MHP3RD_FONT",
          [](Settings &s, const std::string &t) {
              s.font = t;

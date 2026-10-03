@@ -30,6 +30,14 @@ Read and write the PNG images of HD texture packs. Copyright (c) 2017 Sean Barre
 
 Hashes textures for HD texture packs. Copyright (c) 2012-2021 Yann Collet. BSD 2-Clause License: `xxHash-LICENSE.txt`. <https://github.com/Cyan4973/xxHash>
 
+### volk (Android only)
+
+Lets the Android app resolve Vulkan through a function-pointer table instead of linking `libvulkan.so` directly, so a custom GPU driver the player picks can back it. Copyright (c) 2018-2026 Arseny Kapoulkine. MIT License: `volk-LICENSE.md`. <https://github.com/zeux/volk>
+
+### adrenotools and liblinkernsbypass (Android only)
+
+Open the custom Vulkan driver the player picks in the Video settings (host/platform/android_gpu_driver.hpp), the same way Winlator, Skyline and yuzu-Android do. adrenotools links into libmain.so; its hook libraries, built alongside it, are packed next to libmain.so as `libmain_hook.so` and `libhook_impl.so` (`cmake/Adrenotools.cmake`). Copyright (c) 2021 Billy Laws. BSD 2-Clause License: `adrenotools-LICENSE.txt`. <https://github.com/bylaws/libadrenotools>, <https://github.com/bylaws/liblinkernsbypass>
+
 ## Shipped as separate libraries
 
 These are dynamically linked shared libraries in `lib/` next to the executable (`/app/lib/yakumo/lib/` in the Flatpak, `Yakumo.app/Contents/Frameworks/` on macOS). They are unmodified builds of the upstream releases below. You may replace them with your own builds of the same or a compatible version.

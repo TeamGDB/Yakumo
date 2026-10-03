@@ -5,3 +5,5 @@ The files here are unmodified copies from [Dear ImGui](https://github.com/ocornu
 Only what the port uses is kept: the library itself (`imgui*.cpp`, `imgui*.h`, `imconfig.h` and the `imstb_*.h` headers it includes) and two backends from `backends/`, `imgui_impl_sdl3` for window events and gamepads and `imgui_impl_vulkan` for drawing. The demo, the examples and the other backends are left out.
 
 The port's own interface under `host/ui/` is built on it: the in-game menu and the first-run setup screens.
+
+`imconfig.h` carries one small addition, in the file's own sanctioned customization block (its "You may edit imconfig.h" note at the top): `IMGUI_IMPL_VULKAN_USE_VOLK` for the Android app only, so `imgui_impl_vulkan` resolves Vulkan through volk instead of linking `libvulkan.so` directly (`host/platform/android_gpu_driver.hpp`). `imgui_impl_vulkan.cpp`/`.h` themselves are unmodified; they already support this through the convenience support for Volk their own comments describe.
