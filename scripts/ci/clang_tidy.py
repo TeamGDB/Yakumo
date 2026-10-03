@@ -20,8 +20,8 @@ def main():
     parser.add_argument('--timeout', type=int, default=120, help='seconds per translation unit')
     args = parser.parse_args()
     version = subprocess.check_output([args.tool, '--version'], text=True)
-    if not re.search(r'\bLLVM version 18\.1\.8\b', version):
-        parser.error('clang-tidy 18.1.8 is required')
+    if not re.search(r'\bLLVM version 22\.1\.8\b', version):
+        parser.error('clang-tidy 22.1.8 is required')
     build = args.build_dir.resolve()
     database = json.loads((build / 'compile_commands.json').read_text())
     files = set()

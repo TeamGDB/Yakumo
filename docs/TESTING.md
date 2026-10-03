@@ -230,12 +230,12 @@ Useful settings while testing — all described in [the profile README](../profi
 
 ## Focused clang-tidy analysis
 
-Stage 3 (#252) uses LLVM clang-tidy **18.1.8**, with hash-checked standalone
+Stage 3 (#252) uses LLVM clang-tidy **22.1.8**, with hash-checked standalone
 wheels for Linux x86_64 and macOS arm64. The explicit checks in `.clang-tidy`
 cover suspicious `sizeof`/`memset`, implicit pointer-to-bool conversion,
 dangling handles, null string views and use after move. Selected findings and
 compilation errors fail the check; style and modernization rules are excluded.
-See the [LLVM 18.1.8 documentation](https://releases.llvm.org/18.1.8/tools/clang/tools/extra/docs/clang-tidy/index.html).
+See the [LLVM 22.1.8 documentation](https://clang.llvm.org/extra/clang-tidy/index.html).
 
 From a clean public checkout without generated game code:
 
@@ -263,3 +263,16 @@ manifest even on failures. This configuration does not cover renderer-enabled
 SDL/Vulkan code, FFmpeg, Windows/macOS-only branches, Android JNI, shaders,
 or game-generated code. macOS local runs cover the available native branches;
 they are not a substitute for the Linux job or existing platform builds.
+
+When using Apple's compiler with standalone LLVM on macOS, make its implicit
+SDK and libc++ directories explicit in the CMake database before analysis:
+
+```sh
+cmake -S . -B out/tidy \
+  -DCMAKE_OSX_SYSROOT="$(xcrun --show-sdk-path)" \
+  -DCMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES="$(xcrun --show-sdk-path)/usr/include/c++/v1"
+```
+
+The pinned LLVM 22 frontend supports the current Apple SDK headers; older
+standalone LLVM 18 could not parse their newer builtin type traits. Do not
+remove those headers or suppress parser failures to make analysis pass.
