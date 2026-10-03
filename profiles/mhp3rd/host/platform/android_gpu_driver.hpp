@@ -16,8 +16,8 @@
 namespace mhp3rd::android {
 
 struct PickedDriver {
-    std::string library;  // the main driver's file name (settings.custom_gpu_driver); empty on error
-    std::string error;    // empty: picking and installing it worked
+    std::string library; // the main driver's file name (settings.custom_gpu_driver); empty on error
+    std::string error;   // empty: picking and installing it worked
 };
 // Asks for a driver package .zip (as Winlator, Skyline and the Adreno Tools
 // driver repositories distribute them: meta.json and a main .so, often with

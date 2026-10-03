@@ -2537,9 +2537,8 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
                   << static_cast<int>(instance_result) << "); falling back to the phone's own driver\n";
         dlclose(impl.gpu_driver_handle);
         impl.gpu_driver_handle = nullptr;
-        instance_result = volkInitialize() == VK_SUCCESS
-                              ? vkCreateInstance(&instance_info, nullptr, &impl.instance)
-                              : instance_result;
+        instance_result = volkInitialize() == VK_SUCCESS ? vkCreateInstance(&instance_info, nullptr, &impl.instance)
+                                                         : instance_result;
     }
     if (!check(instance_result, "vkCreateInstance", error)) return false;
     volkLoadInstance(impl.instance);

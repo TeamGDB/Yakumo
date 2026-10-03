@@ -627,12 +627,11 @@ void Menu::video() {
         const std::string driver_name = android::driver_display_name(s.custom_gpu_driver);
         info_row("Custom GPU driver", driver_name.empty() ? "System default" : driver_name);
         if (button_row("Pick a driver package…",
-                       {false,
-                        {},
-                        "A custom Vulkan driver (a Turnip/Mesa build for your Adreno GPU) instead of the phone's "
-                        "own, from a .zip such as Winlator, Skyline or the Adreno Tools driver repositories "
-                        "distribute (meta.json and a .so). Applies when Yakumo starts next; if it fails to load, "
-                        "the phone's own driver is used instead."})) {
+                {false, {},
+                    "A custom Vulkan driver (a Turnip/Mesa build for your Adreno GPU) instead of the phone's "
+                    "own, from a .zip such as Winlator, Skyline or the Adreno Tools driver repositories "
+                    "distribute (meta.json and a .so). Applies when Yakumo starts next; if it fails to load, "
+                    "the phone's own driver is used instead."})) {
             if (const std::optional<android::PickedDriver> picked = android::pick_custom_gpu_driver()) {
                 if (picked->error.empty()) {
                     s.custom_gpu_driver = picked->library;

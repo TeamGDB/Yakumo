@@ -183,8 +183,8 @@ int open_document(const std::string &uri, const char *mode) {
     return fd;
 }
 
-std::optional<std::vector<std::string>> install_gpu_driver_zip(const std::string &document_uri,
-                                                                 const std::string &dest_dir) {
+std::optional<std::vector<std::string>> install_gpu_driver_zip(
+    const std::string &document_uri, const std::string &dest_dir) {
     Call call;
     if (!call.ok()) return std::nullopt;
     jmethodID id = call.method("installGpuDriverZip", "(Ljava/lang/String;Ljava/lang/String;)[Ljava/lang/String;");

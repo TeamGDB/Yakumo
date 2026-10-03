@@ -83,7 +83,7 @@ std::string driver_display_name(const std::string &library) {
     if (at == std::string::npos) return library;
     std::string name;
     for (++at; at < text.size() && text[at] != '"'; ++at) {
-        if (text[at] == '\\' && at + 1u < text.size()) ++at;  // skip the escape, keep the escaped character
+        if (text[at] == '\\' && at + 1u < text.size()) ++at; // skip the escape, keep the escaped character
         name += text[at];
     }
     return name.empty() ? library : name;
@@ -102,8 +102,8 @@ void *open_custom_gpu_driver(const std::string &library, std::string &error) {
     const fs::path hooks = executable_directory();
     const std::string driver_dir = directory.string() + "/";
     void *handle = adrenotools_open_libvulkan(RTLD_NOW | RTLD_LOCAL, ADRENOTOOLS_DRIVER_CUSTOM, /*tmpLibDir=*/nullptr,
-                                              hooks.c_str(), driver_dir.c_str(), library.c_str(),
-                                              /*fileRedirectDir=*/nullptr, /*userMappingHandle=*/nullptr);
+        hooks.c_str(), driver_dir.c_str(), library.c_str(),
+        /*fileRedirectDir=*/nullptr, /*userMappingHandle=*/nullptr);
     if (handle == nullptr)
         error = "adrenotools could not load the driver (an old Android version, or a device it does not support)";
     return handle;

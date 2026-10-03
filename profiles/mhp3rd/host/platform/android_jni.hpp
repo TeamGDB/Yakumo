@@ -55,7 +55,7 @@ struct Entry {
 // (already made and cleared by the caller): every .so file name found,
 // flattening away any folder the zip holds them in; empty if none. Nothing
 // when the document cannot be read at all (not a zip, or Android refuses it).
-[[nodiscard]] std::optional<std::vector<std::string>> install_gpu_driver_zip(const std::string &document_uri,
-                                                                              const std::string &dest_dir);
+[[nodiscard]] std::optional<std::vector<std::string>> install_gpu_driver_zip(
+    const std::string &document_uri, const std::string &dest_dir);
 
 } // namespace mhp3rd::android
