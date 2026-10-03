@@ -1,0 +1,4 @@
+# LLVM 18.1.8 standalone wheels: Linux x86_64 and macOS arm64.
+clang-tidy==18.1.8 \
+    --hash=sha256:c725a95c316d15df12f5bf7c1abfdf3cb9e4f3b9a9afb4cb6bb1e9df4e669493 \
+    --hash=sha256:d635df55e45c9141b16f4d33ef785d3ec6944db66a43ece865981447460affc3
