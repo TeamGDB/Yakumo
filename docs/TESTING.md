@@ -230,7 +230,7 @@ Useful settings while testing — all described in [the profile README](../profi
 
 ## Complementary Cppcheck analysis
 
-Stage 4 (#253) pins **Cppcheck 2.17.1** by release source SHA-256. Its independent
+Stage 4 (#253) pins **Cppcheck 2.22.0** by release source SHA-256. Its independent
 parser/dataflow analysis complements clang-tidy's focused AST checks with array
 bounds, uninitialized variables, null dereferences and resource lifetime
 errors. The initial policy blocks first-party `error` diagnostics; `warning`
@@ -270,30 +270,39 @@ tracked metadata; it does not compile the game stub, AOT or overlays.
 
 ### Cppcheck baseline review
 
-The initial Linux baseline analyzed 224 target compile commands in 52.83 seconds;
-the native macOS baseline used 224 commands in 75.56 seconds. The seven selected
-clang-tidy checks found no first-party issues in the same headless source set.
-Cppcheck produced three additional diagnostics, reviewed as follows:
+The initial 2.17.1 evaluation analyzed 224 target commands in 52.83 seconds on
+Linux and 75.56 seconds on macOS. The final pin uses the current **2.22.0**
+release (September 19, 2026), which removed the old false `constStatement`
+warning on VIIM's necessary signed-immediate cast. The selected clang-tidy
+checks found no first-party issues in the same headless source set. Cppcheck
+provides additional bounds/dataflow diagnostics and is tested with a synthetic
+out-of-bounds access that must fail the runner.
+
+The current baseline review covers:
 
 - `invalidContainer`, `host/kernel/kernel.cpp:805`: a reviewed false positive.
   `free_block` erases `position + 1`; `position` is before that element and
   remains valid under the [C++ vector erase rules](https://eel.is/c++draft/vector.modifiers#4).
-  The runner waives only this exact diagnostic, file, line and a SHA-256 fingerprint of the
-  complete reviewed `free_block` function,
-  and retains the finding in raw XML and `reviewed_exceptions`. A moved or changed
-  function fails again for review. No kernel code is rewritten to silence it.
-- `danglingLifetime`, `tests/imgui_security_tests.cpp`: the child signal-handler
-  harness never returns; both expected abort and unexpected success end with
-  `_Exit`. The watched texture now has static storage to express the handler's
-  lifetime explicitly. This changes only the synthetic test harness.
-- `constStatement`, `src/interpreter.cpp:424`: an advisory false positive on the
-  `VIIM` instruction's array initializer. The nested cast interprets a 16-bit
-  immediate as signed before converting it to a float consumed by the VFPU;
-  removing it changes values such as `0xFFFF` from -1. This warning remains
-  visible and nonblocking; no cast or interpreter behavior is changed.
+  The runner waives only this diagnostic, file, line and a SHA-256 fingerprint
+  of the complete reviewed `free_block` function. The finding remains in raw
+  XML and `reviewed_exceptions`. A moved or changed function fails for review.
+  A mutation probe changing the erased position verifies that a real invalid
+  iterator cannot inherit the exception. Kernel behavior remains unchanged.
+- The signal-handler child test's watched texture has static storage to express
+  its lifetime explicitly; both expected abort and unexpected success call
+  `_Exit`. This is a synthetic harness change, not an application fix.
+- The debug test's bounded overlay-name writer now copies the checked prefix
+  and pads the remaining bytes in separate loops. The previous strlen-guarded
+  ternary was safe but triggered a false bounds error in 2.22.0. It writes the
+  same 32-byte field and does not change runtime/game code.
+- Advisory `uninitMemberVarNoCtor` warnings concern aggregate records populated
+  through explicit initializers (the bindings reference, pack locations,
+  user-data items, settings metadata and synthetic test records). They remain
+  visible and nonblocking; the adoption does not add constructors or defaults
+  across unrelated application code merely to silence the analyzer.
 
-Cppcheck's normal analysis level bounds branch exploration, and `--max-configs=1`
-bounds speculative preprocessing per recorded command. Informational limit
-messages remain in reports: a clean result does not mean exhaustive path or
-feature-configuration coverage. System C++ APIs use Cppcheck's shipped library
-models rather than treating its parser as a replacement compiler frontend.
+Cppcheck's normal level bounds branch exploration, and `--max-configs=1` bounds
+speculative preprocessing per recorded command. Informational limits remain in
+reports: a clean result does not mean exhaustive path/configuration coverage.
+System C++ APIs use Cppcheck's shipped library models rather than treating its
+parser as a replacement compiler frontend.

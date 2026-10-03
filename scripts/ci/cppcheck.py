@@ -29,8 +29,8 @@ def main():
     args = parser.parse_args()
     tool = ROOT / 'out/cppcheck-tool/install/bin/cppcheck'
     version = subprocess.check_output([str(tool), '--version'], text=True).strip()
-    if version != 'Cppcheck 2.17.1':
-        parser.error('Cppcheck 2.17.1 is required')
+    if version != 'Cppcheck 2.22.0':
+        parser.error('Cppcheck 2.22.0 is required')
     build = ROOT / 'out/cppcheck'
     # Reuse the build's public header generators directly. Requesting Ninja's
     # NID output target also pulls in object-library dependencies unnecessarily.
@@ -89,7 +89,7 @@ def main():
         diagnostics.append({'id': error.get('id'), 'severity': error.get('severity'),
                             'message': error.get('msg'), 'file': primary,
                             'line': locations[0].get('line') if locations else None})
-    # Cppcheck 2.17.1 invalidates every iterator on vector::erase, but C++
+    # Cppcheck 2.22.0 invalidates every iterator on vector::erase, but C++
     # preserves those before the erased element. Bound this reviewed exception
     # to the diagnostic, location and the entire reviewed free_block function;
     # a changed erase operation must never inherit this exception.
