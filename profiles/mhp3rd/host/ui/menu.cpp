@@ -655,12 +655,18 @@ void Menu::audio() {
         sink.set_volume(gain(s));
         settings::save();
     }
+    if (toggle_row("Mute in background", s.background_mute,
+                   locked("audio.background_mute", "Silence the game while it runs in the background."))) {
+        s.background_mute = !s.background_mute;
+        settings::save();
+    }
     info_row("Device", device ? (paused_ ? "44100 Hz stereo, paused while this menu is open" : "44100 Hz stereo")
                               : "None");
     ImGui::Dummy({0.0f, font_gap()});
     if (button_row("Restore audio defaults", {!device, {}, "Full volume, not muted."})) {
         s.volume = settings::defaults().volume;
         s.mute = settings::defaults().mute;
+        s.background_mute = settings::defaults().background_mute;
         sink.set_volume(gain(s));
         settings::save();
     }
