@@ -26,6 +26,7 @@ public:
         runtime.nids().load_csv(PSPRECOMP_TEST_NIDS_CSV);
         for (const auto &symbol : runtime.nids().all()) nids[{symbol.library, symbol.name}] = symbol.nid;
         mhp3rd::HleRegistrar hle(runtime);
+        mhp3rd::register_media(hle);
         mhp3rd::register_atrac(hle);
         mhp3rd::register_mpeg(hle);
         kernel.start_loader_thread(cpu, 0x08820000u, 0);
@@ -39,7 +40,9 @@ public:
         unsigned i = 0;
         for (auto value : args) cpu.set_gpr(i++ + 4, value);
         cpu.set_gpr(31, 0x08822000u);
-        runtime.invoke_import(library, nids.at({library, name}), cpu);
+        auto found = nids.find({library, name});
+        if (found == nids.end()) throw std::runtime_error("Unknown test NID: " + library + "::" + name);
+        runtime.invoke_import(library, found->second, cpu);
         check(!runtime.stopped(), "HLE import unexpectedly stopped guest execution");
         return cpu.gpr[2];
     }
@@ -161,6 +164,86 @@ void atrac_contracts(Fixture &f) {
         "Exhausted ATRAC ID table rejected");
     for (unsigned slot = 0; slot < 6; ++slot) f.atrac("sceAtracReleaseAtracID", {slot});
 }
+void audio_display_contracts(Fixture &f) {
+    auto &memory = f.runtime.memory();
+    check(f.call("sceDisplay", "sceDisplaySetMode", {0, 480, 272}) == 0 &&
+            f.call("sceDisplay", "sceDisplaySetFrameBuf", {0x04000000, 512, 3, 1}) == 0,
+        "Headless frame presentation must complete");
+    check(f.call("sceCtrl", "sceCtrlSetSamplingCycle", {100}) == 0 &&
+            f.call("sceCtrl", "sceCtrlSetSamplingCycle", {0}) == 100,
+        "Controller sampling cycle returns previous setting");
+    check(
+        f.call("sceCtrl", "sceCtrlSetSamplingMode", {1}) == 0 && f.call("sceCtrl", "sceCtrlSetSamplingMode", {0}) == 1,
+        "Controller sampling mode returns previous setting");
+    check(f.call("sceGe_user", "sceGeEdramGetAddr") == 0x04000000u &&
+            f.call("sceGe_user", "sceGeEdramGetSize") == 0x00200000u &&
+            f.call("sceGe_user", "sceGeEdramSetAddrTranslation", {0}) == 0,
+        "GE EDRAM interface changed");
+    memory.store32(f.data, 0x0F000000u);
+    memory.store32(f.data + 4, 0x0C000000u);
+    auto list = f.call("sceGe_user", "sceGeListEnQueue", {f.data, f.data, 0xFFFFFFFFu, 0});
+    check(f.call("sceGe_user", "sceGeListSync", {list, 0}) == 2, "Stalled GE list must report drawing");
+    check(f.call("sceGe_user", "sceGeListUpdateStallAddr", {list, 0}) == 0 &&
+            f.call("sceGe_user", "sceGeListSync", {list, 0}) == 0,
+        "Released GE stall must finish list");
+    check(f.call("sceGe_user", "sceGeListUpdateStallAddr", {0xFFFFFFFFu, 0}) == mhp3rd::error::kIllegalArgument,
+        "Unknown GE list must reject stall update");
+    memory.store32(f.data + 32, 0);
+    memory.store32(f.data + 36, 1);
+    memory.store32(f.data + 40, 0);
+    memory.store32(f.data + 44, 2);
+    auto callback = f.call("sceGe_user", "sceGeSetCallback", {f.data + 32});
+    check(f.call("sceGe_user", "sceGeListEnQueueHead", {f.data, 0, callback, 0}) > 0, "Head-enqueued GE list failed");
+    check(f.call("sceGe_user", "sceGeUnsetCallback", {callback}) == 0 &&
+            f.call("sceGe_user", "sceGeDrawSync", {0}) == 0 && f.call("sceGe_user", "sceGeBreak", {0}) == 0 &&
+            f.call("sceGe_user", "sceGeContinue") == 0,
+        "GE callbacks/list cleanup failed");
+    const auto call = [&](const char *name, std::initializer_list<std::uint32_t> args = {}) {
+        return f.call("sceAudio", name, args);
+    };
+    check(call("sceAudioChReserve", {0, 16, 0}) == 0 && call("sceAudioChReserve", {0, 16, 0}) == 0x80260002u &&
+            call("sceAudioChReserve", {8, 16, 0}) == 0x80260002u,
+        "Audio channel reservation exclusivity changed");
+    for (unsigned channel = 1; channel < 8; ++channel)
+        check(call("sceAudioChReserve", {0xFFFFFFFFu, 16, 0}) == channel, "Automatic audio reservation order changed");
+    check(call("sceAudioChReserve", {0xFFFFFFFFu, 16, 0}) == 0x80260002u, "Audio channel exhaustion must fail");
+    check(call("sceAudioGetChannelRestLength", {8}) == 0x80260002u && call("sceAudioGetChannelRestLength", {0}) == 0,
+        "Audio rest length invalid/idle contract changed");
+    for (unsigned sample = 0; sample < 32; ++sample) memory.store16(f.data + sample * 2, 1000);
+    check(call("sceAudioOutputPannedBlocking", {0, 0x8000, 0x8000, f.data}) == 16 &&
+            call("sceAudioGetChannelRestLength", {0}) <= 16,
+        "Audio output frame count/timing changed");
+    check(call("sceAudioSetChannelDataLen", {0, 8}) == 0 && call("sceAudioChangeChannelConfig", {0, 0x10}) == 0 &&
+            call("sceAudioChangeChannelVolume", {0, 0x1000, 0x1000}) == 0,
+        "Audio channel settings failed");
+    for (unsigned channel = 0; channel < 8; ++channel)
+        check(call("sceAudioChRelease", {channel}) == 0, "Audio release failed");
+    check(call("sceAudioOutputPannedBlocking", {8, 0, 0, 0}) == 0x80260002u, "Unknown audio channel output accepted");
+    constexpr auto core = 0x1234u;
+    const auto sas = [&](const char *name, std::initializer_list<std::uint32_t> args = {}) {
+        return f.call("sceSasCore", name, args);
+    };
+    check(sas("__sceSasInit", {core, 16, 1, 0, 44100}) == 0 && sas("__sceSasGetOutputmode", {core}) == 0,
+        "SAS initialization output mode changed");
+    memory.store8(f.data, 0u);
+    memory.store8(f.data + 1u, 3u);
+    for (unsigned byte = 2; byte < 16; ++byte) memory.store8(f.data + byte, 0x11u);
+    check(sas("__sceSasSetVoice", {core, 0, f.data, 16, 1}) == 0 && sas("__sceSasSetPitch", {core, 0, 0x1000}) == 0 &&
+            sas("__sceSasSetVolume", {core, 0, 0x1000, 0x1000, 0, 0}) == 0 && sas("__sceSasSetKeyOn", {core, 0}) == 0,
+        "SAS PCM setup failed");
+    check((sas("__sceSasGetEndFlag", {core}) & 1u) == 0 && sas("__sceSasCore", {core, f.output}) == 0 &&
+            memory.load16(f.output) > 990,
+        "SAS HLE must write mixed PCM into guest output");
+    check(sas("__sceSasCore", {core, 0xFFFFFFFFu}) == 0, "Unavailable SAS destination must safely drop grain");
+    check(sas("__sceSasSetKeyOff", {core, 0}) == 0 && (sas("__sceSasGetEndFlag", {core}) & 1u), "SAS key off failed");
+    memory.store8(f.data, 0);
+    memory.store8(f.data + 1, 7);
+    check(sas("__sceSasSetVoice", {core, 0, f.data, 16, 0}) == 0 && sas("__sceSasSetSimpleADSR", {core, 0, 0, 0}) == 0,
+        "SAS VAG/ADSR imports failed");
+    for (const char *name : {"__sceSasRevType", "__sceSasRevParam", "__sceSasRevEVOL", "__sceSasRevVON"})
+        check(sas(name, {core, 0, 0}) == 0, "Unmodeled reverb sends must succeed");
+}
+
 void mpeg_contracts(Fixture &f) {
     if (!mhp3rd::movie::AvcDecoder::available() || !mhp3rd::audio::AtracDecoder::available()) {
         check(f.mpeg("sceMpegGetAvcAu", {0, 0, 0, 0}) == 0x80618001u, "Disabled movies must report no data");
@@ -279,6 +362,7 @@ void mpeg_contracts(Fixture &f) {
 int main() {
     try {
         Fixture fixture;
+        audio_display_contracts(fixture);
         atrac_contracts(fixture);
         mpeg_contracts(fixture);
         std::cout << "Media HLE contracts passed\n";
