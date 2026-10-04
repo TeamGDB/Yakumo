@@ -45,6 +45,17 @@ percentage has no minimum. The `project-coverage` artifact includes per-language
 HTML reports, native LCOV, the JSON/Markdown source inventory and diagnostics.
 See [COVERAGE.md](COVERAGE.md) for commands, comparison bases and remaining gaps.
 
+A header containing declarations or member defaults can have no standalone
+LLVM line mapping even when its implementation is exercised. The small reviewed
+manifest `scripts/ci/coverage_unmapped_headers.json` records an exact SHA-256
+fingerprint and rationale for each such header. These stay visible as unmeasured
+in the inventory, without an invented percentage, and are listed separately in
+the diff report. Any header edit invalidates its exception until reviewed again;
+an emitted mapping always uses the normal 80% gate. Unknown implementation files
+still fail the gate. Regression tests check both source mutation and mapped-line
+failures.
+
+
 On Linux use Clang/LLVM 18 and compiler-rt; on macOS use Xcode Clang and its
 matching `xcrun llvm-cov`/`llvm-profdata`. `COVERAGE_CXX` selects the compiler,
 but report tools must match its profile format. Native coverage currently
