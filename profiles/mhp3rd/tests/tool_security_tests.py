@@ -1,5 +1,6 @@
 """Synthetic archive and command-argument regressions; no game data required."""
 
+import csv
 import io
 import os
 import re
@@ -19,6 +20,10 @@ import embed_shaders
 import databin
 import wrap_overlay
 import extract_iso
+import extract_blocks
+import extract_dialogue
+import extract_text
+import text_report
 from extraction_paths import extraction_path
 
 
@@ -324,6 +329,130 @@ class ArchiveBehaviorTests(unittest.TestCase):
             with patch("sys.stderr", new=io.StringIO()):
                 self.assertEqual(wrap_overlay.main(["wrap"]), 2)
                 self.assertEqual(wrap_overlay.main(["wrap", str(raw), "0x08804001", str(elf)]), 1)
+
+
+class TextToolContracts(unittest.TestCase):
+    @staticmethod
+    def block():
+        data = bytearray(512)
+        struct.pack_into("<4I", data, 0, 2, 8, 64, 0)
+        strings = ["", "Menu", "Goal", "Yes", "No", "Item", "Craft", "Rest"]
+        offset = 36
+        for index, text in enumerate(strings):
+            struct.pack_into("<I", data, 64 + index * 4, offset)
+            encoded = text.encode() + b"\0"
+            data[64 + offset:64 + offset + len(encoded)] = encoded
+            offset += len(encoded)
+        struct.pack_into("<I", data, 96, 0xffffffff)
+        return bytes(data)
+
+    @staticmethod
+    def dialogue():
+        data = bytearray(64)
+        struct.pack_into("<3I", data, 0, 17, 16, 0xffffffff)
+        struct.pack_into("<3I", data, 16, 1, 16, 0xffffffff)
+        data[32:42] = b"Synthetic\0"
+        return bytes(data)
+
+    @staticmethod
+    def quest():
+        data = bytearray(1024)
+        struct.pack_into("<3I", data, 0, 64, 512, 0)
+        for base in (64, 512):
+            for index in range(6):
+                offset = base + 72 + index * 40
+                struct.pack_into("<I", data, base + index * 4, offset)
+                text = ("Field%d" % index).encode() + b"\0"
+                data[offset:offset + len(text)] = text
+            struct.pack_into("<I", data, base + 24, base)
+        return bytes(data)
+
+    @classmethod
+    def archive(cls, path):
+        entries = [cls.block(), cls.quest(), cls.dialogue(), b"Loose synthetic text\0"]
+        directory = bytearray(2048)
+        struct.pack_into("<5I", directory, 0, 1, 2, 3, 4, 5)
+        for index, data in enumerate(entries):
+            struct.pack_into("<2I", directory, 20 + index * 8, index, len(data))
+        path.write_bytes(ArchiveBehaviorTests.encrypt(directory, 0) + b"".join(
+            ArchiveBehaviorTests.encrypt(data + bytes(2048 - len(data)), index + 1)
+            for index, data in enumerate(entries)))
+
+    def test_parsers_and_truncation(self):
+        data = self.block()
+        self.assertEqual(extract_blocks.blocks_of(data)[0][1][1], "Menu")
+        self.assertEqual(extract_text.find_block(data)[1][0][0], 2)
+        self.assertEqual(list(extract_dialogue.dialogue_of(self.dialogue())), [(17, 0, 1, "Synthetic")])
+        fields = extract_text.quest_block(self.quest())
+        self.assertEqual(len(fields), 12)
+        self.assertEqual(fields[0], (64, 136, "Field0"))
+        for size in range(24):
+            truncated = bytes(size)
+            self.assertEqual(extract_blocks.blocks_of(truncated), [])
+            self.assertIsNone(extract_text.find_block(truncated))
+            self.assertIsNone(extract_text.quest_block(truncated))
+            self.assertEqual(list(extract_dialogue.dialogue_of(truncated)), [])
+        self.assertIsNone(extract_blocks.table_at(data, 0, 0))
+        self.assertIsNone(extract_text.parse_table(data, -1))
+        self.assertIsNone(extract_blocks.read_cstr(data, len(data)))
+        self.assertIsNone(extract_dialogue.read_cstr(b"no terminator", 0))
+        self.assertEqual(extract_text.loose_runs(b"hello\0trailing"), ["hello", "trailing"])
+
+    def test_commands_use_real_encrypted_synthetic_archive(self):
+        with tempfile.TemporaryDirectory() as temporary, patch("sys.stdout", new=io.StringIO()):
+            root = Path(temporary)
+            image = root / "synthetic.bin"
+            self.archive(image)
+            extract_blocks.main([str(image), str(root / "blocks.tsv"), "--entries", "0,99"])
+            self.assertIn("Menu", (root / "blocks.tsv").read_text())
+            extract_dialogue.main([str(image), str(root / "dialogue.tsv"), "--entries", "2"])
+            self.assertIn("Synthetic", (root / "dialogue.tsv").read_text())
+            extract_text.main([str(image), str(root / "dump")])
+            self.assertIn("quest fields", (root / "dump/entry_0001.txt").read_text())
+            self.assertIn("loose text runs", (root / "dump/entry_0003.txt").read_text())
+            extract_text.main([str(image), str(root / "small"), "--skip-large", "30", "--no-runs"])
+            self.assertEqual((root / "small/all_strings.tsv").read_text(), "")
+            text_report.main([str(root / "dump")])
+            self.assertTrue((root / "dump/strings.csv").is_file())
+            with self.assertRaises(IndexError):
+                extract_dialogue.main([str(image), str(root / "bad.tsv"), "--entries", "99"])
+
+    def test_report_preserves_text_and_protects_spreadsheet_cells(self):
+        self.assertEqual(text_report.kind("ASCII"), "en")
+        self.assertEqual(text_report.kind("\u65e5\u672c"), "jp")
+        self.assertEqual(text_report.kind("a\uff01"), "misto")
+        self.assertEqual(text_report.kind("123"), "sym")
+        self.assertEqual(text_report.clean("~C12Hello"), "Hello")
+        for value in ("=1+1", "+1", "-1", "@SUM(A1)", "\tplain", " =1"):
+            self.assertTrue(text_report.spreadsheet_row({"text": value})["text"].startswith("'"))
+        with tempfile.TemporaryDirectory() as temporary, patch("sys.stdout", new=io.StringIO()):
+            root = Path(temporary)
+            (root / "all_strings.tsv").write_text("entry\ttable\tindex\ttext\n0\t2\t1\t=1+1\n"
+                "0\t2\t2\t~C12Hello\\nWorld\n0\t2\t3\t\u65e5\u672c\ninvalid\n", encoding="utf-8")
+            text_report.main([str(root)])
+            with (root / "strings.csv").open() as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(len(rows), 3)
+            self.assertEqual(rows[0]["text"], "'=1+1")
+            self.assertEqual(rows[1]["has_format"], "1")
+            self.assertIn("~C12", (root / "codes.txt").read_text())
+            with self.assertRaises(SystemExit):
+                text_report.main([str(root / "missing")])
+
+    @unittest.skipIf(os.name == "nt", "symlink creation requires privileges on Windows")
+    def test_text_outputs_cannot_follow_symlinks_outside_root(self):
+        with tempfile.TemporaryDirectory() as temporary, patch("sys.stdout", new=io.StringIO()):
+            root = Path(temporary)
+            image = root / "synthetic.bin"
+            self.archive(image)
+            outside = root / "outside.txt"
+            outside.write_text("keep")
+            dump = root / "dump"
+            dump.mkdir()
+            (dump / "all_strings.tsv").symlink_to(outside)
+            with self.assertRaises(ValueError):
+                extract_text.main([str(image), str(dump)])
+            self.assertEqual(outside.read_text(), "keep")
 
 
 class BuildToolContracts(unittest.TestCase):

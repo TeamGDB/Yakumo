@@ -17,12 +17,14 @@ in a .lang file name the same tables the game does.
         Limits it to the entries given (the text blocks the game has).
 """
 import argparse
+from contextlib import closing
 import os
 import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import databin
+from extraction_paths import extraction_path
 
 # The archive entries that hold text blocks (docs/DATA_BIN.md): the shared one
 # and the quest/menu ones.
@@ -90,7 +92,7 @@ def blocks_of(data):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("image")
+    parser.add_argument("image", type=argparse.FileType("rb"))
     parser.add_argument("out")
     parser.add_argument("--entries", default=",".join(str(e) for e in TEXT_ENTRIES),
                         help="comma-separated DATA.BIN entry ids")
@@ -98,23 +100,23 @@ def main(argv=None):
     wanted = {int(x) for x in options.entries.split(",") if x}
 
     archive = databin.Archive(options.image)
-    total = 0
-    with open(options.out, "w", encoding="utf-8", newline="\n") as out:
-        out.write("entry\ttable\tindex\ttext\n")
-        for entry in sorted(wanted):
-            try:
-                data = archive.read(entry)
-            except Exception:
-                continue
-            for table_index, strings in blocks_of(data):
-                for index, text in enumerate(strings):
-                    if not text:
-                        continue
-                    out.write("%d\t%d\t%d\t%s\n" % (entry, table_index, index, text.replace("\n", "\\n")))
-                    total += 1
-            print("entry %d: %s" % (entry, [w for w, _ in blocks_of(data)]), flush=True)
-    print("wrote %s, %d strings" % (options.out, total))
-
+    with closing(archive.stream):
+        total = 0
+        with open(extraction_path(os.path.dirname(options.out) or ".", (os.path.basename(options.out),)), "w", encoding="utf-8", newline="\n") as out:
+            out.write("entry\ttable\tindex\ttext\n")
+            for entry in sorted(wanted):
+                try:
+                    data = archive.read(entry)
+                except Exception:
+                    continue
+                for table_index, strings in blocks_of(data):
+                    for index, text in enumerate(strings):
+                        if not text:
+                            continue
+                        out.write("%d\t%d\t%d\t%s\n" % (entry, table_index, index, text.replace("\n", "\\n")))
+                        total += 1
+                print("entry %d: %s" % (entry, [w for w, _ in blocks_of(data)]), flush=True)
+        print("wrote %s, %d strings" % (options.out, total))
 
 if __name__ == "__main__":
     main(sys.argv[1:])

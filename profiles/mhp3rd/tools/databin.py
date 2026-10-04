@@ -146,10 +146,12 @@ class Archive:
     """The DATA.BIN directory: a block table plus an exact-size table."""
 
     def __init__(self, path):
-        self.stream = open(path, "rb")
+        # A CLI can pass its already-opened input; sizes come from the same
+        # descriptor, so replacing the pathname cannot change the size check.
+        self.stream = path if hasattr(path, "read") else open(path, "rb")
         try:
             self.base = 0
-            self.size = os.path.getsize(path)
+            self.size = os.fstat(self.stream.fileno()).st_size
             located = iso_find(self.stream, "/PSP_GAME/USRDIR/DATA.BIN")
             if located:
                 self.base, self.size = located

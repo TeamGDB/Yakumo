@@ -17,12 +17,14 @@ shape the translation tools use (entry -> index).
     python3 extract_dialogue.py IMAGE.iso OUT.tsv [--entry 4289]
 """
 import argparse
+from contextlib import closing
 import os
 import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import databin
+from extraction_paths import extraction_path
 
 
 def u32(data, offset):
@@ -70,23 +72,23 @@ def dialogue_of(data):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("image")
+    parser.add_argument("image", type=argparse.FileType("rb"))
     parser.add_argument("out")
     parser.add_argument("--entries", default="4289,4290,4291",
                         help="the DATA.BIN entries that hold dialogue")
     options = parser.parse_args(argv)
 
     archive = databin.Archive(options.image)
-    total = 0
-    with open(options.out, "w", encoding="utf-8", newline="\n") as out:
-        out.write("id\tindex\tkind\ttext\n")
-        for entry in (int(x) for x in options.entries.split(",") if x):
-            data = archive.read(entry)
-            for ident, index, kind, text in dialogue_of(data):
-                out.write("%d\t%d\t%d\t%s\n" % (ident, index, kind, text.replace("\n", "\\n")))
-                total += 1
-    print("wrote %s, %d dialogue strings" % (options.out, total))
-
+    with closing(archive.stream):
+        total = 0
+        with open(extraction_path(os.path.dirname(options.out) or ".", (os.path.basename(options.out),)), "w", encoding="utf-8", newline="\n") as out:
+            out.write("id\tindex\tkind\ttext\n")
+            for entry in (int(x) for x in options.entries.split(",") if x):
+                data = archive.read(entry)
+                for ident, index, kind, text in dialogue_of(data):
+                    out.write("%d\t%d\t%d\t%s\n" % (ident, index, kind, text.replace("\n", "\\n")))
+                    total += 1
+        print("wrote %s, %d dialogue strings" % (options.out, total))
 
 if __name__ == "__main__":
     main(sys.argv[1:])
