@@ -914,3 +914,20 @@ foreach(font_test IN ITEMS mhp3rd_font_bitmap_tests mhp3rd_imgui_font_bitmap_tes
     endif()
 endforeach()
 target_compile_definitions(mhp3rd_imgui_font_bitmap_tests PRIVATE TEST_IMGUI_STB)
+
+# Synthetic kernel/HLE contracts use the real headless host implementation.
+add_executable(mhp3rd_kernel_hle_tests tests/kernel_hle_tests.cpp
+    ${MHP3RD_HOST_SOURCES} host/generated_stub.cpp "${MHP3RD_NIDS_INC}")
+target_include_directories(mhp3rd_kernel_hle_tests PRIVATE
+    "${MHP3RD_PROFILE_DIR}/host" "${MHP3RD_PROFILE_DIR}/third_party"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated_nids")
+target_compile_definitions(mhp3rd_kernel_hle_tests PRIVATE PSPRECOMP_TEST_NIDS_CSV="${PROJECT_SOURCE_DIR}/configs/nids.csv")
+target_link_libraries(mhp3rd_kernel_hle_tests PRIVATE psprecomp_core Threads::Threads ${CMAKE_DL_LIBS})
+if(WIN32)
+    target_link_libraries(mhp3rd_kernel_hle_tests PRIVATE ws2_32 iphlpapi shell32)
+endif()
+set_target_properties(mhp3rd_kernel_hle_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_kernel_hle_tests COMMAND mhp3rd_kernel_hle_tests)
+    set_tests_properties(mhp3rd_kernel_hle_tests PROPERTIES TIMEOUT 60 ENVIRONMENT "MHP3RD_NO_RENDER=1")
+endif()
