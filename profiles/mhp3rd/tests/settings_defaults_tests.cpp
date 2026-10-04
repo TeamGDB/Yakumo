@@ -43,6 +43,17 @@ void test_android() {
     check(android.fast_loading, "a phone loads fast too");
 }
 
+void test_translation_language() {
+    check(Settings{}.language == "original" && defaults_for(Platform::Desktop).language == "original" &&
+            defaults_for(Platform::Android).language == "original" && from_entries({}).language == "original",
+        "translation is opt-in on every platform and in old settings files");
+    const Settings selected = from_entries({{"text.language", "en-US"}});
+    check(selected.language == "en-US", "the selected translation is loaded from settings");
+    const Entries written = to_entries(selected);
+    check(written.at("text.language") == "en-US" && from_entries(written).language == "en-US",
+        "the translation choice survives settings serialization");
+}
+
 void test_this_build() {
     const Settings expected = defaults_for(kPlatform);
     check(defaults().aspect == expected.aspect && defaults().mouse == expected.mouse &&
@@ -367,6 +378,7 @@ int main() {
     test_desktop_is_the_declared_defaults();
     test_android();
     test_this_build();
+    test_translation_language();
     test_control_presets();
     test_controls_from_the_previous_version();
     test_controls_from_main();

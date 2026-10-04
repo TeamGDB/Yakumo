@@ -1,10 +1,26 @@
 {
+  "profiles/mhp3rd/host/app_paths.hpp": {
+    "sha256": "17ac7c479a32e74dc2b1e80cce27db2e2d601cfdac31926a25006d5528eba4c9",
+    "reason": "Function declarations and aggregate fields have no standalone LLVM line map; corresponding implementation mappings remain subject to the normal diff gate."
+  },
   "profiles/mhp3rd/host/audio/audio_sink.hpp": {
     "sha256": "8567e9ef3cb07f9eba8fcd1a2bb24931dc1cea549d46b3af46cb9b3dacc45fbc",
     "reason": "AudioSink method declarations have no standalone LLVM line map. Their out-of-line implementations and actual SDL output-gain behavior are covered by renderer/audio regression tests and remain subject to the normal diff gate."
   },
+  "profiles/mhp3rd/host/mods/mhp3rd_mods.hpp": {
+    "sha256": "c3b8facbaf504cd30609232610be607f65a25f271526a933cd6f901e64a7e869",
+    "reason": "Function declarations and aggregate fields have no standalone LLVM line map; corresponding implementation mappings remain subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/platform/android_documents.hpp": {
+    "sha256": "db4ebe8bb177b8439c071c90d68d6645305592e8fc79805b6ae68e5d06d203bf",
+    "reason": "Function declarations and aggregate fields have no standalone LLVM line map; corresponding implementation mappings remain subject to the normal diff gate."
+  },
   "profiles/mhp3rd/host/settings/settings.hpp": {
-    "sha256": "2472ab73effdcc1f979768e6ef200c20755c4dcfd0228e3e3fa609e28657ff61",
-    "reason": "Settings declarations and member defaults have no standalone LLVM line map. Background option defaults, malformed input and serialization are tested in mhp3rd_settings_tests; menu/default-restoration behavior is covered by SDL/ImGui regressions."
+    "sha256": "9767f4139450d8007a00819e7f4ebd6ef0e6d393b0f76ebf723fc4f8c7b7793c",
+    "reason": "Reviewed combined declarations and aggregate member defaults from the translation and background-audio/input changes; no standalone function body is exempted. Executable implementations remain subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/ui/translation_screen.hpp": {
+    "sha256": "be45fd2586182b46dfe5f08a84e0564c357ffca14dafc5e7e2932124ee5faa85",
+    "reason": "Function declarations and aggregate fields have no standalone LLVM line map; corresponding implementation mappings remain subject to the normal diff gate."
   }
 }
