@@ -266,3 +266,39 @@ equipment), 4059–4073 the village quests, 4703–4716 the download quests.
 This repository ships only the mechanism. The glossary and the script that turns
 it into `.lang` files live with the translation itself, outside this repository,
 so no game-derived text is committed here.
+
+## Import validation and runtime limits
+
+Translation files must be UTF-8 without embedded NUL bytes. A UTF-8 BOM is
+accepted. Files are limited to 16 MiB and individual lines to 64 KiB. The
+language code contains 1-64 ASCII letters, digits, hyphens or underscores;
+`original` is reserved for the unchanged game text. English codes such as `en`
+can name an imported translation too. Invalid input leaves the previous file
+in place. Imports stage the validated bytes before replacing the destination;
+symlink and directory destinations are refused. If replacement and rollback
+both fail, the error names the retained recovery copy.
+
+On Android, **Import translation** opens the system document picker. The
+selected document is copied with the same file-size limit into private staging,
+then passed through the regular importer. Cancelling writes nothing; temporary
+copies are removed after success or failure.
+
+Exact keys take precedence over range/wildcard rules. Among overlapping rules,
+the first matching rule wins. `*:*` matches all eligible table entries; index
+zero remains unchanged in ordinary text tables. Repeated matches share one
+immutable translated string in guest memory, so expanding a wildcard does not
+exhaust a reservation calculated from its source text.
+
+Archive reads are gathered by their actual byte ranges. Unread gaps are never
+parsed as zeros. Runtime collection is limited to 4 MiB per entry, 16 MiB across
+pending entries, and 4096 disjoint fragments per entry. Short or malformed
+headers are skipped safely. Reloading a block reuses its arena slice.
+
+Synthetic regression suites `mhp3rd_text_tests`, `mhp3rd_text_runtime_tests` and,
+on Unix/Android, `mhp3rd_translation_document_tests` run in the existing public
+unit-test, coverage and sanitizer workflows. They use invented strings, archive
+metadata and encrypted bytes, never extracted game fixtures. Python text-tool
+contracts are part of `tool_security_tests.py`. Worksheet CSV output quotes
+formula-like text; extraction outputs are checked against symlink escapes.
+Actual translated gameplay, font/layout fit and Android provider behavior still
+need device verification with a translation supplied locally by its author.

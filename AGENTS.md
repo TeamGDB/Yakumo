@@ -27,6 +27,7 @@ Read the documents relevant to the task before changing code, testing, packaging
 | [DATA_BIN.md](docs/DATA_BIN.md) | Archive layout, obfuscation, overlay entries, file IDs and mod I/O |
 | [EQUIPMENT_MODS.md](docs/EQUIPMENT_MODS.md) | Equipment model/file lookup, traced tables and mod targets |
 | [LAYERED_ARMOR.md](docs/LAYERED_ARMOR.md) | Appearance overrides, model hooks, reload behavior and multiplayer visibility |
+| [TEXT_TRANSLATION.md](docs/TEXT_TRANSLATION.md) | Translation format, import safety limits, text tools and runtime tests |
 | [DEBUG_MENU.md](docs/DEBUG_MENU.md) | Developer tools, command-file automation, guest state and quest testing |
 
 The [profile README](profiles/mhp3rd/README.md) covers player settings, environment variables, controls, saves, mods and networking. For device-specific testing in a developer's environment, also read [LOCAL_TESTING.md](LOCAL_TESTING.md) when present, as described below.
