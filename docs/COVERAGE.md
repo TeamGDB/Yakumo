@@ -79,6 +79,16 @@ JSON and JaCoCo XML. Reports show measured files and remaining gaps separately
 per language. An unmapped changed native/Python/Java file fails the
 gate rather than silently disappearing from its denominator. Deleted lines and
 unchanged lines do not enter the changed-line count.
+
+Declaration-only headers can have no standalone LLVM line mapping even when
+all changed behavior is exercised in their implementations. The reviewed
+`scripts/ci/coverage_unmapped_headers.json` manifest records their exact SHA-256
+fingerprints and verification rationale. They remain visible as unmeasured in
+the inventory and are listed separately in the diff report; no percentage is
+invented for them. Any edit invalidates the review until its fingerprint and
+rationale are reviewed again. Emitted mappings always use the normal 80% gate,
+and unknown implementation files still fail. Regression tests verify source
+mutation and mapped-line failures cannot bypass enforcement.
 The combined measured source-line total pools covered/executable line counts
 across languages, rather than averaging percentages. It has no minimum and
 excludes unknown lines; the report states this limitation alongside the value.
