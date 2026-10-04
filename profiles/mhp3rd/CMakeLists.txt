@@ -939,3 +939,34 @@ foreach(font_test IN ITEMS mhp3rd_font_bitmap_tests mhp3rd_imgui_font_bitmap_tes
 endforeach()
 target_compile_definitions(mhp3rd_imgui_font_bitmap_tests PRIVATE TEST_IMGUI_STB)
 
+# Real public-buffer renderer/UI contracts are opt-in: use software Vulkan and
+# a bounded Xvfb display in CI, or an explicitly selected local GPU.
+option(MHP3RD_RENDERER_TESTS "Run real SDL/Vulkan public-buffer renderer tests" OFF)
+if(MHP3RD_RENDERER_TESTS)
+    if(NOT MHP3RD_RENDERER)
+        message(FATAL_ERROR "Renderer tests require MHP3RD_RENDERER=ON")
+    endif()
+    add_executable(mhp3rd_renderer_ui_tests tests/renderer_ui_tests.cpp
+        ${MHP3RD_HOST_SOURCES} ${MHP3RD_RENDERER_SOURCES}
+        $<TARGET_OBJECTS:mhp3rd_generated>)
+    add_dependencies(mhp3rd_renderer_ui_tests mhp3rd_shaders mhp3rd_version)
+    target_sources(mhp3rd_renderer_ui_tests PRIVATE "${MHP3RD_NIDS_INC}")
+    target_compile_definitions(mhp3rd_renderer_ui_tests PRIVATE MHP3RD_HAS_RENDERER=1 MHP3RD_HAS_SDL_AUDIO=1 MHP3RD_HAS_SDL=1
+        PSPRECOMP_TEST_NIDS_CSV="${PROJECT_SOURCE_DIR}/configs/nids.csv")
+    target_include_directories(mhp3rd_renderer_ui_tests PRIVATE
+        "${MHP3RD_PROFILE_DIR}/host" "${MHP3RD_PROFILE_DIR}/third_party"
+        "${MHP3RD_PROFILE_DIR}/third_party/imgui"
+        "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders"
+        "${CMAKE_CURRENT_BINARY_DIR}/generated_version"
+        "${CMAKE_CURRENT_BINARY_DIR}/generated_nids")
+    target_link_libraries(mhp3rd_renderer_ui_tests PRIVATE psprecomp_core SDL3::SDL3 Vulkan::Vulkan Threads::Threads ${CMAKE_DL_LIBS})
+    mhp3rd_use_ffmpeg(mhp3rd_renderer_ui_tests)
+    if(WIN32)
+        target_link_libraries(mhp3rd_renderer_ui_tests PRIVATE ws2_32 iphlpapi shell32)
+    endif()
+    set_target_properties(mhp3rd_renderer_ui_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    if(PSPRECOMP_BUILD_TESTS)
+        add_test(NAME mhp3rd_renderer_ui_tests COMMAND mhp3rd_renderer_ui_tests)
+        set_tests_properties(mhp3rd_renderer_ui_tests PROPERTIES TIMEOUT 90)
+    endif()
+endif()
