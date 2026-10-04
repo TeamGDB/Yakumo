@@ -418,6 +418,7 @@ const std::vector<Field> &fields() {
                     std::cerr << "[settings] MHP3RD_TOUCH_LAYOUT: psp or action\n";
             }},
         BOOL_FIELD("input.touch_haptics", touch_haptics),
+        BOOL_FIELD("input.background_gamepad", background_gamepad),
         BOOL_FIELD("input.invert_mouse_x", invert_mouse_x),
         BOOL_FIELD("input.invert_mouse_y", invert_mouse_y),
         {"input.name_entry", "MHP3RD_OSK_MODE",

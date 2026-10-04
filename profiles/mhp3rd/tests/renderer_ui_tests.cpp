@@ -1089,14 +1089,47 @@ void media_renderer_contracts(MediaFixture &fixture, gpu::VulkanRenderer &render
 }
 void audio_device_contracts() {
     auto &sink = audio::AudioSink::instance();
+    const auto saved = settings::current();
+    auto &player = settings::current();
+    player.volume = 60;
+    player.mute = false;
+    player.background_mute = true;
+    sink.set_window_focused(false);
+    expect(sink.output_gain() == 0.0f, "unfocused background mute applies before device initialization");
     sink.initialize();
     expect(sink.has_device(), "SDL dummy audio device opens");
+    expect(sink.output_gain() == 0.0f, "device initialization retains background mute");
+    player.volume = 30;
+    sink.refresh_settings();
+    expect(sink.output_gain() == 0.0f, "volume change cannot unmute an unfocused window");
+    sink.set_volume(0.9f);
+    expect(sink.output_gain() == 0.0f, "direct gain updates also retain background mute");
+    player.background_mute = false;
+    sink.refresh_settings();
+    expect(std::abs(sink.output_gain() - 0.3f) < 0.0001f, "disabling background mute applies immediately");
+    player.background_mute = true;
+    sink.refresh_settings();
+    expect(sink.output_gain() == 0.0f, "enabling background mute applies immediately");
+    sink.set_window_focused(true);
+    expect(std::abs(sink.output_gain() - 0.3f) < 0.0001f, "focus regain restores current volume");
+    player.mute = true;
+    sink.refresh_settings();
+    sink.set_window_focused(false);
+    sink.set_window_focused(true);
+    expect(sink.output_gain() == 0.0f, "focus regain preserves explicit mute");
+    player = settings::defaults();
+    sink.refresh_settings();
+    expect(sink.output_gain() == 1.0f, "restoring audio defaults updates effective gain");
     sink.initialize();
     expect(sink.has_device(), "audio initialize is idempotent");
     sink.set_paused(true);
     sink.set_volume(-1);
+    expect(sink.output_gain() == 0.0f, "negative gain clamps to silence");
     sink.set_volume(0.5f);
+    expect(sink.output_gain() == 0.5f, "ordinary output gain reaches the device");
     sink.set_volume(2);
+    expect(sink.output_gain() == 1.0f, "excess gain clamps to unity");
+    player = saved;
     const std::array<std::int16_t, 8> pcm{1000, -1000, 2000, -2000, 3000, -3000, 4000, -4000};
     std::uint64_t cursor = 0;
     sink.mix(cursor, pcm.data(), 4, 0x8000, 0x8000);
@@ -2202,6 +2235,7 @@ void bindings_editor_contracts(gpu::VulkanRenderer &renderer) {
     activate("done", 0, ImGuiKey_Space);
     activate("remove", 0, ImGuiKey_Space);
     expect(player.controls.combos.empty(), "remove chip deletes custom combination and its bindings");
+    player.background_gamepad = true;
     player.controls.keys = {};
     player.controls.pad = {};
     const auto other = static_cast<int>(input::Action::StickDown);
@@ -2408,6 +2442,7 @@ void scripted_mouse_contracts(gpu::VulkanRenderer &renderer) {
     const auto saved = settings::current();
     auto &player = settings::current();
     player.mouse = true;
+    player.background_gamepad = true;
     player.controls.keys = {};
     player.controls.pad = {};
     player.controls.keys[static_cast<int>(input::Action::Triangle)][0].inputs[0] = input::mouse_button(1);
@@ -2628,6 +2663,7 @@ void virtual_gamepad_contracts(gpu::VulkanRenderer &renderer) {
     expect(!ui::controllers_screen_open(), "back closes controller screen after successful wizard");
     const auto saved_settings = settings::current();
     auto &player = settings::current();
+    player.background_gamepad = true;
     player.controls.keys = {};
     player.controls.pad = {};
     player.controls.swap_sticks = false;
@@ -2649,6 +2685,60 @@ void virtual_gamepad_contracts(gpu::VulkanRenderer &renderer) {
     for (int axis = 0; axis < SDL_GAMEPAD_AXIS_COUNT; ++axis) SDL_SetJoystickVirtualAxis(joystick, axis, 0);
     for (int button = 0; button < SDL_GAMEPAD_BUTTON_COUNT; ++button)
         SDL_SetJoystickVirtualButton(joystick, button, false);
+    sample();
+    expect(SDL_HideWindow(renderer.window()), "focus fixture hides its own test window");
+    sample();
+    expect((SDL_GetWindowFlags(renderer.window()) & SDL_WINDOW_INPUT_FOCUS) == 0,
+        "hidden test window has no keyboard focus");
+    SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_SOUTH, true);
+    SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_LEFTX, 32767);
+    expect((sample().buttons & 0x1000) != 0 && sample().analog_x == 255,
+        "explicit background option admits held controller buttons and analog motion");
+    player.background_gamepad = false;
+    expect(sample().buttons == 0 && sample().analog_x == 128 && sample().right_x == 128,
+        "disabling background input immediately neutralizes held buttons and analog axes");
+    expect(!SDL_GetHintBoolean(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, true),
+        "disabling background input also updates the SDL event policy");
+    player.background_gamepad = true;
+    expect((sample().buttons & 0x1000) != 0 && sample().analog_x == 255,
+        "reenabling background input samples current physical state without stale resolver state");
+    expect(SDL_GetHintBoolean(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, false),
+        "reenabling background input restores SDL background events");
+    SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_SOUTH, false);
+    SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_LEFTX, 0);
+    player.lock_on = true;
+    player.controls.pad[static_cast<int>(input::Action::LockOn)][0].inputs[0] = input::pad(input::PadInput::RightStick);
+    sample();
+    static_cast<void>(renderer.take_lock_on_press());
+    SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_RIGHT_STICK, true);
+    sample();
+    expect(!renderer.take_lock_on_press(), "held background lock-on waits for a real release");
+    player.background_gamepad = false;
+    sample();
+    expect(!renderer.take_lock_on_press(), "blocking background controller input does not synthesize a lock-on tap");
+    SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_RIGHT_STICK, false);
+    player.background_gamepad = true;
+    sample();
+    expect(!renderer.take_lock_on_press(), "reenabling a released controller does not replay the cancelled tap");
+    SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_SOUTH, false);
+    SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_LEFTX, 0);
+    sample();
+    expect(sample().buttons == 0 && sample().analog_x == 128, "background controller releases return to neutral");
+    player.background_mute = true;
+    player.mute = false;
+    player.volume = 70;
+    SDL_Event foreign_focus{};
+    foreign_focus.type = SDL_EVENT_WINDOW_FOCUS_GAINED;
+    foreign_focus.window.windowID = SDL_GetWindowID(renderer.window()) + 1000;
+    SDL_PushEvent(&foreign_focus);
+    sample();
+    expect(
+        audio::AudioSink::instance().output_gain() == 0.0f, "foreign focus event cannot unmute this unfocused window");
+    player.background_mute = false;
+    sample();
+    expect(std::abs(audio::AudioSink::instance().output_gain() - 0.7f) < 0.0001f,
+        "renderer refreshes changed audio settings without waiting for another focus event");
+    expect(SDL_ShowWindow(renderer.window()), "focus fixture restores its test window");
     sample();
     player.controls.keys[static_cast<int>(input::Action::FrameStep)][0].inputs[0] = input::key(SDL_SCANCODE_F13);
     renderer.set_scripted_key(SDL_SCANCODE_F13, true);
@@ -2733,6 +2823,18 @@ void virtual_gamepad_contracts(gpu::VulkanRenderer &renderer) {
     const auto pad_flying = renderer.take_free_camera_controls();
     expect(pad_flying.right == 1 && pad_flying.up == 1 && pad_flying.look_x == -1,
         "virtual gamepad supplies shaped free-camera movement, shoulder elevation and inverted look");
+    SDL_HideWindow(renderer.window());
+    player.background_gamepad = false;
+    SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_BACK, true);
+    SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_RIGHT_STICK, true);
+    sample();
+    const auto blocked_flying = renderer.take_free_camera_controls();
+    expect(blocked_flying.right == 0 && blocked_flying.up == 0 && blocked_flying.look_x == 0 && !blocked_flying.toggle,
+        "unfocused controller cannot move or toggle the free camera when background input is disabled");
+    SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_BACK, false);
+    SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_RIGHT_STICK, false);
+    player.background_gamepad = true;
+    SDL_ShowWindow(renderer.window());
     SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_LEFTX, 0);
     SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_RIGHTX, 0);
     SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, false);
@@ -3151,8 +3253,14 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
         frame();
     };
     auto &sink = audio::AudioSink::instance();
+    settings::current().background_mute = true;
+    sink.set_window_focused(false);
+    expect(sink.output_gain() == 0.0f, "unfocused mute applies before the first audio device opens");
     sink.initialize();
     expect(sink.has_device(), "audio menu has an isolated dummy device");
+    expect(sink.output_gain() == 0.0f, "first device initialization preserves initial unfocused mute");
+    settings::current().background_mute = false;
+    sink.refresh_settings();
     const auto saved_mute = settings::current().mute;
     settings::current().volume = 50;
     settings::current().mute = false;
@@ -3165,13 +3273,25 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
     expect(settings::current().mute, "audio menu mute enables zero gain");
     change_video("Mute", ImGuiKey_LeftArrow);
     expect(!settings::current().mute, "audio menu mute restores gain without losing volume");
+    change_video("Mute in background", ImGuiKey_RightArrow);
+    expect(settings::current().background_mute, "audio menu enables background mute");
+    change_video("Mute in background", ImGuiKey_LeftArrow);
+    expect(!settings::current().background_mute, "audio menu disables background mute");
+    settings::current().background_mute = true;
     change_video("Restore audio defaults", ImGuiKey_Space);
     expect(settings::current().volume == settings::defaults().volume &&
-            settings::current().mute == settings::defaults().mute,
+            settings::current().mute == settings::defaults().mute &&
+            settings::current().background_mute == settings::defaults().background_mute,
         "audio defaults restore shipped gain and mute state");
     settings::current().volume = volume;
     settings::current().mute = saved_mute;
     page();
+    settings::current().background_gamepad = false;
+    change_video("Gamepad in background", ImGuiKey_RightArrow);
+    expect(settings::current().background_gamepad, "controls menu enables background gamepad input");
+    change_video("Gamepad in background", ImGuiKey_LeftArrow);
+    expect(!settings::current().background_gamepad, "controls menu disables background gamepad input");
+    settings::current().background_gamepad = true;
     const auto initial_preset = settings::current().control_preset;
     const auto initial_controls = settings::current().controls;
     const auto initial_user_presets = settings::current().user_presets;
@@ -3384,6 +3504,7 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
     expect(reset_controls.dead_zone == defaults.dead_zone && reset_controls.trigger == defaults.trigger &&
             reset_controls.camera_speed == defaults.camera_speed && reset_controls.aim_speed == defaults.aim_speed &&
             reset_controls.mouse_sensitivity == defaults.mouse_sensitivity && reset_controls.name == defaults.name &&
+            reset_controls.background_gamepad == defaults.background_gamepad &&
             reset_controls.touch_size == defaults.touch_size &&
             reset_controls.touch_opacity == defaults.touch_opacity &&
             reset_controls.free_camera_speed == defaults.free_camera_speed &&
@@ -4142,6 +4263,7 @@ int run_contracts(int scripts) {
     settings.internal_scale = 1;
     settings.window_scale = 1;
     settings.fullscreen = false;
+    settings.background_gamepad = true;
     settings.frame_rate = settings::FrameRate::Fps30;
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");

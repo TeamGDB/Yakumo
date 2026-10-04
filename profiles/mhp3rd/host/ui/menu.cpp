@@ -106,10 +106,6 @@ int cycle(int value, int delta, int count) {
     return ((value + delta) % count + count) % count;
 }
 
-float gain(const settings::Settings &s) {
-    return s.mute ? 0.0f : static_cast<float>(s.volume) / 100.0f;
-}
-
 constexpr const char *kTabs[] = {"Video", "Audio", "Controls", "Network", "Mods", "System", "Debug"};
 constexpr int kTabCount = static_cast<int>(std::size(kTabs));
 
@@ -661,17 +657,18 @@ void Menu::audio() {
     if (slider_row(
             "Volume", volume, 0, 100, 5, "%d%%", locked("audio.volume", "Loudness of everything the game plays."))) {
         s.volume = static_cast<std::uint32_t>(volume);
-        sink.set_volume(gain(s));
+        sink.refresh_settings();
         settings::save();
     }
     if (toggle_row("Mute", s.mute, locked("audio.mute", "Silence the game without losing the volume setting."))) {
         s.mute = !s.mute;
-        sink.set_volume(gain(s));
+        sink.refresh_settings();
         settings::save();
     }
     if (toggle_row("Mute in background", s.background_mute,
-                   locked("audio.background_mute", "Silence the game while it runs in the background."))) {
+            locked("audio.background_mute", "Silence the game while it runs in the background."))) {
         s.background_mute = !s.background_mute;
+        sink.refresh_settings();
         settings::save();
     }
     info_row(
@@ -681,7 +678,7 @@ void Menu::audio() {
         s.volume = settings::defaults().volume;
         s.mute = settings::defaults().mute;
         s.background_mute = settings::defaults().background_mute;
-        sink.set_volume(gain(s));
+        sink.refresh_settings();
         settings::save();
     }
 }
@@ -906,6 +903,13 @@ void Menu::controls() {
             pad == nullptr ? "No gamepad; the keyboard and mouse drive the game"
                            : (name != nullptr ? name : "Gamepad"));
     }
+    if (toggle_row("Gamepad in background", s.background_gamepad,
+            options_for("input.background_gamepad",
+                "Allow this window to read the gamepad while unfocused. "
+                "Other running games may also read the same controller. Keyboard and mouse remain focused."))) {
+        s.background_gamepad = !s.background_gamepad;
+        settings::save();
+    }
     if (choice_row("Confirm button", s.confirm_south ? "Bottom (Western)" : "Right, ○ (Japanese)",
             options_for("input.confirm",
                 "Which face button confirms, in the game and in this menu. The "
@@ -1124,6 +1128,7 @@ void Menu::controls() {
         restore("input.invert_camera_y", s.invert_camera_y, d.invert_camera_y);
         restore("input.name_entry", s.name_entry, d.name_entry);
         restore("input.name", s.name, d.name);
+        restore("input.background_gamepad", s.background_gamepad, d.background_gamepad);
         restore("input.mouse", s.mouse, d.mouse);
         restore("input.mouse_sensitivity", s.mouse_sensitivity, d.mouse_sensitivity);
         restore("input.invert_mouse_x", s.invert_mouse_x, d.invert_mouse_x);

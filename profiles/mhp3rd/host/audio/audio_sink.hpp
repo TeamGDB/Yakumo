@@ -38,6 +38,11 @@ public:
     // Output gain in 0..1, from the volume and mute settings. Only the device
     // output is scaled; MHP3RD_AUDIO_DUMP keeps the game's own levels.
     void set_volume(float gain);
+    // Window focus and player settings compose one output gain. Updating the
+    // volume while unfocused must not bypass background muting.
+    void set_window_focused(bool focused);
+    void refresh_settings();
+    [[nodiscard]] float output_gain() const;
     // Stops and restarts the device, for the in-game menu's pause. What the
     // game queued before the pause stays in the ring and plays on resume.
     void set_paused(bool paused);
