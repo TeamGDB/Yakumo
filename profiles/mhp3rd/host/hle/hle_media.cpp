@@ -435,8 +435,7 @@ void present_frame(Runtime &rt) {
     // The game's text, in the player's language when one is chosen: applied
     // once the game has loaded its text block, between two frames.
     text::frame(rt.memory(), [](std::size_t bytes) -> std::optional<text::Arena> {
-        const std::int32_t uid = kernel().allocate_block("text translation", 1u,
-                                                         static_cast<std::uint32_t>(bytes), 0u);
+        const std::int32_t uid = kernel().allocate_block("text translation", 1u, static_cast<std::uint32_t>(bytes), 0u);
         if (uid < 0) return std::nullopt;
         const MemoryBlock *block = kernel().find_block(uid);
         if (block == nullptr) return std::nullopt;
