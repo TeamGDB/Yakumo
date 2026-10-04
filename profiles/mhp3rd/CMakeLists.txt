@@ -582,6 +582,20 @@ if(PSPRECOMP_BUILD_TESTS)
     add_test(NAME mhp3rd_text_runtime_tests COMMAND mhp3rd_text_runtime_tests)
 endif()
 
+# Android's fd-based document copy also runs against a synthetic provider on
+# Unix hosts, without JNI or a device. Windows does not provide these fd APIs.
+if(UNIX)
+    add_executable(mhp3rd_translation_document_tests
+        tests/translation_document_tests.cpp
+        host/platform/android_documents.cpp
+        host/text/language.cpp)
+    target_include_directories(mhp3rd_translation_document_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+    set_target_properties(mhp3rd_translation_document_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    if(PSPRECOMP_BUILD_TESTS)
+        add_test(NAME mhp3rd_translation_document_tests COMMAND mhp3rd_translation_document_tests)
+    endif()
+endif()
+
 # Fast loading's decision: when a load runs ahead of real time.
 add_executable(mhp3rd_fast_loading_tests
     tests/fast_loading_tests.cpp
