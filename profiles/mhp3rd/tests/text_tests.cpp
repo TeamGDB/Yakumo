@@ -458,6 +458,78 @@ void test_import_translation() {
     fs::remove_all(dir, ec);
 }
 
+void test_import_safety() {
+    namespace fs = std::filesystem;
+    const auto dir = fs::temp_directory_path() / "yakumo-text-import-safety";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir);
+    struct Cleanup {
+        fs::path path;
+        ~Cleanup() {
+            std::error_code e;
+            fs::remove_all(path, e);
+        }
+    } cleanup{dir};
+    const auto source = dir / "source.lang";
+    const auto folder = dir / "translations";
+    const auto write = [&](const std::string &bytes) {
+        std::ofstream out(source, std::ios::binary);
+        out.write(bytes.data(), bytes.size());
+    };
+    const std::string valid = "language = test\nname = Test\n2:1 = Hello\n";
+    std::string error, contents;
+    write(valid);
+    const auto parsed = Translations::from_file(source, error, &contents);
+    check(parsed && contents == valid && error.empty(), "validated bytes are available without a second read");
+    check(mhp3rd::text::import_translation_file(source, folder).error.empty(), "initial import succeeds");
+    const auto read = [](const fs::path &file) {
+        std::ifstream in(file, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), {});
+    };
+    const auto destination = folder / "test.lang";
+    write("language = test\n2:1 = Replacement\n");
+    check(mhp3rd::text::import_translation_file(source, folder).error.empty(), "existing translations can be replaced");
+    const auto replacement = read(destination);
+    check(replacement.find("Replacement") != std::string::npos, "replacement contains the validated bytes");
+    const std::vector<std::string> invalid = {valid + std::string(1, '\0'), valid + "\xc0\x80", valid + "\xed\xa0\x80",
+        valid + "\xf4\x90\x80\x80", valid + "\xe2\x82", valid + "\xff", "language = ../bad\n2:1 = Bad\n",
+        "language = " + std::string(65, 'a') + "\n2:1 = Bad\n",
+        valid + std::string(mhp3rd::text::kMaxTranslationLine + 1, 'a')};
+    for (const auto &bytes : invalid) {
+        write(bytes);
+        check(!mhp3rd::text::import_translation_file(source, folder).error.empty(), "invalid input is refused");
+        check(read(destination) == replacement, "invalid imports preserve the previous translation");
+    }
+    write("language = test\n2:1 = \xf0\x9f\x98\x80\n");
+    check(Translations::from_file(source, error).has_value(), "valid four-byte UTF-8 is accepted");
+    fs::remove(destination);
+    fs::create_directory(destination);
+    check(!mhp3rd::text::import_translation_file(source, folder).error.empty(), "a directory destination is refused");
+    fs::remove(destination);
+    fs::create_symlink(source, destination, ec);
+    if (!ec) {
+        check(!mhp3rd::text::import_translation_file(source, folder).error.empty(), "a symlink destination is refused");
+        check(fs::is_symlink(destination), "a refused symlink is preserved");
+        fs::remove(destination);
+    }
+    {
+        std::ofstream out(source, std::ios::binary);
+        const std::string chunk(65536, '\n');
+        for (unsigned i = 0; i < 256; ++i) out << chunk;
+        out << "\n";
+    }
+    check(!Translations::from_file(source, error) && error.find("16 MiB") != std::string::npos,
+        "the file budget is enforced while reading");
+    check(!Translations::from_file(dir / "missing.lang", error), "missing files are reported");
+    check(mhp3rd::text::scan_languages(dir / "missing").empty(), "missing search folders are normal");
+    fs::remove(source);
+    write(valid);
+    check(mhp3rd::text::import_translation_file(source, folder).error.empty(), "imports recover after refused inputs");
+    for (const auto &item : fs::directory_iterator(folder))
+        check(item.path().filename() == "test.lang", "successful imports leave no staging directories");
+}
+
 } // namespace
 
 int main() {
@@ -475,6 +547,7 @@ int main() {
     test_apply_quest_fields();
     test_apply_quest_copies();
     test_import_translation();
+    test_import_safety();
     if (failures != 0) {
         std::cerr << failures << " failure(s)\n";
         return 1;

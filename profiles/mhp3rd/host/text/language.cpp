@@ -1,6 +1,8 @@
 #include "text/language.hpp"
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <charconv>
 #include <limits>
 #include <fstream>
@@ -9,6 +11,11 @@
 
 namespace mhp3rd::text {
 namespace {
+
+std::string path_text(const std::filesystem::path &path) {
+    const auto bytes = path.u8string();
+    return std::string(bytes.begin(), bytes.end());
+}
 
 std::string trimmed(const std::string &text) {
     const auto first = text.find_first_not_of(" \t\r\n");
@@ -239,28 +246,103 @@ std::map<std::uint32_t, Translations> Translations::parse_blocks(
     return blocks;
 }
 
+namespace {
+bool valid_utf8(const std::string &text) {
+    for (std::size_t i = 0; i < text.size();) {
+        const auto first = static_cast<unsigned char>(text[i++]);
+        if (first == 0) return false;
+        if (first < 0x80) continue;
+        unsigned trailing = 0;
+        std::uint32_t value = 0, minimum = 0;
+        if (first >= 0xc2 && first <= 0xdf) {
+            trailing = 1;
+            value = first & 0x1f;
+            minimum = 0x80;
+        } else if (first >= 0xe0 && first <= 0xef) {
+            trailing = 2;
+            value = first & 0x0f;
+            minimum = 0x800;
+        } else if (first >= 0xf0 && first <= 0xf4) {
+            trailing = 3;
+            value = first & 7;
+            minimum = 0x10000;
+        } else
+            return false;
+        if (trailing > text.size() - i) return false;
+        for (unsigned n = 0; n < trailing; ++n) {
+            const auto byte = static_cast<unsigned char>(text[i++]);
+            if ((byte & 0xc0) != 0x80) return false;
+            value = (value << 6) | (byte & 0x3f);
+        }
+        if (value < minimum || value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff)) return false;
+    }
+    return true;
+}
+bool valid_code(const std::string &code) {
+    if (code.empty() || code.size() > 64) return false;
+    return std::all_of(code.begin(), code.end(), [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+    });
+}
+}
+
 std::optional<std::map<std::uint32_t, Translations>> Translations::from_file(
-    const std::filesystem::path &file, std::string &error) {
+    const std::filesystem::path &file, std::string &error, std::string *validated_contents) {
+    error.clear();
+    if (validated_contents) validated_contents->clear();
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(file, ec)) {
+        error = "not a readable regular translation file";
+        return std::nullopt;
+    }
     std::ifstream in(file, std::ios::binary);
     if (!in) {
-        error = "cannot open " + file.string();
+        error = "cannot open translation file";
         return std::nullopt;
     }
-    std::ostringstream buffer;
-    buffer << in.rdbuf();
-    if (!in.good() && !in.eof()) {
-        error = "cannot read " + file.string();
+    std::string contents;
+    std::array<char, 65536> chunk{};
+    std::size_t line_bytes = 0;
+    while (in) {
+        in.read(chunk.data(), chunk.size());
+        const auto got = static_cast<std::size_t>(in.gcount());
+        if (got > kMaxTranslationBytes - contents.size()) {
+            error = "translation file exceeds 16 MiB";
+            return std::nullopt;
+        }
+        for (std::size_t i = 0; i < got; ++i) {
+            if (chunk[i] == '\n')
+                line_bytes = 0;
+            else if (++line_bytes > kMaxTranslationLine) {
+                error = "translation line exceeds 64 KiB";
+                return std::nullopt;
+            }
+        }
+        contents.append(chunk.data(), got);
+    }
+    if (!in.eof()) {
+        error = "cannot read translation file";
         return std::nullopt;
     }
-    return parse_blocks(buffer.str(), file.stem().string());
+    if (!valid_utf8(contents)) {
+        error = "translation must be UTF-8 without NUL bytes";
+        return std::nullopt;
+    }
+    auto blocks = parse_blocks(contents, path_text(file.stem()));
+    if (!valid_code(blocks.begin()->second.code())) {
+        error = "language code must contain 1-64 ASCII letters, digits, hyphens or underscores";
+        return std::nullopt;
+    }
+    if (validated_contents) *validated_contents = std::move(contents);
+    return blocks;
 }
 
 std::vector<Language> scan_languages(const std::filesystem::path &directory) {
     std::vector<Language> languages;
     std::error_code ec;
     if (!std::filesystem::is_directory(directory, ec)) return languages;
-    for (const auto &entry : std::filesystem::directory_iterator(directory, ec)) {
-        if (ec) break;
+    for (std::filesystem::directory_iterator it(directory, ec), end; !ec && it != end; it.increment(ec)) {
+        const auto &entry = *it;
         if (!entry.is_regular_file(ec) || entry.path().extension() != ".lang") continue;
         std::string error;
         const auto blocks = Translations::from_file(entry.path(), error);
@@ -298,13 +380,14 @@ TranslationImport import_translation_file(const std::filesystem::path &source, c
     TranslationImport result;
     std::error_code ec;
     if (!std::filesystem::is_regular_file(source, ec)) {
-        result.error = "not a file: " + source.string();
+        result.error = "not a file: " + path_text(source);
         return result;
     }
     // Read it first: a file that is not a translation is refused before anything
     // is written into the loader's folder.
     std::string error;
-    const auto blocks = Translations::from_file(source, error);
+    std::string contents;
+    const auto blocks = Translations::from_file(source, error, &contents);
     if (!blocks || blocks->empty()) {
         result.error = error.empty() ? "not a translation file" : error;
         return result;
@@ -324,21 +407,80 @@ TranslationImport import_translation_file(const std::filesystem::path &source, c
     const Translations &main = blocks->begin()->second;
     result.code = main.code();
     result.name = main.name();
-    if (result.code.empty()) result.code = source.stem().string();
+    if (result.code.empty()) result.code = path_text(source.stem());
     if (result.code.empty()) result.code = "translation";
 
     std::filesystem::create_directories(folder, ec);
     if (ec) {
-        result.error = "cannot make " + folder.string() + ": " + ec.message();
+        result.error = "cannot make " + path_text(folder) + ": " + ec.message();
         return result;
     }
     const std::filesystem::path destination = folder / (file_safe(result.code) + ".lang");
-    if (!std::filesystem::equivalent(source, destination, ec)) {
-        std::filesystem::copy_file(source, destination, std::filesystem::copy_options::overwrite_existing, ec);
-        if (ec) {
-            result.error = "cannot copy to " + destination.string() + ": " + ec.message();
+    const auto status = std::filesystem::symlink_status(destination, ec);
+    if (ec && ec != std::errc::no_such_file_or_directory) {
+        result.error = "cannot inspect translation destination";
+        return result;
+    }
+    ec.clear();
+    const bool replacing = std::filesystem::exists(status);
+    if (replacing && !std::filesystem::is_regular_file(status)) {
+        result.error = "translation destination must be a regular file, not a symlink or directory";
+        return result;
+    }
+    // An exclusively created staging directory holds the validated bytes and,
+    // during replacement, the old file. Failed writes never truncate the old
+    // translation. Source changes after validation cannot change the import.
+    std::filesystem::path staging;
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    for (unsigned attempt = 0; attempt < 64; ++attempt) {
+        auto candidate = folder / (".translation-import-" + std::to_string(stamp) + "-" + std::to_string(attempt));
+        if (std::filesystem::create_directory(candidate, ec)) {
+            staging = std::move(candidate);
+            break;
+        }
+        if (ec) break;
+    }
+    if (staging.empty()) {
+        result.error = "cannot create translation staging directory";
+        return result;
+    }
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() {
+            std::error_code ignored;
+            std::filesystem::remove_all(path, ignored);
+        }
+    } cleanup{staging};
+    const auto staged = staging / "translation.lang";
+    {
+        std::ofstream out(staged, std::ios::binary | std::ios::trunc);
+        out.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+        out.close();
+        if (!out) {
+            result.error = "cannot write staged translation";
             return result;
         }
+    }
+    const auto previous = staging / "previous.lang";
+    if (replacing) {
+        std::filesystem::rename(destination, previous, ec);
+        if (ec) {
+            result.error = "cannot preserve previous translation";
+            return result;
+        }
+    }
+    std::filesystem::rename(staged, destination, ec);
+    if (ec) {
+        result.error = "cannot install translation";
+        if (replacing) {
+            std::filesystem::rename(previous, destination, ec);
+            if (ec) {
+                // Keep the backup available for recovery when rollback fails.
+                cleanup.path.clear();
+                result.error += "; previous file remains in " + path_text(previous);
+            }
+        }
+        return result;
     }
     result.saved = destination;
     return result;
