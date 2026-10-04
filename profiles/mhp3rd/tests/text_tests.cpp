@@ -482,6 +482,10 @@ void test_import_safety() {
     write(valid);
     const auto parsed = Translations::from_file(source, error, &contents);
     check(parsed && contents == valid && error.empty(), "validated bytes are available without a second read");
+    write("\xef\xbb\xbf" + valid);
+    const auto bom = Translations::from_file(source, error);
+    check(bom && bom->begin()->second.code() == "test", "UTF-8 BOM preserves the language metadata");
+    write(valid);
     check(mhp3rd::text::import_translation_file(source, folder).error.empty(), "initial import succeeds");
     const auto read = [](const fs::path &file) {
         std::ifstream in(file, std::ios::binary);
@@ -494,7 +498,7 @@ void test_import_safety() {
     check(replacement.find("Replacement") != std::string::npos, "replacement contains the validated bytes");
     const std::vector<std::string> invalid = {valid + std::string(1, '\0'), valid + "\xc0\x80", valid + "\xed\xa0\x80",
         valid + "\xf4\x90\x80\x80", valid + "\xe2\x82", valid + "\xff", "language = ../bad\n2:1 = Bad\n",
-        "language = " + std::string(65, 'a') + "\n2:1 = Bad\n",
+        "language = original\n2:1 = Bad\n", "language = " + std::string(65, 'a') + "\n2:1 = Bad\n",
         valid + std::string(mhp3rd::text::kMaxTranslationLine + 1, 'a')};
     for (const auto &bytes : invalid) {
         write(bytes);

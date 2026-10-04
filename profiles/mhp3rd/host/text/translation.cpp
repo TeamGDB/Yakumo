@@ -102,7 +102,7 @@ State &state() {
 }
 
 bool is_original(const std::string &code) {
-    return code.empty() || code == "original" || code == "en" || code == "en-US" || code == "en-GB";
+    return code.empty() || code == "original";
 }
 
 bool is_target(std::uint32_t entry) {
@@ -195,7 +195,7 @@ std::uint32_t find_block(const psprecomp::GuestMemory &memory, const std::string
             if (!memory.contains(table, first) || memory.load32(table + count * 4u) != 0xFFFFFFFFu) continue;
             for (std::uint32_t i = 0u; i < count && !found; ++i) {
                 const std::uint32_t relative = memory.load32(table + i * 4u);
-                if (relative == 0u) continue;
+                if (relative == 0u || !offset_fits(table, relative)) continue;
                 const std::string text = peek_string(memory, table + relative, probe.size() + 1u);
                 if (text.size() >= probe.size() && text.compare(0u, probe.size(), probe) == 0) found = true;
             }

@@ -104,11 +104,80 @@ int main() {
         text::frame(memory, allocate);
         require(allocations == 1, "reloading a dialogue reuses its arena");
         require(memory.load8(ram + 16 + memory.load32(ram + 20)) == 'T', "reload reapplies translation");
+        // Ordinary menu blocks are located by their header and probe string.
+        entry = 2835;
+        entry_size = 128;
+        clear.assign(128, 0);
+        word(clear, 0, 2);
+        word(clear, 4, 8);
+        word(clear, 8, 32);
+        word(clear, 32, 12);
+        word(clear, 36, 16);
+        word(clear, 40, 0xffffffffu);
+        const std::string menu = "Menu";
+        std::copy(menu.begin(), menu.end(), clear.begin() + 48);
+        memory.copy_in(ram, clear);
+        encrypted = clear;
+        mods::p3rd::encrypt(encrypted, 1, 0);
+        text::set_language("test", {dir});
+        text::translate_read(archive_start, encrypted);
+        text::frame(memory, allocate);
+        require(text::applied_blocks().size() == 1, "ordinary text blocks are located and applied");
+        require(memory.load8(ram + 32 + memory.load32(ram + 36)) == 'N', "ordinary block points to translated text");
+        memory.copy_in(ram, clear);
+        text::forget_blocks();
+        text::translate_read(archive_start, encrypted);
+        text::frame(memory, allocate);
+        require(memory.load8(ram + 32 + memory.load32(ram + 36)) == 'N', "forgotten blocks can be reapplied");
+        {
+            std::ofstream out(dir / "test.lang");
+            out << "language = test\n[16]\n2:1 = Main\n";
+        }
+        text::set_language("test", {dir});
+        memory.copy_in(text::kMainTextBlock, clear);
+        text::frame(memory, allocate);
+        require(text::applied_blocks().at(0).entry == 16, "main text needs no archive read hook");
+        // Two invented quest records, copied as an archive buffer and as inline
+        // fields. The parser must protect sentinels and patch both shapes.
+        {
+            std::ofstream out(dir / "test.lang");
+            out << "language = test\n[4059]\n64:136 = NewTitle\n68:160 = Goal\n72:184 = Details\n";
+        }
+        entry = 4059;
+        entry_size = 512;
+        clear.assign(512, 0);
+        word(clear, 0, 64);
+        word(clear, 4, 256);
+        const std::vector<std::string> fields{"FirstTitle", "Objective", "Description"};
+        for (std::size_t record = 0; record < 2; ++record) {
+            const auto base = record == 0 ? 64u : 256u;
+            for (std::size_t i = 0; i < fields.size(); ++i) {
+                const auto offset = base + 72 + i * 24;
+                word(clear, base + i * 4, offset);
+                std::copy(fields[i].begin(), fields[i].end(), clear.begin() + offset);
+            }
+            word(clear, base + 12, base);
+        }
+        memory.copy_in(ram, clear);
+        memory.copy_in(ram + 1024, clear);
+        // A separate inline structure preserves the source spacing.
+        memory.copy_in(ram + 2048, std::span(clear).subspan(136, 72));
+        encrypted = clear;
+        mods::p3rd::encrypt(encrypted, 1, 0);
+        text::set_language("test", {dir});
+        text::translate_read(archive_start, encrypted);
+        text::frame(memory, allocate);
+        require(text::applied_blocks().at(0).applied == 6, "both quest buffer copies are repointed");
+        require(memory.load32(ram + 76) == 64, "quest table sentinels are preserved");
+        text::frame(memory, allocate);
+        require(memory.load8(ram + 2048) == 'N', "inline quest fields are patched in their own slots");
+        require(memory.load8(ram + 2072) == 'G', "the inline objective is translated");
+        const auto current_allocations = allocations;
         text::set_language("original", {dir});
         require(!text::active(), "original mode clears the translation state");
         text::translate_read(archive_start, encrypted);
         text::frame(memory, allocate);
-        require(allocations == 1, "inactive mode performs no allocation");
+        require(allocations == current_allocations, "inactive mode performs no allocation");
         std::cout << "text runtime tests passed\n";
     } catch (const std::exception &error) {
         std::cerr << error.what() << '\n';
