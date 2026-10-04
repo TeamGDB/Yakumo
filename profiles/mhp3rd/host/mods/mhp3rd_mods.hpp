@@ -51,8 +51,8 @@ std::size_t read_data_bin(std::uint64_t offset, std::span<std::uint8_t> out);
 // translation uses it to know which block a read brought in.
 struct EntryAt {
     std::uint32_t entry{};
-    std::uint64_t into{};  // bytes from the entry's start
-    std::uint64_t size{};  // the entry's exact size
+    std::uint64_t into{}; // bytes from the entry's start
+    std::uint64_t size{}; // the entry's exact size
 };
 [[nodiscard]] std::optional<EntryAt> entry_at_offset(std::uint64_t offset);
 
