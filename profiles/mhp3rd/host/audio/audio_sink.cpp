@@ -117,6 +117,7 @@ struct AudioSink::Impl {
     std::uint64_t seconds{};
 
     float gain{1.0f};
+    bool window_focused{true};
 #if defined(MHP3RD_HAS_SDL_AUDIO)
     SDL_AudioStream *stream{};
 #endif
@@ -206,8 +207,7 @@ void AudioSink::initialize() {
     impl.started = true;
     impl.trace = std::getenv("MHP3RD_TRACE_AUDIO") != nullptr;
     impl.enabled = std::getenv("MHP3RD_NO_AUDIO") == nullptr;
-    const settings::Settings &player = settings::current();
-    impl.gain = player.mute ? 0.0f : static_cast<float>(player.volume) / 100.0f;
+    refresh_settings();
 
     if (const std::filesystem::path path = environment_path("MHP3RD_AUDIO_DUMP"); !path.empty()) {
         if (impl.dump.open(path))
@@ -264,13 +264,33 @@ void AudioSink::shutdown() {
 
 void AudioSink::set_volume(float gain) {
     Impl &impl = *impl_;
-    impl.gain = std::clamp(gain, 0.0f, 1.0f);
+    const auto &player = settings::current();
+    const float effective = !impl.window_focused && player.background_mute ? 0.0f : std::clamp(gain, 0.0f, 1.0f);
+    if (impl.gain == effective) return;
+    impl.gain = effective;
 #if defined(MHP3RD_HAS_SDL_AUDIO)
     if (impl.stream != nullptr) {
         SDL_SetAudioStreamGain(impl.stream, impl.gain);
         std::cout << "Audio: output gain " << SDL_GetAudioStreamGain(impl.stream) << "\n";
     }
 #endif
+}
+
+void AudioSink::set_window_focused(bool focused) {
+    impl_->window_focused = focused;
+    refresh_settings();
+}
+
+void AudioSink::refresh_settings() {
+    const auto &player = settings::current();
+    set_volume(player.mute ? 0.0f : static_cast<float>(player.volume) / 100.0f);
+}
+
+float AudioSink::output_gain() const {
+#if defined(MHP3RD_HAS_SDL_AUDIO)
+    if (impl_->stream != nullptr) return SDL_GetAudioStreamGain(impl_->stream);
+#endif
+    return impl_->gain;
 }
 
 bool AudioSink::has_device() const {

@@ -113,6 +113,7 @@ struct Settings {
     bool invert_camera_y{};
     // Keyboard and mouse. With the mouse on, the window captures the pointer
     // while the game runs and the mouse turns the camera; Esc frees it.
+    bool background_gamepad{}; // Only gamepad input may be enabled without window focus.
     bool mouse{true};
     float mouse_sensitivity{0.10f}; // degrees of camera turn per count of mouse motion
     bool invert_mouse_x{};

@@ -440,6 +440,7 @@ The Android app starts from other defaults where a phone differs, with the same 
 | Audio | Volume | `audio.volume` | | 0–100% |
 | Audio | Mute | `audio.mute` | | |
 | Audio | Mute in background | `audio.background_mute` | | Off (default) or on: silence the game while it runs in the background |
+| Controls | Gamepad in background | `input.background_gamepad` | | Off (default) or on: read the controller while unfocused; other running instances may receive the same input. Keyboard and mouse stay focused |
 | Controls | Confirm button | `input.confirm` | `MHP3RD_PAD_FACE` | Right (○, Japanese) or bottom (Western) |
 | Controls | Stick dead zone | `input.dead_zone` | `MHP3RD_PAD_DEADZONE` | 0–50% |
 | Controls | Trigger point | `input.trigger` | `MHP3RD_PAD_TRIGGER` | 5–100% |

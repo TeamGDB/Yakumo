@@ -342,7 +342,26 @@ void test_crisp_text() {
     check(!from_entries(off).crisp_text, "and off stays off");
 }
 
+void test_background_settings() {
+    for (const auto platform : {Platform::Desktop, Platform::Android}) {
+        const auto values = defaults_for(platform);
+        check(!values.background_mute && !values.background_gamepad,
+            "both background options are opt-in on desktop and Android");
+    }
+    Settings enabled = from_entries({{"audio.background_mute", "1"}, {"input.background_gamepad", "true"}});
+    check(enabled.background_mute && enabled.background_gamepad, "both background options parse independently");
+    const auto again = from_entries(to_entries(enabled));
+    check(again.background_mute && again.background_gamepad, "background options survive serialization");
+    check(!from_entries({{"audio.background_mute", "invalid"}, {"input.background_gamepad", "invalid"}})
+                .background_mute &&
+            !from_entries({{"input.background_gamepad", "invalid"}}).background_gamepad,
+        "invalid background options retain safe defaults");
+    const auto disabled = from_entries({{"audio.background_mute", "false"}, {"input.background_gamepad", "0"}});
+    check(!disabled.background_mute && !disabled.background_gamepad, "explicit false values disable both options");
+}
+
 int main() {
+    test_background_settings();
     test_crisp_text();
     test_layered_armor();
     test_desktop_is_the_declared_defaults();

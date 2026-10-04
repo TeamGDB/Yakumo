@@ -1184,6 +1184,7 @@ struct VulkanRenderer::Impl {
     // so nothing stays pressed and the camera does not jump.
     // The PSP pad from the keyboard, the mouse's buttons and the gamepad as
     // they are now.
+    bool background_gamepad_events{};
     void sample_pad(bool focused);
     void update_pointer(bool focused) {
         const bool minimized = (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) != 0u;
@@ -2428,7 +2429,8 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
     if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
         std::cout << "[pad] no gamepad support: " << SDL_GetError() << "\n";
     } else {
-        SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+        SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, player.background_gamepad ? "1" : "0");
+        impl.background_gamepad_events = player.background_gamepad;
         // The player's own mappings first, so a controller they set up is a
         // gamepad from the start; then every joystick, logged once.
         input::devices::load_mappings();
@@ -2449,6 +2451,7 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
         error = std::string("SDL_CreateWindow failed: ") + SDL_GetError();
         return false;
     }
+    audio::AudioSink::instance().set_window_focused((SDL_GetWindowFlags(impl.window) & SDL_WINDOW_INPUT_FOCUS) != 0u);
 
     std::uint32_t extension_count = 0u;
     const char *const *sdl_extensions = SDL_Vulkan_GetInstanceExtensions(&extension_count);
@@ -5632,12 +5635,6 @@ bool VulkanRenderer::pump_events() {
             impl_->update_content_rect();
             impl_->resize_now = true;
         }
-        if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED || event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
-            const settings::Settings &player = settings::current();
-            const bool focused = event.type == SDL_EVENT_WINDOW_FOCUS_GAINED;
-            const bool muted = player.mute || (!focused && player.background_mute);
-            audio::AudioSink::instance().set_volume(muted ? 0.0f : static_cast<float>(player.volume) / 100.0f);
-        }
 #if defined(__ANDROID__)
         if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) impl_->log_layout("pixel size changed");
         if (event.type == SDL_EVENT_DISPLAY_ORIENTATION) impl_->log_layout("display orientation");
@@ -5673,6 +5670,11 @@ bool VulkanRenderer::pump_events() {
     // lost stays down in SDL's snapshot, which the guest sees as a held
     // direction it can never release.
     const bool focused = (SDL_GetWindowFlags(impl_->window) & SDL_WINDOW_INPUT_FOCUS) != 0u;
+    audio::AudioSink::instance().set_window_focused(focused);
+    if (impl_->background_gamepad_events != settings::current().background_gamepad) {
+        impl_->background_gamepad_events = settings::current().background_gamepad;
+        SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, impl_->background_gamepad_events ? "1" : "0");
+    }
     impl_->update_pointer(focused);
     impl_->sample_pad(focused);
     impl_->sample_free_camera(focused);
@@ -5712,7 +5714,7 @@ void VulkanRenderer::Impl::resolve_bindings(bool focused) {
         now, window);
     log("keys", keys_resolver);
     lead_request = input::lead_requested(input::table(player.controls, false), keys_resolver.targets());
-    if (gamepad == nullptr) {
+    if (gamepad == nullptr || (!focused && !player.background_gamepad)) {
         pad_resolver.reset();
         mapped = {};
         return;
@@ -5793,9 +5795,14 @@ void VulkanRenderer::Impl::sample_lock_on(bool focused) {
     // Keys and mouse buttons act on their own, so moving on W A S D never
     // spoils a tap; only the pad's inputs are also parts of other chords.
     if (lock_on_keys_tap.update(typed_now, false)) lock_on_pressed = true;
+    if (!focused && !player.background_gamepad) {
+        // Losing access to the controller is not the user's release of a tap.
+        lock_on_pad_tap = {};
+        return;
+    }
     bool pad_now = false;
     bool others = false;
-    if (gamepad != nullptr) {
+    if (gamepad != nullptr && (focused || player.background_gamepad)) {
         const PadTuning tuning = pad_tuning();
         const input::Slots &slots = player.controls.pad[action];
         const auto held = [&](input::Binding binding) { return pad_input_held(gamepad, binding, tuning); };
@@ -5836,9 +5843,12 @@ void VulkanRenderer::Impl::sample_free_camera(bool focused) {
     const auto key = [&](SDL_Scancode code) {
         return (focused && keys[code]) || scripted_keys[static_cast<std::size_t>(code)];
     };
-    const auto button = [&](SDL_GamepadButton id) { return gamepad != nullptr && SDL_GetGamepadButton(gamepad, id); };
+    const bool allow_pad = focused || settings::current().background_gamepad;
+    const auto button = [&](SDL_GamepadButton id) {
+        return allow_pad && gamepad != nullptr && SDL_GetGamepadButton(gamepad, id);
+    };
     const auto axis = [&](SDL_GamepadAxis id) {
-        if (gamepad == nullptr) return 0.0f;
+        if (!allow_pad || gamepad == nullptr) return 0.0f;
         return std::clamp(static_cast<float>(SDL_GetGamepadAxis(gamepad, id)) / 32767.0f, -1.0f, 1.0f);
     };
     // A press counts once: on the sample it goes down.
@@ -5943,7 +5953,8 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
     }
 
     // The gamepad adds to the same bits and offsets, so both sources are live.
-    if (impl_->gamepad != nullptr) read_gamepad(impl_->gamepad, impl_->mapped, pad, analog_x, analog_y);
+    if (impl_->gamepad != nullptr && (focused || player.background_gamepad))
+        read_gamepad(impl_->gamepad, impl_->mapped, pad, analog_x, analog_y);
     // So do the on-screen controls.
     if (impl_->touch_visible) {
         const bool action = Impl::action_layout();
