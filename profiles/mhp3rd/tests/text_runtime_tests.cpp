@@ -6,6 +6,7 @@
 #include "psprecomp/guest_memory.hpp"
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -169,9 +170,167 @@ int main() {
         text::frame(memory, allocate);
         require(text::applied_blocks().at(0).applied == 6, "both quest buffer copies are repointed");
         require(memory.load32(ram + 76) == 64, "quest table sentinels are preserved");
-        text::frame(memory, allocate);
+        for (unsigned frame = 0; frame < 260 && memory.load8(ram + 2048) != 'N'; ++frame) {
+            text::frame(memory, allocate);
+            require(text::search_work_last_frame().bytes <= text::kSearchBytesPerFrame,
+                "quest copy and inline searches share a bounded frame budget");
+        }
         require(memory.load8(ram + 2048) == 'N', "inline quest fields are patched in their own slots");
         require(memory.load8(ram + 2072) == 'G', "the inline objective is translated");
+        // Search work is bounded over full RAM, including absent probes. A
+        // second loaded entry must progress rather than starve behind the first.
+        {
+            std::ofstream out(dir / "test.lang");
+            out << "language = test\n[4059]\n64:136 = NewTitle\n68:160 = Goal\n72:184 = Details\n"
+                   "[4061]\n64:136 = Other\n[4289]\n0:0 = Greeting\n[2835]\n2:1 = Label\n";
+        }
+        psprecomp::GuestMemory searched(64u * 1024u * 1024u);
+        unsigned search_allocations = 0;
+        const auto allocate_search = [&](std::size_t size) {
+            ++search_allocations;
+            return std::optional<text::Arena>{
+                {ram + 0x01ff0000u, ram + 0x01ff0000u + static_cast<std::uint32_t>(size)}};
+        };
+        const auto checked_frame = [&] {
+            text::frame(searched, allocate_search);
+            require(text::search_work_last_frame().bytes <= text::kSearchBytesPerFrame,
+                "all pending searches share one frame budget");
+        };
+        const auto until = [&](const auto &ready, unsigned limit) {
+            for (unsigned frame = 0; frame < limit && !ready(); ++frame) checked_frame();
+            require(ready(), "a bounded search eventually discovers its target");
+        };
+        text::set_language("test", {dir});
+        entry = 4059;
+        text::translate_read(archive_start, encrypted);
+        entry = 4061;
+        auto other = clear;
+        other[136] = 'S';
+        auto other_encrypted = other;
+        mods::p3rd::encrypt(other_encrypted, 1, 0);
+        text::translate_read(archive_start, other_encrypted);
+        // The first title begins four bytes before a slice edge. The second
+        // archive is in a later slice and belongs to a different pending entry.
+        const auto boundary_copy = ram + text::kSearchBytesPerFrame - 140u;
+        const auto later_copy = ram + 3u * text::kSearchBytesPerFrame;
+        searched.copy_in(boundary_copy, clear);
+        searched.copy_in(later_copy, other);
+        until([&] { return searched.load32(boundary_copy + 64u) != 136u && searched.load32(later_copy + 64u) != 136u; },
+            16);
+        require(searched.load32(boundary_copy + 76u) == 64u, "cross-slice copies retain their sentinel");
+        // Unaligned inline candidates cross slice edges too. Comparing their
+        // whole fields must not be restricted to a slice's byte span.
+        const auto inline_at = ram + 2u * text::kSearchBytesPerFrame - 3u;
+        searched.copy_in(inline_at, std::span(clear).subspan(136, 72));
+        until([&] { return searched.load8(inline_at) == 'N'; }, 600);
+        require(searched.load8(inline_at + 24u) == 'G', "cross-slice inline objective is intact");
+        // A new structure behind the cursor after an earlier hit still needs
+        // a later pass; stopping all retries at the first hit would lose it.
+        const auto late_inline = ram + 8192u;
+        searched.copy_in(late_inline, std::span(clear).subspan(136, 72));
+        until([&] { return searched.load8(late_inline) == 'N'; }, 900);
+        // A reread resets both cursors and reuses its existing arena.
+        const auto arena_allocations = search_allocations;
+        entry = 4059;
+        searched.copy_in(boundary_copy, clear);
+        text::translate_read(archive_start, encrypted);
+        until([&] { return searched.load32(boundary_copy + 64u) != 136u; }, 16);
+        require(search_allocations == arena_allocations, "incremental reloading reuses its existing arena");
+        // No file initially exists; place it behind a completed portion of the
+        // scan. A later complete pass must find it, not count each slice as a
+        // failed attempt and exhaust the old retry limit prematurely.
+        text::set_language("test", {dir});
+        psprecomp::GuestMemory absent(64u * 1024u * 1024u);
+        entry = 4059;
+        text::translate_read(archive_start, encrypted);
+        for (unsigned frame = 0; frame < 4; ++frame) {
+            text::frame(absent, allocate_search);
+            require(text::search_work_last_frame().bytes <= text::kSearchBytesPerFrame,
+                "missing quest probes are bounded too");
+        }
+        absent.copy_in(ram + 1024u, clear);
+        for (unsigned frame = 0; frame < 260 && absent.load32(ram + 1088u) == 136u; ++frame) {
+            text::frame(absent, allocate_search);
+            require(text::search_work_last_frame().bytes <= text::kSearchBytesPerFrame,
+                "retrying a missing probe preserves the frame budget");
+        }
+        require(absent.load32(ram + 1088u) != 136u, "late archive copies behind the cursor are found on retry");
+        // The last inline structure ends at the RAM boundary. The final partial
+        // slice and its candidate verification must remain in bounds.
+        const auto end_inline = ram + 0x02000000u - 72u;
+        absent.copy_in(end_inline, std::span(clear).subspan(136, 72));
+        for (unsigned frame = 0; frame < 260 && absent.load8(end_inline) != 'N'; ++frame)
+            text::frame(absent, allocate_search);
+        require(absent.load8(end_inline) == 'N', "inline fields at the RAM boundary are found safely");
+        // A purported final field without room for its terminator is not a
+        // complete structure and must not cause a write outside the RAM span.
+        const auto unterminated = ram + 0x02000000u - 59u;
+        absent.copy_in(unterminated, std::span(clear).subspan(136, 59));
+        for (unsigned frame = 0; frame < 260; ++frame) text::frame(absent, allocate_search);
+        require(absent.load8(unterminated) == 'F', "an unterminated field at the RAM edge is left alone");
+        // Dialogue/menu probes also yield instead of doing an independent
+        // full-RAM scan. Verify a dialogue probe that spans a slice boundary.
+        text::set_language("test", {dir});
+        psprecomp::GuestMemory probe_memory(64u * 1024u * 1024u);
+        entry = 4289;
+        entry_size = 64;
+        std::vector<std::uint8_t> dialogue(64, 0);
+        word(dialogue, 4, 16);
+        word(dialogue, 8, 0xffffffffu);
+        word(dialogue, 20, 16);
+        word(dialogue, 24, 0xffffffffu);
+        const std::string greeting = "Greeting source";
+        std::copy(greeting.begin(), greeting.end(), dialogue.begin() + 32);
+        auto encoded_dialogue = dialogue;
+        mods::p3rd::encrypt(encoded_dialogue, 1, 0);
+        const auto dialogue_at = ram + text::kSearchBytesPerFrame - 36u;
+        probe_memory.copy_in(dialogue_at, dialogue);
+        text::translate_read(archive_start, encoded_dialogue);
+        text::frame(probe_memory, allocate_search);
+        require(probe_memory.load32(dialogue_at + 20u) != 16u, "a dialogue probe can cross a slice boundary");
+        entry = 2835;
+        entry_size = 128;
+        std::vector<std::uint8_t> block(128, 0);
+        word(block, 0, 2);
+        word(block, 4, 8);
+        word(block, 8, 32);
+        word(block, 32, 12);
+        word(block, 36, 16);
+        word(block, 40, 0xffffffffu);
+        const std::string label = "Menu source";
+        std::copy(label.begin(), label.end(), block.begin() + 48);
+        auto encoded_block = block;
+        mods::p3rd::encrypt(encoded_block, 1, 0);
+        const auto block_at = ram + 3u * text::kSearchBytesPerFrame;
+        probe_memory.copy_in(block_at, block);
+        text::translate_read(archive_start, encoded_block);
+        text::frame(probe_memory, allocate_search);
+        require(probe_memory.load32(block_at + 36u) == 16u, "a far menu waits for its search slice");
+        for (unsigned frame = 0; frame < 8 && probe_memory.load32(block_at + 36u) == 16u; ++frame) {
+            text::frame(probe_memory, allocate_search);
+            require(text::search_work_last_frame().bytes <= text::kSearchBytesPerFrame,
+                "menu probes share the bounded work contract");
+        }
+        require(probe_memory.load32(block_at + 36u) != 16u, "a menu in a later slice is translated");
+        // Diagnostic comparison can restore a complete blocking search without
+        // dropping any records or changing the normal configured budget.
+        text::set_language("test", {dir});
+        probe_memory.copy_in(block_at, block);
+        text::translate_read(archive_start, encoded_block);
+#ifdef _WIN32
+        _putenv_s("MHP3RD_TEXT_SEARCH_UNLIMITED", "1");
+#else
+        setenv("MHP3RD_TEXT_SEARCH_UNLIMITED", "1", 1);
+#endif
+        text::frame(probe_memory, allocate_search);
+        require(probe_memory.load32(block_at + 36u) != 16u &&
+                text::search_work_last_frame().bytes > text::kSearchBytesPerFrame,
+            "the diagnostic switch restores an unsliced probe scan");
+#ifdef _WIN32
+        _putenv_s("MHP3RD_TEXT_SEARCH_UNLIMITED", "");
+#else
+        unsetenv("MHP3RD_TEXT_SEARCH_UNLIMITED");
+#endif
         const auto current_allocations = allocations;
         text::set_language("original", {dir});
         require(!text::active(), "original mode clears the translation state");
