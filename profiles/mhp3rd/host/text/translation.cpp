@@ -1,4 +1,5 @@
 #include "text/translation.hpp"
+#include "text/read_buffer.hpp"
 
 #include "mods/mhp3rd_data_bin.hpp"
 #include "mods/mhp3rd_mods.hpp"
@@ -28,8 +29,7 @@ const std::uint32_t kTargets[] = {kMainEntry, 2835u, 2836u, 2837u, 2838u, 2839u,
 const std::uint32_t kDialogues[] = {4289u, 4290u, 4291u};
 // The quest files: an array of record offsets, then records with a table of
 // offsets to their strings (village quests; tools/extract_text.py `quest_block`).
-const std::uint32_t kQuests[] = {4059u, 4060u, 4061u, 4062u, 4063u, 4064u,
-                                 4065u, 4066u, 4070u, 4071u, 4072u, 4073u};
+const std::uint32_t kQuests[] = {4059u, 4060u, 4061u, 4062u, 4063u, 4064u, 4065u, 4066u, 4070u, 4071u, 4072u, 4073u};
 
 bool is_dialogue(std::uint32_t entry) {
     for (const std::uint32_t dialogue : kDialogues)
@@ -47,17 +47,17 @@ constexpr std::uint32_t kRamBegin = 0x08800000u;
 constexpr std::uint32_t kRamEnd = 0x0A800000u;
 
 struct QuestField {
-    std::uint32_t ref{};      // position of the offset word in the file
-    std::uint32_t offset{};   // the string's offset in the file
-    std::string text;         // the game's own string
+    std::uint32_t ref{};    // position of the offset word in the file
+    std::uint32_t offset{}; // the string's offset in the file
+    std::string text;       // the game's own string
 };
 
 struct Pending {
-    bool read{};            // the game has read this entry (whole)
+    bool read{}; // the game has read this entry (whole)
     bool applied{};
-    std::string probe;      // the first non-empty string of the block, to find it in RAM
-    std::uint32_t probe_into{};  // where the probe string sits inside the entry
-    std::uint32_t size{};   // the entry's byte size, to sanity-check a found base
+    std::string probe;          // the first non-empty string of the block, to find it in RAM
+    std::uint32_t probe_into{}; // where the probe string sits inside the entry
+    std::uint32_t size{};       // the entry's byte size, to sanity-check a found base
     // A dialogue's ids number across its entries (4289 is 0..16, 4290 is 17..23),
     // so the first id is not always 0; it tells the entry apart in RAM.
     std::uint32_t first_id{};
@@ -66,8 +66,7 @@ struct Pending {
     std::uint32_t missed{};
     // The game may read a large entry in pieces; the pieces are collected here
     // as they come.
-    std::vector<std::uint8_t> partial;
-    std::size_t partial_have{};  // how many bytes of the entry have been read
+    ReadBuffer partial;
     // A quest file is read again every time its screen opens (the quest list,
     // and again in the quest), each read loading the game's own offsets. Its
     // translation is re-applied to the new buffer, always into the same arena
@@ -78,23 +77,23 @@ struct Pending {
     // client), parsed from the file, to find and patch the game's own quest
     // structure, which holds the strings inline (not by offset).
     std::vector<std::vector<QuestField>> records;
-    std::uint32_t struct_checks{};  // remaining searches for that structure
-    std::uint64_t struct_next{};    // frame of the next search
-    std::vector<std::uint32_t> copy_bases;  // the file copies to leave alone
+    std::uint32_t struct_checks{};         // remaining searches for that structure
+    std::uint64_t struct_next{};           // frame of the next search
+    std::vector<std::uint32_t> copy_bases; // the file copies to leave alone
 };
 
 struct State {
     bool loaded{};
     std::string code{"original"};
     std::string name{"Original"};
-    std::map<std::uint32_t, Translations> blocks;  // entry -> its translations
+    std::map<std::uint32_t, Translations> blocks; // entry -> its translations
     std::vector<std::filesystem::path> directories;
     std::optional<Arena> arena;
-    std::map<std::uint32_t, Pending> pending;  // entry -> what is known about it
+    std::map<std::uint32_t, Pending> pending; // entry -> what is known about it
     std::map<std::uint32_t, AppliedBlock> applied;
     bool warned_arena{};
     std::size_t arena_used{};
-    std::uint64_t frames{};  // for the timed quest-structure searches
+    std::uint64_t frames{}; // for the timed quest-structure searches
 };
 
 State &state() {
@@ -116,17 +115,17 @@ bool is_target(std::uint32_t entry) {
 // One table at `data + offset`: its string count, or 0 when it does not parse.
 std::uint32_t table_count(std::span<const std::uint8_t> data, std::uint32_t base, std::uint32_t offset) {
     const auto read32 = [&](std::uint32_t at) -> std::uint32_t {
-        if (at + 4u > data.size()) return 0xFFFFFFFFu;
+        if (at > data.size() || data.size() - at < 4u) return 0xFFFFFFFFu;
         return static_cast<std::uint32_t>(data[at]) | (static_cast<std::uint32_t>(data[at + 1u]) << 8u) |
-               (static_cast<std::uint32_t>(data[at + 2u]) << 16u) |
-               (static_cast<std::uint32_t>(data[at + 3u]) << 24u);
+            (static_cast<std::uint32_t>(data[at + 2u]) << 16u) | (static_cast<std::uint32_t>(data[at + 3u]) << 24u);
     };
-    if (offset < 8u || base + offset + 8u > data.size()) return 0u;
+    if (offset < 8u || !offset_fits(base, offset) || base + offset > data.size() || data.size() - (base + offset) < 8u)
+        return 0u;
     const std::uint32_t table = base + offset;
     const std::uint32_t first = read32(table);
     if (first < 8u || first % 4u != 0u || first / 4u - 1u > 8192u) return 0u;
     const std::uint32_t count = first / 4u - 1u;
-    if (table + first > data.size()) return 0u;
+    if (first > data.size() - table) return 0u;
     if (read32(table + count * 4u) != 0xFFFFFFFFu) return 0u;
     return count;
 }
@@ -146,8 +145,8 @@ std::string peek_string(const psprecomp::GuestMemory &memory, std::uint32_t addr
 
 // Looks for the loaded dialogue entry: finds the probe string in RAM and works
 // back to the entry start by the offset the string had inside it.
-std::uint32_t find_dialogue(const psprecomp::GuestMemory &memory, const std::string &probe, std::uint32_t into,
-                            std::uint32_t first_id) {
+std::uint32_t find_dialogue(
+    const psprecomp::GuestMemory &memory, const std::string &probe, std::uint32_t into, std::uint32_t first_id) {
     if (probe.empty()) return 0u;
     const auto equal = [&](std::uint32_t at) {
         for (std::size_t i = 0; i < probe.size(); ++i) {
@@ -179,7 +178,7 @@ std::uint32_t find_dialogue(const psprecomp::GuestMemory &memory, const std::str
 std::uint32_t find_block(const psprecomp::GuestMemory &memory, const std::string &probe) {
     if (probe.empty()) return 0u;
     for (std::uint32_t at = kRamBegin; at + 16u < kRamEnd; at += 4u) {
-        if (!memory.contains(at, 64u)) continue;
+        if (!memory.contains(at, 256u)) continue;
         if (memory.load32(at + 4u) != 8u) continue;
         bool found = false;
         for (std::uint32_t word = 2u; word < 64u && !found; ++word) {
@@ -211,8 +210,8 @@ std::uint32_t find_block(const psprecomp::GuestMemory &memory, const std::string
 // inside it, with the record array at the top checked. A quest file is in RAM
 // more than once (the quest list's buffer, the quest's own), so the patch
 // translates every copy it can find.
-std::vector<std::uint32_t> find_quest_copies(const psprecomp::GuestMemory &memory, const std::string &probe,
-                                             std::uint32_t into, std::uint32_t size) {
+std::vector<std::uint32_t> find_quest_copies(
+    const psprecomp::GuestMemory &memory, const std::string &probe, std::uint32_t into, std::uint32_t size) {
     std::vector<std::uint32_t> copies;
     if (probe.empty()) return copies;
     const auto equal = [&](std::uint32_t at) {
@@ -245,10 +244,8 @@ std::vector<std::uint32_t> find_quest_copies(const psprecomp::GuestMemory &memor
 // followed by the other fields at the game's slots (each field's length rounded
 // up to four), and every field is overwritten in place with the translation
 // when it fits the slot. Returns how many fields were written.
-std::uint32_t apply_quest_struct(psprecomp::GuestMemory &memory,
-                                 const std::vector<std::vector<QuestField>> &records,
-                                 const Translations &translations, const std::vector<std::uint32_t> &copies,
-                                 std::uint32_t copy_size) {
+std::uint32_t apply_quest_struct(psprecomp::GuestMemory &memory, const std::vector<std::vector<QuestField>> &records,
+    const Translations &translations, const std::vector<std::uint32_t> &copies, std::uint32_t copy_size) {
     if (records.empty()) return 0u;
     std::uint32_t end = kRamEnd;
     while (end > kRamBegin + 0x100000u && !memory.contains(end - 4u, 4u)) end -= 0x100000u;
@@ -292,7 +289,10 @@ std::uint32_t apply_quest_struct(psprecomp::GuestMemory &memory,
                     while (stop < 4096u && here + stop < span && ram[here + stop] == 0u) ++stop;
                     slot[n] = stop - pos[n];
                 }
-                if (pos[n] + fields[n].text.size() > end - at) { ok = false; break; }
+                if (pos[n] + fields[n].text.size() > end - at) {
+                    ok = false;
+                    break;
+                }
                 if (n != 0u && std::memcmp(ram + here + pos[n], fields[n].text.data(), fields[n].text.size()) != 0)
                     ok = false;
             }
@@ -302,8 +302,8 @@ std::uint32_t apply_quest_struct(psprecomp::GuestMemory &memory,
                     translations.find(static_cast<std::uint16_t>(fields[n].ref), fields[n].offset);
                 if (text == nullptr) continue;
                 const std::uint32_t need = std::max(static_cast<std::uint32_t>(fields[n].text.size()) + 1u,
-                                                    static_cast<std::uint32_t>(text->size()) + 1u);
-                if (need > slot[n]) continue;  // does not fit the game's slot
+                    static_cast<std::uint32_t>(text->size()) + 1u);
+                if (need > slot[n]) continue; // does not fit the game's slot
                 const std::uint32_t base = at + pos[n];
                 for (std::uint32_t i = 0u; i < need; ++i)
                     memory.store8(base + i, i < text->size() ? static_cast<std::uint8_t>((*text)[i]) : 0u);
@@ -348,17 +348,23 @@ void set_language(const std::string &code, const std::vector<std::filesystem::pa
                 if (!translations.name().empty()) s.name = translations.name();
             }
             if (!blocks->empty()) s.name = blocks->begin()->second.name();
-            std::cout << "[text] " << s.name << " (" << s.code << "): " << strings << " strings in "
-                      << s.blocks.size() << " block(s)\n";
+            std::cout << "[text] " << s.name << " (" << s.code << "): " << strings << " strings in " << s.blocks.size()
+                      << " block(s)\n";
             return;
         }
     }
     std::cout << "[text] no " << s.code << " translation found; the game's own text is used\n";
 }
 
-bool active() noexcept { return !state().blocks.empty(); }
-const std::string &language_code() noexcept { return state().code; }
-const std::string &language_name() noexcept { return state().name; }
+bool active() noexcept {
+    return !state().blocks.empty();
+}
+const std::string &language_code() noexcept {
+    return state().code;
+}
+const std::string &language_name() noexcept {
+    return state().name;
+}
 
 std::vector<std::uint32_t> translated_entries() {
     std::vector<std::uint32_t> entries;
@@ -369,8 +375,8 @@ std::vector<std::uint32_t> translated_entries() {
 std::vector<AppliedBlock> applied_blocks() {
     std::vector<AppliedBlock> blocks;
     for (const auto &[entry, block] : state().applied) blocks.push_back(block);
-    std::sort(blocks.begin(), blocks.end(),
-              [](const AppliedBlock &a, const AppliedBlock &b) { return a.entry < b.entry; });
+    std::sort(
+        blocks.begin(), blocks.end(), [](const AppliedBlock &a, const AppliedBlock &b) { return a.entry < b.entry; });
     return blocks;
 }
 
@@ -387,9 +393,8 @@ std::vector<Language> languages() {
     std::vector<Language> all;
     for (const std::filesystem::path &directory : state().directories) {
         for (Language &language : scan_languages(directory)) {
-            const bool known = std::any_of(all.begin(), all.end(), [&](const Language &other) {
-                return other.code == language.code;
-            });
+            const bool known =
+                std::any_of(all.begin(), all.end(), [&](const Language &other) { return other.code == language.code; });
             if (!known) all.push_back(std::move(language));
         }
     }
@@ -397,19 +402,21 @@ std::vector<Language> languages() {
     return all;
 }
 
-const std::vector<std::filesystem::path> &search_directories() noexcept { return state().directories; }
+const std::vector<std::filesystem::path> &search_directories() noexcept {
+    return state().directories;
+}
 
 void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
     State &s = state();
     if (!s.loaded || s.blocks.empty() || bytes.empty()) return;
     const std::optional<mods::EntryAt> at = mods::entry_at_offset(offset);
-    if (!at || at->into != 0u) return;
+    if (!at || at->size == 0u || at->size > ReadBuffer::kMaxBytes || at->into >= at->size) return;
     const auto found = s.blocks.find(at->entry);
     if (found == s.blocks.end()) return;
     static const bool trace = std::getenv("MHP3RD_TRACE_TEXT") != nullptr;
     if (trace)
-        std::cout << "[text] read entry " << at->entry << " offset " << offset << " size " << bytes.size()
-                  << " (entry " << at->size << ")\n";
+        std::cout << "[text] read entry " << at->entry << " offset " << offset << " size " << bytes.size() << " (entry "
+                  << at->size << ")\n";
     // The archive is obfuscated per 2 KiB block; a piece is decrypted by its own
     // starting block, so a read that does not carry the whole entry can still be
     // collected. The pieces are gathered until the entry is whole.
@@ -427,46 +434,39 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
         pending.missed = 0u;
         pending.probe.clear();
         pending.partial.clear();
-        pending.partial_have = 0u;
-    } else if (pending.read) {
-        return;
     }
-    // Collect the entry's stored bytes, then decrypt them in 2 KiB blocks (the
-    // keystream is seeded per block, so a piece is not decrypted on its own).
-    // The game may never read the whole entry (a dialogue can be read up to the
-    // part it needs); whatever has been read is enough for the probe, and the
-    // translation applies to the strings inside it.
-    std::vector<std::uint8_t> stored;
-    if (bytes.size() >= at->size) {
-        stored.assign(bytes.begin(), bytes.end());
-    } else {
-        if (pending.partial.size() != at->size) pending.partial.assign(at->size, 0u);
-        const std::size_t from = static_cast<std::size_t>(at->into);
-        if (from + bytes.size() > pending.partial.size()) return;
-        std::copy(bytes.begin(), bytes.end(), pending.partial.begin() + from);
-        if (pending.partial_have < from + bytes.size()) pending.partial_have = from + bytes.size();
-        stored.assign(pending.partial.begin(), pending.partial.begin() + pending.partial_have);
+    // Bound aggregate retained archive storage as well as each entry. Only
+    // contiguous, actually received bytes are handed to the layout parser.
+    if (pending.partial.size() == 0u) {
+        std::size_t retained = 0;
+        for (const auto &[entry, item] : s.pending) retained += item.partial.size();
+        if (at->size > 16u * 1024u * 1024u - retained) return;
     }
-    // The obfuscation is one keystream seeded from the block the entry starts
-    // at and running through the whole entry, not a fresh one every 2 KiB
-    // (mods::p3rd::decrypt does the entry from `block`, offset 0).
-    std::vector<std::uint8_t> clear = stored;
+    const auto available = static_cast<std::size_t>(at->size - at->into);
+    const auto piece = bytes.first(std::min(bytes.size(), available));
+    if (!pending.partial.append(static_cast<std::size_t>(at->size), static_cast<std::size_t>(at->into), piece)) return;
+    const auto prefix = pending.partial.prefix();
+    if (prefix.empty()) return;
+    pending.probe.clear();
+    pending.records.clear();
+    pending.applied = false;
+    std::vector<std::uint8_t> clear(prefix.begin(), prefix.end());
     const std::uint32_t entry_start_block = static_cast<std::uint32_t>((offset - at->into) / mods::p3rd::kBlock);
     mods::p3rd::decrypt(clear, entry_start_block, 0u);
     const auto read32 = [&](std::uint32_t i) -> std::uint32_t {
+        if (i > clear.size() || clear.size() - i < 4u) return 0xFFFFFFFFu;
         return static_cast<std::uint32_t>(clear[i]) | (static_cast<std::uint32_t>(clear[i + 1u]) << 8u) |
-               (static_cast<std::uint32_t>(clear[i + 2u]) << 16u) |
-               (static_cast<std::uint32_t>(clear[i + 3u]) << 24u);
+            (static_cast<std::uint32_t>(clear[i + 2u]) << 16u) | (static_cast<std::uint32_t>(clear[i + 3u]) << 24u);
     };
     // The probe is the first non-empty string and where it sits in the entry, so
     // the entry can be found in RAM by that string alone (the dialogue has no
     // header to look for).
-    if (is_dialogue(at->entry)) {
+    if (is_dialogue(at->entry) && clear.size() >= 8u) {
         // The first id of the entry (4289 starts at 0, 4290 at 17, ...), which
         // tells the entry apart from the others in RAM.
         pending.first_id = read32(0u);
         // (id, offset) pairs at the top; the first block's first string.
-        for (std::uint32_t k = 0u; k < 64u && pending.probe.empty(); ++k) {
+        for (std::uint32_t k = 0u; k < 64u && (k + 1u) * 8u <= clear.size() && pending.probe.empty(); ++k) {
             const std::uint32_t id = read32(k * 8u);
             const std::uint32_t block_offset = read32(k * 8u + 4u);
             if (id == 0xFFFFFFFFu || block_offset >= clear.size()) break;
@@ -474,7 +474,9 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
                 const std::uint32_t sub = block_offset + j * 8u;
                 if (sub + 8u > clear.size()) break;
                 if (read32(sub) == 0xFFFFFFFFu) break;
-                const std::uint32_t string = block_offset + read32(sub + 4u);
+                const auto relative = read32(sub + 4u);
+                if (!offset_fits(block_offset, relative)) break;
+                const std::uint32_t string = block_offset + relative;
                 if (string >= clear.size()) break;
                 std::string text;
                 for (std::uint32_t c = string; c < clear.size() && clear[c] != 0u && text.size() < 24u; ++c)
@@ -546,7 +548,7 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
         pending.struct_next = 0u;
         std::cout << "[text] quest " << at->entry << ": parsed " << pending.records.size() << " record(s)\n";
     } else if (clear.size() >= 12u && read32(4u) == 8u) {
-        for (std::uint32_t word = 2u; word < 64u && pending.probe.empty(); ++word) {
+        for (std::uint32_t word = 2u; word < 64u && (word + 1u) * 4u <= clear.size() && pending.probe.empty(); ++word) {
             const std::uint32_t table_offset = read32(word * 4u);
             const std::uint32_t count = table_count(clear, 0u, table_offset);
             // A gap or header field between tables is skipped, not the end of
@@ -555,6 +557,7 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
             for (std::uint32_t i = 1u; i < count; ++i) {
                 const std::uint32_t relative = read32(table_offset + i * 4u);
                 if (relative == 0u) continue;
+                if (!offset_fits(table_offset, relative)) continue;
                 const std::uint32_t string = table_offset + relative;
                 if (string >= clear.size()) continue;
                 std::string text;
@@ -568,9 +571,8 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
             }
         }
     }
-    pending.read = true;
-    if (trace)
-        std::cout << "[text] block " << at->entry << " read: probe \"" << pending.probe << "\"\n";
+    pending.read = !pending.probe.empty();
+    if (trace) std::cout << "[text] block " << at->entry << " read: probe \"" << pending.probe << "\"\n";
 }
 
 void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
@@ -595,7 +597,8 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
         std::size_t bytes = 64u;
         for (const auto &[entry, translations] : s.blocks) bytes += translations.arena_bytes();
         const std::optional<Arena> arena = allocate(bytes);
-        if (!arena || !arena->valid()) {
+        if (!arena || !arena->valid() || bytes > arena->end - arena->begin ||
+            !memory.contains(arena->begin, arena->end - arena->begin)) {
             if (!s.warned_arena) {
                 std::cout << "[text] no guest memory for the translations; the game's text is used\n";
                 s.warned_arena = true;
@@ -628,12 +631,15 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
 
         std::uint32_t address = 0u;
         std::vector<std::uint32_t> quest_copies;
-        if (entry == kMainEntry) address = kMainTextBlock;
-        else if (is_dialogue(entry)) address = find_dialogue(memory, pending.probe, pending.probe_into, pending.first_id);
+        if (entry == kMainEntry)
+            address = kMainTextBlock;
+        else if (is_dialogue(entry))
+            address = find_dialogue(memory, pending.probe, pending.probe_into, pending.first_id);
         else if (is_quest(entry)) {
             quest_copies = find_quest_copies(memory, pending.probe, pending.probe_into, pending.size);
             address = quest_copies.empty() ? 0u : quest_copies.front();
-        } else if (!pending.probe.empty()) address = find_block(memory, pending.probe);
+        } else if (!pending.probe.empty())
+            address = find_block(memory, pending.probe);
         static const bool trace = std::getenv("MHP3RD_TRACE_TEXT") != nullptr;
         if (address == 0u) {
             // A probe that never matches must not be retried forever: scanning
@@ -658,8 +664,8 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
                 pending.arena_bytes = static_cast<std::uint32_t>(need);
                 s.arena_used += need;
             }
-            const Arena slice{s.arena->begin + pending.arena_offset,
-                              s.arena->begin + pending.arena_offset + pending.arena_bytes};
+            const Arena slice{
+                s.arena->begin + pending.arena_offset, s.arena->begin + pending.arena_offset + pending.arena_bytes};
             std::size_t used = 0u;
             const std::uint32_t applied = apply_dialogue(memory, address, translations->second, slice, used);
             if (applied == 0u) continue;
@@ -681,8 +687,8 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
                 pending.arena_bytes = static_cast<std::uint32_t>(need);
                 s.arena_used += need;
             }
-            const Arena slice{s.arena->begin + pending.arena_offset,
-                              s.arena->begin + pending.arena_offset + pending.arena_bytes};
+            const Arena slice{
+                s.arena->begin + pending.arena_offset, s.arena->begin + pending.arena_offset + pending.arena_bytes};
             std::uint32_t applied = 0u;
             pending.copy_bases = quest_copies;
             // Only the fields the parser found are repointed: a `.lang` may hold
@@ -714,15 +720,14 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
             pending.arena_bytes = static_cast<std::uint32_t>(need);
             s.arena_used += need;
         }
-        const Arena slice{s.arena->begin + pending.arena_offset,
-                          s.arena->begin + pending.arena_offset + pending.arena_bytes};
+        const Arena slice{
+            s.arena->begin + pending.arena_offset, s.arena->begin + pending.arena_offset + pending.arena_bytes};
         const ApplyResult result = apply(memory, address, translations->second, slice);
         if (!result.block) continue;
         pending.applied = true;
         s.applied[entry] = AppliedBlock{entry, address, result.applied};
-        std::cout << "[text] block " << entry << " at " << psprecomp::hex32(address) << ": applied "
-                  << result.applied << ", " << result.missing << " not there, " << result.skipped
-                  << " did not fit\n";
+        std::cout << "[text] block " << entry << " at " << psprecomp::hex32(address) << ": applied " << result.applied
+                  << ", " << result.missing << " not there, " << result.skipped << " did not fit\n";
     }
 }
 

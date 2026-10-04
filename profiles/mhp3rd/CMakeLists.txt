@@ -567,6 +567,21 @@ if(PSPRECOMP_BUILD_TESTS)
     add_test(NAME mhp3rd_text_tests COMMAND mhp3rd_text_tests)
 endif()
 
+# Exercise the live text read/decrypt/frame state machine with synthetic data.
+add_executable(mhp3rd_text_runtime_tests
+    tests/text_runtime_tests.cpp
+    host/text/language.cpp
+    host/text/translation.cpp
+    host/mods/mhp3rd_data_bin.cpp
+    host/mods/file_overlay.cpp
+    host/mods/mod_ini.cpp)
+target_include_directories(mhp3rd_text_runtime_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+target_link_libraries(mhp3rd_text_runtime_tests PRIVATE psprecomp_core)
+set_target_properties(mhp3rd_text_runtime_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_text_runtime_tests COMMAND mhp3rd_text_runtime_tests)
+endif()
+
 # Fast loading's decision: when a load runs ahead of real time.
 add_executable(mhp3rd_fast_loading_tests
     tests/fast_loading_tests.cpp
