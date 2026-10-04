@@ -157,13 +157,15 @@ std::size_t Translations::arena_bytes(const std::vector<std::uint32_t> &table_si
             continue;
         }
         std::size_t matches = 0u;
-        for (std::uint16_t table = 0; table < table_sizes.size(); ++table) {
+        const auto table_count =
+            std::min(table_sizes.size(), static_cast<std::size_t>(std::numeric_limits<std::uint16_t>::max()) + 1u);
+        for (std::size_t table = 0; table < table_count; ++table) {
             if (pattern.any != Pattern::Any::Table && pattern.any != Pattern::Any::Index &&
                 pattern.any != Pattern::Any::Both && table != pattern.table)
                 continue;
             const std::uint32_t count = table_sizes[table];
             for (std::uint32_t index = 1u; index < count; ++index)
-                if (pattern.matches(table, index)) ++matches;
+                if (pattern.matches(static_cast<std::uint16_t>(table), index)) ++matches;
         }
         total += matches * (text.size() + 1u);
     }

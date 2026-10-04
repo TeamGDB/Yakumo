@@ -160,6 +160,14 @@ void test_blocks_and_rules() {
     check(blocks.at(2835).find(2u, 20u) == nullptr, "and does not see the first block's");
 }
 
+void test_arena_table_limit() {
+    const Translations t = Translations::parse("*:* = X\n", "test");
+    std::vector<std::uint32_t> sizes(65537u, 2u);
+    check(t.arena_bytes(sizes) == 65536u * 2u,
+        "table estimation terminates and does not wrap beyond the uint16 table range");
+    check(t.arena_bytes(std::vector<std::uint32_t>{2u}) == 2u, "table estimation keeps ordinary wildcard sizing");
+}
+
 void test_apply() {
     Memory memory(kBase, kSize);
     write_text(memory);
@@ -538,6 +546,7 @@ void test_import_safety() {
 
 int main() {
     test_parse();
+    test_arena_table_limit();
     test_rule_application();
     test_numeric_bounds();
     test_partial_reads();
