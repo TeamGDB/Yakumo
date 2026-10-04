@@ -183,7 +183,7 @@ std::map<std::uint32_t, Translations> Translations::parse_blocks(
     std::uint32_t current = kMainEntry;
     bool any_header = false;
 
-    std::istringstream stream(text);
+    std::istringstream stream(text.starts_with("\xef\xbb\xbf") ? text.substr(3) : text);
     std::string line;
     while (std::getline(stream, line)) {
         while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
@@ -352,7 +352,7 @@ std::vector<Language> scan_languages(const std::filesystem::path &directory) {
         language.code = main.code();
         language.name = main.name();
         language.file = entry.path();
-        if (language.code.empty()) continue;
+        if (language.code.empty() || language.code == "original") continue;
         languages.push_back(std::move(language));
     }
     std::sort(languages.begin(), languages.end(), [](const Language &a, const Language &b) { return a.code < b.code; });
@@ -407,6 +407,10 @@ TranslationImport import_translation_file(const std::filesystem::path &source, c
     const Translations &main = blocks->begin()->second;
     result.code = main.code();
     result.name = main.name();
+    if (result.code == "original") {
+        result.error = "original is reserved for the unmodified game text";
+        return result;
+    }
     if (result.code.empty()) result.code = path_text(source.stem());
     if (result.code.empty()) result.code = "translation";
 
