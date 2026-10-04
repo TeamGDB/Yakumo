@@ -136,6 +136,23 @@ before the game loads its text. `host/text/` holds the file format
 (`language.{hpp,cpp}`) and the apply logic (`translation.{hpp,cpp}`); both are
 unit-tested in `tests/text_tests.cpp` on a buffer, with no game data.
 
+### Character widths
+
+The game's text paths use fixed half-width or full-width cells rather than the
+horizontal advance reported by the font. Yakumo classifies Cyrillic
+(U+0400-U+052F) as half-width, matching Latin letters; Japanese and other original
+character classes are unchanged. Latin-1 accented letters and inverted Spanish
+punctuation already use half-width cells. A font containing these glyphs is
+still required. This fixes excessive Cyrillic spacing; it does not automatically
+shorten translations that exceed a field's width or line count.
+
+`MHP3RD_ORIGINAL_TEXT_WIDTH=1` restores the original classification for comparison.
+`MHP3RD_TRACE_FONT=1` reports each observed character's class and caller along
+with the existing glyph rasterization trace. Regenerate the main corpus with
+`profiles/mhp3rd/scripts/generate.sh` when adopting this change: the shared text
+classifier must remain interceptable at same-unit calls. Only its callers' main
+AOT unit changes; runtime headers and overlay ABI do not change.
+
 ### Fitting the box
 
 The game draws a string in the lines its own text had: a dialogue's are about 21

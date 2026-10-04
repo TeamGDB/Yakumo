@@ -1147,6 +1147,8 @@ std::string branch_condition(const psprecomp::DecodedInstruction &d) {
 // overlay corpus passes its own prefix, which names both its registration entry
 // point and its units, so corpora stay distinguishable in one process.
 std::string g_symbol_prefix = "recomp";
+// Profile-selected leaves must remain interceptable inside a generated unit.
+std::set<std::uint32_t> g_dispatch_targets;
 
 std::string generated_unit_cpp_name(std::uint32_t unit) {
     std::ostringstream name;
@@ -1375,7 +1377,14 @@ std::string emit_function_source(
                         // label. Going through ctx.pc + LOCAL_DISPATCH needlessly
                         // re-decodes a dense entry id and burns the local-transfer
                         // counter. The delay slot and $ra write have already run.
-                        body << "    goto L_" << psprecomp::hex32(target).substr(2) << ";\n";
+                        if (g_dispatch_targets.contains(target)) {
+                            body << "    ctx.pc = " << psprecomp::hex32(target) << "u;\n"
+                                 << "    rt.invoke_native_fast_path(" << psprecomp::hex32(target) << "u, ctx);\n"
+                                 << "    if (ctx.pc != " << psprecomp::hex32(pc + 8u) << "u) return;\n"
+                                 << "    goto L_" << psprecomp::hex32(pc + 8u).substr(2) << ";\n";
+                        } else {
+                            body << "    goto L_" << psprecomp::hex32(target).substr(2) << ";\n";
+                        }
                     } else {
                         // Cross-unit call. PSP import stubs are deliberate outer-
                         // dispatcher boundaries; do not pay a guaranteed-failing
@@ -2034,6 +2043,16 @@ int main(int argc, char **argv) {
                     g_symbol_prefix = argv[++i];
                     continue;
                 }
+                if (option == "--dispatch-target") {
+                    if (i + 1 >= argc) throw psprecomp::Error("--dispatch-target needs an address");
+                    const std::string text = argv[++i];
+                    std::size_t consumed = 0u;
+                    const auto value = std::stoull(text, &consumed, 16);
+                    if (consumed != text.size() || value > UINT32_MAX || (value & 3u) != 0u)
+                        throw psprecomp::Error("--dispatch-target needs a 32-bit aligned hex address");
+                    g_dispatch_targets.insert(static_cast<std::uint32_t>(value));
+                    continue;
+                }
                 positional.emplace_back(option);
             }
             const std::uint32_t load_base = !positional.empty()
@@ -2043,7 +2062,7 @@ int main(int argc, char **argv) {
                 positional.size() > 1u ? static_cast<std::uint32_t>(std::stoul(positional[1], nullptr, 0)) : 0x4000u;
             if (positional.size() > 2u) {
                 std::cerr << "Usage: psp_recomp <ELF> --auto <generated_dir> [load_base_hex] [unit_span_bytes]"
-                          << " [--prefix <symbol_prefix>]\n";
+                          << " [--prefix <symbol_prefix>] [--dispatch-target <hex_address>]\n";
                 return 2;
             }
             if (unit_span == 0u || (unit_span & 3u) != 0u)
@@ -2054,7 +2073,7 @@ int main(int argc, char **argv) {
         std::cerr << "Usage:\n"
                   << "  psp_recomp <ELF> <functions.csv> <generated_manifest.cpp>\n"
                   << "  psp_recomp <ELF> --auto <generated_dir> [load_base_hex] [unit_span_bytes]"
-                  << " [--prefix <symbol_prefix>]\n";
+                  << " [--prefix <symbol_prefix>] [--dispatch-target <hex_address>]\n";
         return 2;
     } catch (const std::exception &e) {
         std::cerr << "psp_recomp error: " << e.what() << "\n";
