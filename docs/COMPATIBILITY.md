@@ -78,6 +78,28 @@ Application sources are identical between these commits: the later commits corre
 
 Game runs used isolated or copied save data and finite deadlines. Captures were inspected, and test processes stopped. macOS used 32 compatible overlays and disabled audio/FFmpeg; Android is an emulator with audio/FFmpeg disabled. Hunts, multiplayer, audio quality and long-session stability were not checked in this pass. The Steam Deck developer binary was installed with a rollback copy; the release installation was unchanged.
 
+## Translation layout checks (2026-10-04)
+
+PR #227 application source `ac40d11` was built with GCC 14 and Vulkan on Steam
+Deck. Five affected native suites passed; 52/52 renderer-enabled native suites
+also passed on macOS. These are targeted translation checks, not a full gameplay
+compatibility pass.
+
+| Language | Inspected copied-save inventory result |
+| --- | --- |
+| Russian | Cyrillic uses half-width cells; item names and the sampled three-line description fit their panels. A same-frame comparison with the original-width switch reproduces the previous excessive spacing and clipping |
+| English | Original Latin cell widths, alignment and inventory layout retained |
+| Spanish | Locally authored accented labels and inverted punctuation displayed and fitted; precomposed accented vowels, diaeresis and both cases of n with tilde checked |
+| Japanese | Locally authored kana/kanji labels and descriptions retained full-width cells and fitted the panel |
+
+Each run was bounded to 60 seconds with finite input; captures and font traces
+were inspected. One main text AOT unit was regenerated/rebuilt; all other main
+objects and 355 compatible overlays were reused unchanged. No game text fixtures
+or translation files are distributed in this repository. Audio was disabled;
+full translation completeness, every field's fit, quests, multiplayer, hunts,
+other-device rendering and long sessions were not checked. Translation authors
+still need to shorten lines that exceed a field.
+
 ## Updating this page
 
 Run through [the smoke test](TESTING.md) on the platform, then change the cells you checked in the same pull request as the fix, or in a pull request of their own. Add a row to *Tested hardware* with the commit you tested. A result without a commit cannot be compared with anything later, so it does not go in the table.
