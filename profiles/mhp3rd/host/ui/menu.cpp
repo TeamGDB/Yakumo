@@ -1651,14 +1651,13 @@ void Menu::system() {
         for (std::size_t i = 0; i < available.codes.size(); ++i)
             if (available.codes[i] == s.language || (s.language == "en" && available.codes[i] == "original"))
                 index = static_cast<int>(i);
-        const int delta =
-            choice_row("Game text language", available.names[static_cast<std::size_t>(index)],
-                       options_for("text.language",
-                                   "The language of the game's text itself, with the entries named in a "
-                                   "translation file of the translations folder replaced. Original keeps the "
-                                   "disc's own text, which is English on a patched image and Japanese on an "
-                                   "original one, and any entry a translation leaves out falls back to it. A "
-                                   "change applies the next time the game starts."));
+        const int delta = choice_row("Game text language", available.names[static_cast<std::size_t>(index)],
+            options_for("text.language",
+                "The language of the game's text itself, with the entries named in a "
+                "translation file of the translations folder replaced. Original keeps the "
+                "disc's own text, which is English on a patched image and Japanese on an "
+                "original one, and any entry a translation leaves out falls back to it. A "
+                "change applies the next time the game starts."));
         if (delta != 0) {
             index = cycle(index, delta, static_cast<int>(available.codes.size()));
             s.language = available.codes[static_cast<std::size_t>(index)];
