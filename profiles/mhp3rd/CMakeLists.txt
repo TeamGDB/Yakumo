@@ -680,6 +680,28 @@ if(Vulkan_FOUND)
     endif()
 endif()
 
+add_executable(mhp3rd_ge_state_tests tests/ge_state_tests.cpp host/gpu/ge_state.cpp)
+target_include_directories(mhp3rd_ge_state_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+target_link_libraries(mhp3rd_ge_state_tests PRIVATE psprecomp_core)
+set_target_properties(mhp3rd_ge_state_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_ge_state_tests COMMAND mhp3rd_ge_state_tests)
+    add_test(NAME mhp3rd_ge_state_slow_tests COMMAND mhp3rd_ge_state_tests)
+    set_tests_properties(mhp3rd_ge_state_slow_tests PROPERTIES ENVIRONMENT "MHP3RD_NO_FAST_DECODE=1")
+endif()
+
+add_executable(mhp3rd_texture_decode_tests
+    tests/texture_decode_tests.cpp
+    host/gpu/texture_decode.cpp)
+target_include_directories(mhp3rd_texture_decode_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+target_link_libraries(mhp3rd_texture_decode_tests PRIVATE psprecomp_core)
+set_target_properties(mhp3rd_texture_decode_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_texture_decode_tests COMMAND mhp3rd_texture_decode_tests)
+    add_test(NAME mhp3rd_texture_decode_slow_tests COMMAND mhp3rd_texture_decode_tests)
+    set_tests_properties(mhp3rd_texture_decode_slow_tests PROPERTIES ENVIRONMENT "MHP3RD_NO_FAST_TEXTURE_DECODE=1;MHP3RD_NO_BUFFER_REUSE=1")
+endif()
+
 add_executable(mhp3rd_render_tests tests/render_tests.cpp)
 target_include_directories(mhp3rd_render_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
 target_link_libraries(mhp3rd_render_tests PRIVATE psprecomp_core)
@@ -914,3 +936,4 @@ foreach(font_test IN ITEMS mhp3rd_font_bitmap_tests mhp3rd_imgui_font_bitmap_tes
     endif()
 endforeach()
 target_compile_definitions(mhp3rd_imgui_font_bitmap_tests PRIVATE TEST_IMGUI_STB)
+
