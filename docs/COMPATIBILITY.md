@@ -100,6 +100,30 @@ full translation completeness, every field's fit, quests, multiplayer, hunts,
 other-device rendering and long sessions were not checked. Translation authors
 still need to shorten lines that exceed a field.
 
+## Translation search budget checks (2026-10-04)
+
+PR #227 application source `b385767` was built in GCC 14 Release on Steam Deck;
+four affected native suites passed, and all 355 overlay hashes stayed unchanged.
+The full 52-suite renderer-enabled run passed on macOS; the final RAM-edge guard
+and regression then passed the affected runtime suite again.
+
+A release-optimized benchmark over 32 MiB of synthetic RAM and 40 invented quest
+records measured the original inline search at 61-68 ms per blocking call. The
+incremental version retained the complete search across 128 slices, with each
+slice at 0.45-0.50 ms in that benchmark. The final production runtime's synthetic
+trace measured 530 inline-search slices (maximum 0.934 ms) and 650 block/probe
+slices (maximum 0.595 ms), excluding the intentional unsliced diagnostic case.
+These timings are observations on this device, not wall-clock guarantees.
+
+Regression checks cover shared work across pending entries, slice-crossing and
+unaligned candidates, late discovery behind a cursor, repeated loads with arena
+reuse, missing-probe retries, RAM-end fields and the diagnostic off switch.
+No game-derived fixture is committed. Live quest/frame correlation, real-quest
+translation timing and gameplay behavior with the incremental search remain
+unverified: the developer's active game was left untouched and no new game
+window was opened. This demonstrates removal of the search's blocking cost;
+it does not claim every reported quest stutter is resolved.
+
 ## Updating this page
 
 Run through [the smoke test](TESTING.md) on the platform, then change the cells you checked in the same pull request as the fix, or in a pull request of their own. Add a row to *Tested hardware* with the commit you tested. A result without a commit cannot be compared with anything later, so it does not go in the table.
