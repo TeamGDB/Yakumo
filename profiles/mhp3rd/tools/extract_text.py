@@ -22,12 +22,14 @@ Output, in OUTDIR:
     report.txt          what every entry holds and the totals
 """
 import argparse
+from contextlib import closing
 import os
 import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import databin
+from extraction_paths import extraction_path
 
 
 def u32(data, offset):
@@ -218,7 +220,7 @@ def loose_runs(data, min_length=4):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("image")
+    parser.add_argument("image", type=argparse.FileType("rb"))
     parser.add_argument("outdir")
     parser.add_argument("--skip-large", type=int, default=0,
                         help="skip entries larger than this many bytes (default: all)")
@@ -228,82 +230,81 @@ def main(argv=None):
     options = parser.parse_args(argv)
 
     archive = databin.Archive(options.image)
-    entries = len(archive.blocks) - 1
-    os.makedirs(options.outdir, exist_ok=True)
+    with closing(archive.stream):
+        entries = len(archive.blocks) - 1
+        os.makedirs(options.outdir, exist_ok=True)
 
-    all_strings = open(os.path.join(options.outdir, "all_strings.tsv"), "w",
-                       encoding="utf-8", newline="\n")
-    report = []
-    total_strings = 0
+        with open(extraction_path(options.outdir, ("all_strings.tsv",)), "w",
+                           encoding="utf-8", newline="\n") as all_strings:
+            report = []
+            total_strings = 0
 
-    for index in range(entries):
-        try:
-            data = archive.read(index)
-        except Exception:
-            continue
-        if not data or data[:4] in (b"MWo3", b"PSMF", b"~SCE"):
-            continue
-        if options.skip_large and len(data) > options.skip_large:
-            continue
+            for index in range(entries):
+                try:
+                    data = archive.read(index)
+                except Exception:
+                    continue
+                if not data or data[:4] in (b"MWo3", b"PSMF", b"~SCE"):
+                    continue
+                if options.skip_large and len(data) > options.skip_large:
+                    continue
 
-        # Loose runs are only collected for entries the block parser did not
-        # already cover, and never for huge binary entries: they cost time and
-        # a model would swamp the output.
-        block = find_block(data)
-        quest = quest_block(data) if not block else None
-        runs = []
-        if not block and not quest and not options.no_runs and (
-                not options.skip_large or len(data) <= options.skip_large):
-            runs = loose_runs(data)
-        if not block and not quest and not runs:
-            continue
+                # Loose runs are only collected for entries the block parser did not
+                # already cover, and never for huge binary entries: they cost time and
+                # a model would swamp the output.
+                block = find_block(data)
+                quest = quest_block(data) if not block else None
+                runs = []
+                if not block and not quest and not options.no_runs and (
+                        not options.skip_large or len(data) <= options.skip_large):
+                    runs = loose_runs(data)
+                if not block and not quest and not runs:
+                    continue
 
-        strings_here = 0
-        with open(os.path.join(options.outdir, "entry_%04d.txt" % index), "w",
-                  encoding="utf-8", newline="\n") as out:
-            out.write("### entry %d, size %d bytes\n" % (index, len(data)))
-            if block:
-                base, tables = block
-                out.write("### string block at %#x: %d table(s)\n" % (base, len(tables)))
-                for table_index, table in tables:
-                    out.write("\n== table %d (%d strings)\n" % (table_index, len(table)))
-                    for k, text in enumerate(table):
-                        out.write("%d\t%s\n" % (k, text.replace("\n", "\\n")))
-                        all_strings.write("%d\t%d\t%d\t%s\n" % (index, table_index, k, text.replace("\n", "\\n")))
-                        strings_here += 1
-                        total_strings += 1
-            if quest:
-                # A quest field is keyed by `ref:offset`: the word that holds
-                # the offset (the run-time patch rewrites that word), and the
-                # offset it holds. The table column is the word's position.
-                out.write("\n== quest fields (%d)\n" % len(quest))
-                for ref_offset, string_offset, text in quest:
-                    out.write("%d\t%d\t%s\n" % (ref_offset, string_offset, text.replace("\n", "\\n")))
-                    all_strings.write("%d\t%d\t%d\t%s\n" % (index, ref_offset, string_offset,
-                                                            text.replace("\n", "\\n")))
-                    strings_here += 1
-                    total_strings += 1
-            if runs:
-                out.write("\n== loose text runs (%d)\n" % len(runs))
-                for text in runs:
-                    out.write("%s\n" % text.replace("\n", "\\n"))
+                strings_here = 0
+                with open(extraction_path(options.outdir, ("entry_%04d.txt" % index,)), "w",
+                          encoding="utf-8", newline="\n") as out:
+                    out.write("### entry %d, size %d bytes\n" % (index, len(data)))
+                    if block:
+                        base, tables = block
+                        out.write("### string block at %#x: %d table(s)\n" % (base, len(tables)))
+                        for table_index, table in tables:
+                            out.write("\n== table %d (%d strings)\n" % (table_index, len(table)))
+                            for k, text in enumerate(table):
+                                out.write("%d\t%s\n" % (k, text.replace("\n", "\\n")))
+                                all_strings.write("%d\t%d\t%d\t%s\n" % (index, table_index, k, text.replace("\n", "\\n")))
+                                strings_here += 1
+                                total_strings += 1
+                    if quest:
+                        # A quest field is keyed by `ref:offset`: the word that holds
+                        # the offset (the run-time patch rewrites that word), and the
+                        # offset it holds. The table column is the word's position.
+                        out.write("\n== quest fields (%d)\n" % len(quest))
+                        for ref_offset, string_offset, text in quest:
+                            out.write("%d\t%d\t%s\n" % (ref_offset, string_offset, text.replace("\n", "\\n")))
+                            all_strings.write("%d\t%d\t%d\t%s\n" % (index, ref_offset, string_offset,
+                                                                    text.replace("\n", "\\n")))
+                            strings_here += 1
+                            total_strings += 1
+                    if runs:
+                        out.write("\n== loose text runs (%d)\n" % len(runs))
+                        for text in runs:
+                            out.write("%s\n" % text.replace("\n", "\\n"))
 
-        report.append((index, len(data), 1 if (block or quest) else 0, strings_here, len(runs)))
-        if len(report) % 200 == 0:
-            print("...", index, "entries with text:", len(report), flush=True)
+                report.append((index, len(data), 1 if (block or quest) else 0, strings_here, len(runs)))
+                if len(report) % 200 == 0:
+                    print("...", index, "entries with text:", len(report), flush=True)
 
-    all_strings.close()
-    with open(os.path.join(options.outdir, "report.txt"), "w", encoding="utf-8", newline="\n") as out:
-        out.write("entries with a string block or loose text: %d of %d\n" % (len(report), entries))
-        out.write("table strings: %d\n" % total_strings)
-        out.write("\nentry\tsize\tblocks\ttable_strings\tloose_runs\n")
-        for index, size, blocks, strings, runs in sorted(report, key=lambda r: -r[3]):
-            out.write("%d\t%d\t%d\t%d\t%d\n" % (index, size, blocks, strings, runs))
+        with open(extraction_path(options.outdir, ("report.txt",)), "w", encoding="utf-8", newline="\n") as out:
+            out.write("entries with a string block or loose text: %d of %d\n" % (len(report), entries))
+            out.write("table strings: %d\n" % total_strings)
+            out.write("\nentry\tsize\tblocks\ttable_strings\tloose_runs\n")
+            for index, size, blocks, strings, runs in sorted(report, key=lambda r: -r[3]):
+                out.write("%d\t%d\t%d\t%d\t%d\n" % (index, size, blocks, strings, runs))
 
-    print("entries with text:", len(report), "of", entries)
-    print("table strings:", total_strings)
-    print("report: %s" % os.path.join(options.outdir, "report.txt"))
-
+        print("entries with text:", len(report), "of", entries)
+        print("table strings:", total_strings)
+        print("report: %s" % extraction_path(options.outdir, ("report.txt",)))
 
 if __name__ == "__main__":
     main(sys.argv[1:])
