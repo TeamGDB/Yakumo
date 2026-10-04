@@ -1,4 +1,10 @@
 #include "hle/hle_common.hpp"
+#include "adhoc/client.hpp"
+#include "adhoc/server.hpp"
+#include "adhoc/sockets.hpp"
+#include "settings/settings.hpp"
+#include "hle/utility_dialog.hpp"
+#include <thread>
 #include "kernel/kernel.hpp"
 #include "psprecomp/common.hpp"
 
@@ -83,7 +89,7 @@ public:
         mhp3rd::write_cstring(runtime.memory(), address, value, 512);
     }
     std::uint32_t call(std::string library, std::string name, std::initializer_list<std::uint32_t> args = {}) {
-        for (unsigned i = 0; i < 8; ++i) ctx.set_gpr(i < 4 ? i + 4 : i + 4, 0);
+        for (unsigned i = 0; i < 8; ++i) ctx.set_gpr(i + 4, 0);
         unsigned i = 0;
         for (const auto value : args) ctx.set_gpr(i++ + 4, value);
         ctx.set_gpr(31, 0x08822000u);
@@ -633,12 +639,427 @@ void io_contracts() {
     check(call("sceIoWrite", {1, Fixture::output, 3}) == 3 && call("sceIoWrite", {2, Fixture::output, 0}) == 0,
         "stdio handles guest output and empty writes");
 }
+bool wait_until(const std::function<bool()> &condition) {
+    const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    do {
+        if (condition()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    } while (std::chrono::steady_clock::now() < end);
+    return condition();
+}
+struct ProtocolPeer {
+    mhp3rd::adhoc::net::Socket socket = mhp3rd::adhoc::net::kNoSocket;
+    explicit ProtocolPeer(std::uint16_t port) {
+        using namespace mhp3rd::adhoc::net;
+        socket = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        const auto address = Address::ipv4_address(htonl(INADDR_LOOPBACK), port);
+        check(socket != kNoSocket &&
+                ::connect(socket, reinterpret_cast<const sockaddr *>(&address.storage), address.length) == 0,
+            "loopback protocol peer connects");
+        set_nonblocking(socket);
+        no_sigpipe(socket);
+    }
+    ~ProtocolPeer() { close(); }
+    void close() {
+        if (socket != mhp3rd::adhoc::net::kNoSocket) mhp3rd::adhoc::net::close_socket(socket);
+        socket = mhp3rd::adhoc::net::kNoSocket;
+    }
+    void send(const std::string &bytes) {
+        check(::send(socket, bytes.data(), static_cast<int>(bytes.size()), mhp3rd::adhoc::net::kSendFlags) ==
+                static_cast<int>(bytes.size()),
+            "public protocol record sent completely");
+    }
+    std::string read(std::size_t size) {
+        std::string bytes;
+        check(wait_until([&] {
+            char buffer[256];
+            const auto got = ::recv(socket, buffer, static_cast<int>(std::min(sizeof(buffer), size - bytes.size())), 0);
+            if (got > 0) bytes.append(buffer, static_cast<std::size_t>(got));
+            return bytes.size() == size;
+        }),
+            "public protocol response arrives before bound");
+        return bytes;
+    }
+};
+void network_contracts() {
+    using namespace mhp3rd::adhoc;
+    Fixture f;
+    Server server;
+    struct Cleanup {
+        ~Cleanup() { Client::get().stop(); }
+    } cleanup;
+    auto &settings = mhp3rd::settings::current();
+    settings.adhoc = false;
+    settings.adhoc_mac = "02:11:22:33:44:0a";
+    settings.adhoc_nickname = "PublicA";
+    const Mac macA{2, 0x11, 0x22, 0x33, 0x44, 0x0a}, macB{2, 0x11, 0x22, 0x33, 0x44, 0x0b};
+    constexpr unsigned own = Fixture::output, peer = own + 8, length = own + 16, data = own + 32, port_out = own + 24;
+    for (unsigned i = 0; i < 6; ++i) {
+        f.runtime.memory().store8(own + i, macA[i]);
+        f.runtime.memory().store8(peer + i, macB[i]);
+    }
+    mhp3rd::HleRegistrar hle(f.runtime);
+    mhp3rd::register_adhoc(hle);
+    auto net = [&](const char *name, std::initializer_list<unsigned> args = {}) {
+        return f.call("sceNetAdhoc", name, args);
+    };
+    auto ctl = [&](const char *name, std::initializer_list<unsigned> args = {}) {
+        return f.call("sceNetAdhocctl", name, args);
+    };
+    constexpr unsigned invalidid = 0x80410701u, addr = 0x80410702u, buflen = 0x80410704u, datalen = 0x80410705u,
+                       wouldblock = 0x80410709u, portuse = 0x8041070au, invalid = 0x80410711u, timeout = 0x80410715u;
+    check(net("sceNetAdhocPdpCreate", {own, 10000, 4096}) == 0x80410712u && net("sceNetAdhocPtpOpen") == 0x80410712u &&
+            net("sceNetAdhocPtpListen") == 0x80410712u,
+        "uninitialized ad hoc rejects socket creation");
+    for (const auto *name :
+        {"sceNetAdhocctlScan", "sceNetAdhocctlDisconnect", "sceNetAdhocctlGetPeerList", "sceNetAdhocctlGetScanInfo"})
+        check(ctl(name) == 0x80410b08u, "uninitialized control API rejected");
+    check(f.call("sceNet", "sceNetInit") == 0 && f.call("sceNet", "sceNetFreeThreadinfo") == 0 &&
+            f.call("sceNet", "sceNetTerm") == 0,
+        "base network initialization acknowledged");
+    check(f.call("sceNet", "sceNetGetLocalEtherAddr", {data}) == 0 && f.runtime.memory().load8(data + 5) == macA[5],
+        "configured local MAC exported to guest");
+    check(
+        f.call("sceWlanDrv", "sceWlanGetEtherAddr", {data}) == 0 && f.call("sceWlanDrv", "sceWlanGetSwitchState") == 0,
+        "disabled WLAN state reflects settings");
+    check(
+        net("sceNetAdhocInit") == 0 && net("sceNetAdhocInit") == 0x80410713u, "ad hoc initialization rejects repeats");
+    check(net("sceNetAdhocPdpCreate", {0, 10000, 4096}) == addr &&
+            net("sceNetAdhocPdpCreate", {own, 10000, 0}) == buflen &&
+            net("sceNetAdhocPdpCreate", {peer, 10000, 4096}) == addr,
+        "PDP validates address ownership and buffer");
+    const auto pdp = net("sceNetAdhocPdpCreate", {own, 10000, 4096});
+    check(static_cast<int>(pdp) > 0 && net("sceNetAdhocPdpCreate", {own, 10000, 4096}) == portuse,
+        "PDP reserves unique source port");
+    check(net("sceNetAdhocPdpSend", {pdp, 0, 10000, data, 1}) == addr &&
+            net("sceNetAdhocPdpSend", {pdp, peer, 10000, 0, 1}) == datalen &&
+            net("sceNetAdhocPdpSend", {pdp, peer, 10000, data, 10241}) == datalen,
+        "PDP send rejects missing address and oversized/missing payload");
+    check(net("sceNetAdhocPdpRecv", {pdp, 0, 0, 0, length, 100, 1}) == invalid, "PDP recv requires data pointer");
+    f.runtime.memory().store32(length, 64);
+    check(net("sceNetAdhocPdpRecv", {pdp, own, port_out, data, length, 100, 1}) == wouldblock,
+        "nonblocking empty PDP returns would-block");
+    check(net("sceNetAdhocPdpRecv", {pdp, own, port_out, data, length, 100, 0}) == timeout,
+        "blocking PDP timeout returns network error");
+    const auto loader = f.kernel.current_uid();
+    const auto cancellation_helper = f.helper();
+    net("sceNetAdhocPdpRecv", {pdp, 0, 0, data, length, 0, 0});
+    net("sceNetAdhocPdpDelete", {pdp});
+    f.kernel.on_starvation(f.ctx);
+    check(f.kernel.current_uid() == loader && f.ctx.gpr[2] == invalidid,
+        "deleting PDP cancels blocked reader with socket error");
+    check(f.kernel.terminate_thread(f.ctx, static_cast<int>(cancellation_helper), true) == 0,
+        "cancellation helper exits before timed socket checks");
+    for (const auto *name : {"sceNetAdhocPdpDelete", "sceNetAdhocPdpSend", "sceNetAdhocPdpRecv", "sceNetAdhocPtpAccept",
+             "sceNetAdhocPtpConnect", "sceNetAdhocPtpSend", "sceNetAdhocPtpRecv", "sceNetAdhocPtpFlush",
+             "sceNetAdhocPtpClose"})
+        check(net(name, {0xffffffffu}) == invalidid, "unknown socket API rejected");
+    check(ctl("sceNetAdhocctlAddHandler") == 0x80410b04u, "control handler requires nonzero function");
+    std::array<unsigned, 4> handlers{};
+    for (auto &handler : handlers) handler = ctl("sceNetAdhocctlAddHandler", {0x08826000, 17});
+    check(ctl("sceNetAdhocctlAddHandler", {0x08826000}) == 0x80410b12u, "control handler capacity bounded");
+    for (auto handler : handlers) check(ctl("sceNetAdhocctlDelHandler", {handler}) == 0, "control handler removed");
+    check(ctl("sceNetAdhocctlDelHandler", {handlers[0]}) == 0x80410b06u, "repeated control handler delete rejected");
+    std::uint16_t server_port = 0;
+    for (std::uint16_t candidate = 37512; candidate < 37600; candidate += 2)
+        if (server.start(ServerConfig{candidate, false})) {
+            server_port = candidate;
+            break;
+        }
+    check(server_port != 0, "public loopback relay starts");
+    settings.adhoc = true;
+    settings.adhoc_server = "127.0.0.1:" + std::to_string(server_port);
+    f.string(Fixture::text + 4, "ULJM05800");
+    check(ctl("sceNetAdhocctlInit", {0, 0, Fixture::text}) == 0 && ctl("sceNetAdhocctlInit") == 0x80410b07u,
+        "control initializes one client identity");
+    check(wait_until([] { return Client::get().server_state() == ServerState::Online; }),
+        "real HLE client logs into synthetic relay");
+    check(ctl("sceNetAdhocctlGetPeerList") == 0x80410b04u && ctl("sceNetAdhocctlGetScanInfo") == 0x80410b04u,
+        "list APIs require length pointer");
+    Client::get().join("PUBLIC01");
+    check(wait_until([] { return Client::get().in_group(); }), "real HLE client joins group");
+    ProtocolPeer remote(server_port);
+    remote.send(ctl::login(macB, "PublicB", "ULJM05800") + ctl::connect("PUBLIC01"));
+    check(wait_until([] { return Client::get().peers().size() == 1; }), "HLE client observes public protocol peer");
+    check(ctl("sceNetAdhocctlGetPeerList", {length, 0}) == 0 && f.runtime.memory().load32(length) == 152,
+        "peer sizing query counts records");
+    check(ctl("sceNetAdhocctlGetPeerList", {length, data}) == 0 && f.runtime.memory().load32(data) == 0 &&
+            mhp3rd::read_cstring(f.runtime.memory(), data + 4) == "PublicB" &&
+            f.runtime.memory().load8(data + 137) == macB[5],
+        "peer record terminates list and exports nickname/MAC");
+    check(ctl("sceNetAdhocctlScan") == 0 && wait_until([] { return !Client::get().scan_results().empty(); }),
+        "control scan completes against real relay");
+    check(ctl("sceNetAdhocctlGetScanInfo", {length, 0}) == 0 && f.runtime.memory().load32(length) == 28,
+        "scan sizing query counts record");
+    check(ctl("sceNetAdhocctlGetScanInfo", {length, data}) == 0 && f.runtime.memory().load32(data + 4) == 1 &&
+            mhp3rd::read_cstring(f.runtime.memory(), data + 8, 8) == "PUBLIC01",
+        "scan record exports channel and group");
+    const auto livepdp = net("sceNetAdhocPdpCreate", {own, 10000, 4096});
+    ProtocolPeer datagrams(relay_port_for(server_port));
+    datagrams.send(relay::init(relay::kInitPdp, macB, 10000, {}, 0));
+    check(wait_until([] { return Client::get().diagnostics().relay_links_up >= 1; }), "PDP relay is established");
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    f.string(data, "hello");
+    check(net("sceNetAdhocPdpSend", {livepdp, peer, 10000, data, 5}) == 0, "HLE sends public datagram");
+    const auto packet = datagrams.read(relay::kPdpHeaderSize + 5);
+    check(packet.substr(relay::kPdpHeaderSize) == "hello", "wire receives exact HLE datagram payload");
+    datagrams.send(relay::pdp_header(macA, 10000, 5) + "reply");
+    check(wait_until([&] { return Client::get().pdp_peek(static_cast<int>(livepdp)).has_value(); }),
+        "incoming datagram reaches client queue");
+    f.runtime.memory().store32(length, 2);
+    check(net("sceNetAdhocPdpRecv", {livepdp, peer, port_out, data, length, 100, 1}) == 0x80400706u &&
+            f.runtime.memory().load32(length) == 5,
+        "short PDP buffer reports required size without consuming datagram");
+    check(net("sceNetAdhocPdpRecv", {livepdp, peer, port_out, data, length, 100, 1}) == 0 &&
+            mhp3rd::read_cstring(f.runtime.memory(), data, 5) == "reply" &&
+            f.runtime.memory().load16(port_out) == 10000,
+        "retry receives preserved datagram and sender port");
+    check(net("sceNetAdhocPtpListen") == addr && net("sceNetAdhocPtpListen", {own, 20000, 0}) == buflen,
+        "PTP listener validates source and buffer");
+    const auto listener = net("sceNetAdhocPtpListen", {own, 20000, 4096, 100, 1, 1});
+    check(static_cast<int>(listener) > 0 && net("sceNetAdhocPtpListen", {own, 20000, 4096}) == portuse,
+        "PTP listener reserves unique port");
+    check(net("sceNetAdhocPtpConnect", {listener, 100, 1}) == invalidid &&
+            net("sceNetAdhocPtpAccept", {listener, peer, port_out, 100, 1}) == wouldblock,
+        "listener rejects connect and empty nonblocking accept");
+    check(net("sceNetAdhocPtpAccept", {listener, peer, port_out, 100, 0}) == timeout,
+        "blocking accept respects PSP timeout");
+    check(wait_until([] { return Client::get().diagnostics().relay_links_up >= 2; }), "listener relay is established");
+    ProtocolPeer stream(relay_port_for(server_port));
+    stream.send(relay::init(relay::kInitPtpConnect, macB, 30000, macA, 20000));
+    unsigned accepted = wouldblock;
+    check(wait_until([&] {
+        accepted = net("sceNetAdhocPtpAccept", {listener, peer, port_out, 100, 1});
+        return accepted != wouldblock;
+    }) && static_cast<int>(accepted) > 0,
+        "HLE accepts real peer connection");
+    stream.read(relay::kPtpNoticeSize);
+    check(wait_until(
+              [&] { return Client::get().ptp_info(static_cast<int>(accepted)).state == StreamState::Established; }),
+        "accepted stream enters established state");
+    check(net("sceNetAdhocPtpConnect", {accepted, 100, 1}) == 0 &&
+            net("sceNetAdhocPtpAccept", {accepted, 0, 0, 100, 1}) == 0x8040070eu,
+        "established stream connects immediately but cannot accept");
+    check(net("sceNetAdhocPtpSend", {accepted, 0, length}) == invalid &&
+            net("sceNetAdhocPtpRecv", {accepted, data, 0}) == invalid,
+        "stream I/O requires data and length pointers");
+    f.runtime.memory().store32(length, 5);
+    f.string(data, "quest");
+    check(net("sceNetAdhocPtpSend", {accepted, data, length, 100, 1}) == 0 && f.runtime.memory().load32(length) == 5,
+        "HLE stream queues exact send count");
+    check(stream.read(9).substr(4) == "quest", "peer receives framed stream payload");
+    f.runtime.memory().store32(length, 0);
+    check(net("sceNetAdhocPtpSend", {accepted, data, length, 100, 1}) == 0, "empty established stream send succeeds");
+    check(net("sceNetAdhocPtpFlush", {accepted, 100000, 0}) == 0, "flush waits for actual stream send queue");
+    f.runtime.memory().store32(length, 64);
+    check(net("sceNetAdhocPtpRecv", {accepted, data, length, 100, 1}) == wouldblock &&
+            net("sceNetAdhocPtpRecv", {accepted, data, length, 100, 0}) == timeout,
+        "empty established stream supports nonblocking and timed waits");
+    std::string framed;
+    wire::put32(framed, 5);
+    stream.send(framed + "ready");
+    check(wait_until([&] { return Client::get().ptp_info(static_cast<int>(accepted)).readable == 5; }),
+        "stream reply reaches client buffer");
+    check(net("sceNetAdhocPtpRecv", {accepted, data, length, 100, 1}) == 0 && f.runtime.memory().load32(length) == 5 &&
+            mhp3rd::read_cstring(f.runtime.memory(), data, 5) == "ready",
+        "HLE returns exact stream reply bytes");
+    check(net("sceNetAdhocGetPtpStat") == invalid && net("sceNetAdhocGetPtpStat", {length, 0}) == 0 &&
+            f.runtime.memory().load32(length) == 72,
+        "stream stat query counts listener and accepted sockets");
+    check(net("sceNetAdhocGetPtpStat", {length, data}) == 0 && f.runtime.memory().load32(data) == data + 36 &&
+            f.runtime.memory().load32(data + 36) == 0 && f.runtime.memory().load32(data + 36 + 28) == 0 &&
+            f.runtime.memory().load32(data + 36 + 32) == 4,
+        "stream stats link records and expose current buffer occupancy");
+    stream.close();
+    check(wait_until(
+              [&] { return Client::get().ptp_info(static_cast<int>(accepted)).state == StreamState::Disconnected; }),
+        "peer close reaches actual stream state");
+    check(net("sceNetAdhocPtpRecv", {accepted, data, length, 100, 1}) == 0x8041070cu &&
+            net("sceNetAdhocPtpSend", {accepted, data, length, 100, 1}) == 0x8041070cu &&
+            net("sceNetAdhocPtpFlush", {accepted, 100, 1}) == 0x8041070cu,
+        "disconnected stream exposes network disconnect error");
+    check(net("sceNetAdhocPtpClose", {accepted}) == 0 && net("sceNetAdhocPtpClose", {listener}) == 0,
+        "stream sockets close");
+    check(net("sceNetAdhocPtpOpen") == addr && net("sceNetAdhocPtpOpen", {own, 22000, own, 23000, 4096}) == addr &&
+            net("sceNetAdhocPtpOpen", {peer, 22000, own, 23000, 4096}) == addr,
+        "stream opener validates own and remote addresses");
+    check(net("sceNetAdhocPtpOpen", {own, 22000, peer, 23000, 0}) == buflen, "stream opener rejects empty buffer");
+    const auto opening = net("sceNetAdhocPtpOpen", {own, 22000, peer, 23000, 4096, 1000000, 10});
+    check(static_cast<int>(opening) > 0, "opener returns pending stream identity");
+    check(net("sceNetAdhocPtpConnect", {opening, 100, 1}) == wouldblock &&
+            net("sceNetAdhocPtpConnect", {opening, 100, 0}) == timeout,
+        "pending outgoing connect supports polling and timeout");
+    check(net("sceNetAdhocPtpSend", {opening, data, length, 100, 1}) == 0x8041070bu,
+        "unconnected stream send reports not connected");
+    check(net("sceNetAdhocPtpClose", {opening}) == 0, "pending connection cancels on close");
+    check(ctl("sceNetAdhocctlDisconnect") == 0 && ctl("sceNetAdhocctlTerm") == 0 && net("sceNetAdhocTerm") == 0 &&
+            !mhp3rd::adhoc_networking_on(),
+        "shutdown clears control and socket initialization");
+    auto utility = [&](const char *name, std::initializer_list<unsigned> args = {}) {
+        return f.call("sceUtility", name, args);
+    };
+    for (const auto *name : {"sceNetAdhocDiscoverInitStart", "sceNetAdhocDiscoverUpdate", "sceNetAdhocDiscoverStop",
+             "sceNetAdhocDiscoverTerm"})
+        check(f.call("sceNetAdhocDiscover", name) == 0, "discovery transitions acknowledge request");
+    check(f.call("sceNetAdhocDiscover", "sceNetAdhocDiscoverGetStatus") == 0,
+        "terminated discovery reports no active request");
+    check(f.call("sceNetAdhocDiscover", "sceNetAdhocDiscoverInitStart") == 0 &&
+            f.call("sceNetAdhocDiscover", "sceNetAdhocDiscoverGetStatus") == 2,
+        "synthetic discovery completes without nearby peer");
+    check(utility("sceUtilityNetconfInitStart") == invalid &&
+            utility("sceUtilityNetconfShutdownStart") == mhp3rd::kErrorUtilityInvalidStatus,
+        "netconf requires parameters and active dialog");
+    constexpr unsigned params = Fixture::text + 0x400, group = params + 0x100;
+    f.runtime.memory().store32(params + 0x30, 2);
+    f.runtime.memory().store32(params + 0x34, group);
+    f.string(group, "PUBLIC01");
+    settings.adhoc = false;
+    check(utility("sceUtilityNetconfInitStart", {params}) == 0 &&
+            utility("sceUtilityNetconfInitStart", {params}) == mhp3rd::kErrorUtilityInvalidStatus,
+        "netconf starts once");
+    check(utility("sceUtilityNetconfGetStatus") == 1 && utility("sceUtilityNetconfUpdate") == 0 &&
+            utility("sceUtilityNetconfGetStatus") == 3 && f.runtime.memory().load32(params + 0x1c) == 0x80410b05u,
+        "disabled networking completes dialog with control timeout");
+    check(utility("sceUtilityNetconfShutdownStart") == 0 && utility("sceUtilityNetconfGetStatus") == 4 &&
+            utility("sceUtilityNetconfGetStatus") == 0,
+        "netconf shutdown completes lifecycle");
+    settings.adhoc = true;
+    check(utility("sceUtilityNetconfInitStart", {params}) == 0 && utility("sceUtilityNetconfShutdownStart") == 0,
+        "joining request can be cancelled immediately");
+    check(utility("sceUtilityNetconfGetStatus") == 4 && utility("sceUtilityNetconfGetStatus") == 0,
+        "cancelled join reaches inactive state");
+    f.runtime.memory().store32(params + 0x30, 0);
+    check(utility("sceUtilityNetconfInitStart", {params}) == 0 && utility("sceUtilityNetconfGetStatus") == 1 &&
+            utility("sceUtilityNetconfGetStatus") == 2 && utility("sceUtilityNetconfGetStatus") == 3 &&
+            f.runtime.memory().load32(params + 0x1c) == 1,
+        "unsupported action returns cancellation result");
+    check(utility("sceUtilityNetconfShutdownStart") == 0 && utility("sceUtilityNetconfGetStatus") == 4 &&
+            utility("sceUtilityNetconfGetStatus") == 0,
+        "unsupported action still shuts down cleanly");
+    settings.adhoc = false;
+}
+void system_contracts() {
+    Fixture f;
+    for (const auto *name : {"sceKernelDcacheWritebackAll", "sceKernelDcacheWritebackInvalidateAll",
+             "sceKernelDcacheInvalidateRange", "sceKernelDcacheWritebackRange", "sceKernelSetGPO",
+             "sceKernelIcacheInvalidateAll", "sceKernelIcacheInvalidateRange"})
+        check(f.call("UtilsForUser", name) == 0, "cache maintenance completes on public host");
+    check(f.call("UtilsForUser", "sceKernelLibcTime", {Fixture::output}) == f.runtime.memory().load32(Fixture::output),
+        "libc time return and output agree");
+    check(f.call("UtilsForUser", "sceKernelLibcTime") != 0, "libc time accepts optional output");
+    check(f.call("UtilsForUser", "sceKernelLibcGettimeofday", {Fixture::output, Fixture::output + 16}) == 0,
+        "gettimeofday writes guest clock and timezone");
+    const auto before = static_cast<std::uint64_t>(f.runtime.memory().load32(Fixture::output)) * 1000000 +
+        f.runtime.memory().load32(Fixture::output + 4);
+    check(f.runtime.memory().load32(Fixture::output + 16) == 0 && f.runtime.memory().load32(Fixture::output + 20) == 0,
+        "timezone reports UTC offset and no DST");
+    f.kernel.on_starvation(f.ctx);
+    f.call("UtilsForUser", "sceKernelLibcGettimeofday", {Fixture::output});
+    const auto after = static_cast<std::uint64_t>(f.runtime.memory().load32(Fixture::output)) * 1000000 +
+        f.runtime.memory().load32(Fixture::output + 4);
+    check(after - before == 1000 && f.call("UtilsForUser", "sceKernelLibcClock") == 1000,
+        "libc clock follows virtual time independent of host wait");
+    check(f.call("UtilsForUser", "sceKernelLibcGettimeofday") == 0, "gettimeofday accepts absent outputs");
+    for (unsigned index = 0; index < 3; ++index)
+        check(f.call("StdioForUser",
+                  index == 0       ? "sceKernelStdin"
+                      : index == 1 ? "sceKernelStdout"
+                                   : "sceKernelStderr") == index,
+            "stdio descriptors are stable");
+    check(f.call("ModuleMgrForUser", "sceKernelGetModuleId") == 0x01000001 &&
+            f.call("ModuleMgrForUser", "sceKernelGetModuleIdByAddress", {0x08820000}) == 0x01000001,
+        "main module identity is stable");
+    check(static_cast<int>(f.call("ModuleMgrForUser", "sceKernelLoadModuleByID", {0xffffffffu})) > 0,
+        "stock HLE module acknowledgment assigns an ID");
+    for (const auto *name : {"sceKernelStartModule", "sceKernelStopModule", "sceKernelUnloadModule"})
+        check(f.call("ModuleMgrForUser", name, {0x1234}) == 0x1234, "module lifecycle acknowledges supplied identity");
+    const auto cb = f.thread("sceKernelCreateCallback", {Fixture::text, 0x08826000, 0});
+    check(f.call("LoadExecForUser", "sceKernelRegisterExitCallback", {cb}) == 0 &&
+            f.call("scePower", "scePowerRegisterCallback", {0, cb}) == 0 &&
+            f.kernel.callbacks.at(cb).notify_argument == 0x1084,
+        "power callback reports AC and healthy battery");
+    for (const auto *name : {"scePowerSetClockFrequency630", "scePowerCheckWlanCoexistenceClock"})
+        check(f.call("scePower", name) == 0, "power clock settings acknowledged");
+    check(f.call("sceRtc", "sceRtcGetCurrentClockLocalTime", {Fixture::output}) == 0 &&
+            f.runtime.memory().load16(Fixture::output) >= 2000 && f.runtime.memory().load16(Fixture::output + 2) >= 1 &&
+            f.runtime.memory().load16(Fixture::output + 2) <= 12 &&
+            f.runtime.memory().load32(Fixture::output + 12) < 1000000,
+        "RTC reports valid date and fractional microseconds");
+    check(f.call("sceImpose", "sceImposeSetLanguageMode") == 0 &&
+            f.call("sceOpenPSID", "sceOpenPSIDGetOpenPSID", {Fixture::output}) == 0,
+        "platform locale and public identifier calls complete");
+    for (unsigned i = 0; i < 16; ++i)
+        check(
+            f.runtime.memory().load8(Fixture::output + i) == 0x10 + i, "synthetic identifier bytes are deterministic");
+    for (auto parameter : {2u, 4u, 5u, 8u, 9u, 99u})
+        check(f.call("sceUtility", "sceUtilityGetSystemParamInt", {parameter, Fixture::output}) == 0 &&
+                f.runtime.memory().load32(Fixture::output) == (parameter == 2 ? 1u : 0u),
+            "system preferences return supported defaults");
+    check(f.call("sceUtility", "sceUtilityLoadModule") == 0 && f.call("sceUtility", "sceUtilityUnloadModule") == 0,
+        "utility module loading acknowledged");
+    f.call("LoadExecForUser", "sceKernelExitGame");
+    check(f.runtime.stopped() && f.runtime.stop_reason().find("ExitGame") != std::string::npos,
+        "guest exit stops runtime with reason");
+}
+void thread_end_and_dispatch_contracts() {
+    Fixture f;
+    const auto loader = f.kernel.current_uid();
+    const auto helper = f.helper();
+    mhp3rd::WaitState join{};
+    join.type = mhp3rd::WaitType::ThreadEnd;
+    join.object = static_cast<int>(helper);
+    f.kernel.block(f.ctx, join);
+    check(f.kernel.current_uid() == static_cast<int>(helper), "thread-end wait schedules its target");
+    f.kernel.exit_current_thread(f.ctx, 17, false);
+    check(f.kernel.current_uid() == loader && f.ctx.gpr[2] == 17, "thread exit wakes joiner with exit status");
+    check(f.thread("sceKernelGetThreadExitStatus", {helper}) == 17 &&
+            f.thread("sceKernelGetThreadExitStatus", {static_cast<unsigned>(loader)}) == mhp3rd::error::kNotDormant &&
+            f.thread("sceKernelGetThreadExitStatus", {0xffffffffu}) == mhp3rd::error::kUnknownThid,
+        "exit status API distinguishes dormant, live and missing threads");
+    check(f.thread("sceKernelChangeThreadPriority", {helper, 1}) == mhp3rd::error::kDormant,
+        "dormant priority change rejected");
+    check(f.thread("sceKernelDeleteThread", {helper}) == 0 &&
+            f.thread("sceKernelDeleteThread", {static_cast<unsigned>(loader)}) == mhp3rd::error::kNotDormant,
+        "delete HLE distinguishes dormant and current thread");
+    check(f.thread("sceKernelChangeCurrentThreadAttr", {0xffffffffu, 0x100000}) == 0 &&
+            f.kernel.current_thread()->attributes == 0x100000,
+        "thread attribute masks are applied");
+    const auto child = f.thread("sceKernelCreateThread", {Fixture::text, 0x08824000, 0x30, 4096, 0x100000});
+    check(static_cast<int>(child) > 0 && f.thread("sceKernelStartThread", {child}) == 0,
+        "thread HLE creates and starts child");
+    check(
+        f.thread("sceKernelChangeThreadPriority", {child, 0x40}) == 0 && f.kernel.find_thread(child)->priority == 0x40,
+        "ready thread priority changes");
+    check(f.thread("sceKernelTerminateThread", {child}) == 0 &&
+            f.thread("sceKernelTerminateDeleteThread", {child}) == 0 && f.kernel.find_thread(child) == nullptr,
+        "termination resets and deletes child");
+    f.kernel.set_dispatch_enabled(false);
+    const auto high = f.helper(0x10);
+    f.kernel.finish(f.ctx, 81);
+    f.kernel.on_starvation(f.ctx);
+    check(f.kernel.current_uid() == loader && f.ctx.gpr[2] == 81,
+        "disabled dispatch prevents finish and starvation preemption");
+    f.kernel.set_dispatch_enabled(true);
+    f.kernel.finish(f.ctx, 82);
+    check(f.kernel.current_uid() == static_cast<int>(high), "reenabling dispatch honors ready priority");
+    f.thread("sceKernelExitDeleteThread", {29});
+    check(f.kernel.find_thread(high) == nullptr && f.kernel.current_uid() == loader,
+        "exit-delete frees current child and resumes loader");
+    const auto normal = f.helper(0x10);
+    f.kernel.finish(f.ctx, 0);
+    f.thread("sceKernelExitThread", {31});
+    check(f.kernel.find_thread(normal)->exit_status == 31 && f.kernel.current_uid() == loader,
+        "exit HLE preserves dormant thread status");
+    check(f.call("Kernel_Library", "sceKernelGetThreadId") == static_cast<unsigned>(loader),
+        "kernel library identity shares scheduler state");
+}
 
 }
 int main() {
     try {
         memory_contracts();
         scheduler_contracts();
+        thread_end_and_dispatch_contracts();
         semaphore_contracts();
         event_flag_contracts();
         mutex_contracts();
@@ -646,6 +1067,8 @@ int main() {
         vtimer_contracts();
         sysmem_contracts();
         io_contracts();
+        network_contracts();
+        system_contracts();
         std::cout << "kernel/HLE contracts passed\n";
         return 0;
     } catch (const std::exception &error) {
