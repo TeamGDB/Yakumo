@@ -1,10 +1,14 @@
 #include "psprecomp/decoder.hpp"
+#include "psprecomp/common.hpp"
 #include "psprecomp/interpreter.hpp"
 #include "psprecomp/runtime.hpp"
 
 #include <array>
 #include <bit>
 #include <cmath>
+#include <cstdlib>
+#include <sstream>
+#include <optional>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -27,6 +31,187 @@ void step(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &cpu, std::uin
     check(psprecomp::interpret_allegrex(runtime, cpu, 1u) == psprecomp::InterpreterExit::Budget,
         "Single instruction did not advance to its bounded next PC");
     check(cpu.pc == base + 4u && cpu.gpr[0] == 0u, "Instruction corrupted PC or zero register");
+}
+class Environment {
+public:
+    std::string name;
+    std::optional<std::string> previous;
+    Environment(const char *key, const char *value) : name(key) {
+        if (const char *old = std::getenv(key)) previous = old;
+        set(value);
+    }
+    void set(const char *value) {
+#if defined(_WIN32)
+        _putenv_s(name.c_str(), value ? value : "");
+#else
+        if (value)
+            setenv(name.c_str(), value, 1);
+        else
+            unsetenv(name.c_str());
+#endif
+    }
+    ~Environment() { set(previous ? previous->c_str() : nullptr); }
+};
+void next(psprecomp::Runtime &, psprecomp::AllegrexContext &cpu) {
+    cpu.gpr[2]++;
+    cpu.pc += 4;
+}
+void stop(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &) {
+    runtime.stop("completed public dispatch contract");
+}
+void fault(psprecomp::Runtime &, psprecomp::AllegrexContext &) {
+    throw psprecomp::Error("synthetic guest memory fault");
+}
+void stay(psprecomp::Runtime &, psprecomp::AllegrexContext &) {}
+void entry(
+    psprecomp::Runtime &, psprecomp::AllegrexContext &cpu, std::uint16_t, psprecomp::GuestMemory::AotFastView &memory) {
+    cpu.gpr[2] = memory.aot_load32(scratch);
+    cpu.pc += 4;
+}
+unsigned heartbeat_hits = 0;
+void heartbeat(std::uint64_t, std::uint32_t) {
+    ++heartbeat_hits;
+}
+void dispatch_contracts() {
+    {
+        psprecomp::Runtime runtime;
+        runtime.register_function(base + 0x10000, next, "recomp_unit_far");
+        runtime.register_function(base, next, "recomp_unit_low");
+        runtime.register_function(base + 1, next, "unaligned_override");
+        check(runtime.has_function(base) && runtime.has_function(base + 1) && !runtime.has_function(base + 2),
+            "Exact and aligned dispatch lookup changed");
+        psprecomp::AllegrexContext cpu{};
+        check(!runtime.invoke_isolated_aot(base + 2, cpu) && runtime.invoke_isolated_aot(base, cpu) && cpu.gpr[2] == 1,
+            "Isolated AOT dispatch contract changed");
+        runtime.unregister_functions(base, base + 2);
+        check(!runtime.has_function(base) && !runtime.has_function(base + 1) && runtime.has_function(base + 0x10000),
+            "Unregister range must be half-open");
+        bool threw = false;
+        try {
+            runtime.register_function(base, nullptr, "invalid");
+        } catch (const psprecomp::Error &) {
+            threw = true;
+        }
+        check(threw, "Null generated callbacks must be rejected");
+        runtime.register_generated_unit(0, base, 0x4000, next, entry);
+        runtime.register_function(base, next, "recomp_unit_zero");
+        runtime.memory().store32(scratch, 42);
+        auto memory = runtime.memory().aot_fast_view();
+        cpu.pc = base;
+        check(runtime.invoke_chained_unit(cpu, 0, &memory) && cpu.gpr[2] == 42,
+            "Shared-memory generated entry must execute");
+        cpu.pc = base;
+        check(runtime.invoke_chained_call(cpu, &memory) && cpu.gpr[2] == 42,
+            "Indirect chain must use registered shared-memory entry");
+        check(!runtime.invoke_chained_unit(cpu, 4096), "Out-of-range generated unit must not dispatch");
+        runtime.register_generated_unit(1, base + 0x5000, 0x4000, next);
+        cpu.pc = base;
+        check(!runtime.invoke_chained_unit(cpu, 0), "Conflicting generated layouts must disable dense path");
+        check(runtime.invoke_chained_call(cpu), "Conflicting layout must retain exact registered dispatch");
+        runtime.register_native_fast_path(base, [](auto &, auto &state) {
+            state.gpr[2] = 77;
+            state.pc += 4;
+        });
+        cpu.pc = base;
+        runtime.invoke_native_fast_path(base, cpu);
+        check(cpu.gpr[2] == 77, "Native profile override did not run");
+        runtime.register_native_fast_path(base, {});
+        cpu.pc = base;
+        runtime.invoke_native_fast_path(base, cpu);
+        check(cpu.gpr[2] == 78, "Removed native override must fall back to AOT");
+        cpu.pc = base + 0x10000;
+        runtime.invoke_native_fast_path(base, cpu);
+        check(cpu.gpr[2] == 79, "Varying indirect target must preserve AOT fallback");
+        cpu.pc = 0;
+        runtime.invoke_native_fast_path(base, cpu);
+        cpu.pc = base + 2;
+        runtime.invoke_native_fast_path(base, cpu);
+        cpu.pc = 0x08F00000;
+        runtime.invoke_native_fast_path(base, cpu);
+        bool missing = false;
+        cpu.pc = base + 4;
+        try {
+            runtime.invoke_native_fast_path(base + 4, cpu);
+        } catch (const psprecomp::Error &) {
+            missing = true;
+        }
+        check(missing, "Missing native AOT fallback must diagnose the missing function");
+    }
+    {
+        Environment no_chain("PSPRECOMP_NO_CHAIN", "1");
+        psprecomp::Runtime runtime;
+        runtime.register_function(base, next, "recomp_unit_zero");
+        auto cpu = runtime.cpu();
+        cpu.pc = base;
+        check(!runtime.invoke_chained_call(cpu), "Disabled chaining must not execute a guest function");
+    }
+    {
+        Environment histogram("PSPRECOMP_HLE_HISTOGRAM", "1");
+        psprecomp::Runtime runtime;
+        runtime.register_hle("public", 1, [](auto &, auto &cpu) { cpu.gpr[2] = 99; });
+        runtime.invoke_import("public", 1, runtime.cpu());
+        runtime.invoke_import_cached(300, "public", 1, runtime.cpu());
+        runtime.invoke_import_cached(300, "public", 1, runtime.cpu());
+        check(
+            runtime.cpu().gpr[2] == 99 && runtime.hle_histogram().size() == 1 && runtime.hle_histogram()[0].second == 3,
+            "Bound import cache and histogram must agree");
+        std::ostringstream diagnostics;
+        auto *original = std::cerr.rdbuf(diagnostics.rdbuf());
+        runtime.report_hle_histogram();
+        std::cerr.rdbuf(original);
+        check(diagnostics.str().find("calls=3") != std::string::npos,
+            "Import histogram must report actual invocation count");
+        runtime.invoke_import_cached(500, "absent", 2, runtime.cpu());
+        check(runtime.stopped() && runtime.stop_reason().find("Missing HLE import") != std::string::npos,
+            "Missing import must stop with diagnostic");
+    }
+    for (const char *mode : {"ordinary", "trace", "deferred"}) {
+        Environment trace("PSPRECOMP_TRACE_ON_ERROR", std::string(mode) == "trace" ? "1" : nullptr);
+        Environment profile("PSPRECOMP_PROFILE_DISPATCH", std::string(mode) == "deferred" ? "1" : nullptr);
+        Environment start("PSPRECOMP_PROFILE_DISPATCH_START", std::string(mode) == "deferred" ? "1" : nullptr);
+        Environment count("PSPRECOMP_PROFILE_DISPATCH_COUNT", "2");
+        Environment strict("PSPRECOMP_STRICT_PC_PROGRESS", "1");
+        std::ostringstream diagnostics;
+        auto *original = std::cerr.rdbuf(diagnostics.rdbuf());
+        psprecomp::Runtime runtime;
+        runtime.register_function(base, next, "public_next");
+        runtime.register_function(base + 4, fault, "public_fault");
+        bool faulted = false;
+        try {
+            runtime.run(base, 4);
+        } catch (const psprecomp::Error &error) {
+            faulted = std::string(error.what()).find("public_fault") != std::string::npos &&
+                std::string(error.what()).find("gpr:") != std::string::npos;
+        }
+        std::cerr.rdbuf(original);
+        check(faulted, "Guest exception must preserve function identity and architectural diagnostic");
+        psprecomp::Runtime stalled;
+        stalled.register_function(base, stay, "public_stall");
+        stalled.run(base, 3);
+        check(stalled.stopped() && stalled.stop_reason().find("without changing PC") != std::string::npos,
+            "Strict PC progress must stop fallthrough");
+    }
+    {
+        Environment profile("PSPRECOMP_PROFILE_DISPATCH", "1");
+        Environment start("PSPRECOMP_PROFILE_DISPATCH_START", "1");
+        Environment count("PSPRECOMP_PROFILE_DISPATCH_COUNT", "2");
+        psprecomp::Runtime runtime;
+        runtime.register_function(base, next, "first");
+        runtime.register_function(base + 4, next, "second");
+        runtime.register_function(base + 8, next, "third");
+        runtime.run(base, 10);
+        check(runtime.cpu().gpr[2] == 3 && runtime.stop_reason().find("profile window complete") != std::string::npos,
+            "Deferred profile window must stop at requested bound");
+    }
+    heartbeat_hits = 0;
+    psprecomp::set_runtime_heartbeat_hook(heartbeat, 1);
+    psprecomp::Runtime runtime;
+    runtime.register_function(base, next, "first");
+    runtime.register_function(base + 4, stop, "last");
+    runtime.run(base, 4);
+    psprecomp::set_runtime_heartbeat_hook(nullptr, 0);
+    check(heartbeat_hits > 0 && runtime.stop_reason() == "completed public dispatch contract",
+        "Heartbeat must not alter successful guest dispatch");
 }
 void integer_contracts() {
     psprecomp::Runtime runtime;
@@ -307,6 +492,7 @@ void floating_contracts() {
 }
 int main() {
     try {
+        dispatch_contracts();
         integer_contracts();
         memory_contracts();
         floating_contracts();
