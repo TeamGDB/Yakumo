@@ -990,8 +990,11 @@ static void test_automatic_profile_dispatch_target() {
     require(
         std::system(shell_command(command + " --dispatch-target 0x08804014 --dispatch-target 08804014").c_str()) == 0,
         "profile dispatch target generation accepts repeated aligned hex addresses");
-    std::ifstream input(generated / "generated_unit_0000.cpp");
-    const std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    std::string text;
+    {
+        std::ifstream input(generated / "generated_unit_0000.cpp");
+        text.assign((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    }
     const auto delay = text.find("ctx.gpr[4] + static_cast<std::uint32_t>(1)");
     const auto hook = text.find("rt.invoke_native_fast_path(0x08804014u, ctx)");
     require(delay < hook && hook != std::string::npos, "delay slot executes before profile leaf interception");
