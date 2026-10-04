@@ -8,6 +8,9 @@
 #include "ui/layer.hpp"
 #include "ui/save_screen.hpp"
 #include "ui/widgets.hpp"
+#if defined(MHP3RD_ANDROID_APP)
+#include "platform/android_documents.hpp"
+#endif
 
 #include "imgui.h"
 
@@ -41,9 +44,13 @@ State &state() {
 TextLanguages g_languages;
 bool g_languages_loaded = false;
 
-float px(float value) { return std::round(value * Layer::get().scale()); }
+float px(float value) {
+    return std::round(value * Layer::get().scale());
+}
 
-std::string utf8(const fs::path &path) { return install::path_to_utf8(path); }
+std::string utf8(const fs::path &path) {
+    return install::path_to_utf8(path);
+}
 
 void indented(const std::string &text, ImU32 color = colors::kTextDim) {
     ImGui::Indent(px(16.0f));
@@ -51,7 +58,9 @@ void indented(const std::string &text, ImU32 color = colors::kTextDim) {
     ImGui::Unindent(px(16.0f));
 }
 
-fs::path translations_folder() { return install::user_data_directory() / "translations"; }
+fs::path translations_folder() {
+    return install::user_data_directory() / "translations";
+}
 
 void go(Stage stage) {
     State &s = state();
@@ -66,8 +75,26 @@ void close() {
     s.focus_row = true;
 }
 
+void start_import(const fs::path &chosen);
+
 void open_browser() {
     State &s = state();
+#if defined(MHP3RD_ANDROID_APP)
+    const auto picked = android::pick_translation_to_import(install::user_data_directory() / "transfer");
+    if (!picked) {
+        close();
+        return;
+    }
+    if (!picked->error.empty()) {
+        s.result = {};
+        s.result.error = picked->error;
+        go(Stage::Result);
+        return;
+    }
+    start_import(picked->staged);
+    std::error_code ec;
+    fs::remove_all(picked->staged.parent_path(), ec);
+#else
     FileBrowser::Options options;
     options.extensions = {".lang"};
     options.filter_name = ".lang";
@@ -81,6 +108,7 @@ void open_browser() {
     }
     s.browser = std::make_unique<FileBrowser>(start, std::move(options));
     go(Stage::Choose);
+#endif
 }
 
 void start_import(const fs::path &chosen) {
@@ -154,7 +182,9 @@ const TextLanguages &text_languages() {
     return g_languages;
 }
 
-void refresh_text_languages() { g_languages_loaded = false; }
+void refresh_text_languages() {
+    g_languages_loaded = false;
+}
 
 void translation_rows() {
     State &s = state();
@@ -163,25 +193,30 @@ void translation_rows() {
         s.focus_row = false;
     }
     if (button_row("Import translation…",
-                   {false, {},
-                    "Copy a translation file (.lang) you downloaded into Yakumo. It appears under Game text "
-                    "language; a restart loads it."}))
+            {false, {},
+                "Copy a translation file (.lang) you downloaded into Yakumo. It appears under Game text "
+                "language; a restart loads it."}))
         open_browser();
 #if !defined(MHP3RD_ANDROID_APP)
-    if (button_row("Open the translations folder",
-                   {false, {}, "Show where imported translations are kept."}))
+    if (button_row("Open the translations folder", {false, {}, "Show where imported translations are kept."}))
         open_folder(translations_folder());
 #endif
 }
 
-bool translation_screen_open() { return state().stage != Stage::Closed; }
+bool translation_screen_open() {
+    return state().stage != Stage::Closed;
+}
 
 bool translation_screen(bool back) {
     State &s = state();
     switch (s.stage) {
-    case Stage::Closed: return false;
-    case Stage::Choose: return browse(back);
-    case Stage::Result: result_screen(back); break;
+    case Stage::Closed:
+        return false;
+    case Stage::Choose:
+        return browse(back);
+    case Stage::Result:
+        result_screen(back);
+        break;
     }
     return true;
 }

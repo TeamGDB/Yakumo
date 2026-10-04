@@ -24,6 +24,10 @@ struct PickedImport {
 // work. `staging` is emptied first. Nothing when the player cancels.
 [[nodiscard]] std::optional<PickedImport> pick_saves_to_import(const std::filesystem::path &staging);
 
+// A picked .lang document is copied to a new private staging directory with
+// the translation input budget. The caller imports it, then removes its parent.
+[[nodiscard]] std::optional<PickedImport> pick_translation_to_import(const std::filesystem::path &staging);
+
 struct PickedExport {
     std::string where; // the picked folder, for the player
     std::string error; // empty: the copy worked

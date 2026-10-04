@@ -1,12 +1,15 @@
 #include "platform/android_documents.hpp"
 
 #include "platform/android_jni.hpp"
+#include "text/language.hpp"
 
 #include <fcntl.h>
 #include <unistd.h>
 
 #include <array>
 #include <cerrno>
+#include <chrono>
+#include <limits>
 #include <fstream>
 #include <vector>
 
@@ -31,7 +34,8 @@ std::string describe_tree(const std::string &uri) {
     return colon == std::string::npos ? decoded : decoded.substr(colon + 1);
 }
 
-bool copy_document_to_file(const std::string &uri, const fs::path &target, std::string &error) {
+bool copy_document_to_file(const std::string &uri, const fs::path &target, std::string &error,
+    std::size_t limit = std::numeric_limits<std::size_t>::max()) {
     const int fd = open_document(uri, "r");
     if (fd < 0) {
         error = "cannot read " + target.filename().string();
@@ -40,6 +44,7 @@ bool copy_document_to_file(const std::string &uri, const fs::path &target, std::
     std::ofstream out(target, std::ios::binary | std::ios::trunc);
     std::array<char, 1 << 16> buffer{};
     bool ok = static_cast<bool>(out);
+    std::size_t copied = 0;
     while (ok) {
         const ssize_t got = ::read(fd, buffer.data(), buffer.size());
         if (got < 0 && errno == EINTR) continue;
@@ -47,10 +52,17 @@ bool copy_document_to_file(const std::string &uri, const fs::path &target, std::
             ok = got == 0;
             break;
         }
+        if (static_cast<std::size_t>(got) > limit - copied) {
+            ok = false;
+            break;
+        }
+        copied += static_cast<std::size_t>(got);
         out.write(buffer.data(), got);
         ok = static_cast<bool>(out);
     }
     ::close(fd);
+    out.close();
+    ok = ok && static_cast<bool>(out);
     if (!ok) error = "cannot copy " + target.filename().string();
     return ok;
 }
@@ -151,6 +163,38 @@ bool copy_tree(const fs::path &local, const std::string &folder_uri, std::string
 }
 
 } // namespace
+
+std::optional<PickedImport> pick_translation_to_import(const fs::path &staging) {
+    const auto document = pick_document();
+    if (!document) return std::nullopt;
+    PickedImport result;
+    std::error_code ec;
+    fs::create_directories(staging, ec);
+    if (ec) {
+        result.error = "cannot create translation transfer folder";
+        return result;
+    }
+    fs::path folder;
+    const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    for (unsigned attempt = 0; attempt < 64; ++attempt) {
+        auto candidate = staging / ("translation-" + std::to_string(stamp) + "-" + std::to_string(attempt));
+        if (fs::create_directory(candidate, ec)) {
+            folder = std::move(candidate);
+            break;
+        }
+        if (ec) break;
+    }
+    if (folder.empty()) {
+        result.error = "cannot stage translation document";
+        return result;
+    }
+    result.staged = folder / "selected.lang";
+    if (!copy_document_to_file(*document, result.staged, result.error, text::kMaxTranslationBytes)) {
+        fs::remove_all(folder, ec);
+        result.staged.clear();
+    }
+    return result;
+}
 
 std::optional<PickedImport> pick_saves_to_import(const fs::path &staging) {
     const std::optional<std::string> tree = pick_folder();
