@@ -928,3 +928,22 @@ set_target_properties(mhp3rd_media_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${
 if(PSPRECOMP_BUILD_PROFILE_TESTS)
     add_test(NAME mhp3rd_media_tests COMMAND mhp3rd_media_tests)
 endif()
+
+# Synthetic HLE suites link the real headless host with a public empty registry.
+add_library(mhp3rd_test_host STATIC ${MHP3RD_HOST_SOURCES} host/generated_stub.cpp "${MHP3RD_NIDS_INC}")
+target_include_directories(mhp3rd_test_host PUBLIC
+    "${MHP3RD_PROFILE_DIR}/host" "${MHP3RD_PROFILE_DIR}/third_party"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated_nids")
+target_link_libraries(mhp3rd_test_host PUBLIC psprecomp_core Threads::Threads ${CMAKE_DL_LIBS})
+mhp3rd_use_ffmpeg(mhp3rd_test_host)
+if(WIN32)
+    target_link_libraries(mhp3rd_test_host PUBLIC ws2_32 iphlpapi shell32)
+endif()
+add_executable(mhp3rd_media_hle_tests tests/media_hle_tests.cpp)
+target_compile_definitions(mhp3rd_media_hle_tests PRIVATE PSPRECOMP_TEST_NIDS_CSV="${PROJECT_SOURCE_DIR}/configs/nids.csv")
+target_link_libraries(mhp3rd_media_hle_tests PRIVATE mhp3rd_test_host)
+set_target_properties(mhp3rd_media_hle_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_media_hle_tests COMMAND mhp3rd_media_hle_tests)
+    set_tests_properties(mhp3rd_media_hle_tests PROPERTIES TIMEOUT 60 ENVIRONMENT "MHP3RD_NO_RENDER=1;MHP3RD_NO_AUDIO=1")
+endif()
