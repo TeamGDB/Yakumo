@@ -1,7 +1,8 @@
 #include "text/language.hpp"
 
 #include <algorithm>
-#include <cstdlib>
+#include <charconv>
+#include <limits>
 #include <fstream>
 #include <sstream>
 #include <system_error>
@@ -27,26 +28,43 @@ std::string unescape(const std::string &text) {
             continue;
         }
         switch (text[i + 1u]) {
-        case 'n': out += '\n'; ++i; break;
-        case 'r': out += '\r'; ++i; break;
-        case 't': out += '\t'; ++i; break;
-        case '\\': out += '\\'; ++i; break;
-        case '#': out += '#'; ++i; break;
-        case ';': out += ';'; ++i; break;
-        default: out += text[i]; break;
+        case 'n':
+            out += '\n';
+            ++i;
+            break;
+        case 'r':
+            out += '\r';
+            ++i;
+            break;
+        case 't':
+            out += '\t';
+            ++i;
+            break;
+        case '\\':
+            out += '\\';
+            ++i;
+            break;
+        case '#':
+            out += '#';
+            ++i;
+            break;
+        case ';':
+            out += ';';
+            ++i;
+            break;
+        default:
+            out += text[i];
+            break;
         }
     }
     return out;
 }
 
 // One non-negative decimal number in full.
-bool number(const std::string &text, unsigned long &value) {
+bool number(const std::string &text, std::uint32_t &value) {
     if (text.empty()) return false;
-    char *end = nullptr;
-    const unsigned long parsed = std::strtoul(text.c_str(), &end, 10);
-    if (end == text.c_str() || *end != '\0') return false;
-    value = parsed;
-    return true;
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+    return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size();
 }
 
 // A key: `TABLE:INDEX`, `TABLE:FIRST-LAST` or with `*` for either side.
@@ -59,27 +77,27 @@ bool parse_key(const std::string &text, Pattern &pattern) {
     if (table_text == "*") {
         pattern.any = Pattern::Any::Table;
     } else {
-        unsigned long table = 0;
+        std::uint32_t table = 0;
         if (!number(table_text, table) || table > 0xFFFFul) return false;
         pattern.table = static_cast<std::uint16_t>(table);
     }
 
     if (index_text == "*") {
-        pattern.any = pattern.any == Pattern::Any::Table ? Pattern::Any::Table : Pattern::Any::Index;
+        pattern.any = pattern.any == Pattern::Any::Table ? Pattern::Any::Both : Pattern::Any::Index;
         return true;
     }
     const auto dash = index_text.find('-');
     if (dash != std::string::npos && dash > 0u && dash + 1u < index_text.size()) {
-        unsigned long first = 0, last = 0;
+        std::uint32_t first = 0, last = 0;
         if (!number(trimmed(index_text.substr(0, dash)), first) ||
-            !number(trimmed(index_text.substr(dash + 1u)), last))
+            !number(trimmed(index_text.substr(dash + 1u)), last) || first > last)
             return false;
         pattern.first = static_cast<std::uint32_t>(first);
         pattern.last = static_cast<std::uint32_t>(last);
         pattern.has_range = true;
         return true;
     }
-    unsigned long index = 0;
+    std::uint32_t index = 0;
     if (!number(index_text, index)) return false;
     pattern.first = static_cast<std::uint32_t>(index);
     return true;
@@ -134,7 +152,7 @@ std::size_t Translations::arena_bytes(const std::vector<std::uint32_t> &table_si
         std::size_t matches = 0u;
         for (std::uint16_t table = 0; table < table_sizes.size(); ++table) {
             if (pattern.any != Pattern::Any::Table && pattern.any != Pattern::Any::Index &&
-                table != pattern.table)
+                pattern.any != Pattern::Any::Both && table != pattern.table)
                 continue;
             const std::uint32_t count = table_sizes[table];
             for (std::uint32_t index = 1u; index < count; ++index)
@@ -150,8 +168,8 @@ Translations Translations::parse(const std::string &text, const std::string &fal
     return parse_blocks(text, fallback_code).at(kMainEntry);
 }
 
-std::map<std::uint32_t, Translations> Translations::parse_blocks(const std::string &text,
-                                                                const std::string &fallback_code) {
+std::map<std::uint32_t, Translations> Translations::parse_blocks(
+    const std::string &text, const std::string &fallback_code) {
     std::map<std::uint32_t, Translations> blocks;
     std::string code = fallback_code;
     std::string name = fallback_code;
@@ -173,9 +191,10 @@ std::map<std::uint32_t, Translations> Translations::parse_blocks(const std::stri
             std::string head = trimmed(body.substr(1u, close - 1u));
             const auto colon = head.find(':');
             if (colon != std::string::npos) head = head.substr(0, colon);
-            if (head == "main") current = kMainEntry;
+            if (head == "main")
+                current = kMainEntry;
             else {
-                unsigned long entry = 0;
+                std::uint32_t entry = 0;
                 if (!number(head, entry)) continue;
                 current = static_cast<std::uint32_t>(entry);
             }
@@ -220,8 +239,8 @@ std::map<std::uint32_t, Translations> Translations::parse_blocks(const std::stri
     return blocks;
 }
 
-std::optional<std::map<std::uint32_t, Translations>> Translations::from_file(const std::filesystem::path &file,
-                                                                            std::string &error) {
+std::optional<std::map<std::uint32_t, Translations>> Translations::from_file(
+    const std::filesystem::path &file, std::string &error) {
     std::ifstream in(file, std::ios::binary);
     if (!in) {
         error = "cannot open " + file.string();
@@ -254,8 +273,7 @@ std::vector<Language> scan_languages(const std::filesystem::path &directory) {
         if (language.code.empty()) continue;
         languages.push_back(std::move(language));
     }
-    std::sort(languages.begin(), languages.end(),
-              [](const Language &a, const Language &b) { return a.code < b.code; });
+    std::sort(languages.begin(), languages.end(), [](const Language &a, const Language &b) { return a.code < b.code; });
     return languages;
 }
 
@@ -267,8 +285,8 @@ std::string file_safe(const std::string &code) {
     std::string out;
     out.reserve(code.size());
     for (const char c : code) {
-        const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-                        c == '-' || c == '_' || c == '.';
+        const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' ||
+            c == '_' || c == '.';
         out += ok ? c : '_';
     }
     return out.empty() ? std::string("translation") : out;
@@ -276,8 +294,7 @@ std::string file_safe(const std::string &code) {
 
 } // namespace
 
-TranslationImport import_translation_file(const std::filesystem::path &source,
-                                          const std::filesystem::path &folder) {
+TranslationImport import_translation_file(const std::filesystem::path &source, const std::filesystem::path &folder) {
     TranslationImport result;
     std::error_code ec;
     if (!std::filesystem::is_regular_file(source, ec)) {

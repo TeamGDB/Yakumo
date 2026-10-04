@@ -53,8 +53,8 @@ inline constexpr std::uint32_t kMainEntry = 16u;
 
 // One language the loader found in a translations folder.
 struct Language {
-    std::string code;  // "pt-BR"
-    std::string name;  // "Português (Brasil)", or the code when the file has no name
+    std::string code; // "pt-BR"
+    std::string name; // "Português (Brasil)", or the code when the file has no name
     std::filesystem::path file;
 };
 
@@ -72,17 +72,16 @@ struct Language {
 
 // A table wildcard: which table and index a key names. `*` is a wildcard.
 struct Pattern {
-    enum class Any { None, Table, Index } any{Any::None};
+    enum class Any { None, Table, Index, Both } any{Any::None};
     bool has_range{};
     std::uint16_t table{};
     std::uint32_t first{};
     std::uint32_t last{};
 
     [[nodiscard]] bool matches(std::uint16_t candidate_table, std::uint32_t candidate_index) const noexcept {
-        if (any != Any::Table && candidate_table != table) return false;
-        if (any == Any::Index) return true;  // table:* matches every index
-        return has_range ? candidate_index >= first && candidate_index <= last
-                         : candidate_index == first;
+        if (any != Any::Table && any != Any::Both && candidate_table != table) return false;
+        if (any == Any::Index || any == Any::Both) return true; // table:* matches every index
+        return has_range ? candidate_index >= first && candidate_index <= last : candidate_index == first;
     }
 };
 
@@ -107,12 +106,8 @@ public:
     void add(Pattern pattern, std::string text);
 
     // Every exact string, in the order it was added.
-    [[nodiscard]] const std::vector<std::pair<std::uint64_t, std::string>> &entries() const noexcept {
-        return order_;
-    }
-    [[nodiscard]] const std::vector<std::pair<Pattern, std::string>> &patterns() const noexcept {
-        return patterns_;
-    }
+    [[nodiscard]] const std::vector<std::pair<std::uint64_t, std::string>> &entries() const noexcept { return order_; }
+    [[nodiscard]] const std::vector<std::pair<Pattern, std::string>> &patterns() const noexcept { return patterns_; }
 
     void set_code(std::string code) { code_ = std::move(code); }
     void set_name(std::string name) { name_ = std::move(name); }
@@ -121,13 +116,13 @@ public:
     // pattern counts once per string it can match in a block of `tables`
     // strings each.
     [[nodiscard]] std::size_t arena_bytes(const std::vector<std::uint32_t> &table_sizes) const noexcept;
-    // The same without a block to count against: exact strings only.
+    // Upper bound when each exact string and rule is stored once and reused.
     [[nodiscard]] std::size_t arena_bytes() const noexcept;
 
     // Parses `text` (a whole file) and fills `blocks`: block entry -> its
     // strings. A file with no `[entry]` header goes to kMainEntry.
-    [[nodiscard]] static std::map<std::uint32_t, Translations> parse_blocks(const std::string &text,
-                                                                            const std::string &fallback_code);
+    [[nodiscard]] static std::map<std::uint32_t, Translations> parse_blocks(
+        const std::string &text, const std::string &fallback_code);
     // Parses one block's worth, for a caller that has the text of a single
     // section.
     [[nodiscard]] static Translations parse(const std::string &text, const std::string &fallback_code);
@@ -140,7 +135,7 @@ public:
 private:
     std::string code_;
     std::string name_;
-    std::map<std::uint64_t, std::size_t> index_;  // exact key -> position in order_
+    std::map<std::uint64_t, std::size_t> index_; // exact key -> position in order_
     std::vector<std::pair<std::uint64_t, std::string>> order_;
     std::vector<std::pair<Pattern, std::string>> patterns_;
 };
@@ -151,10 +146,10 @@ private:
 
 // What importing one translation file did.
 struct TranslationImport {
-    std::string code;             // the language's own code, or its file name
-    std::string name;             // for the menu
-    std::filesystem::path saved;  // where it was copied
-    std::string error;            // why it could not be imported; empty on success
+    std::string code;            // the language's own code, or its file name
+    std::string name;            // for the menu
+    std::filesystem::path saved; // where it was copied
+    std::string error;           // why it could not be imported; empty on success
 };
 
 // Reads `source` as a translation file and copies it into `folder` under its own
@@ -162,7 +157,7 @@ struct TranslationImport {
 // file is read first, so a file that is not a translation is refused; the folder
 // is created when missing, and a file of the same code is replaced. Nothing is
 // written when the source cannot be read.
-[[nodiscard]] TranslationImport import_translation_file(const std::filesystem::path &source,
-                                                        const std::filesystem::path &folder);
+[[nodiscard]] TranslationImport import_translation_file(
+    const std::filesystem::path &source, const std::filesystem::path &folder);
 
 } // namespace mhp3rd::text

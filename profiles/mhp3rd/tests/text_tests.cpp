@@ -2,6 +2,7 @@
 // applying one to a text block on a buffer standing for guest memory. No game
 // data: the block and the strings here are made up.
 #include "text/language.hpp"
+#include "text/read_buffer.hpp"
 #include "text/translation.hpp"
 
 #include <cstdint>
@@ -39,8 +40,8 @@ public:
     }
     [[nodiscard]] std::uint32_t load32(std::uint32_t address) const {
         return static_cast<std::uint32_t>(load8(address)) | (static_cast<std::uint32_t>(load8(address + 1u)) << 8u) |
-               (static_cast<std::uint32_t>(load8(address + 2u)) << 16u) |
-               (static_cast<std::uint32_t>(load8(address + 3u)) << 24u);
+            (static_cast<std::uint32_t>(load8(address + 2u)) << 16u) |
+            (static_cast<std::uint32_t>(load8(address + 3u)) << 24u);
     }
     void store8(std::uint32_t address, std::uint8_t value) {
         if (contains(address, 1u)) bytes_[address - base_] = value;
@@ -69,7 +70,7 @@ void write_table(Memory &memory, std::uint32_t at, const std::vector<std::string
         memory.store32(at + i * 4u, text);
         for (std::size_t c = 0; c <= strings[i].size(); ++c)
             memory.store8(at + text + static_cast<std::uint32_t>(c),
-                          c < strings[i].size() ? static_cast<std::uint8_t>(strings[i][c]) : 0u);
+                c < strings[i].size() ? static_cast<std::uint8_t>(strings[i][c]) : 0u);
         text += static_cast<std::uint32_t>(strings[i].size() + 1u);
     }
     memory.store32(at + count * 4u, 0xFFFFFFFFu);
@@ -113,17 +114,16 @@ std::string read_text_at(const Memory &memory, std::uint32_t address) {
 void test_parse() {
     // The old shape (no [entry]): everything belongs to the main block, and
     // escapes are understood.
-    const std::string text =
-        "# a comment\n"
-        "; another\n"
-        "language = pt-BR\n"
-        "name = PortuguÃªs (Brasil)\n"
-        "\n"
-        "2:20 = Cancelar\n"
-        "2:21 = Sim \\#1\n"
-        "3:1 = Linha 1\\nLinha 2\n"
-        "not a key = ignored\n"
-        "2:20 = Duplicado\n";
+    const std::string text = "# a comment\n"
+                             "; another\n"
+                             "language = pt-BR\n"
+                             "name = PortuguÃªs (Brasil)\n"
+                             "\n"
+                             "2:20 = Cancelar\n"
+                             "2:21 = Sim \\#1\n"
+                             "3:1 = Linha 1\\nLinha 2\n"
+                             "not a key = ignored\n"
+                             "2:20 = Duplicado\n";
     const Translations t = Translations::parse(text, "xx");
     check(t.code() == "pt-BR", "the language line wins");
     check(t.name() == "PortuguÃªs (Brasil)", "the name line is read");
@@ -133,22 +133,21 @@ void test_parse() {
     check(t.find(3u, 1u) != nullptr && *t.find(3u, 1u) == "Linha 1\nLinha 2", "\\n unescapes");
     check(t.find(2u, 99u) == nullptr, "an unknown key is absent");
     check(t.arena_bytes() == t.find(2u, 20u)->size() + t.find(2u, 21u)->size() + t.find(3u, 1u)->size() + 3u,
-          "the arena size counts every terminator");
+        "the arena size counts every terminator");
 }
 
 void test_blocks_and_rules() {
     // The grouped shape: [entry] sections, a range and a wildcard.
-    const std::string text =
-        "language = pt-BR\n"
-        "name = Teste\n"
-        "\n"
-        "[16]\n"
-        "2:20 = Cancelar\n"
-        "3:1-3 = Faixa\n"
-        "2:* = Tudo\n"
-        "\n"
-        "[2835]\n"
-        "2:129 = Bem-vindo\n";
+    const std::string text = "language = pt-BR\n"
+                             "name = Teste\n"
+                             "\n"
+                             "[16]\n"
+                             "2:20 = Cancelar\n"
+                             "3:1-3 = Faixa\n"
+                             "2:* = Tudo\n"
+                             "\n"
+                             "[2835]\n"
+                             "2:129 = Bem-vindo\n";
     const auto blocks = Translations::parse_blocks(text, "xx");
     check(blocks.size() == 2u, "two blocks are read");
     const Translations &main = blocks.at(16);
@@ -166,10 +165,10 @@ void test_apply() {
     write_text(memory);
 
     Translations t;
-    t.add(2u, 1u, "Qtd");        // shorter than "Qty"
-    t.add(2u, 2u, "Cancelar");   // longer than "Cancel"
-    t.add(3u, 2u, "TÃ´nico");     // longer than "Tonic"
-    t.add(2u, 99u, "fora");      // the table has no such entry
+    t.add(2u, 1u, "Qtd");      // shorter than "Qty"
+    t.add(2u, 2u, "Cancelar"); // longer than "Cancel"
+    t.add(3u, 2u, "TÃ´nico");  // longer than "Tonic"
+    t.add(2u, 99u, "fora");    // the table has no such entry
 
     const Arena arena{mhp3rd::text::kMainTextBlock + 0x8000u, mhp3rd::text::kMainTextBlock + 0x8000u + 0x400u};
     const mhp3rd::text::ApplyResult result = mhp3rd::text::apply(memory, mhp3rd::text::kMainTextBlock, t, arena);
@@ -190,7 +189,7 @@ void test_apply_limited_arena() {
 
     Translations t;
     t.add(2u, 1u, "Qtd");
-    t.add(2u, 2u, "Cancelar");  // does not fit the arena below
+    t.add(2u, 2u, "Cancelar"); // does not fit the arena below
 
     const Arena arena{mhp3rd::text::kMainTextBlock + 0x8000u, mhp3rd::text::kMainTextBlock + 0x8000u + 5u};
     const mhp3rd::text::ApplyResult result = mhp3rd::text::apply(memory, mhp3rd::text::kMainTextBlock, t, arena);
@@ -200,7 +199,7 @@ void test_apply_limited_arena() {
 }
 
 void test_apply_before_load() {
-    Memory memory(kBase, kSize);  // no text written: the block is all zeros
+    Memory memory(kBase, kSize); // no text written: the block is all zeros
 
     Translations t;
     t.add(2u, 2u, "Qtd");
@@ -215,8 +214,8 @@ void write_dialogue(Memory &memory, std::uint32_t at, int blocks, int entries_pe
     // Layout: the top (id, offset) table, then each sub-block, then the strings.
     // Every offset is relative to the base the game adds it to (the top table
     // for a block, the block for a string).
-    const auto block_size = static_cast<std::uint32_t>(entries_per_block) * 8u + 16u +
-                            static_cast<std::uint32_t>(entries_per_block) * 24u;
+    const auto block_size =
+        static_cast<std::uint32_t>(entries_per_block) * 8u + 16u + static_cast<std::uint32_t>(entries_per_block) * 24u;
     std::uint32_t cursor = static_cast<std::uint32_t>(blocks) * 8u + 16u;
     for (int id = 0; id < blocks; ++id) {
         memory.store32(at + id * 8u, static_cast<std::uint32_t>(id));
@@ -232,8 +231,8 @@ void write_dialogue(Memory &memory, std::uint32_t at, int blocks, int entries_pe
             const std::string text = "d" + std::to_string(id) + "-" + std::to_string(k);
             const std::uint32_t string = strings + static_cast<std::uint32_t>(k) * 16u;
             for (std::size_t i = 0; i <= text.size(); ++i)
-                memory.store8(string + static_cast<std::uint32_t>(i),
-                              i < text.size() ? static_cast<std::uint8_t>(text[i]) : 0u);
+                memory.store8(
+                    string + static_cast<std::uint32_t>(i), i < text.size() ? static_cast<std::uint8_t>(text[i]) : 0u);
             memory.store32(block + k * 8u, 0u);
             memory.store32(block + k * 8u + 4u, string - block);
         }
@@ -292,8 +291,8 @@ void test_apply_dialogue() {
 // A quest file: an array of record offsets at the top, then each record's
 // string table (here a run of entry-relative offsets) and the strings.
 void write_quest(Memory &memory, std::uint32_t at) {
-    memory.store32(at + 0u, 0x100u);  // record 0
-    memory.store32(at + 4u, 0x200u);  // record 1
+    memory.store32(at + 0u, 0x100u); // record 0
+    memory.store32(at + 4u, 0x200u); // record 1
     // Record 0's six fields, at their offsets, then record 1's.
     const char *titles[] = {"Title", "Objective", "Result", "Body", "Monsters", "Client"};
     for (std::uint32_t field = 0; field < 6u; ++field) {
@@ -301,8 +300,8 @@ void write_quest(Memory &memory, std::uint32_t at) {
         memory.store32(at + 0x100u + field * 4u, string);
         const std::string text = std::string(titles[field]) + "0";
         for (std::size_t i = 0; i <= text.size(); ++i)
-            memory.store8(at + string + static_cast<std::uint32_t>(i),
-                          i < text.size() ? static_cast<std::uint8_t>(text[i]) : 0u);
+            memory.store8(
+                at + string + static_cast<std::uint32_t>(i), i < text.size() ? static_cast<std::uint8_t>(text[i]) : 0u);
     }
 }
 
@@ -313,9 +312,9 @@ void test_apply_quest() {
 
     // The keys are `ref:offset`: the word that holds the offset, and the offset.
     Translations t;
-    t.add(0x100u, 0x400u, "Titulo");      // record 0's title
-    t.add(0x104u, 0x420u, "Um objetivo bem mais longo");  // any length
-    t.add(0x108u, 0x999u, "deslocado");   // the word does not hold 0x999
+    t.add(0x100u, 0x400u, "Titulo");                     // record 0's title
+    t.add(0x104u, 0x420u, "Um objetivo bem mais longo"); // any length
+    t.add(0x108u, 0x999u, "deslocado");                  // the word does not hold 0x999
 
     Arena arena{at + 0x8000u, at + 0x8000u + 0x400u};
     std::size_t used = 0u;
@@ -324,10 +323,9 @@ void test_apply_quest() {
     const std::uint32_t title = at + memory.load32(at + 0x100u);
     check(read_text_at(memory, title) == "Titulo", "the title is repointed and reads back");
     const std::uint32_t objective = at + memory.load32(at + 0x104u);
-    check(read_text_at(memory, objective) == "Um objetivo bem mais longo",
-          "a longer translation is stored whole");
+    check(read_text_at(memory, objective) == "Um objetivo bem mais longo", "a longer translation is stored whole");
     check(memory.load32(at + 0x108u) == 0x999u || read_text_at(memory, at + memory.load32(at + 0x108u)) != "deslocado",
-          "a word that no longer matches is left alone");
+        "a word that no longer matches is left alone");
     const std::uint32_t untouched = at + memory.load32(at + 0x10Cu);
     check(read_text_at(memory, untouched) == "Body0", "a field with no translation keeps the game's text");
 }
@@ -366,8 +364,8 @@ void test_apply_quest_fields() {
     memory.store32(at + 0x118u, 0x118u);
 
     Translations t;
-    t.add(0x100u, 0x400u, "Titulo");  // a real field
-    t.add(0x118u, 0x118u, "Lixo");    // the sentinel's position, not a field
+    t.add(0x100u, 0x400u, "Titulo"); // a real field
+    t.add(0x118u, 0x118u, "Lixo");   // the sentinel's position, not a field
 
     Arena arena{at + 0x8000u, at + 0x8000u + 0x400u};
     std::size_t used = 0u;
@@ -375,6 +373,56 @@ void test_apply_quest_fields() {
     const std::uint32_t applied = mhp3rd::text::apply_quest(memory, at, t, arena, used, fields);
     check(applied == 1u, "only the field the parser found is replaced");
     check(memory.load32(at + 0x118u) == 0x118u, "the table's sentinel word is left alone");
+}
+
+void test_rule_application() {
+    Memory memory(kBase, kSize);
+    write_text(memory);
+    const auto t = Translations::parse("2:1 = EXACT\n2:* = FIRST\n2:* = SECOND\n*:1 = ALL\n", "test");
+    const auto start = mhp3rd::text::kMainTextBlock + 0x8000u;
+    const auto r = mhp3rd::text::apply(
+        memory, mhp3rd::text::kMainTextBlock, t, Arena{start, start + static_cast<std::uint32_t>(t.arena_bytes())});
+    check(read_entry(memory, 2, 1) == "EXACT", "exact keys win over rules");
+    check(read_entry(memory, 2, 2) == "FIRST", "the first matching rule wins");
+    check(read_entry(memory, 3, 1) == "ALL", "table wildcards expand to every table");
+    check(r.applied == 5 && r.skipped == 0, "runtime-sized reservations cover expanded rules");
+    const auto table = mhp3rd::text::kMainTextBlock + memory.load32(mhp3rd::text::kMainTextBlock + 8u);
+    check(memory.load32(table + 8u) == memory.load32(table + 12u), "rule matches share immutable bytes");
+    const auto all = Translations::parse("*:* = GLOBAL\n", "test");
+    const auto r2 = mhp3rd::text::apply(memory, mhp3rd::text::kMainTextBlock, all, Arena{start, start + 7u});
+    check(r2.applied == 6 && r2.bytes == 7 && r2.skipped == 0, "both wildcards share one string");
+    const auto bad = mhp3rd::text::apply(memory, mhp3rd::text::kMainTextBlock, all, Arena{1, 100});
+    check(bad.applied == 0 && bad.skipped == 6, "unmapped arenas never repoint a table");
+}
+
+void test_partial_reads() {
+    mhp3rd::text::ReadBuffer buffer;
+    const std::vector<std::uint8_t> tail{5, 6, 7, 8};
+    const std::vector<std::uint8_t> head{1, 2, 3, 4};
+    check(buffer.append(8, 4, tail) && buffer.prefix().empty(), "out-of-order tails expose no unread gap");
+    check(buffer.append(8, 0, head) && buffer.prefix().size() == 8, "a head joins the received tail");
+    check(buffer.prefix()[0] == 1 && buffer.prefix()[7] == 8, "assembled bytes preserve offsets");
+    check(buffer.append(8, 2, head) && buffer.prefix().size() == 8, "overlaps do not double-count bytes");
+    check(!buffer.append(7, 0, head), "a changed entry size is rejected");
+    check(!buffer.append(8, 7, tail) && !buffer.append(8, 9, head), "reads outside the entry are rejected");
+    buffer.clear();
+    check(buffer.size() == 0 && buffer.prefix().empty(), "reload clears received ranges");
+    check(!buffer.append(mhp3rd::text::ReadBuffer::kMaxBytes + 1, 0, head), "oversized entries are rejected");
+    check(!buffer.append(0, 0, head) && !buffer.append(8, 0, {}), "empty entries and reads are rejected");
+    for (std::size_t i = 0; i < mhp3rd::text::ReadBuffer::kMaxFragments; ++i)
+        check(buffer.append(20000, i * 2, std::span(head).first(1)), "bounded fragments are accepted");
+    check(!buffer.append(20000, 18000, std::span(head).first(1)), "fragment budget is enforced");
+    check(buffer.append(20000, 1, std::span(head).first(1)), "joining ranges remains possible at the budget");
+}
+
+void test_numeric_bounds() {
+    const auto t = Translations::parse("2:-1 = bad\n2:+1 = bad\n2:4294967296 = bad\n2:5-3 = bad\n"
+                                       "2:4294967295 = maximum\n2:1 = valid\n",
+        "test");
+    check(t.size() == 2 && t.patterns().empty(), "signed, overflowing and reversed keys are rejected");
+    check(t.find(2, 0xffffffffu) != nullptr, "the largest index is represented without truncation");
+    const auto blocks = Translations::parse_blocks("[-1]\n[4294967296]\n", "test");
+    check(blocks.size() == 1 && blocks.contains(16), "invalid section numbers never wrap");
 }
 
 // Importing a `.lang` file the player downloaded: a real translation is read
@@ -414,6 +462,9 @@ void test_import_translation() {
 
 int main() {
     test_parse();
+    test_rule_application();
+    test_numeric_bounds();
+    test_partial_reads();
     test_blocks_and_rules();
     test_apply();
     test_apply_limited_arena();
