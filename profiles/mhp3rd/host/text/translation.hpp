@@ -183,6 +183,15 @@ void set_language(const std::string &code, const std::vector<std::filesystem::pa
 // this buffer, so the game copies it out already translated.
 void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes);
 
+// Searches share this candidate-address budget across all pending blocks.
+// Candidate verification can read beyond a slice so boundary matches survive.
+inline constexpr std::uint32_t kSearchBytesPerFrame = 256u * 1024u;
+struct SearchWork {
+    std::uint32_t bytes{};
+    std::uint32_t budget{kSearchBytesPerFrame};
+};
+[[nodiscard]] SearchWork search_work_last_frame() noexcept;
+
 // Runs once per frame (hle_media.cpp): reserves the arena the translated strings
 // live in, through `allocate`, and applies the block the game loaded at start.
 void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate);

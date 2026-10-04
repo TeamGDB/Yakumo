@@ -136,6 +136,23 @@ before the game loads its text. `host/text/` holds the file format
 (`language.{hpp,cpp}`) and the apply logic (`translation.{hpp,cpp}`); both are
 unit-tested in `tests/text_tests.cpp` on a buffer, with no game data.
 
+### Runtime search budget
+
+Loaded blocks and inline quest structures are discovered incrementally. All
+pending searches share at most 256 KiB of candidate addresses per game frame;
+the first entry rotates so an absent probe cannot starve another block. A
+candidate is checked against the complete memory range, so its strings can
+cross a search slice boundary. Quest-file copies are patched as they are found,
+and later sweeps retain discovery of inline structures created behind a cursor.
+A reread restarts the cursors while reusing the same translation arena.
+
+A full 32 MiB sweep takes 128 search slices, spread over frames (longer when
+several blocks share the budget). Until discovery, the original text can remain
+visible. This bounds search work, not translation application or a wall-clock
+frame deadline. `MHP3RD_TRACE_TEXT=1` reports each search's reserved candidate
+bytes, completion and elapsed microseconds. For a performance comparison only,
+`MHP3RD_TEXT_SEARCH_UNLIMITED=1` restores unsliced, blocking memory searches.
+
 ### Character widths
 
 The game's text paths use fixed half-width or full-width cells rather than the

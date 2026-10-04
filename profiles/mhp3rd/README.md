@@ -1214,6 +1214,8 @@ With the setting off nothing is hooked into the display lists, no input is read 
 | `MHP3RD_TRACE_AUDIO=1` | One line per second of output: frames, peak, RMS, silence and drops |
 | `MHP3RD_TRACE_ATRAC=1` | Every `sceAtrac3plus` call with its arguments, result and decode position |
 | `MHP3RD_TRACE_UI=1` | Each [sharper copy](#sharper-text-and-2d-textures) of a glyph atlas page or a 2D texture as it is made: its address, sizes and milliseconds, and how many of a page's cells were drawn again |
+| `MHP3RD_TRACE_TEXT=1` | Translation reads, application and incremental search candidate bytes/completion/elapsed microseconds |
+| `MHP3RD_TEXT_SEARCH_UNLIMITED=1` | Restore blocking whole-memory translation searches for performance comparisons; normal runs share 256 KiB of candidate addresses per frame |
 | `MHP3RD_ORIGINAL_TEXT_WIDTH=1` | Restore original full-width Cyrillic classification for layout comparisons |
 | `MHP3RD_TRACE_FONT=1` | Character classes and callers, plus every `sceLibFont` call with its arguments: the font the game asks for, the font info and character metrics returned, and each glyph image's buffer and 26.6 position, with the caller's return address |
 | `MHP3RD_TRACE_MPEG=1` | Every `sceMpeg` and `sceJpegCsc` call, and each call the ring buffer makes to the game's read callback |
