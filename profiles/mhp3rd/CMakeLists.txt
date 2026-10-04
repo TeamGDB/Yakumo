@@ -917,10 +917,13 @@ target_compile_definitions(mhp3rd_imgui_font_bitmap_tests PRIVATE TEST_IMGUI_STB
 
 add_executable(mhp3rd_media_tests
     tests/media_tests.cpp
+    host/audio/atrac_decoder.cpp
+    host/movie/avc_decoder.cpp
     host/audio/sas_core.cpp
     host/movie/psmf_demuxer.cpp)
 target_include_directories(mhp3rd_media_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
 target_link_libraries(mhp3rd_media_tests PRIVATE psprecomp_core)
+mhp3rd_use_ffmpeg(mhp3rd_media_tests)
 set_target_properties(mhp3rd_media_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 if(PSPRECOMP_BUILD_PROFILE_TESTS)
     add_test(NAME mhp3rd_media_tests COMMAND mhp3rd_media_tests)

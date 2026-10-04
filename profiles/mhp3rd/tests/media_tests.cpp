@@ -1,4 +1,6 @@
 #include "audio/sas_core.hpp"
+#include "audio/atrac_decoder.hpp"
+#include "movie/avc_decoder.hpp"
 #include "movie/psmf_demuxer.hpp"
 
 #include <algorithm>
@@ -83,6 +85,68 @@ void demux_contracts() {
     demux.end_of_stream();
     video = demux.pop_video();
     check(video && video->pts == -1 && video->dts == -1, "Unknown timestamps must stay unknown");
+}
+void decoder_contracts() {
+    mhp3rd::movie::AvcDecoder video;
+    mhp3rd::movie::Picture picture;
+    check(
+        !video.is_open() && !video.decode({}, picture) && !video.drain(picture), "Closed video decoder accepted input");
+    video.reset();
+    video.close();
+    if (video.available()) {
+        check(video.open() && video.is_open(), "Available video decoder did not open");
+        const std::array<std::uint8_t, 46> black{0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xc0, 0x0a, 0xda, 0x7b, 0x01, 0x10,
+            0x00, 0x00, 0x03, 0x00, 0x10, 0x00, 0x00, 0x03, 0x00, 0x28, 0xf1, 0x22, 0x6a, 0x00, 0x00, 0x00, 0x01, 0x68,
+            0xce, 0x0f, 0xc8, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x3a, 0x26, 0x28, 0x00, 0x09, 0x02, 0xe0};
+        // Public synthetic black 16x16 picture, generated with FFmpeg's libx264
+        // encoder from the color filter. Encoder metadata SEI is omitted.
+        check(video.decode(black, picture), "Synthetic H.264 picture did not decode");
+        check(picture.width == 16u && picture.height == 16u && picture.y.size() == 256u && picture.cb.size() == 64u &&
+                picture.cr.size() == 64u,
+            "Decoded planes must be tightly packed");
+        check(std::all_of(picture.y.begin(), picture.y.end(), [](auto pixel) { return pixel == 16u; }) &&
+                std::all_of(picture.cb.begin(), picture.cb.end(), [](auto pixel) { return pixel == 128u; }) &&
+                std::all_of(picture.cr.begin(), picture.cr.end(), [](auto pixel) { return pixel == 128u; }),
+            "Synthetic black picture pixels changed");
+        auto owned = picture.y;
+        check(!video.drain(picture) && !video.drain(picture) && !video.decode(black, picture),
+            "Draining decoder must reject new input until reset");
+        video.reset();
+        check(video.decode(black, picture) && picture.y == owned, "Reset must allow identical picture decode");
+        const std::array<std::uint8_t, 4> malformed{1u, 2u, 3u, 4u};
+        check(
+            !video.decode(malformed, picture) && !video.decode({}, picture), "Malformed video input created a picture");
+        video.close();
+        check(!video.is_open() && picture.y == owned, "Closing decoder invalidated owned output");
+        check(video.open(), "Video decoder could not reopen");
+    } else {
+        check(!video.open(), "Disabled decoder reported successful open");
+    }
+    mhp3rd::audio::AtracDecoder audio;
+    std::array<std::int16_t, 4096> pcm{};
+    check(!audio.is_open() && audio.decode({}, pcm.data()) == 0u, "Closed audio decoder produced samples");
+    audio.reset();
+    check(mhp3rd::audio::atrac_frame_samples(mhp3rd::audio::AtracCodec::Atrac3) == 1024u &&
+            mhp3rd::audio::atrac_frame_samples(mhp3rd::audio::AtracCodec::Atrac3Plus) == 2048u,
+        "ATRAC frame sizes changed");
+    check(!audio.open(mhp3rd::audio::AtracCodec::Atrac3, 0u, 192u, {}) &&
+            !audio.open(mhp3rd::audio::AtracCodec::Atrac3, 3u, 192u, {}) &&
+            !audio.open(mhp3rd::audio::AtracCodec::Atrac3, 2u, 0u, {}),
+        "Invalid ATRAC parameters accepted");
+    if (audio.available()) {
+        check(audio.open(mhp3rd::audio::AtracCodec::Atrac3Plus, 2u, 16u, {}) && audio.is_open() &&
+                audio.codec() == mhp3rd::audio::AtracCodec::Atrac3Plus,
+            "ATRAC3plus open contract failed");
+        const std::array<std::uint8_t, 16> malformed{};
+        check(audio.decode(malformed, pcm.data()) == 0u && audio.decode({}, pcm.data()) == 0u,
+            "Malformed ATRAC packet must not produce samples");
+        audio.reset();
+        const std::array<std::uint8_t, 1> invalid_extra{};
+        check(!audio.open(mhp3rd::audio::AtracCodec::Atrac3, 2u, 192u, invalid_extra) && !audio.is_open(),
+            "Invalid codec extradata must close the old stream");
+    } else {
+        check(!audio.open(mhp3rd::audio::AtracCodec::Atrac3Plus, 2u, 16u, {}), "Disabled ATRAC decoder opened");
+    }
 }
 void sas_contracts() {
     psprecomp::GuestMemory memory;
@@ -187,6 +251,7 @@ void sas_contracts() {
 int main() {
     try {
         demux_contracts();
+        decoder_contracts();
         sas_contracts();
         std::cout << "Media contracts passed\n";
         return 0;
