@@ -141,6 +141,27 @@ void decoder_contracts() {
         check(audio.decode(malformed, pcm.data()) == 0u && audio.decode({}, pcm.data()) == 0u,
             "Malformed ATRAC packet must not produce samples");
         audio.reset();
+        // Format reference: FFmpeg n7.1.5 libavcodec/atrac3.c (WAVE fields and sound-unit format only).
+        // ATRAC3 format facts: a 14-byte WAVE extension with frame factor one,
+        // independent channels, and 192 bytes per sound unit. A unit begins
+        // with six-bit id 0x28; all remaining zero fields encode no gains,
+        // tonal components or quantized spectrum. No external stream is used.
+        std::array<std::uint8_t, 14> extra{};
+        extra[0] = 1u;
+        extra[3] = 4u;
+        extra[10] = 1u;
+        for (unsigned channels : {1u, 2u}) {
+            check(audio.open(mhp3rd::audio::AtracCodec::Atrac3, channels, 192u * channels, extra),
+                "Synthetic ATRAC3 format did not open");
+            std::vector<std::uint8_t> silent(192u * channels, 0u);
+            for (unsigned channel = 0u; channel < channels; ++channel) silent[channel * 192u] = 0xA0u;
+            pcm.fill(1234);
+            check(audio.decode(silent, pcm.data()) == 1024u, "Zero-spectrum ATRAC3 frame must decode 1024 samples");
+            check(std::all_of(pcm.begin(), pcm.begin() + 2048, [](auto sample) { return sample == 0; }),
+                "Zero-spectrum ATRAC3 must produce stereo silence, including mono duplication");
+            audio.reset();
+            check(audio.decode(silent, pcm.data()) == 1024u, "ATRAC reset discarded valid codec state");
+        }
         const std::array<std::uint8_t, 1> invalid_extra{};
         check(!audio.open(mhp3rd::audio::AtracCodec::Atrac3, 2u, 192u, invalid_extra) && !audio.is_open(),
             "Invalid codec extradata must close the old stream");
