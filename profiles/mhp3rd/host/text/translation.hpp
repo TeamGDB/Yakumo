@@ -28,6 +28,8 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <limits>
+#include <set>
 #include <optional>
 #include <span>
 #include <string>
@@ -52,13 +54,35 @@ struct Arena {
 // Reserves `bytes` of guest memory, or nothing when there is none to give.
 using ArenaAllocator = std::function<std::optional<Arena>(std::size_t bytes)>;
 
+// Store each immutable translation once per arena slice. A wildcard can point
+// many table entries at the same bytes without multiplying the reservation.
+template <typename Memory>
+std::optional<std::uint32_t> store_translation(Memory &memory, const std::string &text, const Arena &arena,
+    std::size_t &used, std::map<const std::string *, std::uint32_t> &stored) {
+    if (!arena.valid() || !memory.contains(arena.begin, arena.end - arena.begin)) return std::nullopt;
+    if (const auto found = stored.find(&text); found != stored.end()) return found->second;
+    const std::size_t capacity = arena.end - arena.begin;
+    if (used > capacity || text.size() >= capacity - used) return std::nullopt;
+    const auto at = arena.begin + static_cast<std::uint32_t>(used);
+    for (std::size_t i = 0; i < text.size(); ++i)
+        memory.store8(at + static_cast<std::uint32_t>(i), static_cast<std::uint8_t>(text[i]));
+    memory.store8(at + static_cast<std::uint32_t>(text.size()), 0u);
+    used += text.size() + 1u;
+    stored.emplace(&text, at);
+    return at;
+}
+
+[[nodiscard]] inline bool offset_fits(std::uint32_t base, std::uint32_t offset) noexcept {
+    return offset <= std::numeric_limits<std::uint32_t>::max() - base;
+}
+
 // What applying one file to one block did.
 struct ApplyResult {
-    std::uint32_t applied{};  // strings replaced
-    std::uint32_t missing{};  // strings the block does not have
-    std::uint32_t skipped{};  // strings that did not fit the arena
-    std::uint32_t bytes{};    // arena bytes used
-    bool block{};             // the address held a text block
+    std::uint32_t applied{}; // strings replaced
+    std::uint32_t missing{}; // strings the block does not have
+    std::uint32_t skipped{}; // strings that did not fit the arena
+    std::uint32_t bytes{};   // arena bytes used
+    bool block{};            // the address held a text block
 };
 
 // Applies `translations` to the text block at `block`. Memory is anything with
@@ -68,6 +92,9 @@ template <typename Memory>
 ApplyResult apply(Memory &memory, std::uint32_t block, const Translations &translations, const Arena &arena) {
     ApplyResult result;
     if (!memory.contains(block, 8u) || !arena.valid()) return result;
+    std::map<const std::string *, std::uint32_t> stored;
+    std::set<std::uint64_t> placed;
+    std::size_t used = 0;
 
     struct Table {
         std::uint32_t address{};
@@ -81,13 +108,14 @@ ApplyResult apply(Memory &memory, std::uint32_t block, const Translations &trans
         if (found != tables.end()) return found->second;
         Table table;
         const std::uint32_t slot = block + static_cast<std::uint32_t>(index) * 4u;
-        if (memory.contains(slot, 4u)) {
+        if (index < 64u && offset_fits(block, static_cast<std::uint32_t>(index) * 4u) && memory.contains(slot, 4u) &&
+            offset_fits(block, memory.load32(slot))) {
             const std::uint32_t address = block + memory.load32(slot);
             if (memory.contains(address, 8u)) {
                 const std::uint32_t first = memory.load32(address);
                 if (first >= 8u && first % 4u == 0u && first / 4u - 1u <= 8192u) {
                     const std::uint32_t count = first / 4u - 1u;
-                    if (memory.contains(address, first) &&
+                    if (offset_fits(address, first) && memory.contains(address, first) &&
                         memory.load32(address + count * 4u) == 0xFFFFFFFFu) {
                         table = Table{address, count, true};
                     }
@@ -105,17 +133,15 @@ ApplyResult apply(Memory &memory, std::uint32_t block, const Translations &trans
             ++result.missing;
             return;
         }
-        const std::size_t needed = text.size() + 1u;
-        if (result.bytes + needed > arena.end - arena.begin) {
+        if (translations.find(table_index, index) != &text || placed.contains(key(table_index, index))) return;
+        const auto at = store_translation(memory, text, arena, used, stored);
+        if (!at) {
             ++result.skipped;
             return;
         }
-        const std::uint32_t at = arena.begin + result.bytes;
-        for (std::size_t i = 0; i < text.size(); ++i)
-            memory.store8(at + static_cast<std::uint32_t>(i), static_cast<std::uint8_t>(text[i]));
-        memory.store8(at + static_cast<std::uint32_t>(text.size()), 0u);
-        result.bytes += static_cast<std::uint32_t>(needed);
-        memory.store32(table.address + index * 4u, at - table.address);
+        result.bytes = static_cast<std::uint32_t>(used);
+        memory.store32(table.address + index * 4u, *at - table.address);
+        placed.insert(key(table_index, index));
         ++result.applied;
     };
 
@@ -125,16 +151,16 @@ ApplyResult apply(Memory &memory, std::uint32_t block, const Translations &trans
         for (std::uint16_t table_index = 0; table_index < 64u; ++table_index) {
             const Table &table = table_for(table_index);
             if (!table.valid) continue;
-            if (pattern.any == Pattern::Any::Table && table_index != pattern.table) continue;
+
             if (pattern.any != Pattern::Any::Table && pattern.any != Pattern::Any::Index &&
-                table_index != pattern.table)
+                pattern.any != Pattern::Any::Both && table_index != pattern.table)
                 continue;
             for (std::uint32_t index = 1u; index < table.count; ++index)
                 if (pattern.matches(table_index, index)) place(table_index, index, text);
         }
     }
     result.block = !tables.empty() &&
-                   std::any_of(tables.begin(), tables.end(), [](const auto &item) { return item.second.valid; });
+        std::any_of(tables.begin(), tables.end(), [](const auto &item) { return item.second.valid; });
     return result;
 }
 
@@ -167,35 +193,32 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate);
 // The keys are `id:index`. Returns how many strings were replaced. Memory is
 // anything with contains, load8/load32, store8/store32.
 template <typename Memory>
-std::uint32_t apply_dialogue(Memory &memory, std::uint32_t address, const Translations &translations,
-                             const Arena &arena, std::size_t &used) {
+std::uint32_t apply_dialogue(
+    Memory &memory, std::uint32_t address, const Translations &translations, const Arena &arena, std::size_t &used) {
     std::uint32_t applied = 0u;
+    std::map<const std::string *, std::uint32_t> stored;
+    if (!arena.valid()) return applied;
     // The top list is (id, offset) pairs; the ids need not start at 0 (a block
     // of dialogue is numbered from wherever the game left off), so they are read
     // from each pair rather than assumed from the position.
     for (std::uint32_t slot = 0u; slot < 512u; ++slot) {
         const std::uint32_t top = address + slot * 8u;
-        if (!memory.contains(top, 8u)) break;
+        if (!offset_fits(address, slot * 8u) || !memory.contains(top, 8u)) break;
         const std::uint32_t id = memory.load32(top);
         if (id == 0xFFFFFFFFu) break;
         const std::uint32_t block_offset = memory.load32(top + 4u);
-        if (block_offset >= 0x00400000u) break;
+        if (block_offset >= 0x00400000u || !offset_fits(address, block_offset)) break;
         const std::uint32_t block = address + block_offset;
         if (!memory.contains(block, 8u)) continue;
         for (std::uint32_t index = 0u; index < 4096u; ++index) {
             const std::uint32_t at = block + index * 8u;
-            if (!memory.contains(at, 8u)) break;
+            if (!offset_fits(block, index * 8u) || !memory.contains(at, 8u)) break;
             if (memory.load32(at) == 0xFFFFFFFFu) break;
             const std::string *text = translations.find(static_cast<std::uint16_t>(id), index);
             if (text == nullptr) continue;
-            const std::size_t needed = text->size() + 1u;
-            if (used + needed > arena.end - arena.begin) continue;
-            const std::uint32_t into = arena.begin + static_cast<std::uint32_t>(used);
-            for (std::size_t i = 0; i < text->size(); ++i)
-                memory.store8(into + static_cast<std::uint32_t>(i), static_cast<std::uint8_t>((*text)[i]));
-            memory.store8(into + static_cast<std::uint32_t>(text->size()), 0u);
-            used += needed;
-            memory.store32(at + 4u, into - block);
+            const auto into = store_translation(memory, *text, arena, used, stored);
+            if (!into) continue;
+            memory.store32(at + 4u, *into - block);
             ++applied;
         }
     }
@@ -213,16 +236,18 @@ std::uint32_t apply_dialogue(Memory &memory, std::uint32_t address, const Transl
 // many strings were replaced. Memory is anything with contains, load32,
 // store8/store32.
 template <typename Memory>
-std::uint32_t apply_quest(Memory &memory, std::uint32_t address, const Translations &translations,
-                          const Arena &arena, std::size_t &used,
-                          const std::vector<std::uint32_t> &fields = {}) {
+std::uint32_t apply_quest(Memory &memory, std::uint32_t address, const Translations &translations, const Arena &arena,
+    std::size_t &used, const std::vector<std::uint32_t> &fields = {}) {
     std::uint32_t applied = 0u;
+    std::map<const std::string *, std::uint32_t> stored;
+    if (!arena.valid()) return applied;
     for (const auto &[id, text] : translations.entries()) {
         const std::uint32_t position = table_of(id);
         if (!fields.empty() && std::find(fields.begin(), fields.end(), position) == fields.end()) continue;
         const std::uint32_t ref = address + position;
         const std::uint32_t string_offset = index_of(id);
-        if (!memory.contains(ref, 4u)) continue;
+        if (!offset_fits(address, position) || !offset_fits(address, string_offset) || !memory.contains(ref, 4u))
+            continue;
         // The word holds the file offset (the archive image is loaded as it is)
         // or an absolute pointer, when the game relocated the copy (the quest
         // keeps its own); anything else is a different layout and is left alone.
@@ -230,14 +255,9 @@ std::uint32_t apply_quest(Memory &memory, std::uint32_t address, const Translati
         const bool relative = word == string_offset;
         const bool absolute = word == address + string_offset;
         if (!relative && !absolute) continue;
-        const std::size_t needed = text.size() + 1u;
-        if (used + needed > arena.end - arena.begin) continue;
-        const std::uint32_t into = arena.begin + static_cast<std::uint32_t>(used);
-        for (std::size_t i = 0; i < text.size(); ++i)
-            memory.store8(into + static_cast<std::uint32_t>(i), static_cast<std::uint8_t>(text[i]));
-        memory.store8(into + static_cast<std::uint32_t>(text.size()), 0u);
-        used += needed;
-        memory.store32(ref, relative ? (into - address) : into);
+        const auto into = store_translation(memory, text, arena, used, stored);
+        if (!into) continue;
+        memory.store32(ref, relative ? (*into - address) : *into);
         ++applied;
     }
     return applied;
@@ -246,7 +266,7 @@ std::uint32_t apply_quest(Memory &memory, std::uint32_t address, const Translati
 // The blocks translated so far this run, for the menu's diagnostics.
 struct AppliedBlock {
     std::uint32_t entry{};
-    std::uint32_t address{};  // where its strings landed, or 0 for a read-in-place block
+    std::uint32_t address{}; // where its strings landed, or 0 for a read-in-place block
     std::uint32_t applied{};
 };
 [[nodiscard]] std::vector<AppliedBlock> applied_blocks();
