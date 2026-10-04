@@ -302,3 +302,16 @@ contracts are part of `tool_security_tests.py`. Worksheet CSV output quotes
 formula-like text; extraction outputs are checked against symlink escapes.
 Actual translated gameplay, font/layout fit and Android provider behavior still
 need device verification with a translation supplied locally by its author.
+
+### CLI path security review
+
+The extraction and worksheet commands are local tools run with the operator's
+own filesystem privileges. Their input images and output/dump roots are
+explicitly selected through command-line arguments; these paths are not received
+from the game archive or a remote user. The PR #227 CodeQL Python dataflows at
+`Archive` input opening, extractor output opening, `extraction_path` root
+resolution and worksheet input/output all originate at these CLI arguments.
+Those path-injection findings were reviewed as false positives. Archive-derived
+components still require validation and resolved containment below the selected
+root, with traversal and symlink regression tests; this does not authorize
+exposing the tools as a service accepting untrusted root paths.
