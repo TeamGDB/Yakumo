@@ -2,6 +2,7 @@
 
 import contextlib
 import io
+import hashlib
 import json
 import os
 import subprocess
@@ -143,6 +144,35 @@ class CoverageGateIntegrationTests(unittest.TestCase):
         status, summary = self.run_gate('--report-only')
         self.assertEqual(status, 0)
         self.assertEqual(summary['diff']['percent'], 60)
+
+    def test_reviewed_header_stays_unmeasured_and_source_mutation_fails(self):
+        name = 'profiles/mhp3rd/host/ui/example.hpp'
+        self.write(name, '#pragma once\nvoid example();\n')
+        fingerprint = hashlib.sha256((self.root / name).read_bytes()).hexdigest()
+        self.write('scripts/ci/coverage_unmapped_headers.json', json.dumps({name: {
+            'sha256': fingerprint, 'reason': 'Only a function declaration.'}}))
+        self.git('add', name)
+        self.git('commit', '-qm', 'Add declaration')
+        status, summary = self.run_gate()
+        self.assertEqual(status, 0)
+        self.assertFalse(summary['diff']['unmeasured_changed_files'])
+        self.assertEqual(summary['diff']['reviewed_unmapped_headers'][0]['file'], name)
+        self.assertIn(name, summary['languages']['native']['unmeasured_files'])
+        self.assertEqual(summary['languages']['native']['count'], 5)
+        self.write(name, '#pragma once\ninline int example() { return 42; }\n')
+        self.git('add', name)
+        self.git('commit', '-qm', 'Add an unmapped function body')
+        status, summary = self.run_gate()
+        self.assertEqual(status, 1)
+        self.assertEqual(summary['diff']['unmeasured_changed_files'], [name])
+        self.assertFalse(summary['diff']['reviewed_unmapped_headers'])
+
+    def test_reviewed_header_cannot_bypass_mapped_line_threshold(self):
+        name = 'profiles/mhp3rd/host/ui/example.hpp'
+        result = report.diff_coverage({name: {1}}, {name: 'native'}, {name: {1: 0}},
+                                     {name: 'Reviewed declaration'})
+        self.assertEqual(result['percent'], 0)
+        self.assertFalse(result['reviewed_unmapped_headers'])
 
     def test_changed_java_requires_mapping_and_can_be_covered(self):
         self.write('profiles/mhp3rd/packaging/android/java/App.java', 'new\n')

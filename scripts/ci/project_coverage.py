@@ -3,6 +3,7 @@
 
 import argparse
 import ast
+import hashlib
 import json
 import os
 import re
@@ -95,14 +96,34 @@ def changed_lines(text):
     return result
 
 
-def diff_coverage(changed, inventory, coverage):
+def reviewed_unmapped_headers(root):
+    """Recognize exact reviewed headers without fabricating executable lines.
+
+    A source change invalidates its fingerprint and fails the normal mapping
+    gate until reviewed again. Mapped lines always keep normal enforcement.
+    """
+    manifest = root / 'scripts/ci/coverage_unmapped_headers.json'
+    if not manifest.is_file():
+        return {}
+    reviewed = json.loads(manifest.read_text())
+    return {name: item['reason'] for name, item in reviewed.items()
+            if source_kind(name) == 'native' and Path(name).suffix in {'.h', '.hh', '.hpp', '.hxx'}
+            and item['reason'] and (root / name).is_file()
+            and hashlib.sha256((root / name).read_bytes()).hexdigest() == item['sha256']}
+
+
+def diff_coverage(changed, inventory, coverage, reviewed_headers=None):
     details = []
     covered = count = 0
     unmeasured = []
+    reviewed = []
     for name, lines in sorted(changed.items()):
         if inventory.get(name) not in {'native', 'python', 'java'} or not lines:
             continue
         if name not in coverage:
+            if name in (reviewed_headers or {}):
+                reviewed.append({'file': name, 'reason': reviewed_headers[name]})
+                continue
             unmeasured.append(name)
             continue
         hits = coverage[name]
@@ -113,7 +134,8 @@ def diff_coverage(changed, inventory, coverage):
         details.append({'file': name, 'covered': len(passed), 'count': len(executable),
                         'missing_lines': sorted(executable - passed)})
     return {'covered': covered, 'count': count, 'percent': 100 * covered / count if count else None,
-            'files': details, 'unmeasured_changed_files': unmeasured}
+            'files': details, 'unmeasured_changed_files': unmeasured,
+            'reviewed_unmapped_headers': reviewed}
 
 
 def measured_totals(languages):
@@ -154,7 +176,7 @@ def main():
     diff = subprocess.check_output(['git', '-c', 'core.quotepath=false', 'diff', '--no-ext-diff',
                                     '--find-renames', '--unified=0', merge_base, 'HEAD', '--'],
                                    cwd=ROOT, text=True)
-    changed = diff_coverage(changed_lines(diff), inventory, coverage)
+    changed = diff_coverage(changed_lines(diff), inventory, coverage, reviewed_unmapped_headers(ROOT))
     languages = {}
     for kind in sorted(set(inventory.values())):
         names = [name for name, value in inventory.items() if value == kind]
@@ -185,6 +207,9 @@ def main():
               f'Changed executable lines: **{percent}**, {changed["covered"]}/{changed["count"]}; '
               'required: **80%**.', '',
               'Unmeasured changed native/Python/Java files: ' + ', '.join(changed['unmeasured_changed_files']), '',
+              'Reviewed headers without standalone line maps: ' +
+              ', '.join(item['file'] for item in changed['reviewed_unmapped_headers']) +
+              '. Exact source fingerprints are required; no coverage percentage is assigned.', '',
               'Unmeasured files stay visible in the inventory. Percentages apply to mapped lines, '
               'not unknown lines; this report does not claim complete project coverage. '
               'Shaders/build scripts require appropriate behavioral/build validation rather than a fabricated line metric.',
