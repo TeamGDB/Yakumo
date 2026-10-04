@@ -23,4 +23,4 @@ mkdir -p "$profile_dir/analysis"
 # Regenerate in place: psp_recomp rewrites only units whose text changed and
 # removes units that no longer exist, so unchanged units keep their timestamps
 # and are not recompiled.
-"$build_dir/psp_recomp" "$elf" --auto "$profile_dir/generated"
+"$build_dir/psp_recomp" "$elf" --auto "$profile_dir/generated" --dispatch-target 0x088E8B18
