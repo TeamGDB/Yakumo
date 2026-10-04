@@ -50,6 +50,8 @@ namespace mhp3rd::text {
 // The archive entry of the big shared block the game loads at start
 // (docs/DEBUG_MENU.md). `[main]` in a file means this.
 inline constexpr std::uint32_t kMainEntry = 16u;
+inline constexpr std::size_t kMaxTranslationBytes = 16u * 1024u * 1024u;
+inline constexpr std::size_t kMaxTranslationLine = 64u * 1024u;
 
 // One language the loader found in a translations folder.
 struct Language {
@@ -130,7 +132,7 @@ public:
     // Reads one file and splits it into its blocks. `error` is set, and nothing
     // is returned, when the file cannot be read.
     [[nodiscard]] static std::optional<std::map<std::uint32_t, Translations>> from_file(
-        const std::filesystem::path &file, std::string &error);
+        const std::filesystem::path &file, std::string &error, std::string *validated_contents = nullptr);
 
 private:
     std::string code_;
