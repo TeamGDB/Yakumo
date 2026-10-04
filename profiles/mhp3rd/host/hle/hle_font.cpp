@@ -246,9 +246,50 @@ void blit_glyph(psprecomp::GuestMemory &memory, std::uint32_t image_address, std
     }
 }
 
+// The shared text classifier is used for both glyph centering and string
+// cell counts. Traced at the sceFontGetCharInfo caller: the original classifies
+// Cyrillic as full-width and never reads advance H. Currency symbols and
+// the half-width katakana variant retain their original classes.
+constexpr std::uint32_t kCharacterClass = 0x088E8B18u;
+
+void classify_character(Runtime &, AllegrexContext &ctx) {
+    const std::uint32_t code = arg(ctx, 1) & 0xFFFFu;
+    const std::uint32_t result = font_character_class(code);
+    if (trace_font()) {
+        static std::set<std::uint32_t> reported;
+        if (reported.insert(code).second)
+            trace("CharacterClass code=%04X class=%u cells=%g ra=%08X", code, result, result != 0u ? 0.5 : 1.0,
+                ctx.gpr[31]);
+    }
+    ctx.set_gpr(2u, result);
+    ctx.pc = ctx.gpr[31];
+}
+
+void install_character_class(Runtime &runtime) {
+    if (std::getenv("MHP3RD_ORIGINAL_TEXT_WIDTH") != nullptr) return;
+    const auto &memory = runtime.memory();
+    // Refuse a moved/changed executable rather than replacing unrelated code.
+    if (memory.load32(kCharacterClass) != 0x30A5FFFFu || memory.load32(kCharacterClass + 4u) != 0x24A2FDB0u ||
+        memory.load32(kCharacterClass + 20u) != 0x2C421DB0u || memory.load32(kCharacterClass + 164u) != 0x24020001u)
+        return;
+    runtime.register_function(kCharacterClass, &classify_character, "mhp3rd_text_character_class");
+    runtime.register_native_fast_path(kCharacterClass, &classify_character);
+    std::cout << "[font] Cyrillic uses half-width text cells\n";
+}
+
 } // namespace
 
+std::uint32_t font_character_class(std::uint32_t code) {
+    code &= 0xFFFFu;
+    // Cyrillic and its supplement use the same cell layout as Latin letters.
+    if (code >= 0x0400u && code <= 0x052Fu) return 1u;
+    if (code < 0x0250u || (code >= 0x20A0u && code <= 0x20CFu) || code >= 0xFFF0u) return 1u;
+    if (code >= 0xFF60u && code <= 0xFFDFu) return 2u;
+    return 0u;
+}
+
 void register_font(HleRegistrar &hle) {
+    install_character_class(kernel().runtime());
     fonts::ready();
     fonts::set_reload_hook(forget_game_glyphs);
 

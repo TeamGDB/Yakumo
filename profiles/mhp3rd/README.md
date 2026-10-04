@@ -498,7 +498,7 @@ The game draws its text with the PSP's system font, which lives in the console's
 
 A change applies at once: Yakumo makes the game draw every character again the next time it shows it, so text already on screen changes within a frame or two.
 
-How the text is laid out, as traced with `MHP3RD_TRACE_FONT=1`: the game sizes a glyph cell in a texture atlas from the font's maximum glyph size, renders each glyph into a 20×20 buffer and copies that whole buffer into the cell, and draws text as one sprite per cell, half a character wide for Latin letters and full width for Japanese ones. Yakumo reports a 20×20 maximum so cells and buffer match, and fits every glyph inside its cell with a pixel of margin, shifting it and, when it is too large, scaling it down, so no font can spill into a neighbour or lose its edges. The size of the text is therefore fixed by the game; *Weight* is the adjustment that fits within it.
+How the text is laid out, as traced with `MHP3RD_TRACE_FONT=1`: the game sizes a glyph cell in a texture atlas from the font's maximum glyph size, renders each glyph into a 20×20 buffer and copies that whole buffer into the cell, and draws text as one sprite per cell, half a character wide for Latin and Cyrillic letters and full width for Japanese ones. Set `MHP3RD_ORIGINAL_TEXT_WIDTH=1` to restore the game's original Cyrillic classification for comparison. Yakumo reports a 20×20 maximum so cells and buffer match, and fits every glyph inside its cell with a pixel of margin, shifting it and, when it is too large, scaling it down, so no font can spill into a neighbour or lose its edges. The size of the text is therefore fixed by the game; *Weight* is the adjustment that fits within it.
 
 ### Sharper text and 2D textures
 
@@ -1214,7 +1214,8 @@ With the setting off nothing is hooked into the display lists, no input is read 
 | `MHP3RD_TRACE_AUDIO=1` | One line per second of output: frames, peak, RMS, silence and drops |
 | `MHP3RD_TRACE_ATRAC=1` | Every `sceAtrac3plus` call with its arguments, result and decode position |
 | `MHP3RD_TRACE_UI=1` | Each [sharper copy](#sharper-text-and-2d-textures) of a glyph atlas page or a 2D texture as it is made: its address, sizes and milliseconds, and how many of a page's cells were drawn again |
-| `MHP3RD_TRACE_FONT=1` | Every `sceLibFont` call with its arguments: the font the game asks for, the font info and character metrics returned, and each glyph image's buffer and 26.6 position, with the caller's return address |
+| `MHP3RD_ORIGINAL_TEXT_WIDTH=1` | Restore original full-width Cyrillic classification for layout comparisons |
+| `MHP3RD_TRACE_FONT=1` | Character classes and callers, plus every `sceLibFont` call with its arguments: the font the game asks for, the font info and character metrics returned, and each glyph image's buffer and 26.6 position, with the caller's return address |
 | `MHP3RD_TRACE_MPEG=1` | Every `sceMpeg` and `sceJpegCsc` call, and each call the ring buffer makes to the game's read callback |
 | `MHP3RD_SAS_NO_ENV=1` | Hold every SAS voice at full envelope, to separate an envelope bug from a decoding one |
 | `MHP3RD_TRACE_PAD=1` | Log the pad state whenever it changes (`[pad]`), and each chord pressed, waiting, tapped and let go, with when its last input went down (`[chord] <ms> pad pressed Pad LB + Pad West (last input down 0 ms before)`) |

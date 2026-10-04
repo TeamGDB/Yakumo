@@ -971,6 +971,40 @@ static void test_automatic_cfg_and_codegen() {
 #endif
 }
 
+static void test_automatic_profile_dispatch_target() {
+#ifdef PSPRECOMP_CODEGEN_PATH
+    const auto root = std::filesystem::temp_directory_path() / "psprecomp_profile_dispatch_test";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root);
+    const auto elf_path = root / "public.elf";
+    const auto generated = root / "generated";
+    auto bytes = make_branch_delay_test_elf();
+    put32(bytes, 0x80, 0x0E201005u); // jal 0x08804014, inside this unit
+    put32(bytes, 0x84, 0x24840001u); // addiu a0,a0,1 in the delay slot
+    {
+        std::ofstream out(elf_path, std::ios::binary);
+        out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    }
+    const auto command =
+        shell_quote(codegen_tool_path()) + " " + shell_quote(elf_path) + " --auto " + shell_quote(generated);
+    require(
+        std::system(shell_command(command + " --dispatch-target 0x08804014 --dispatch-target 08804014").c_str()) == 0,
+        "profile dispatch target generation accepts repeated aligned hex addresses");
+    std::ifstream input(generated / "generated_unit_0000.cpp");
+    const std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    const auto delay = text.find("ctx.gpr[4] + static_cast<std::uint32_t>(1)");
+    const auto hook = text.find("rt.invoke_native_fast_path(0x08804014u, ctx)");
+    require(delay < hook && hook != std::string::npos, "delay slot executes before profile leaf interception");
+    require(text.find("if (ctx.pc != 0x08804008u) return;") != std::string::npos &&
+            text.find("goto L_08804008;") != std::string::npos,
+        "profile leaf resumes the caller only at its original return PC");
+    for (const auto option : {" --dispatch-target", " --dispatch-target 08804015", " --dispatch-target 0x100000000",
+             " --dispatch-target 08804014garbage"})
+        require(std::system(shell_command(command + option).c_str()) != 0, "invalid profile target is rejected");
+    std::filesystem::remove_all(root);
+#endif
+}
+
 static void test_automatic_cross_unit_tail_chaining() {
 #ifndef PSPRECOMP_CODEGEN_PATH
     throw std::runtime_error("PSPRECOMP_CODEGEN_PATH was not provided by CMake");
@@ -1897,6 +1931,7 @@ int main() {
         test_codegen_vh2f_lowering();
         test_vfpu_branch_cfg_discovery();
         test_automatic_cfg_and_codegen();
+        test_automatic_profile_dispatch_target();
         test_automatic_cross_unit_tail_chaining();
         test_materialized_function_pointer_discovery();
 

@@ -74,6 +74,8 @@ void register_media(HleRegistrar &hle);
 void register_atrac(HleRegistrar &hle);
 void register_mpeg(HleRegistrar &hle);
 void register_font(HleRegistrar &hle);
+// Guest text classification: 0 is full-width, 1 Latin half-width, 2 half-width katakana.
+[[nodiscard]] std::uint32_t font_character_class(std::uint32_t code);
 void register_utility(HleRegistrar &hle, const std::filesystem::path &memory_stick);
 void register_savedata(HleRegistrar &hle, const std::filesystem::path &memory_stick);
 void register_adhoc(HleRegistrar &hle);

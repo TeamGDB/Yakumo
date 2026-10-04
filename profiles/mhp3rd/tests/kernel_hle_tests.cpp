@@ -1428,6 +1428,61 @@ static std::array<unsigned char, 640> contract_font() {
     u16(606, 20);
     return data;
 }
+void text_width_contracts() {
+    Fixture f;
+    constexpr unsigned leaf = 0x088E8B18u;
+    mhp3rd::HleRegistrar hle(f.runtime);
+    // An unrelated executable must keep its original classification leaf.
+    f.runtime.register_native_fast_path(leaf, [](auto &, auto &ctx) { ctx.set_gpr(2, 99); });
+    mhp3rd::register_font(hle);
+    f.ctx.pc = leaf;
+    f.runtime.invoke_native_fast_path(leaf, f.ctx);
+    check(f.ctx.gpr[2] == 99, "unknown executable refuses text layout hook");
+    auto &memory = f.runtime.memory();
+    memory.store32(leaf, 0x30A5FFFFu);
+    memory.store32(leaf + 4, 0x24A2FDB0u);
+    memory.store32(leaf + 20, 0x2C421DB0u);
+    memory.store32(leaf + 164, 0x24020001u);
+#ifdef _WIN32
+    _putenv_s("MHP3RD_ORIGINAL_TEXT_WIDTH", "1");
+#else
+    setenv("MHP3RD_ORIGINAL_TEXT_WIDTH", "1", 1);
+#endif
+    mhp3rd::register_font(hle);
+    f.ctx.pc = leaf;
+    f.runtime.invoke_native_fast_path(leaf, f.ctx);
+    check(f.ctx.gpr[2] == 99, "original text width switch leaves the native leaf untouched");
+#ifdef _WIN32
+    _putenv_s("MHP3RD_ORIGINAL_TEXT_WIDTH", "");
+#else
+    unsetenv("MHP3RD_ORIGINAL_TEXT_WIDTH");
+#endif
+    mhp3rd::register_font(hle);
+    // Original half-width Latin-1 includes every Spanish accent and inverted
+    // punctuation. Japanese and half-width katakana keep their former classes.
+    const unsigned half[] = {'A', 'z', '0', ' ', 0xA1, 0xBF, 0xC1, 0xD1, 0xDC, 0xE1, 0xE9, 0xED, 0xF1, 0xF3, 0xFA, 0xFC,
+        0x24F, 0x400, 0x401, 0x410, 0x430, 0x44F, 0x451, 0x52F, 0x20A0, 0x20CF, 0xFFF0, 0xFFFF};
+    const unsigned full[] = {0x250, 0x3FF, 0x530, 0x2000, 0x3000, 0x3042, 0x30A2, 0x4E00, 0xFF5F, 0x20D0, 0x209F};
+    for (const auto code : half) check(mhp3rd::font_character_class(code) == 1, "Latin/Cyrillic half-width cell");
+    for (const auto code : full) check(mhp3rd::font_character_class(code) == 0, "unchanged full-width cell");
+    for (unsigned code = 0xFF60; code <= 0xFFDF; ++code)
+        check(mhp3rd::font_character_class(code) == 2, "half-width katakana variant unchanged");
+    for (unsigned code = 0xFFE0; code <= 0xFFEF; ++code)
+        check(mhp3rd::font_character_class(code) == 0, "reserved class unchanged");
+    check(mhp3rd::font_character_class(0x100410) == 1, "guest classifier masks character to uint16");
+    for (const auto code : {0x410u, 0xE1u, 0x3042u, 0xFFE0u}) {
+        f.ctx.gpr.fill(0xA5A5A5A5u);
+        f.ctx.set_gpr(5, code);
+        f.ctx.set_gpr(31, Fixture::output);
+        f.ctx.pc = leaf;
+        f.runtime.invoke_native_fast_path(leaf, f.ctx);
+        check(f.ctx.gpr[2] == mhp3rd::font_character_class(code) && f.ctx.pc == Fixture::output,
+            "native text classifier returns correct class and caller PC");
+        check(f.ctx.gpr[5] == code && f.ctx.gpr[16] == 0xA5A5A5A5u && f.ctx.gpr[29] == 0xA5A5A5A5u,
+            "native classifier preserves arguments, saved registers and stack");
+    }
+}
+
 void font_contracts() {
     Fixture f;
     PublicFiles files;
@@ -1535,6 +1590,7 @@ int main() {
         system_contracts();
         scheduler_deadlock_contracts();
         utility_and_savedata_contracts();
+        text_width_contracts();
         font_contracts();
         hosting_contracts();
         std::cout << "kernel/HLE contracts passed\n";

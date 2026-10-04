@@ -29,7 +29,8 @@
 // - The top of the bitmap goes to 1 + ascender - bitmap top, the ascender being
 //   the font info's maximum glyph ascender.
 // - Text is laid out in whole cells: a half-width character advances by half
-//   the text size and a full-width one by the full size; the advances the font
+//   the text size and a full-width one by the full size. The profile extends
+//   this classification to Cyrillic; the advances the font
 //   reports are never read. Each character is drawn as a sprite showing its
 //   whole cell (one of the game's text paths leaves out the last column and
 //   row), squeezed into the character's advance.
