@@ -19,6 +19,8 @@
 #include "ui/texture_pack_screen.hpp"
 #include "ui/controllers_screen.hpp"
 #include "ui/save_screen.hpp"
+#include "ui/translation_screen.hpp"
+#include "text/translation.hpp"
 #include "save_data/savedata_store.hpp"
 #include "save_data/save_transfer.hpp"
 #include "input/gamepad_devices.hpp"
@@ -1377,6 +1379,86 @@ template <class Fn> auto with_escape(gpu::VulkanRenderer &renderer, Fn work) {
         SDL_PushEvent(&event);
     });
     return work();
+}
+
+void translation_screen_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::path &sandbox) {
+    const auto folder = install::user_data_directory() / "translations";
+    text::set_language("original", {folder});
+    ui::refresh_text_languages();
+    expect(ui::text_languages().codes == std::vector<std::string>{"original"}, "translation list starts with original");
+    auto &layer = ui::Layer::get();
+    layer.set_interactive(true);
+    const auto frame = [&](const char *focus = nullptr, bool back = false) {
+        layer.begin_frame();
+        ui::begin_panel("##translation-contract", "Synthetic translations", "", false);
+        ui::begin_content();
+        if (focus) {
+            auto *window = ImGui::GetCurrentWindow();
+            ImGui::FocusWindow(window);
+            ImGui::SetFocusID(window->GetID(focus), window);
+            ImGui::SetNavCursorVisible(true);
+        }
+        if (ui::translation_screen_open())
+            ui::translation_screen(back);
+        else
+            ui::translation_rows();
+        ui::begin_footer();
+        ui::hints({{ui::Control::Confirm, "Choose"}, {ui::Control::Back, "Back"}});
+        ui::end_panel();
+        layer.end_frame();
+        renderer.present_ui(false);
+    };
+    const auto activate = [&](const char *label) {
+        frame(label);
+        frame(label);
+        ImGui::GetIO().AddKeyEvent(ImGuiKey_Space, true);
+        frame(label);
+        ImGui::GetIO().AddKeyEvent(ImGuiKey_Space, false);
+        frame();
+    };
+    const auto drop = [&](const std::filesystem::path &path) {
+        const auto chosen = path.string();
+        SDL_Event event{};
+        event.type = SDL_EVENT_DROP_FILE;
+        event.drop.windowID = SDL_GetWindowID(renderer.window());
+        event.drop.data = chosen.c_str();
+        expect(SDL_PushEvent(&event), "synthetic translation drop queues");
+        renderer.pump_events();
+        frame();
+        frame();
+    };
+    frame();
+    activate("Import translation…");
+    expect(ui::translation_screen_open(), "translation import opens browser");
+    for (unsigned i = 0; i < 32 && ui::translation_screen_open(); ++i) frame(nullptr, true);
+    expect(!ui::translation_screen_open(), "back at the root cancels the browser");
+    const auto source = sandbox / "synthetic.lang";
+    {
+        std::ofstream out(source);
+        out << "language = ui-test\nname = Synthetic UI\n2:1 = Text\n";
+    }
+    activate("Import translation…");
+    drop(source);
+    expect(std::filesystem::is_regular_file(folder / "ui-test.lang"), "UI imports the validated synthetic file");
+    const auto &languages = ui::text_languages();
+    expect(std::find(languages.codes.begin(), languages.codes.end(), "ui-test") != languages.codes.end(),
+        "successful import refreshes the cached language list");
+    activate("Done");
+    expect(!ui::translation_screen_open(), "Done closes the result");
+    const auto invalid = sandbox / "invalid.lang";
+    {
+        std::ofstream out(invalid);
+        out << "not a translation";
+    }
+    activate("Import translation…");
+    drop(invalid);
+    expect(ui::translation_screen_open() && !std::filesystem::exists(folder / "invalid.lang"),
+        "invalid UI imports show a result without creating a translation");
+    frame(nullptr, true);
+    expect(!ui::translation_screen_open(), "Back closes the failure result");
+    text::set_language("original", {});
+    ui::refresh_text_languages();
+    layer.set_interactive(false);
 }
 
 void save_screen_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::path &sandbox) {
@@ -4267,6 +4349,7 @@ int run_contracts(int scripts) {
     menu_contracts(renderer);
     setup_screen_contracts(renderer, sandbox);
     texture_pack_screen_contracts(renderer, sandbox);
+    translation_screen_contracts(renderer, sandbox);
     save_screen_contracts(renderer, sandbox);
     mods_screen_contracts(renderer, sandbox, fixture.runtime);
     bindings_editor_contracts(renderer);
