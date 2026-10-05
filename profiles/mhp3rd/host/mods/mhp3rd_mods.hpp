@@ -46,8 +46,9 @@ struct DiscRange {
 // Reads DATA.BIN as the game sees it, at an offset into the archive.
 std::size_t read_data_bin(std::uint64_t offset, std::span<std::uint8_t> out);
 
-// The archive entry that holds byte `offset` of DATA.BIN, and how far into it
-// that is, or nothing when the offset is inside the directory. The text
+// The active archive entry that holds byte `offset` of DATA.BIN, and how far
+// into it that is. Directory bytes, padding and out-of-range offsets return
+// nothing. Pending layout changes do not apply until activation. The text
 // translation uses it to know which block a read brought in.
 struct EntryAt {
     std::uint32_t entry{};
