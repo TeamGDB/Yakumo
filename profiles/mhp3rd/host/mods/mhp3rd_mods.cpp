@@ -276,6 +276,19 @@ std::optional<EntryAt> entry_at_offset(std::uint64_t offset) {
     return EntryAt{entry, offset - start, size};
 }
 
+std::optional<ArchiveEntry> read_archive_entry(std::uint32_t entry, std::size_t max_bytes) {
+    State &s = state();
+    if (!s.directory || !s.view) return std::nullopt;
+    const Directory &d = s.layout ? s.layout->directory : *s.directory;
+    if (entry >= d.entries()) return std::nullopt;
+    const auto size = d.size(entry);
+    if (size == 0u || size > max_bytes) return std::nullopt;
+    ArchiveEntry result{static_cast<std::uint64_t>(d.blocks[entry]) * p3rd::kBlock,
+        std::vector<std::uint8_t>(static_cast<std::size_t>(size))};
+    if (s.view->read(result.offset, result.bytes) != size) return std::nullopt;
+    return result;
+}
+
 std::size_t read_data_bin(std::uint64_t offset, std::span<std::uint8_t> out) {
     State &s = state();
     if (!s.serving || !s.view) return raw_read(offset, out);

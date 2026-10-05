@@ -51,11 +51,14 @@ struct QuestField {
     std::uint32_t ref{};    // position of the offset word in the file
     std::uint32_t offset{}; // the string's offset in the file
     std::string text;       // the game's own string
+    std::uint32_t record{};
+    std::uint16_t quest_id{};
 };
 
 struct Pending {
     bool read{}; // the game has read this entry (whole)
     bool applied{};
+    std::optional<std::uint32_t> load_hint;
     std::string probe;          // the first non-empty string of the block, to find it in RAM
     std::uint32_t probe_into{}; // where the probe string sits inside the entry
     std::uint32_t size{};       // the entry's byte size, to sanity-check a found base
@@ -77,9 +80,11 @@ struct Pending {
     // slice, so the same strings are not copied twice.
     std::uint32_t arena_offset{};
     std::uint32_t arena_bytes{};
-    // The quest's records (title, objective, result, description, monsters,
-    // client), parsed from the file, to find and patch the game's own quest
-    // structure, which holds the strings inline (not by offset).
+    std::uint32_t active_arena_offset{};
+    std::uint32_t active_arena_bytes{};
+    std::map<const std::string *, std::uint32_t> active_strings;
+    // Catalog fields validate the active quest's relocated offset table and
+    // remain probes for legacy inline-copy discovery.
     std::vector<std::vector<QuestField>> records;
     std::uint32_t struct_checks{};         // remaining searches for that structure
     std::uint64_t struct_next{};           // frame of the next search
@@ -88,6 +93,7 @@ struct Pending {
 
 struct State {
     bool loaded{};
+    bool quests_prepared{};
     std::string code{"original"};
     std::string name{"Original"};
     std::map<std::uint32_t, Translations> blocks; // entry -> its translations
@@ -286,6 +292,17 @@ std::uint32_t apply_quest_struct(psprecomp::GuestMemory &memory, const std::vect
     for (std::uint32_t r = 0u; r < records.size(); ++r)
         if (!records[r].empty() && !records[r][0].text.empty())
             by_first[static_cast<std::uint8_t>(records[r][0].text[0])].push_back(r);
+    // The validated active container has its own pointer-table path. Do not
+    // subsequently overwrite the inline originals used to validate that path.
+    std::uint32_t active_title = 0u;
+    if (std::getenv("MHP3RD_TEXT_NO_QUEST_DIRECT") == nullptr && memory.contains(kActiveQuestBlock, 65536u)) {
+        const auto record = memory.load32(kActiveQuestBlock);
+        if (record >= 4u && record <= 65536u - 72u) {
+            const auto id = memory.load16(kActiveQuestBlock + record + 28u);
+            if ((id >= 101u && id <= 699u) || (id >= 10101u && id <= 10899u))
+                active_title = kActiveQuestBlock + record + 72u;
+        }
+    }
     // The quest file itself (and the buffer the game read it into) holds the
     // same strings in the same order; only the game's own structure is patched.
     const auto in_copy = [&](std::uint32_t at) {
@@ -298,7 +315,7 @@ std::uint32_t apply_quest_struct(psprecomp::GuestMemory &memory, const std::vect
     for (std::uint32_t at = range.begin; at < range.end; ++at) {
         const std::uint32_t here = at - kRamBegin;
         for (const std::uint32_t r : by_first[ram[here]]) {
-            if (in_copy(at)) continue;
+            if (in_copy(at) || at == active_title) continue;
             const std::vector<QuestField> &fields = records[r];
             const std::string &title = fields[0].text;
             if (title.size() > end - at) continue;
@@ -345,6 +362,87 @@ std::uint32_t apply_quest_struct(psprecomp::GuestMemory &memory, const std::vect
     return written;
 }
 
+// Resolve the active quest through the container header, then require its
+// identity, original strings and table sentinel to match a catalog record.
+// Unlike overwriting inline slots, repointing these words also permits long
+// translations and leaves the original bytes available for reload validation.
+void apply_active_quest(psprecomp::GuestMemory &memory, State &s) {
+    constexpr std::uint32_t limit = 64u * 1024u;
+    const auto root = kActiveQuestBlock;
+    if (!s.arena || !memory.contains(root, limit)) return;
+    const auto record_at = memory.load32(root);
+    if (record_at < 4u || record_at > limit - 72u) return;
+    const auto id = memory.load16(root + record_at + 28u);
+    if (!((id >= 101u && id <= 699u) || (id >= 10101u && id <= 10899u))) return;
+    const auto matches = [&](std::uint32_t at, const std::string &text) {
+        if (!memory.contains(at, text.size() + 1u)) return false;
+        for (std::size_t n = 0; n < text.size(); ++n)
+            if (memory.load8(at + n) != static_cast<std::uint8_t>(text[n])) return false;
+        return memory.load8(at + text.size()) == 0u;
+    };
+    for (auto &[entry, pending] : s.pending) {
+        if (!is_quest(entry)) continue;
+        const auto translations = s.blocks.find(entry);
+        if (translations == s.blocks.end()) continue;
+        for (const auto &record : pending.records) {
+            if (record.empty() || record.front().quest_id != id) continue;
+            const auto source_record = record.front().record;
+            const auto relocated = [&](std::uint32_t offset) -> std::optional<std::uint32_t> {
+                if (offset < source_record || offset - source_record >= limit - record_at) return std::nullopt;
+                return record_at + offset - source_record;
+            };
+            const auto first_ref = relocated(record.front().ref);
+            if (!first_ref || *first_ref > limit - (record.size() + 1u) * 4u ||
+                memory.load32(root + *first_ref + record.size() * 4u) != *first_ref)
+                continue;
+            bool valid = true;
+            for (const auto &field : record) {
+                const auto ref = relocated(field.ref), offset = relocated(field.offset);
+                if (!ref || !offset || *ref > limit - 4u || field.text.size() >= limit - *offset ||
+                    !matches(root + *offset, field.text)) {
+                    valid = false;
+                    break;
+                }
+                const auto word = memory.load32(root + *ref);
+                const auto translated = translations->second.find(static_cast<std::uint16_t>(field.ref), field.offset);
+                const std::uint32_t address = root + word;
+                const bool in_slice = pending.active_arena_bytes != 0u &&
+                    address >= s.arena->begin + pending.active_arena_offset &&
+                    address < s.arena->begin + pending.active_arena_offset + pending.active_arena_bytes;
+                if (word != *offset && !(translated && in_slice && matches(address, *translated))) {
+                    valid = false;
+                    break;
+                }
+            }
+            if (!valid) continue;
+            if (pending.active_arena_bytes == 0u) {
+                const auto need = translations->second.arena_bytes();
+                if (need == 0u || need > s.arena->end - s.arena->begin - s.arena_used) return;
+                pending.active_arena_offset = static_cast<std::uint32_t>(s.arena_used);
+                pending.active_arena_bytes = static_cast<std::uint32_t>(need);
+                s.arena_used += need;
+            }
+            const Arena slice{s.arena->begin + pending.active_arena_offset,
+                s.arena->begin + pending.active_arena_offset + pending.active_arena_bytes};
+            if (pending.active_strings.empty()) {
+                std::size_t used = 0u;
+                for (const auto &[key, text] : translations->second.entries())
+                    if (!store_translation(memory, text, slice, used, pending.active_strings)) return;
+                for (const auto &[pattern, text] : translations->second.patterns())
+                    if (!store_translation(memory, text, slice, used, pending.active_strings)) return;
+            }
+            for (const auto &field : record) {
+                const auto text = translations->second.find(static_cast<std::uint16_t>(field.ref), field.offset);
+                if (text == nullptr) continue;
+                const auto into = pending.active_strings.find(text);
+                if (into != pending.active_strings.end())
+                    memory.store32(root + *relocated(field.ref), into->second - root);
+            }
+            return;
+        }
+    }
+}
+
 } // namespace
 
 void set_language(const std::string &code, const std::vector<std::filesystem::path> &directories) {
@@ -359,6 +457,7 @@ void set_language(const std::string &code, const std::vector<std::filesystem::pa
     s.applied.clear();
     s.arena_used = 0u;
     s.warned_arena = false;
+    s.quests_prepared = false;
     if (is_original(s.code)) return;
 
     for (const std::filesystem::path &directory : directories) {
@@ -417,6 +516,7 @@ void forget_blocks() {
     s.arena.reset();
     s.arena_used = 0u;
     s.warned_arena = false;
+    s.quests_prepared = false;
 }
 
 std::vector<Language> languages() {
@@ -434,6 +534,24 @@ std::vector<Language> languages() {
 
 const std::vector<std::filesystem::path> &search_directories() noexcept {
     return state().directories;
+}
+
+void note_loader_completion(const psprecomp::GuestMemory &memory, std::uint32_t caller, std::uint32_t request) {
+    if (std::getenv("MHP3RD_TEXT_NO_QUEST_DIRECT") != nullptr || caller != 0x08865840u ||
+        !memory.contains(request, 24u))
+        return;
+    const auto entry = memory.load16(request + 2u);
+    auto &s = state();
+    const auto found = s.pending.find(entry);
+    if (!is_quest(entry) || found == s.pending.end() || !found->second.read) return;
+    auto &pending = found->second;
+    const auto destination = memory.load32(request + 4u);
+    const auto size = memory.load32(request + 8u), into = memory.load32(request + 12u);
+    if (into >= pending.size || size != pending.size - into || pending.partial.prefix().size() != pending.size ||
+        destination < kRamBegin || destination >= kRamEnd || pending.size > kRamEnd - destination ||
+        (destination & 3u) != 0u || !memory.contains(destination, pending.size))
+        return;
+    pending.load_hint = destination;
 }
 
 void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
@@ -459,6 +577,7 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
     // is translated again, because the game reloads a block it already had
     // (leaving a quest reloads the menus), which puts its own offsets back.
     if (at->into == 0u) {
+        pending.load_hint.reset();
         pending.read = false;
         pending.applied = false;
         pending.missed = 0u;
@@ -568,7 +687,8 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
                 std::string text;
                 for (std::uint32_t c = string; c < clear.size() && clear[c] != 0u && text.size() < 256u; ++c)
                     text.push_back(static_cast<char>(clear[c]));
-                fields.push_back(QuestField{best_pos + n * 4u, string, std::move(text)});
+                fields.push_back(QuestField{best_pos + n * 4u, string, std::move(text), start,
+                    static_cast<std::uint16_t>(read32(start + 28u))});
             }
             if (!fields.empty()) pending.records.push_back(std::move(fields));
         }
@@ -615,6 +735,19 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
     if (std::getenv("MHP3RD_TEXT_SEARCH_UNLIMITED") != nullptr)
         s.search_work.budget = std::numeric_limits<std::uint32_t>::max();
     if (!s.loaded || s.blocks.empty()) return;
+    const bool direct_quest = std::getenv("MHP3RD_TEXT_NO_QUEST_DIRECT") == nullptr;
+    if (direct_quest && !s.quests_prepared) {
+        s.quests_prepared = true;
+        for (const auto entry : kQuests) {
+            if (!s.blocks.contains(entry) || s.pending.contains(entry)) continue;
+            if (auto source = mods::read_archive_entry(entry, ReadBuffer::kMaxBytes)) {
+                translate_read(source->offset, source->bytes);
+                // Metadata inspection is not a guest load. Only actual reads
+                // should start background discovery of catalog copies.
+                s.pending[entry].read = false;
+            }
+        }
+    }
     ++s.frames;
 
     // The main block sits at its fixed address as soon as the game has loaded
@@ -627,12 +760,15 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
 
     bool any = false;
     for (const auto &[entry, pending] : s.pending)
-        if (pending.read && (!pending.applied || (is_quest(entry) && pending.struct_checks > 0u))) any = true;
+        if ((direct_quest && is_quest(entry) && !pending.records.empty()) ||
+            (pending.read && (!pending.applied || (is_quest(entry) && pending.struct_checks > 0u))))
+            any = true;
     if (!any) return;
 
     if (!s.arena) {
         std::size_t bytes = 64u;
-        for (const auto &[entry, translations] : s.blocks) bytes += translations.arena_bytes();
+        for (const auto &[entry, translations] : s.blocks)
+            bytes += translations.arena_bytes() * (direct_quest && is_quest(entry) ? 2u : 1u);
         const std::optional<Arena> arena = allocate(bytes);
         if (!arena || !arena->valid() || bytes > arena->end - arena->begin ||
             !memory.contains(arena->begin, arena->end - arena->begin)) {
@@ -644,6 +780,8 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
         }
         s.arena = arena;
     }
+
+    if (direct_quest) apply_active_quest(memory, s);
 
     const auto end = ram_end(memory);
     static const bool trace = std::getenv("MHP3RD_TRACE_TEXT") != nullptr;
@@ -690,7 +828,15 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
 
         std::uint32_t address = 0u;
         std::vector<std::uint32_t> quest_copies;
-        const auto range = entry == kMainEntry ? SearchRange{} : next_range(pending.search_cursor, end, s.search_work);
+        SearchRange range;
+        if (pending.load_hint && s.search_work.budget - s.search_work.bytes >= 4u) {
+            const auto probe = *pending.load_hint + pending.probe_into;
+            range = SearchRange{probe, probe + 4u, false};
+            pending.load_hint.reset();
+            s.search_work.bytes += 4u;
+        } else if (entry != kMainEntry) {
+            range = next_range(pending.search_cursor, end, s.search_work);
+        }
         if (entry == kMainEntry)
             address = kMainTextBlock;
         else if (is_dialogue(entry))

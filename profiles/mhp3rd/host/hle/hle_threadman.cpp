@@ -1,6 +1,7 @@
 // ThreadManForUser and Kernel_Library: threads, time, semaphores, event flags,
 // mutexes, callbacks, VTimers and interrupt masking.
 #include "hle_common.hpp"
+#include "text/translation.hpp"
 
 #include "psprecomp/common.hpp"
 
@@ -168,7 +169,7 @@ void register_semaphores(HleRegistrar &hle) {
         kernel().semaphores.erase(found);
         kernel().finish(ctx, 0u);
     });
-    hle.add("ThreadManForUser", "sceKernelSignalSema", [](Runtime &, AllegrexContext &ctx) {
+    hle.add("ThreadManForUser", "sceKernelSignalSema", [](Runtime &rt, AllegrexContext &ctx) {
         const SceUID uid = as_signed(arg(ctx, 0));
         auto found = kernel().semaphores.find(uid);
         if (found == kernel().semaphores.end()) {
@@ -181,6 +182,7 @@ void register_semaphores(HleRegistrar &hle) {
             kernel().finish(ctx, error::kSemaOverflow);
             return;
         }
+        text::note_loader_completion(rt.memory(), ctx.gpr[31], ctx.gpr[18]);
         found->second.count += signal;
         kernel().release_semaphore_waiters(uid);
         kernel().finish(ctx, 0u);

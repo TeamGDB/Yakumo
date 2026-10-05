@@ -97,14 +97,30 @@ offset it holds, e.g. `[4059]` with `1624:1192 = Derrota Jaggi` (the title
 "Jaggi Takedown", whose offset word is at 1624 and points at 1192). The run-time
 patch finds the file in RAM by its first title and rewrites each word to point
 into the arena, so a quest translation may be any length, unlike a fixed field.
-The file is read again every time its screen opens (the quest list, and again
-during the quest), so the patch re-applies the translation to each new buffer,
-and to every copy of the file it finds in RAM, all sharing one arena slice. The
-game also keeps its own quest structure, with the six strings inline and no
-offsets to rewrite; the patch finds it by those strings and overwrites each
-field in place when the translation fits the game's own slot (the distance to
-the next field, the gaps the file itself lays the strings out with). The
-in-quest **Detalhes Missão** screen reads that structure. `tools/extract_text.py` reads these too (`quest_block`).
+Reloaded catalogs are translated again. The loader completion signal supplies a
+validated destination hint for complete quest catalog reads; bounded RAM search
+remains a fallback for other copies.
+
+The active quest uses a separate container and can load without reading a quest
+catalog first. It also has an offset table; its text is not limited to inline
+slots. Yakumo prepares the selected language's catalog metadata from the active
+archive, matches the active quest's ID and original fields, and repoints its
+validated field words into a separate arena slice. Unknown layouts or mismatched
+strings remain untouched. Existing `ref:offset` language keys stay unchanged.
+Long translations can still exceed the game's visual layout; pointer storage
+removes the source-buffer limit, not the screen's width limit.
+
+For NPJB-40001, the active container starts at `0x08A3A630`; its first word is the
+record offset, and the record holds the quest ID at `+0x1C` and text from `+0x48`.
+The executable's accessor at `0x088BE458` resolves the record through that first
+word. A bounded macOS experiment confirmed that changing one field offset
+changes the text shown by the active-quest details screen. The implementation
+validates offsets, original strings, record identity and the table sentinel
+before changing any field. It currently handles ordinary village and Hall IDs;
+DLC support and language files supplied by mods are deferred.
+
+`MHP3RD_TEXT_NO_QUEST_DIRECT=1` restores the previous quest discovery/application
+path for comparisons. Restart after changing the language or source files.
 
 ## How it works
 
@@ -131,14 +147,15 @@ When a language is chosen, the text is applied between two frames
 
 The archive is obfuscated per 2 KiB block, so a block read in pieces is
 decrypted whole before anything is read from it; a partial read is collected
-until enough has been seen. Nothing reads the disc image, and nothing is written
-before the game loads its text. `host/text/` holds the file format
+until enough has been seen. Quest metadata preparation reads bounded entries
+through the active archive view without marking them as guest loads. No game
+files are modified, and guest writes wait for a validated loaded structure. `host/text/` holds the file format
 (`language.{hpp,cpp}`) and the apply logic (`translation.{hpp,cpp}`); both are
 unit-tested in `tests/text_tests.cpp` on a buffer, with no game data.
 
 ### Runtime search budget
 
-Loaded blocks and inline quest structures are discovered incrementally. All
+Fallback discovery of loaded blocks and inline quest structures is incremental. All
 pending searches share at most 256 KiB of candidate addresses per game frame;
 the first entry rotates so an absent probe cannot starve another block. A
 candidate is checked against the complete memory range, so its strings can
@@ -146,7 +163,8 @@ cross a search slice boundary. Quest-file copies are patched as they are found,
 and later sweeps retain discovery of inline structures created behind a cursor.
 A reread restarts the cursors while reusing the same translation arena.
 
-A full 32 MiB sweep takes 128 search slices, spread over frames (longer when
+Known quest catalog destinations and the validated active quest avoid that sweep.
+A full fallback 32 MiB sweep takes 128 search slices, spread over frames (longer when
 several blocks share the budget). Until discovery, the original text can remain
 visible. This bounds search work, not translation application or a wall-clock
 frame deadline. `MHP3RD_TRACE_TEXT=1` reports each search's reserved candidate

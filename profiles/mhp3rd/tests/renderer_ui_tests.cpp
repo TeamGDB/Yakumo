@@ -1944,6 +1944,11 @@ void mods_screen_contracts(
             "archive lookup agrees with the active entry boundaries and exact sizes");
     };
     check_entry(2 * block + 7, 1, 7, 8);
+    expect(!mods::read_archive_entry(2, block) && !mods::read_archive_entry(1, 7),
+        "archive inspection rejects unknown entries and oversized allocations");
+    const auto original_entry = mods::read_archive_entry(1, 8);
+    expect(original_entry && original_entry->offset == 2 * block && original_entry->bytes.size() == 8,
+        "archive inspection reads the complete original entry within its bound");
     expect(!mods::entry_at_offset(0) && !mods::entry_at_offset(2 * block + 8),
         "archive lookup rejects directory bytes and exact-size padding");
     {
@@ -1959,6 +1964,14 @@ void mods_screen_contracts(
     expect(session && mods::serving(), "restart activates grown archive layout");
     check_entry(2 * block + 16, 0, block + 16, block + 17);
     check_entry(3 * block, 1, 0, 8);
+    if (auto inspected = mods::read_archive_entry(1, 8)) {
+        expect(inspected->offset == 3 * block, "archive inspection uses the active virtual layout");
+        mods::p3rd::decrypt(inspected->bytes, 3, 0);
+        expect(std::string(inspected->bytes.begin(), inspected->bytes.end()) == "SECOND!!",
+            "archive inspection preserves moved entry data");
+    } else {
+        expect(false, "archive inspection can read a moved entry");
+    }
     expect(!mods::entry_at_offset(2 * block + 17) && !mods::entry_at_offset(4 * block),
         "grown archive lookup rejects padding and archive end");
     std::array<std::uint8_t, 8> moved{};
