@@ -55,6 +55,20 @@ struct QuestField {
     std::uint16_t quest_id{};
 };
 
+std::optional<std::string> quest_source_text(
+    std::span<const std::uint8_t> bytes, std::uint32_t offset, std::uint32_t end) {
+    if (offset >= end || end > bytes.size()) return std::nullopt;
+    std::string text;
+    for (auto at = offset; at < end && text.size() < 4096u; ++at) {
+        const auto byte = bytes[at];
+        if (byte == 0u) return valid_utf8(text) ? std::optional<std::string>{text} : std::nullopt;
+        if (byte < 32u && byte != '\n' && byte != '\r' && byte != '\t') return std::nullopt;
+        if (byte == 127u) return std::nullopt;
+        text.push_back(static_cast<char>(byte));
+    }
+    return std::nullopt;
+}
+
 struct Pending {
     bool read{}; // the game has read this entry (whole)
     bool applied{};
@@ -86,6 +100,8 @@ struct Pending {
     // Catalog fields validate the active quest's relocated offset table and
     // remain probes for legacy inline-copy discovery.
     std::vector<std::vector<QuestField>> records;
+    // Resolve wildcard keys against this source image's validated offsets.
+    Translations quest_translations;
     std::uint32_t struct_checks{};         // remaining searches for that structure
     std::uint64_t struct_next{};           // frame of the next search
     std::vector<std::uint32_t> copy_bases; // the file copies to leave alone
@@ -602,6 +618,7 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
     if (prefix.empty()) return;
     pending.probe.clear();
     pending.records.clear();
+    pending.quest_translations = {};
     pending.applied = false;
     std::vector<std::uint8_t> clear(prefix.begin(), prefix.end());
     const std::uint32_t entry_start_block = static_cast<std::uint32_t>((offset - at->into) / mods::p3rd::kBlock);
@@ -665,17 +682,19 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
                 std::uint32_t len = 0u;
                 for (std::uint32_t p = at; p + 4u <= end && len < 8u;) {
                     const std::uint32_t value = read32(p);
-                    if (value == 0u || value >= clear.size() || clear[value] < 32u || clear[value] >= 127u) break;
+                    if (value == 0u || (len == 0u && value != anchor)) break;
                     if (len != 0u && value <= run[len - 1u]) break;
                     // The record's string table ends with a sentinel that holds
                     // the table's own position; it is not a string, and its low
                     // byte often reads as printable, so it was mistaken for a
                     // seventh field (the high-rank quests' crash). Stop before it.
                     if (len != 0u && value == at) break;
+                    const auto text = quest_source_text(clear, value, end);
+                    if (!text || (len == 0u && text->empty())) break;
                     run[len++] = value;
                     p += 4u;
                 }
-                if (len >= 3u && run[0] == anchor && len > best_len) {
+                if (len >= 3u && run[0] == anchor && len > best_len && read32(at + len * 4u) == at) {
                     best_len = len;
                     best_pos = at;
                 }
@@ -684,11 +703,12 @@ void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes) {
             std::vector<QuestField> fields;
             for (std::uint32_t n = 0u; n < best_len; ++n) {
                 const std::uint32_t string = read32(best_pos + n * 4u);
-                std::string text;
-                for (std::uint32_t c = string; c < clear.size() && clear[c] != 0u && text.size() < 256u; ++c)
-                    text.push_back(static_cast<char>(clear[c]));
-                fields.push_back(QuestField{best_pos + n * 4u, string, std::move(text), start,
-                    static_cast<std::uint16_t>(read32(start + 28u))});
+                auto text = quest_source_text(clear, string, end);
+                const auto ref = best_pos + n * 4u;
+                if (const auto translated = found->second.find(static_cast<std::uint16_t>(ref), string))
+                    pending.quest_translations.add(static_cast<std::uint16_t>(ref), string, *translated);
+                fields.push_back(
+                    QuestField{ref, string, std::move(*text), start, static_cast<std::uint16_t>(read32(start + 28u))});
             }
             if (!fields.empty()) pending.records.push_back(std::move(fields));
         }
@@ -767,8 +787,12 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
 
     if (!s.arena) {
         std::size_t bytes = 64u;
-        for (const auto &[entry, translations] : s.blocks)
-            bytes += translations.arena_bytes() * (direct_quest && is_quest(entry) ? 2u : 1u);
+        for (const auto &[entry, translations] : s.blocks) {
+            const auto pending = s.pending.find(entry);
+            const auto resolved = pending != s.pending.end() ? pending->second.quest_translations.arena_bytes() : 0u;
+            bytes += std::max(translations.arena_bytes(), resolved);
+            if (direct_quest && is_quest(entry)) bytes += translations.arena_bytes();
+        }
         const std::optional<Arena> arena = allocate(bytes);
         if (!arena || !arena->valid() || bytes > arena->end - arena->begin ||
             !memory.contains(arena->begin, arena->end - arena->begin)) {
@@ -899,7 +923,7 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
         // slice so the strings are not copied twice.
         if (is_quest(entry)) {
             if (pending.arena_bytes == 0u) {
-                const std::size_t need = translations->second.arena_bytes();
+                const std::size_t need = pending.quest_translations.arena_bytes();
                 if (need == 0u || s.arena_used + need > s.arena->end - s.arena->begin) continue;
                 pending.arena_offset = static_cast<std::uint32_t>(s.arena_used);
                 pending.arena_bytes = static_cast<std::uint32_t>(need);
@@ -917,7 +941,7 @@ void frame(psprecomp::GuestMemory &memory, const ArenaAllocator &allocate) {
                 for (const QuestField &field : record) field_refs.push_back(field.ref);
             for (const std::uint32_t copy : quest_copies) {
                 std::size_t used = 0u;
-                applied += apply_quest(memory, copy, translations->second, slice, used, field_refs);
+                applied += apply_quest(memory, copy, pending.quest_translations, slice, used, field_refs);
             }
             pending.applied = range.complete;
             if (applied > 0u || trace) {

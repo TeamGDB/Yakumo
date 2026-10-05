@@ -122,6 +122,22 @@ def find_block(data):
     return (0, tables)
 
 
+def quest_source_text(data, offset, end):
+    """A complete, bounded UTF-8 field inside one quest record."""
+    if not 0 <= offset < end <= len(data):
+        return None
+    terminator = data.find(b"\0", offset, min(end, offset + 4096))
+    if terminator < 0:
+        return None
+    raw = data[offset:terminator]
+    if any((byte < 32 and byte not in (9, 10, 13)) or byte == 127 for byte in raw):
+        return None
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
 def quest_block(data):
     """The strings of a quest file (entries 4059-4073 and friends), as
     [(ref_offset, string_offset, text)], or None.
@@ -165,7 +181,7 @@ def quest_block(data):
             at = position
             while at + 4 <= end and len(run) < 8:
                 value = u32(data, at)
-                if value == 0 or value >= len(data) or not 32 <= data[value] < 127:
+                if value == 0 or (not run and value != anchor):
                     break
                 if run and value <= run[-1]:
                     break
@@ -174,16 +190,20 @@ def quest_block(data):
                 # printable, so stop before it instead of taking a seventh field.
                 if run and value == position:
                     break
+                text = quest_source_text(data, value, end)
+                if text is None or (not run and not text):
+                    break
                 run.append(value)
                 at += 4
-            if run and run[0] == anchor and (best is None or len(run) > len(best[1])):
+            if (run and run[0] == anchor and at + 4 <= end and u32(data, at) == position
+                    and (best is None or len(run) > len(best[1]))):
                 best = (position, run)
             position += 4
         if best is None or len(best[1]) < 3:
             continue
         position, run = best
         for n, string_offset in enumerate(run):
-            text = read_cstr(data, string_offset)
+            text = quest_source_text(data, string_offset, end)
             if text:
                 fields.append((position + n * 4, string_offset, text))
     # A single custom quest must expose all six fields. Keep the stronger

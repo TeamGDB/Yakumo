@@ -248,7 +248,6 @@ std::map<std::uint32_t, Translations> Translations::parse_blocks(
     return blocks;
 }
 
-namespace {
 bool valid_utf8(const std::string &text) {
     for (std::size_t i = 0; i < text.size();) {
         const auto first = static_cast<unsigned char>(text[i++]);
@@ -280,6 +279,7 @@ bool valid_utf8(const std::string &text) {
     }
     return true;
 }
+namespace {
 bool valid_code(const std::string &code) {
     if (code.empty() || code.size() > 64) return false;
     return std::all_of(code.begin(), code.end(), [](char c) {

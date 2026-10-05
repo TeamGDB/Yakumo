@@ -13,11 +13,12 @@ The translation files are plain UTF-8 text and contain no game data.
 
 | Where | What |
 | --- | --- |
-| Menu (**System → Text → Game text language**) | Cycles through English and every translation file found. Applies at the next start, like a mod's choice |
+| Menu (**System → Text → Game text language**) | Cycles through Original and every translation file found. Applies at the next start, like a mod's choice |
 | `settings.ini`, key `text.language` | The same choice, by hand |
 | `MHP3RD_LANGUAGE`, for one run | Overrides the file for the run, not written back |
 
-`en` (the default) loads nothing and keeps the disc's own text.
+`original` keeps the disc's own text. An `en.lang` file can supply English on
+an unpatched Japanese image; without that file, `en` also keeps the source text.
 
 ## Where the files are looked for
 
@@ -109,6 +110,20 @@ validated field words into a separate arena slice. Unknown layouts or mismatched
 strings remain untouched. Existing `ref:offset` language keys stay unchanged.
 Long translations can still exceed the game's visual layout; pointer storage
 removes the source-buffer limit, not the screen's width limit.
+
+Quest source fields accept complete UTF-8, including Japanese and empty optional
+fields. Invalid encoding, disallowed controls, missing terminators, strings
+outside their record and tables without their own sentinel are rejected.
+
+An English patch can preserve the quest table's position while moving the text
+within its reserved slots. Exact `ref:offset` keys are specific to that layout.
+For a verified shared reference position, use the existing wildcard syntax,
+for example `[4064]` with `644:* = Translated title`. The runtime resolves it
+against the selected image's validated fields before applying a catalog or an
+active quest. Exact keys take precedence. Wildcards do not include sentinels or
+unrecognized fields and do not bypass source-string or pointer validation.
+Compare quest IDs and field positions in both images before creating these
+aliases; do not assume a different mod or patch preserves the same layout.
 
 For NPJB-40001, the active container starts at `0x08A3A630`; its first word is the
 record offset, and the record holds the quest ID at `+0x1C` and text from `+0x48`.
@@ -212,6 +227,9 @@ and holds each translation to the field's own box.
 - **Only blocks the file names.** The eight text blocks, the dialogue block and
   the twelve quest files are the game's text; the thousands of other archive
   entries are models, textures and data, not text.
+- **Quest keys depend on the source layout.** Use exact offsets for one image,
+  or verified reference wildcards for images sharing the same field positions.
+  Missing translation keys still display the source text.
 - **The chat filter is not translated.** Entry 16 tables 41–43 are the word list
   the chat censor uses, not text the game draws; a `.lang` must not name them, or
   translating would break the filter.
