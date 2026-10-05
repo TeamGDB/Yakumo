@@ -260,8 +260,9 @@ std::vector<std::uint32_t> find_quest_copies(const psprecomp::GuestMemory &memor
         const std::uint32_t second = memory.load32(base + 4u);
         // The record array holds file offsets (the archive image as it is) or
         // absolute pointers when the game relocated the copy.
-        const bool relative = first != 0u && first < size && second > first && second < size;
-        const bool absolute = first > base && first - base < size && second > first && second - base < size;
+        const bool relative = first >= 8u && first < size && (second == 0u || (second > first && second < size));
+        const bool absolute =
+            first >= base + 8u && first - base < size && (second == 0u || (second > first && second - base < size));
         if (!relative && !absolute) continue;
         copies.push_back(base);
     }
