@@ -8,8 +8,8 @@
     "reason": "AudioSink method declarations have no standalone LLVM line map. Their out-of-line implementations and actual SDL output-gain behavior are covered by renderer/audio regression tests and remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_mods.hpp": {
-    "sha256": "c3b8facbaf504cd30609232610be607f65a25f271526a933cd6f901e64a7e869",
-    "reason": "Function declarations and aggregate fields have no standalone LLVM line map; corresponding implementation mappings remain subject to the normal diff gate."
+    "sha256": "f9167beb23f644a3eea5f4fc88b3e88343a792a921812510760a6cf23fa83c89",
+    "reason": "Function declarations and aggregate fields have no standalone LLVM line map. Reviewed additions expose a bounded archive-read declaration and result fields only; executable implementation and archive/runtime regressions remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/platform/android_documents.hpp": {
     "sha256": "db4ebe8bb177b8439c071c90d68d6645305592e8fc79805b6ae68e5d06d203bf",
