@@ -427,6 +427,25 @@ class TextToolContracts(unittest.TestCase):
         self.assertIsNone(extract_dialogue.read_cstr(b"no terminator", 0))
         self.assertEqual(extract_text.loose_runs(b"hello\0trailing"), ["hello", "trailing"])
 
+    def test_quest_source_utf8(self):
+        for text in ("Invented", "\u67b6\u7a7a", "\u00c9preuve", "\u0422\u0435\u0441\u0442", "\U0001f31f"):
+            data = bytearray(self.quest())
+            for offset in (136, 584):
+                encoded = text.encode("utf-8")
+                data[offset:offset + 24] = encoded + bytes(24 - len(encoded))
+            fields = extract_text.quest_block(data)
+            self.assertEqual(len(fields), 12)
+            self.assertEqual(fields[0], (64, 136, text))
+        for bad in (b"\xc0\xaf", b"\x80", b"\xe6\x9e", b"\xed\xa0\x80", b"\x01", b"\x7f"):
+            data = bytearray(self.quest())
+            data[136:160] = bad + bytes(24 - len(bad))
+            self.assertIsNone(extract_text.quest_block(data))
+        self.assertEqual(extract_text.quest_source_text(b"\n\r\t\0", 0, 4), "\n\r\t")
+        self.assertEqual(extract_text.quest_source_text(b"\0", 0, 1), "")
+        for data, offset, end in ((b"abc", 0, 3), (b"abc\0", 0, 3), (b"x" * 4096 + b"\0", 0, 4097),
+                                  (b"\0", -1, 1), (b"\0", 0, 2), (b"\0", 1, 1)):
+            self.assertIsNone(extract_text.quest_source_text(data, offset, end))
+
     def test_commands_use_real_encrypted_synthetic_archive(self):
         with tempfile.TemporaryDirectory() as temporary, patch("sys.stdout", new=io.StringIO()):
             root = Path(temporary)

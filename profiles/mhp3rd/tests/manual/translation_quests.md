@@ -32,6 +32,17 @@ Use the same quest IDs, star levels, controller and language in both sessions.
 Record the source commit alongside the binary hash. Do not compare screenshots
 from different quest records or claim that a translated menu proves quests work.
 
+Repeat the capture matrix with an unpatched Japanese image and the supported
+English-patched image, using separate copied saves and read-only game inputs.
+Record each image's local fingerprint. Test the same quest ID in both; a useful
+regression includes a title starting with Japanese UTF-8 and fields whose byte
+offsets differ between images. A shared translation must cover each source's
+exact keys or use verified `ref:*` aliases as described in
+[TEXT_TRANSLATION.md](../../../../docs/TEXT_TRANSLATION.md#quest-files).
+Check covered title, objective, description, monsters and client, reload the
+catalog, and repeat in the active quest. An untranslated field with no key is
+a translation-file gap; a matching key that remains original is a runtime failure.
+
 ## Capture matrix
 
 | Capture | Action | Inspect |

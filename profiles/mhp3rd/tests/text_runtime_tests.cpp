@@ -26,6 +26,104 @@ void require(bool ok, const char *message) {
 void word(std::vector<std::uint8_t> &bytes, std::size_t at, std::uint32_t value) {
     for (unsigned i = 0; i < 4; ++i) bytes.at(at + i) = static_cast<std::uint8_t>(value >> (i * 8));
 }
+
+void test_quest_source_versions(const std::filesystem::path &dir) {
+    using namespace mhp3rd;
+    {
+        std::ofstream out(dir / "portable.lang");
+        out << "language = portable\n[4059]\n64:* = Portable title\n68:* = Portable objective\n"
+               "72:* = Portable description\n76:* = Must not replace a sentinel\n";
+    }
+    const std::vector<std::string> titles{"InventedTitle", "\xe6\x9e\xb6\xe7\xa9\xba", "\xc3\x89preuve",
+        "\xd0\xa2\xd0\xb5\xd1\x81\xd1\x82", "\xf0\x9f\x8c\x9f"};
+    for (std::size_t variant = 0; variant < titles.size(); ++variant) {
+        entry = 4059;
+        entry_size = 4096;
+        std::vector<std::uint8_t> source(entry_size, 0);
+        word(source, 0, 64);
+        word(source, 92, 101);
+        const auto goal = variant == 0 ? 160u : 176u;
+        const auto description = variant == 0 ? 184u : 224u;
+        word(source, 64, 136);
+        word(source, 68, goal);
+        word(source, 72, description);
+        word(source, 76, 64);
+        std::copy(titles[variant].begin(), titles[variant].end(), source.begin() + 136);
+        const std::string objective = variant == 1 ? "" : "Synthetic objective";
+        std::copy(objective.begin(), objective.end(), source.begin() + goal);
+        std::string details;
+        for (unsigned n = 0; n < 100; ++n) details += "\xe6\x9e\xb6\xe7\xa9\xba";
+        details += "\n\r\tend";
+        std::copy(details.begin(), details.end(), source.begin() + description);
+        auto encoded = source;
+        mods::p3rd::encrypt(encoded, 1, 0);
+        catalog = mods::ArchiveEntry{archive_start, encoded};
+        psprecomp::GuestMemory memory(64u * 1024u * 1024u);
+        const auto destination = ram + 20u * 1024u * 1024u;
+        const text::ArenaAllocator allocate = [&](std::size_t size) {
+            return std::optional<text::Arena>{
+                {ram + 0x01ff0000u, ram + 0x01ff0000u + static_cast<std::uint32_t>(size)}};
+        };
+        const auto matches = [&](std::uint32_t root, std::uint32_t ref, const std::string &expected) {
+            const auto pointer = root + memory.load32(root + ref);
+            if (!memory.contains(pointer, expected.size() + 1)) return false;
+            for (std::size_t n = 0; n <= expected.size(); ++n)
+                if (memory.load8(pointer + n) != (n == expected.size() ? 0 : static_cast<std::uint8_t>(expected[n])))
+                    return false;
+            return true;
+        };
+        text::set_language("portable", {dir});
+        for (unsigned reload = 0; reload < 2; ++reload) {
+            memory.copy_in(destination, source);
+            memory.copy_in(text::kActiveQuestBlock, source);
+            text::translate_read(archive_start, encoded);
+            const auto request = ram + 4096;
+            memory.store16(request + 2, static_cast<std::uint16_t>(entry));
+            memory.store32(request + 4, destination);
+            memory.store32(request + 8, static_cast<std::uint32_t>(entry_size));
+            memory.store32(request + 12, 0);
+            text::note_loader_completion(memory, 0x08865840u, request);
+            text::frame(memory, allocate);
+            for (const auto root : {destination, text::kActiveQuestBlock}) {
+                require(matches(root, 64, "Portable title"), "UTF-8 quest title uses a portable key");
+                require(matches(root, 68, "Portable objective"), "a changed or empty source field is translated");
+                require(matches(root, 72, "Portable description"), "source fields longer than 256 bytes are validated");
+                require(memory.load32(root + 76) == 64, "wildcards cannot translate quest table sentinels");
+            }
+            require(text::search_work_last_frame().bytes <= text::kSearchBytesPerFrame,
+                "UTF-8 quest discovery retains the shared search budget");
+        }
+        // Exact physical keys remain version-specific and take precedence.
+        {
+            std::ofstream out(dir / "physical.lang");
+            out << "language = physical\n[4059]\n68:160 = Exact\n68:* = Fallback\n";
+        }
+        text::set_language("physical", {dir});
+        memory.copy_in(text::kActiveQuestBlock, source);
+        text::frame(memory, allocate);
+        require(matches(text::kActiveQuestBlock, 68, variant == 0 ? "Exact" : "Fallback"),
+            "exact keys win only when the source offset matches");
+        // Malformed source fields must not produce a partially valid record.
+        const std::vector<std::string> invalid{"\xc0\xaf", "\x80", "\xf5\x80\x80\x80", "\xe6\x9e", "\xe6!",
+            "\xed\xa0\x80", "\xf4\x90\x80\x80", "\x01", "\x7f"};
+        for (std::size_t n = 0; n <= invalid.size(); ++n) {
+            auto bad = source;
+            std::fill(bad.begin() + description, bad.end(), n == invalid.size() ? 'x' : 0);
+            if (n < invalid.size()) std::copy(invalid[n].begin(), invalid[n].end(), bad.begin() + description);
+            auto encrypted = bad;
+            mods::p3rd::encrypt(encrypted, 1, 0);
+            catalog = mods::ArchiveEntry{archive_start, encrypted};
+            text::set_language("portable", {dir});
+            memory.copy_in(text::kActiveQuestBlock, bad);
+            text::frame(memory, allocate);
+            require(memory.load32(text::kActiveQuestBlock + 64) == 136,
+                "invalid UTF-8, controls and unterminated fields reject the entire record");
+        }
+    }
+    catalog.reset();
+    entry = 4289;
+    entry_size = 64;
+}
 }
 
 namespace mhp3rd::mods {
@@ -54,6 +152,7 @@ int main(int argc, char **argv) {
     } cleanup{dir};
     try {
         fs::create_directories(dir);
+        test_quest_source_versions(dir);
         {
             std::ofstream out(dir / "test.lang");
             out << "language = test\n[4289]\n0:0 = Translated\n[2835]\n2:1 = New\n";

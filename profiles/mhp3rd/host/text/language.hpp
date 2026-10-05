@@ -53,6 +53,9 @@ inline constexpr std::uint32_t kMainEntry = 16u;
 inline constexpr std::size_t kMaxTranslationBytes = 16u * 1024u * 1024u;
 inline constexpr std::size_t kMaxTranslationLine = 64u * 1024u;
 
+// Reject malformed UTF-8 and embedded NULs before accepting source text.
+[[nodiscard]] bool valid_utf8(const std::string &text);
+
 // One language the loader found in a translations folder.
 struct Language {
     std::string code; // "pt-BR"
