@@ -264,11 +264,11 @@ std::uint64_t data_bin_size() {
 std::optional<EntryAt> entry_at_offset(std::uint64_t offset) {
     State &s = state();
     if (!s.directory) return std::nullopt;
-    const Directory &d = *s.directory;
+    const Directory &d = s.layout ? s.layout->directory : *s.directory;
     const std::uint64_t block = offset / p3rd::kBlock;
     if (block > std::numeric_limits<std::uint32_t>::max()) return std::nullopt;
     const std::int64_t last = d.entry_at(static_cast<std::uint32_t>(block));
-    if (last < 0) return std::nullopt;
+    if (last < 0 || static_cast<std::uint64_t>(last) >= d.entries()) return std::nullopt;
     const std::uint64_t start = static_cast<std::uint64_t>(d.blocks[last]) * p3rd::kBlock;
     const auto entry = static_cast<std::uint32_t>(last);
     const auto size = d.size(entry);

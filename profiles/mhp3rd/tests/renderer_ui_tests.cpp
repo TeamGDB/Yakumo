@@ -1879,9 +1879,9 @@ void texture_pack_screen_contracts(gpu::VulkanRenderer &renderer, const std::fil
 void mods_screen_contracts(
     gpu::VulkanRenderer &renderer, const std::filesystem::path &sandbox, psprecomp::Runtime &runtime) {
     // Construct a tiny ISO9660 image and archive entirely from public bytes.
-    // It contains one eight-byte entry and no game executable or assets.
+    // It contains two eight-byte entries and no game executable or assets.
     constexpr std::size_t block = 2048;
-    std::vector<std::uint8_t> image(25 * block);
+    std::vector<std::uint8_t> image(26 * block);
     auto store = [&](std::size_t offset, std::uint32_t value) {
         for (int byte = 0; byte < 4; ++byte) image[offset + byte] = value >> (byte * 8);
     };
@@ -1900,13 +1900,13 @@ void mods_screen_contracts(
     record(16 * block + 156, std::string(1, '\0'), 20, block, true);
     record(20 * block, "PSP_GAME", 21, block, true);
     record(21 * block, "USRDIR", 22, block, true);
-    record(22 * block, "DATA.BIN;1", 23, block * 2, false);
+    record(22 * block, "DATA.BIN;1", 23, block * 3, false);
     mods::p3rd::Directory directory;
     directory.directory_blocks = 1;
-    directory.blocks = {1, 2};
-    directory.sizes = {{0, 8}};
-    directory.trailer.resize(block - 16);
-    mods::p3rd::encrypt(directory.trailer, 0, 16);
+    directory.blocks = {1, 2, 3};
+    directory.sizes = {{0, 8}, {1, 8}};
+    directory.trailer.resize(block - 28);
+    mods::p3rd::encrypt(directory.trailer, 0, 28);
     const auto header = directory.encode();
     expect(header.size() == block, "synthetic archive directory fills exactly one block");
     std::copy(header.begin(), header.end(), image.begin() + 23 * block);
@@ -1914,6 +1914,10 @@ void mods_screen_contracts(
     std::copy_n("PUBLIC!!", 8, entry.begin());
     mods::p3rd::encrypt(entry, 1, 0);
     std::copy(entry.begin(), entry.end(), image.begin() + 24 * block);
+    std::fill(entry.begin(), entry.end(), 0);
+    std::copy_n("SECOND!!", 8, entry.begin());
+    mods::p3rd::encrypt(entry, 2, 0);
+    std::copy(entry.begin(), entry.end(), image.begin() + 25 * block);
     const auto iso_path = sandbox / "public-mod-fixture.iso";
     {
         std::ofstream out(iso_path, std::ios::binary);
@@ -1934,6 +1938,41 @@ void mods_screen_contracts(
     }
     const auto id = session->library().mods().front().id;
     expect(!session->library().enabled(id), "new public mod starts disabled");
+    auto check_entry = [&](std::uint64_t offset, std::uint32_t expected, std::uint64_t into, std::uint64_t size) {
+        const auto at = mods::entry_at_offset(offset);
+        expect(at && at->entry == expected && at->into == into && at->size == size,
+            "archive lookup agrees with the active entry boundaries and exact sizes");
+    };
+    check_entry(2 * block + 7, 1, 7, 8);
+    expect(!mods::entry_at_offset(0) && !mods::entry_at_offset(2 * block + 8),
+        "archive lookup rejects directory bytes and exact-size padding");
+    {
+        std::ofstream out(folder / "replacement.bin", std::ios::binary);
+        out << std::string(block + 17, 'G');
+    }
+    session->library().set_enabled(id, true);
+    session->commit();
+    expect(session->restart_pending() && !mods::serving(), "growing mod waits for restart");
+    check_entry(2 * block, 1, 0, 8);
+    mods::attach_disc(&disc);
+    session = mods::session();
+    expect(session && mods::serving(), "restart activates grown archive layout");
+    check_entry(2 * block + 16, 0, block + 16, block + 17);
+    check_entry(3 * block, 1, 0, 8);
+    expect(!mods::entry_at_offset(2 * block + 17) && !mods::entry_at_offset(4 * block),
+        "grown archive lookup rejects padding and archive end");
+    std::array<std::uint8_t, 8> moved{};
+    expect(mods::read_data_bin(3 * block, moved) == moved.size(), "moved entry is readable");
+    mods::p3rd::decrypt(moved, 3, 0);
+    expect(std::string(moved.begin(), moved.end()) == "SECOND!!", "moved entry is re-keyed for its new offset");
+    session->library().set_enabled(id, false);
+    session->commit();
+    check_entry(3 * block, 1, 0, 8);
+    mods::attach_disc(&disc);
+    session = mods::session();
+    check_entry(2 * block, 1, 0, 8);
+    std::ofstream(folder / "replacement.bin", std::ios::binary) << "CHANGED!";
+
     auto &layer = ui::Layer::get();
     layer.set_interactive(true);
     ImVec2 click{};
