@@ -2,11 +2,13 @@
 
 #include "mods/mod_session.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace psprecomp {
 class Runtime;
