@@ -99,6 +99,13 @@ int main(int argc, char **argv) {
                 mods::p3rd::encrypt(source, 1, 0);
                 text::translate_read(archive_start, source);
             }
+            const auto matches = [&](std::uint32_t address, const std::string &expected) {
+                if (!live.contains(address, expected.size() + 1)) return false;
+                for (std::size_t i = 0; i < expected.size(); ++i)
+                    if (live.load8(address + static_cast<std::uint32_t>(i)) != static_cast<std::uint8_t>(expected[i]))
+                        return false;
+                return live.load8(address + static_cast<std::uint32_t>(expected.size())) == 0;
+            };
             unsigned ready = 0;
             for (unsigned frame = 0; frame < 30; ++frame) {
                 text::frame(live, arena);
@@ -110,9 +117,9 @@ int main(int argc, char **argv) {
                     const auto title = copies[n] + live.load32(copies[n] + 64);
                     const auto goal = copies[n] + live.load32(copies[n] + 68);
                     const auto details = copies[n] + live.load32(copies[n] + 72);
-                    if (live.load8(title) == 'T' && live.load8(goal) == 'G' && live.load8(details) == 'D' &&
-                        live.load8(inlines[n]) == 'T' && live.load8(inlines[n] + 24) == 'G' &&
-                        live.load8(inlines[n] + 48) == 'D')
+                    if (matches(title, "Title") && matches(goal, "Goal") && matches(details, "Details") &&
+                        matches(inlines[n], "Title") && matches(inlines[n] + 24, "Goal") &&
+                        matches(inlines[n] + 48, "Details"))
                         ++ready;
                     require(live.load32(copies[n] + 76) == 64, "quest sentinel remains unchanged");
                 }
