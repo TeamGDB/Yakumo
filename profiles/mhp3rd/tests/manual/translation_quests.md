@@ -69,3 +69,18 @@ The synthetic `mhp3rd_quest_translation_latency_tests` measures this ceiling in
 30 game frames over invented quest data. It tests source and inline fields under
 multiple pending loads, with a bounded search-work requirement. It cannot prove
 real-game loader/decryption/relocation timing or visual correctness.
+
+## Loader research checkpoint
+
+A bounded macOS observational run found that the loader semaphore call returning
+to `0x08865840` exposes an entry ID and a dynamic destination in the request.
+For ordinary text entry 2835, that destination matched the address eventually
+found by the current RAM scanner. Entries 2838 and 4289 produced multiple chunk
+notifications with the same destination and increasing offsets. A notification
+therefore does not by itself prove that a whole text entry has finished loading.
+
+This is evidence for a possible event-based discovery path, not a validated
+quest fix. Quest list loading, relocation/copies and inline field construction
+still need the capture matrix above. The generated function at `0x08863664`
+checks a destination range; it must not be treated as a decrypt/copy hook merely
+because it was mentioned beside the loader in an older description.
