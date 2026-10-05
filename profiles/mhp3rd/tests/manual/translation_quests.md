@@ -15,6 +15,10 @@ with the bounded platform launchers in the local testing guide.
 The launcher creates a new output directory, copies saves and the translation,
 links read-only game inputs, and records binary/translation fingerprints.
 It does not change a developer or release installation.
+Game inputs may be read-only links to an existing installation. Save/settings
+links that escape their source directory, directory links inside saves and
+special save files are rejected before creating a session. The selected
+translation is staged with a fixed filename inside the session directory.
 
 Run two independent sessions from the same save source:
 
