@@ -378,6 +378,16 @@ class TextToolContracts(unittest.TestCase):
             ArchiveBehaviorTests.encrypt(data + bytes(2048 - len(data)), index + 1)
             for index, data in enumerate(entries)))
 
+    def test_single_quest_record(self):
+        data = bytearray(self.quest()[:512])
+        struct.pack_into("<I", data, 4, 0)
+        fields = extract_text.quest_block(data)
+        self.assertIsNotNone(fields)
+        self.assertEqual(len(fields), 6)
+        self.assertEqual(fields[0], (64, 136, "Field0"))
+        struct.pack_into("<I", data, 64 + 20, 0)
+        self.assertIsNone(extract_text.quest_block(data))
+
     def test_parsers_and_truncation(self):
         data = self.block()
         self.assertEqual(extract_blocks.blocks_of(data)[0][1][1], "Menu")

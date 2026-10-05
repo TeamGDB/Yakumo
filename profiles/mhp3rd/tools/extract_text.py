@@ -148,7 +148,7 @@ def quest_block(data):
             break
         records.append(value)
         index += 1
-    if len(records) < 2:
+    if not records:
         return None
 
     fields = []
@@ -186,9 +186,9 @@ def quest_block(data):
             text = read_cstr(data, string_offset)
             if text:
                 fields.append((position + n * 4, string_offset, text))
-    # A real quest file has several records of five or six fields; a handful
-    # of fields is a binary entry that happened to look like one.
-    if len(fields) < 10:
+    # A single custom quest must expose all six fields. Keep the stronger
+    # aggregate check for multi-record entries to limit binary false positives.
+    if len(fields) < (6 if len(records) == 1 else 10):
         return None
     return fields
 

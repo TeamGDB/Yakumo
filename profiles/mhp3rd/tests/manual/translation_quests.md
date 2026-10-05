@@ -126,3 +126,21 @@ Remaining evidence: a synthetic moved-layout regression, single-record/UTF-8
 fixtures, decoded DLC record identity and copy lifetime, and the visual matrix
 for normal, modded and downloaded quests. These findings do not mark any of those
 scenarios as passed and do not resolve the failing latency regression.
+
+### Initial implementation
+
+Archive lookup now uses the active virtual directory and rejects offsets beyond
+its last entry. A synthetic two-entry ISO exercises a growing replacement,
+re-keyed reads, exact-size padding, pending restart, activation and restoration.
+The old lookup failed four assertions; the corrected lookup passed the complete
+macOS renderer/UI suite. An unrelated pointer-click assertion failed in one
+intermediate run and passed on the subsequent complete run; it remains a test
+stability observation, not evidence about translation correctness.
+
+Runtime discovery now accepts a zero terminator after a single quest record,
+including a relocated record pointer, while rejecting invalid nonzero next
+pointers. Extraction accepts a single record only with at least six recognized
+fields; the multi-record binary-noise threshold is unchanged. Both new single-
+record tests failed before their respective fixes. Non-ASCII source validation,
+mod language layering, DLC parsing and event-based discovery remain outstanding.
+The display-latency test remains an unsuppressed failure.

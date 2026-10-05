@@ -253,6 +253,40 @@ int main(int argc, char **argv) {
         }
         require(memory.load8(ram + 2048) == 'N', "inline quest fields are patched in their own slots");
         require(memory.load8(ram + 2072) == 'G', "the inline objective is translated");
+        // A custom catalog may contain just one quest. Its next record word
+        // is the zero terminator, not a second offset.
+        auto single = clear;
+        word(single, 4, 0);
+        for (bool relocated : {false, true}) {
+            text::set_language("test", {dir});
+            auto loaded = single;
+            if (relocated) word(loaded, 0, ram + 64);
+            memory.copy_in(ram, loaded);
+            encrypted = single;
+            mods::p3rd::encrypt(encrypted, 1, 0);
+            text::translate_read(archive_start, encrypted);
+            text::frame(memory, allocate);
+            const auto pointer = memory.load32(ram + 64);
+            require(pointer != 136 && memory.contains(ram + pointer, 9),
+                "single-record quest is discovered with relative or relocated record pointers");
+            for (std::size_t i = 0; i < 9; ++i)
+                require(memory.load8(ram + pointer + i) == static_cast<std::uint8_t>("NewTitle"[i]),
+                    "single-record quest title matches completely including its terminator");
+            require(memory.load32(ram + 4) == 0 && memory.load32(ram + 76) == 64,
+                "single-record discovery preserves both sentinels");
+        }
+        for (std::uint32_t second : {1u, 512u, 0xFFFFFFFFu}) {
+            text::set_language("test", {dir});
+            auto invalid = single;
+            word(invalid, 4, second);
+            memory.copy_in(ram, invalid);
+            encrypted = single;
+            mods::p3rd::encrypt(encrypted, 1, 0);
+            text::translate_read(archive_start, encrypted);
+            text::frame(memory, allocate);
+            require(memory.load32(ram + 64) == 136,
+                "single-record discovery rejects a nonzero invalid next-record pointer");
+        }
         // Search work is bounded over full RAM, including absent probes. A
         // second loaded entry must progress rather than starve behind the first.
         {
