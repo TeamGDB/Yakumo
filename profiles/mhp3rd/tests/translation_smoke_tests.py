@@ -101,8 +101,8 @@ pathlib.Path(os.environ['MHP3RD_SCREENSHOT_DIR'], 'fixture.bmp').write_bytes(b'i
             '--font', str(self.font), '--unlimited', '--output-parent', str(self.root),
             *extra], capture_output=True, text=True, timeout=10)
 
-    def assert_rejected_before_output(self, expected):
-        result = self.launch()
+    def assert_rejected_before_output(self, expected, *extra):
+        result = self.launch(*extra)
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn(expected, result.stderr)
         self.assertEqual(list(self.root.glob('yakumo-quest-translation-*')), [])
@@ -152,6 +152,14 @@ pathlib.Path(os.environ['MHP3RD_SCREENSHOT_DIR'], 'fixture.bmp').write_bytes(b'i
         (self.source / 'ms0' / 'save').unlink()
         (self.source / 'ms0').rmdir()
         self.assert_rejected_before_output('save source containing ms0')
+
+    def test_output_parent_outside_approved_roots_rejected(self):
+        self.assert_rejected_before_output('OS temporary directory or repository out',
+                                           '--output-parent', '/')
+
+    def test_missing_output_parent_rejected(self):
+        self.assert_rejected_before_output('existing directory', '--output-parent',
+                                           str(self.root / 'missing'))
 
 
 if __name__ == '__main__':

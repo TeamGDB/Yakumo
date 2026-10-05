@@ -33,6 +33,19 @@ def validate_save_tree(root):
             raise ValueError('save source contains a missing target or special file')
 
 
+def output_parent(directory):
+    """Keep visual-test artifacts under the OS temporary directory or repo out."""
+    candidate = os.path.join(os.path.realpath(directory or tempfile.gettempdir()), '')
+    allowed = (tempfile.gettempdir(), Path(__file__).resolve().parents[3] / 'out')
+    for base in allowed:
+        root = os.path.realpath(base)
+        if candidate.startswith(root.rstrip(os.sep) + os.sep):
+            if not os.path.isdir(candidate):
+                raise ValueError('output parent must be an existing directory')
+            return candidate
+    raise ValueError('output parent must be inside the OS temporary directory or repository out')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
@@ -44,7 +57,8 @@ def main():
     parser.add_argument('--font', type=Path, help='Optional local font used by the build')
     parser.add_argument('--commit', required=True, help='Source commit used to build the executable')
     parser.add_argument('--seconds', type=int, default=300)
-    parser.add_argument('--output-parent', type=Path)
+    parser.add_argument('--output-parent', type=Path,
+                        help='Existing parent inside the OS temporary directory or repository out')
     parser.add_argument('--unlimited', action='store_true')
     args = parser.parse_args()
     if not 1 <= args.seconds <= 600:
@@ -60,9 +74,10 @@ def main():
         save_source = extraction_path(args.data_dir, ('ms0',))
         validate_save_tree(save_source)
         settings_source = extraction_path(args.data_dir, ('settings.ini',))
+        parent = output_parent(args.output_parent)
     except (ValueError, OSError, RuntimeError) as error:
         parser.error(str(error))
-    root = Path(tempfile.mkdtemp(prefix='yakumo-quest-translation-', dir=args.output_parent)).resolve()
+    root = Path(tempfile.mkdtemp(prefix='yakumo-quest-translation-', dir=parent)).resolve()
     data = extraction_path(root, ('data',))
     data.mkdir()
     shutil.copytree(save_source, extraction_path(root, ('data', 'ms0')))

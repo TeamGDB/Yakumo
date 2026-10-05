@@ -1,6 +1,7 @@
 """Validate archive names before writing below a caller-selected directory."""
 
 from pathlib import Path
+import os
 
 
 def archive_component(name):
@@ -15,8 +16,11 @@ def archive_component(name):
 
 def extraction_path(directory, components):
     """Reject traversal and existing symlinks that lead outside the output root."""
-    root = Path(directory).resolve()
-    destination = root.joinpath(*(archive_component(name) for name in components)).resolve()
-    if not destination.is_relative_to(root) or destination == root:
+    root = os.path.normcase(os.path.realpath(directory))
+    destination = os.path.normcase(os.path.realpath(os.path.join(
+        root, *(archive_component(name) for name in components))))
+    # Include the separator: a neighboring directory with the same prefix is
+    # outside the root. realpath also resolves existing symlink components.
+    if not destination.startswith(root.rstrip(os.sep) + os.sep) or destination == root:
         raise ValueError("archive destination escapes the output directory")
-    return destination
+    return Path(destination)

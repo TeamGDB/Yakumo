@@ -103,6 +103,25 @@ class ArchiveSecurityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary, self.assertRaises(ValueError):
             databin.write_entry(FakeArchive(), 0, temporary)
 
+    def test_similar_directory_prefix_does_not_allow_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / 'output'
+            neighbor = root / 'output-neighbor'
+            output.mkdir()
+            neighbor.mkdir()
+            protected = neighbor / 'file'
+            protected.write_bytes(b'keep')
+            try:
+                (output / 'FILE').symlink_to(protected)
+            except OSError as error:
+                self.skipTest(f'symlinks unavailable: {error}')
+            with self.assertRaises(ValueError):
+                extraction_path(output, ('FILE',))
+            with self.assertRaises(ValueError):
+                extraction_path(output, ())
+            self.assertEqual(protected.read_bytes(), b'keep')
+
     def test_databin_valid_overlay_filename(self):
         class FakeArchive:
             def read(self, index):
