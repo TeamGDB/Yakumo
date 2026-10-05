@@ -295,7 +295,12 @@ python3 profiles/mhp3rd/tools/text_report.py docs/TEXT_DUMP
 text`: `kind` is `en`, `jp`, `misto` or `sym`, and `has_format` marks the rows
 that carry the game's own `~Cnn`/`~Bnn` codes. Entries 2835–2841 are the
 quest/menu tables, 16 the big block (menu, items, equipment, save/load, Felyne
-equipment), 4059–4073 the village quests, 4703–4716 the download quests.
+equipment), and 4059–4073 contain quest catalog records. Entries 4703–4716
+were previously described here as download quests, but their outer structure is
+not recognized by the quest extractor. Downloaded savedata follows a separate
+load path; support must not be inferred from these archive entry numbers. See
+the [quest research checkpoint](../profiles/mhp3rd/tests/manual/translation_quests.md#mod-and-downloadable-quest-research)
+for observed limits and outstanding verification.
 
 This repository ships only the mechanism. The glossary and the script that turns
 it into `.lang` files live with the translation itself, outside this repository,
