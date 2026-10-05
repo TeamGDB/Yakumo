@@ -580,6 +580,14 @@ target_link_libraries(mhp3rd_text_runtime_tests PRIVATE psprecomp_core)
 set_target_properties(mhp3rd_text_runtime_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 if(PSPRECOMP_BUILD_TESTS)
     add_test(NAME mhp3rd_text_runtime_tests COMMAND mhp3rd_text_runtime_tests)
+    add_test(NAME mhp3rd_quest_translation_latency_tests COMMAND mhp3rd_text_runtime_tests --quest-display-latency)
+    set_tests_properties(mhp3rd_quest_translation_latency_tests PROPERTIES TIMEOUT 30 LABELS "translation;regression")
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME mhp3rd_translation_smoke_launcher_tests
+            COMMAND "${Python3_EXECUTABLE}" "${MHP3RD_PROFILE_DIR}/tests/translation_smoke_tests.py")
+        set_tests_properties(mhp3rd_translation_smoke_launcher_tests PROPERTIES TIMEOUT 30 LABELS "translation")
+    endif()
 endif()
 
 # Android's fd-based document copy also runs against a synthetic provider on

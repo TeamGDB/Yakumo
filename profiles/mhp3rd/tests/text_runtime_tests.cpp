@@ -35,7 +35,7 @@ std::optional<EntryAt> entry_at_offset(std::uint64_t offset) {
 }
 }
 
-int main() {
+int main(int argc, char **argv) {
     namespace fs = std::filesystem;
     using namespace mhp3rd;
     const auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -52,6 +52,75 @@ int main() {
         {
             std::ofstream out(dir / "test.lang");
             out << "language = test\n[4289]\n0:0 = Translated\n[2835]\n2:1 = New\n";
+        }
+        // Display-latency regression: several loaded quest lists must not
+        // delay a newly opened screen until a full sweep of guest RAM finishes.
+        // Thirty game frames is a one-second upper bound, not a CPU benchmark.
+        if (argc > 1 && std::string(argv[1]) == "--quest-display-latency") {
+            const std::vector<std::uint32_t> entries{
+                4059, 4060, 4061, 4062, 4063, 4064, 4065, 4066, 4070, 4071, 4072, 4073};
+            std::ofstream language(dir / "latency.lang");
+            language << "language = latency\n";
+            for (const auto id : entries)
+                language << '[' << id << "]\n64:136 = Title\n68:160 = Goal\n72:184 = Details\n";
+            language.close();
+            text::set_language("latency", {dir});
+            psprecomp::GuestMemory live(64u * 1024u * 1024u);
+            const text::ArenaAllocator arena = [&](std::size_t size) {
+                return std::optional<text::Arena>{
+                    {ram + 0x01ff0000u, ram + 0x01ff0000u + static_cast<std::uint32_t>(size)}};
+            };
+            std::vector<std::uint32_t> copies, inlines;
+            for (std::size_t n = 0; n < entries.size(); ++n) {
+                entry = entries[n];
+                entry_size = 512;
+                std::vector<std::uint8_t> source(512, 0);
+                word(source, 0, 64);
+                word(source, 4, 256);
+                word(source, 256, 328);
+                word(source, 260, 352);
+                word(source, 264, 376);
+                word(source, 268, 256);
+                const std::string unused = "Unused" + std::to_string(n + 100);
+                std::copy(unused.begin(), unused.end(), source.begin() + 328);
+                std::copy(unused.begin(), unused.end(), source.begin() + 352);
+                std::copy(unused.begin(), unused.end(), source.begin() + 376);
+                const std::vector<std::string> fields{"SourceTitle" + std::to_string(n + 100),
+                    "SourceGoal" + std::to_string(n + 100), "SourceDetails" + std::to_string(n + 100)};
+                for (std::size_t i = 0; i < fields.size(); ++i) {
+                    word(source, 64 + i * 4, 136 + static_cast<std::uint32_t>(i) * 24);
+                    std::copy(fields[i].begin(), fields[i].end(), source.begin() + 136 + i * 24);
+                }
+                word(source, 76, 64); // Table sentinel, never translated.
+                copies.push_back(ram + 0x01400000u + static_cast<std::uint32_t>(n) * 1024u);
+                inlines.push_back(ram + 0x01800000u + static_cast<std::uint32_t>(n) * 1024u);
+                live.copy_in(copies.back(), source);
+                live.copy_in(inlines.back(), std::span(source).subspan(136, 72));
+                mods::p3rd::encrypt(source, 1, 0);
+                text::translate_read(archive_start, source);
+            }
+            unsigned ready = 0;
+            for (unsigned frame = 0; frame < 30; ++frame) {
+                text::frame(live, arena);
+                if (std::getenv("MHP3RD_TEXT_SEARCH_UNLIMITED") == nullptr)
+                    require(text::search_work_last_frame().bytes <= text::kSearchBytesPerFrame,
+                        "quest display latency must not be fixed by unbounded RAM searches");
+                ready = 0;
+                for (std::size_t n = 0; n < entries.size(); ++n) {
+                    const auto title = copies[n] + live.load32(copies[n] + 64);
+                    const auto goal = copies[n] + live.load32(copies[n] + 68);
+                    const auto details = copies[n] + live.load32(copies[n] + 72);
+                    if (live.load8(title) == 'T' && live.load8(goal) == 'G' && live.load8(details) == 'D' &&
+                        live.load8(inlines[n]) == 'T' && live.load8(inlines[n] + 24) == 'G' &&
+                        live.load8(inlines[n] + 48) == 'D')
+                        ++ready;
+                    require(live.load32(copies[n] + 76) == 64, "quest sentinel remains unchanged");
+                }
+                if (ready == entries.size()) break;
+            }
+            std::cout << "Quest screens ready within 30 frames: " << ready << '/' << entries.size() << '\n';
+            require(ready == entries.size(), "quest list and inline details must translate within 30 frames");
+            return 0;
         }
         for (std::size_t n = 0; n < 16; ++n) {
             text::set_language("test", {dir});
