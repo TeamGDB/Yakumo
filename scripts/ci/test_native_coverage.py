@@ -3,16 +3,59 @@
 import contextlib
 import io
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import native_coverage
-from native_coverage import production_source, reviewed_zero_hash_stubs, totals, write_summary
+from native_coverage import native_test_objects, production_source, reviewed_zero_hash_stubs, totals, write_summary
 
 
 class CoveragePolicyTests(unittest.TestCase):
+    def test_mixed_ctest_commands_keep_all_native_mappings(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            build = root / 'out/coverage'
+            build.mkdir(parents=True)
+            binary = build / 'native_tests'
+            binary.touch()
+            script = root / 'test_contract.py'
+            script.write_text('raise SystemExit(0)\n')
+            tests = [{'command': [str(binary)]},
+                     {'command': [str(binary), '--variant']},
+                     {'command': [sys.executable, str(script)]}]
+            with mock.patch.object(native_coverage, 'ROOT', root), \
+                    mock.patch.object(native_coverage, 'BUILD', build):
+                self.assertEqual(native_test_objects(tests), {str(binary.resolve())})
+                self.assertEqual(native_test_objects([tests[-1]]), set())
+
+    def test_missing_native_mapping_still_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with mock.patch.object(native_coverage, 'BUILD', root):
+                with self.assertRaises(SystemExit):
+                    native_test_objects([{'command': [str(root / 'missing_tests')]}])
+                with self.assertRaises(ValueError):
+                    native_test_objects([{'command': [sys.executable]}])
+
+    def test_python_script_must_exist_inside_repository(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository = root / 'repo'
+            repository.mkdir()
+            outside = root / 'outside.py'
+            outside.touch()
+            link = repository / 'escape.py'
+            link.symlink_to(outside)
+            with mock.patch.object(native_coverage, 'ROOT', repository):
+                for script in (outside, link):
+                    with self.subTest(script=script), self.assertRaises(ValueError):
+                        native_test_objects([{'command': [sys.executable, str(script)]}])
+                with self.assertRaises(SystemExit):
+                    native_test_objects([{'command': [sys.executable, str(repository / 'missing.py')]}])
+
     def test_summary_does_not_write_to_environment_selected_path(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
