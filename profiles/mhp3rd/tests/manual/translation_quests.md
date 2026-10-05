@@ -19,6 +19,8 @@ Game inputs may be read-only links to an existing installation. Save/settings
 links that escape their source directory, directory links inside saves and
 special save files are rejected before creating a session. The selected
 translation is staged with a fixed filename inside the session directory.
+An optional output parent must already exist under the OS temporary directory
+or this checkout's `out/`; other destinations are rejected.
 
 Run two independent sessions from the same save source:
 
