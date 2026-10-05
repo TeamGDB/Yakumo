@@ -9,6 +9,9 @@ instead. Never upload game data, saves, translation contents or private paths.
 Use `python3 profiles/mhp3rd/tools/translation_smoke.py --help` for the bounded
 launcher. Supply the exact executable, compatible overlays, a prepared game
 folder, a copied-save source and a translation covering the chosen quests.
+The launcher was verified on macOS; Android still needs an ADB/device launcher
+and Windows device launching remains unverified. Use the same capture matrix
+with the bounded platform launchers in the local testing guide.
 The launcher creates a new output directory, copies saves and the translation,
 links read-only game inputs, and records binary/translation fingerprints.
 It does not change a developer or release installation.
