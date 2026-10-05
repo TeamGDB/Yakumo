@@ -10,16 +10,15 @@
 // a small arena reserved in guest memory and the table's offsets are pointed
 // there, but first the block has to be found:
 //
-//   1. The file I/O tells `note_read` every read of DATA.BIN, with the archive
-//      offset and the guest address it was read to (hle_io.cpp). When a read
-//      covers the start of a block the file names, its load address is learned.
-//   2. Between two frames (`frame`), every learned block is translated, in
-//      place: the block's header and tables are read, and each translated
-//      string is put in the arena and its offset rewritten.
+//   1. File reads provide source metadata; complete quest-loader notifications
+//      provide destination hints. Bounded RAM discovery remains a fallback.
+//   2. Between frames, validated tables are repointed into the translation
+//      arena. The active quest's header and original fields are checked
+//      directly against prepared catalog metadata, without a RAM sweep.
 //
 // An entry the file does not name, a string it does not translate, or a block
 // the game has not loaded yet is left alone: the fallback is the game's own
-// text. Nothing here reads the disc image.
+// text. Selected quest catalogs are inspected through the active archive view.
 
 #include "text/language.hpp"
 
@@ -43,6 +42,9 @@ namespace mhp3rd::text {
 
 // The game's main text block: the one entry 16 loads at start (docs/DEBUG_MENU.md).
 inline constexpr std::uint32_t kMainTextBlock = 0x08A40640u;
+// The supported executable's active quest container. Its first word locates
+// the record; field offsets are resolved and validated from that record.
+inline constexpr std::uint32_t kActiveQuestBlock = 0x08A3A630u;
 
 // Where translated strings are copied: [begin, end) in guest memory.
 struct Arena {
@@ -182,6 +184,10 @@ void set_language(const std::string &code, const std::vector<std::filesystem::pa
 // translates and carries the whole block, the block is translated in place, in
 // this buffer, so the game copies it out already translated.
 void translate_read(std::uint64_t offset, std::span<std::uint8_t> bytes);
+
+// Observe the supported archive loader's completion signal. Only a complete
+// quest load supplies a hint; all guest bytes are validated at the next frame.
+void note_loader_completion(const psprecomp::GuestMemory &memory, std::uint32_t caller, std::uint32_t request);
 
 // Searches share this candidate-address budget across all pending blocks.
 // Candidate verification can read beyond a slice so boundary matches survive.

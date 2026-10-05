@@ -57,6 +57,14 @@ struct EntryAt {
 };
 [[nodiscard]] std::optional<EntryAt> entry_at_offset(std::uint64_t offset);
 
+// Read one complete encoded entry from the active archive without changing
+// guest load tracking. The caller supplies a memory bound before allocation.
+struct ArchiveEntry {
+    std::uint64_t offset{};
+    std::vector<std::uint8_t> bytes;
+};
+[[nodiscard]] std::optional<ArchiveEntry> read_archive_entry(std::uint32_t entry, std::size_t max_bytes);
+
 // The game flushed its instruction cache, which it does right after copying a
 // code overlay into place: the point where a code overlay has finished
 // loading. Writes the patches that go to memory outside a loaded overlay.

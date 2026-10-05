@@ -69,8 +69,9 @@ of the game's actual load deadline. Final-load hooks should translate before
 first display whenever possible.
 
 The synthetic `mhp3rd_quest_translation_latency_tests` measures this ceiling in
-30 game frames over invented quest data. It tests source and inline fields under
-multiple pending loads, with a bounded search-work requirement. It cannot prove
+30 game frames over invented quest data. It tests twelve catalog loads with real-shaped completion notifications and
+successive active quests, with a bounded search-work requirement. Each active
+quest must translate on its first frame. It cannot prove
 real-game loader/decryption/relocation timing or visual correctness.
 
 ## Loader research checkpoint
@@ -144,3 +145,30 @@ fields; the multi-record binary-noise threshold is unchanged. Both new single-
 record tests failed before their respective fixes. Non-ASCII source validation,
 mod language layering, DLC parsing and event-based discovery remain outstanding.
 The display-latency test remains an unsuppressed failure.
+
+### Ordinary quest pointer-table implementation
+
+The latency regression now models twelve loaded catalogs and one active quest
+at a time, visiting all twelve records. The earlier fixture's twelve independent
+inline copies did not represent the active container observed in the game.
+The revised regression checks complete title, objective and description strings,
+terminators and preserved sentinels within the original 30-frame ceiling and
+256 KiB search budget. Disabling the new path with
+`MHP3RD_TEXT_NO_QUEST_DIRECT=1` reproduces its failure.
+
+A bounded macOS run of village quest 101 reached the active quest details screen
+and displayed its translated title. A separate disposable run changed only the
+title offset to another field and showed that other field in the title row,
+confirming that this screen follows the active container's offset table. The
+final implementation validates the ID, original strings and sentinel, preserves
+inline bytes and stores translated strings in a separate arena slice.
+The local run reused compatible AOT objects and overlays; it does not validate
+Cyrillic width dispatch changes in regenerated code. Screenshots and memory dumps
+remain local. The first-frame guarantee is synthetic-test evidence; the manual
+capture was taken after loading and does not measure that deadline.
+
+Automated checks cover reloads, a translation longer than its source slot,
+malformed headers, incorrect IDs, source mismatch, corrupted field pointers,
+invalid loader callers, incomplete reads and invalid destinations. Other-device,
+Hall and DLC visual checks remain outstanding. Mod language-layer loading is
+outside this change; source access stays behind the active archive interface.

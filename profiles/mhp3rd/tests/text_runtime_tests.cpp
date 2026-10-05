@@ -18,6 +18,7 @@ std::uint32_t entry = 4289;
 std::uint64_t entry_size = 64;
 constexpr std::uint64_t archive_start = 2048;
 constexpr std::uint32_t ram = 0x08800000;
+std::optional<mhp3rd::mods::ArchiveEntry> catalog;
 
 void require(bool ok, const char *message) {
     if (!ok) throw std::runtime_error(message);
@@ -28,6 +29,10 @@ void word(std::vector<std::uint8_t> &bytes, std::size_t at, std::uint32_t value)
 }
 
 namespace mhp3rd::mods {
+std::optional<ArchiveEntry> read_archive_entry(std::uint32_t id, std::size_t max_bytes) {
+    if (id == entry && catalog && catalog->bytes.size() <= max_bytes) return catalog;
+    return std::nullopt;
+}
 // An isolated lookup seam: this test owns one synthetic archive entry.
 std::optional<EntryAt> entry_at_offset(std::uint64_t offset) {
     if (offset < archive_start || offset - archive_start >= entry_size) return std::nullopt;
@@ -70,13 +75,16 @@ int main(int argc, char **argv) {
                 return std::optional<text::Arena>{
                     {ram + 0x01ff0000u, ram + 0x01ff0000u + static_cast<std::uint32_t>(size)}};
             };
-            std::vector<std::uint32_t> copies, inlines;
+            std::vector<std::uint32_t> copies;
+            std::vector<std::vector<std::uint8_t>> active_sources;
+            std::vector<bool> active_seen(entries.size(), false);
             for (std::size_t n = 0; n < entries.size(); ++n) {
                 entry = entries[n];
                 entry_size = 512;
                 std::vector<std::uint8_t> source(512, 0);
                 word(source, 0, 64);
                 word(source, 4, 256);
+                word(source, 64 + 28, 101 + n);
                 word(source, 256, 328);
                 word(source, 260, 352);
                 word(source, 264, 376);
@@ -93,11 +101,16 @@ int main(int argc, char **argv) {
                 }
                 word(source, 76, 64); // Table sentinel, never translated.
                 copies.push_back(ram + 0x01400000u + static_cast<std::uint32_t>(n) * 1024u);
-                inlines.push_back(ram + 0x01800000u + static_cast<std::uint32_t>(n) * 1024u);
                 live.copy_in(copies.back(), source);
-                live.copy_in(inlines.back(), std::span(source).subspan(136, 72));
+                active_sources.push_back(source);
                 mods::p3rd::encrypt(source, 1, 0);
                 text::translate_read(archive_start, source);
+                const auto request = ram + 4096;
+                live.store16(request + 2, static_cast<std::uint16_t>(entry));
+                live.store32(request + 4, copies.back());
+                live.store32(request + 8, static_cast<std::uint32_t>(entry_size));
+                live.store32(request + 12, 0);
+                text::note_loader_completion(live, 0x08865840u, request);
             }
             const auto matches = [&](std::uint32_t address, const std::string &expected) {
                 if (!live.contains(address, expected.size() + 1)) return false;
@@ -108,7 +121,14 @@ int main(int argc, char **argv) {
             };
             unsigned ready = 0;
             for (unsigned frame = 0; frame < 30; ++frame) {
+                // One active quest at a time, as in the game; visit every
+                // record while all twelve catalogs remain loaded.
+                const auto active = frame % entries.size();
+                live.copy_in(text::kActiveQuestBlock, active_sources[active]);
                 text::frame(live, arena);
+                const auto root = text::kActiveQuestBlock;
+                active_seen[active] = matches(root + live.load32(root + 64), "Title") &&
+                    matches(root + live.load32(root + 68), "Goal") && matches(root + live.load32(root + 72), "Details");
                 if (std::getenv("MHP3RD_TEXT_SEARCH_UNLIMITED") == nullptr)
                     require(text::search_work_last_frame().bytes <= text::kSearchBytesPerFrame,
                         "quest display latency must not be fixed by unbounded RAM searches");
@@ -118,15 +138,15 @@ int main(int argc, char **argv) {
                     const auto goal = copies[n] + live.load32(copies[n] + 68);
                     const auto details = copies[n] + live.load32(copies[n] + 72);
                     if (matches(title, "Title") && matches(goal, "Goal") && matches(details, "Details") &&
-                        matches(inlines[n], "Title") && matches(inlines[n] + 24, "Goal") &&
-                        matches(inlines[n] + 48, "Details"))
+                        active_seen[n])
                         ++ready;
                     require(live.load32(copies[n] + 76) == 64, "quest sentinel remains unchanged");
                 }
                 if (ready == entries.size()) break;
             }
             std::cout << "Quest screens ready within 30 frames: " << ready << '/' << entries.size() << '\n';
-            require(ready == entries.size(), "quest list and inline details must translate within 30 frames");
+            require(
+                ready == entries.size(), "quest lists and each visited active quest must translate within 30 frames");
             return 0;
         }
         for (std::size_t n = 0; n < 16; ++n) {
@@ -287,6 +307,72 @@ int main(int argc, char **argv) {
             require(memory.load32(ram + 64) == 136,
                 "single-record discovery rejects a nonzero invalid next-record pointer");
         }
+        // Completion hints must identify a whole, in-bounds quest load from
+        // the supported caller. Invalid notifications cannot bypass discovery.
+        for (unsigned variant = 0; variant < 9; ++variant) {
+            text::set_language("test", {dir});
+            const auto destination = ram + 20u * 1024u * 1024u;
+            const auto request = ram + 4096;
+            memory.copy_in(destination, clear);
+            encrypted = clear;
+            mods::p3rd::encrypt(encrypted, 1, 0);
+            text::translate_read(archive_start, variant == 8 ? std::span(encrypted).first(64) : std::span(encrypted));
+            memory.store16(request + 2, variant == 2 ? 65535 : 4059);
+            memory.store32(request + 4, variant == 3 ? destination + 1 : variant == 4 ? 0xFFFFFFFFu : destination);
+            memory.store32(request + 8, variant == 5 ? 128 : 512);
+            memory.store32(request + 12, variant == 6 ? 512 : 0);
+            text::note_loader_completion(memory, variant == 1 ? 0 : 0x08865840u, variant == 7 ? 0xFFFFFFF0u : request);
+            text::frame(memory, allocate);
+            require((memory.load32(destination + 64) != 136) == (variant == 0),
+                "only a valid complete loader notification translates the distant catalog immediately");
+        }
+        // The active quest is a separate container, loaded without a catalog
+        // read. Its record and string offsets differ from the catalog's.
+        {
+            std::ofstream out(dir / "test.lang");
+            out << "language = test\n[4059]\n64:136 = A title longer than its original slot\n"
+                   "68:160 = Goal\n72:184 = Details\n";
+        }
+        auto source = clear;
+        word(source, 64 + 28, 101);
+        auto encoded_catalog = source;
+        mods::p3rd::encrypt(encoded_catalog, 1, 0);
+        catalog = mods::ArchiveEntry{archive_start, encoded_catalog};
+        auto active = source;
+        // Move the first record by 32 bytes within the active container.
+        std::copy_n(source.begin() + 64, 192, active.begin() + 96);
+        word(active, 0, 96);
+        for (std::size_t n = 0; n < 3; ++n) word(active, 96 + n * 4, 168 + n * 24);
+        word(active, 108, 96);
+        const auto quest_root = text::kActiveQuestBlock;
+        for (unsigned reload = 0; reload < 2; ++reload) {
+            if (reload == 0) text::set_language("test", {dir});
+            memory.copy_in(quest_root, active);
+            text::frame(memory, allocate);
+            const std::string expected = "A title longer than its original slot";
+            const auto title = quest_root + memory.load32(quest_root + 96);
+            require(memory.contains(title, expected.size() + 1), "active quest points into valid guest memory");
+            for (std::size_t n = 0; n <= expected.size(); ++n)
+                require(memory.load8(title + n) == (n == expected.size() ? 0 : expected[n]),
+                    "active quest translates on its first frame without a catalog read");
+            require(memory.load32(quest_root + 108) == 96, "active quest preserves the table sentinel");
+            require(memory.load8(quest_root + 168) == 'F', "active quest preserves its inline source text");
+        }
+        for (unsigned failure = 0; failure < 5; ++failure) {
+            text::set_language("test", {dir});
+            auto bad = active;
+            if (failure == 0) word(bad, 0, 0xFFFFFFFCu);
+            if (failure == 1) word(bad, 96 + 28, 999);
+            if (failure == 2) word(bad, 108, 0);
+            if (failure == 3) bad[168] = 'X';
+            if (failure == 4) word(bad, 100, 0xFFFFFFFFu);
+            memory.copy_in(quest_root, bad);
+            text::frame(memory, allocate);
+            for (std::size_t n = 0; n < bad.size(); ++n)
+                require(memory.load8(quest_root + n) == bad[n],
+                    "invalid active quest metadata or source text is not partially patched");
+        }
+        catalog.reset();
         // Search work is bounded over full RAM, including absent probes. A
         // second loaded entry must progress rather than starve behind the first.
         {
