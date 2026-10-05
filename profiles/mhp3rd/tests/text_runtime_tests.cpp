@@ -67,10 +67,9 @@ void test_quest_source_versions(const std::filesystem::path &dir) {
         const auto matches = [&](std::uint32_t root, std::uint32_t ref, const std::string &expected) {
             const auto pointer = root + memory.load32(root + ref);
             if (!memory.contains(pointer, expected.size() + 1)) return false;
-            for (std::size_t n = 0; n <= expected.size(); ++n)
-                if (memory.load8(pointer + n) != (n == expected.size() ? 0 : static_cast<std::uint8_t>(expected[n])))
-                    return false;
-            return true;
+            for (std::size_t n = 0; n < expected.size(); ++n)
+                if (memory.load8(pointer + n) != static_cast<std::uint8_t>(expected[n])) return false;
+            return memory.load8(pointer + expected.size()) == 0;
         };
         text::set_language("portable", {dir});
         for (unsigned reload = 0; reload < 2; ++reload) {

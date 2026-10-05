@@ -67,6 +67,28 @@ def write_summary(markdown):
     print(markdown)
 
 
+def native_test_objects(tests):
+    """Collect native mappings while leaving Python tests in the CTest run."""
+    objects = set()
+    for test in tests:
+        command = test['command']
+        binary = Path(command[0]).resolve()
+        # CTest also registers Python contracts. Their interpreter has no LLVM
+        # mapping; coverage.py collects their production scripts separately.
+        if (re.fullmatch(r'python(?:\d+(?:\.\d+)*)?(?:\.exe)?', Path(command[0]).name)
+                and len(command) > 1 and Path(command[1]).suffix == '.py'):
+            script = Path(command[1]).resolve()
+            script.relative_to(ROOT.resolve())
+            if not script.is_file():
+                raise SystemExit(f'Missing Python test script: {script.name}')
+            continue
+        binary.relative_to(BUILD.resolve())
+        if not binary.is_file():
+            raise SystemExit(f'Missing native test executable: {binary.name}')
+        objects.add(str(binary))
+    return objects
+
+
 def main():
     if sys.platform == 'darwin':
         cov, profdata = ['xcrun', 'llvm-cov'], ['xcrun', 'llvm-profdata']
@@ -82,13 +104,7 @@ def main():
     # Discover the registered executables, including tests with zero hits.
     database = json.loads(subprocess.check_output(
         ['ctest', '--test-dir', str(BUILD), '--show-only=json-v1'], text=True))
-    objects = set()
-    for test in database['tests']:
-        binary = Path(test['command'][0]).resolve()
-        binary.relative_to(BUILD.resolve())
-        if not binary.is_file():
-            raise SystemExit(f'Missing native test executable: {binary.name}')
-        objects.add(str(binary))
+    objects = native_test_objects(database['tests'])
     if not objects:
         raise SystemExit('No registered native tests')
     # Remove only this runner's previous outputs to avoid stale-profile inflation.
@@ -176,7 +192,7 @@ def main():
     for name, value in summary['totals'].items():
         percent = f'{value["percent"]:.2f}%' if value['percent'] is not None else 'N/A'
         text.append(f'| {name.title()} | {value["covered"]} / {value["count"]} | {percent} |')
-    text += ['', f'{len(files)} first-party production files represented across {summary["tests"]} native tests.',
+    text += ['', f'{len(files)} first-party production files represented across {summary["tests"]} registered CTest tests.',
              f'{len(summary["unrepresented_first_party_files"])} tracked production files have no coverage mapping; '
              'they are listed separately and are not included in these percentages.', '',
              'Scope excludes test code, vendor/generated/game code and Python. Headless coverage does not '

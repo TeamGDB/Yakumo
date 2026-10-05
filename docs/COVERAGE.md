@@ -63,6 +63,11 @@ generated-code registry even when a local generated corpus exists. It does not
 compile or upload game-derived code. Native coverage uses LLVM source mapping
 and exports LCOV for the diff check.
 
+CTest also registers Python contracts. They remain in the full suite, but their
+Python interpreter is not passed to LLVM as a native coverage object. Python
+production scripts are measured separately by coverage.py. Native test binaries,
+including those with zero hits, must still exist inside the coverage build.
+
 Coverage CI compiles the application with the Vulkan renderer and system
 FFmpeg enabled, including their first-party source mappings even where the
 tests execute synthetic Vulkan/SDL/ImGui contracts alongside headless suites. It builds the same pinned SDL source
