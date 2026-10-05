@@ -87,3 +87,42 @@ quest fix. Quest list loading, relocation/copies and inline field construction
 still need the capture matrix above. The generated function at `0x08863664`
 checks a destination range; it must not be treated as a decrypt/copy hook merely
 because it was mentioned beside the loader in an older description.
+
+## Mod and downloadable quest research
+
+Source inspection identified independent gaps beyond the scanner's latency:
+
+- `mods::entry_at_offset` resolves reads against the original archive directory,
+  while `read_data_bin` serves the active virtual layout. Activating a replacement
+  does not update the original directory. A replacement that moves entry boundaries
+  can therefore make translation identify the wrong entry, relative offset or size.
+  This mismatch is confirmed in source; its visible effect still needs an end-to-end
+  mod fixture and game capture.
+- `set_language` selects the first matching language file and returns. Its search
+  directories do not include enabled mods, and it does not merge language layers.
+  Mod activation compares file replacements and patches, so adding a language-only
+  source also requires explicit activation/invalidation semantics.
+- The quest extractor requires at least two records and an ASCII first byte for
+  candidate strings. Runtime discovery has similar assumptions. Single-record and
+  non-ASCII source fixtures must be covered before claiming custom quest support.
+- The savedata load path copies decrypted downloadable quest data into guest RAM
+  without notifying translation. Archive read notifications alone cannot cover
+  this source.
+
+A read-only inspection of a local game archive found that the existing extractor
+recognizes quest fields in the nonempty entries 4059–4073, but recognizes none in
+4703–4716. The latter have a different outer structure. This does not establish
+what their nested records contain or how they relate to downloaded savedata.
+No archive contents or extracted strings are included in this document.
+
+Before implementing mod language layers, verify that translations belong to the
+winning source file. Base-game offsets must not silently apply to a mod's changed
+record layout. Reuse mod enablement and priority, preserve untranslated fields,
+and define cache invalidation when the active source changes. A quest ID plus a
+field name is a candidate identity, not a validated format: ID reuse by mods and
+DLC still needs investigation.
+
+Remaining evidence: a synthetic moved-layout regression, single-record/UTF-8
+fixtures, decoded DLC record identity and copy lifetime, and the visual matrix
+for normal, modded and downloaded quests. These findings do not mark any of those
+scenarios as passed and do not resolve the failing latency regression.
