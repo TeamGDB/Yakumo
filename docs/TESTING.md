@@ -436,3 +436,10 @@ speculative preprocessing per recorded command. Informational limits remain in
 reports: a clean result does not mean exhaustive path/configuration coverage.
 System C++ APIs use Cppcheck's shipped library models rather than treating its
 parser as a replacement compiler frontend.
+
+### Quest translation regression
+
+Follow the [quest translation visual scenario](../profiles/mhp3rd/tests/manual/translation_quests.md)
+for bounded human or visual-agent checks with local game data. Run the synthetic
+`mhp3rd_quest_translation_latency_tests` through CTest to detect delayed quest
+list/detail translation under multiple pending loads.
