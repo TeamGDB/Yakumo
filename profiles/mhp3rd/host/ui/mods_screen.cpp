@@ -328,6 +328,7 @@ void documents_screen(bool back) {
     indented("Choose the unpacked mod folder (or a folder holding several mods) in Android's picker. Choose a "
              "folder inside Downloads or on the SD card, not the storage or Download root.");
     indented("Copied " + human_size(s.document_import.bytes()) + ". Installed mods stay in place until review.");
+    focus_first();
     if (back ||
         button_row(s.cancel_import ? "Cancelling…" : "Cancel",
             {s.cancel_import, {}, "Close the system picker too if it is still open. The temporary copy is removed."})) {
