@@ -130,9 +130,26 @@ public class YakumoActivityTest {
         assertNull(YakumoActivity.documentName(uri));
     }
 
+    @Test
+    public void directoryListingBoundsProviderEntriesAndClosesCursor() {
+        YakumoActivity activity = Robolectric.buildActivity(YakumoActivity.class).get();
+        ReflectionHelpers.setStaticField(SDLActivity.class, "mSingleton", activity);
+        ListingProvider provider = new ListingProvider();
+        provider.attachInfo(RuntimeEnvironment.getApplication(), null);
+        ShadowContentResolver.registerProviderInternal("documents.test", provider);
+        String folder = "content://documents.test/tree/root/document/root";
+        provider.large = 100000;
+        assertEquals(100000, YakumoActivity.listFolder(folder).length);
+        assertTrue(provider.cursor.isClosed());
+        provider.large = 100001;
+        assertNull(YakumoActivity.listFolder(folder));
+        assertTrue(provider.cursor.isClosed());
+    }
+
     public static final class ListingProvider extends ContentProvider {
         boolean empty;
         boolean fail;
+        int large;
         MatrixCursor cursor;
         @Override public boolean onCreate() { return true; }
         @Override public Cursor query(Uri uri, String[] projection, String selection,
@@ -148,7 +165,10 @@ public class YakumoActivityTest {
             assertArrayEquals(new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID,
                 DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE}, projection);
             cursor = new MatrixCursor(projection);
-            if (!empty) {
+            if (large > 0) {
+                for (int n = 0; n < large; ++n)
+                    cursor.addRow(new Object[]{"id" + n, "file" + n, "application/octet-stream"});
+            } else if (!empty) {
                 cursor.addRow(new Object[]{"saves", "Saves", DocumentsContract.Document.MIME_TYPE_DIR});
                 cursor.addRow(new Object[]{"options", "Options.ini", "application/octet-stream"});
             }

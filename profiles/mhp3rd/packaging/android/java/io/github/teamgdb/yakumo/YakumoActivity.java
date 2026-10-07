@@ -43,6 +43,7 @@ import java.util.ArrayList;
  */
 public class YakumoActivity extends SDLActivity {
     private static final int kPickTree = 0x59414b01;
+    private static final int kMaxDirectoryEntries = 100000;
     private static final Object sPickLock = new Object();
     private static boolean sPickDone;
     private static String sPickResult;
@@ -342,6 +343,7 @@ public class YakumoActivity extends SDLActivity {
                             DocumentsContract.Document.COLUMN_MIME_TYPE};
         try (Cursor cursor = resolver.query(children, columns, null, null, null)) {
             while (cursor != null && cursor.moveToNext()) {
+                if (entries.size() >= kMaxDirectoryEntries) return null;
                 String id = cursor.getString(0);
                 String name = cursor.getString(1);
                 boolean directory = DocumentsContract.Document.MIME_TYPE_DIR.equals(cursor.getString(2));
