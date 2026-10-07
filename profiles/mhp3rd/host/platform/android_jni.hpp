@@ -35,6 +35,8 @@ void relaunch();
 [[nodiscard]] std::optional<std::string> pick_document();
 // The document standing for a picked tree's folder itself.
 [[nodiscard]] std::string tree_root(const std::string &tree_uri);
+// The provider's display name, which need not be its opaque document id.
+[[nodiscard]] std::optional<std::string> document_name(const std::string &uri);
 
 struct Entry {
     bool directory{};

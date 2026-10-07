@@ -121,6 +121,18 @@ std::string tree_root(const std::string &tree_uri) {
     return call.text(result).value_or(std::string());
 }
 
+std::optional<std::string> document_name(const std::string &uri) {
+    Call call;
+    if (!call.ok()) return std::nullopt;
+    jmethodID id = call.method("documentName", "(Ljava/lang/String;)Ljava/lang/String;");
+    if (id == nullptr) return std::nullopt;
+    jstring argument = call.string(uri);
+    jobject result = call.env->CallStaticObjectMethod(call.type, id, argument);
+    call.env->DeleteLocalRef(argument);
+    if (call.failed()) return std::nullopt;
+    return call.text(result);
+}
+
 std::optional<std::vector<Entry>> list_folder(const std::string &folder_uri) {
     Call call;
     if (!call.ok()) return std::nullopt;

@@ -192,7 +192,7 @@ bool Menu::frame() {
     }
     // A texture pack copy keeps the menu open until it ends.
     texture_pack_import_tick();
-    if (layer.take_menu_toggle() && !texture_pack_import_busy()) return false;
+    if (layer.take_menu_toggle() && !texture_pack_import_busy() && !mods_import_busy()) return false;
     const bool back = layer.take_back();
     // The pad's back button closes the menu too, once nothing is being edited.
     const ImGuiKey cancel = layer.confirm_south() ? ImGuiKey_GamepadFaceRight : ImGuiKey_GamepadFaceDown;
@@ -226,7 +226,15 @@ bool Menu::frame() {
     // A page that is not there this run (Debug) gives way to the first.
     if (tab_ >= tab_count) tab_ = 0;
     const bool opening = first_frame_;
-    const bool switched = tab_bar(kTabs, tab_count, tab_) || first_frame_;
+    // A provider transfer owns the picker until it finishes; another page
+    // must not open a competing save/translation picker in the meantime.
+    const bool transfer = texture_pack_import_busy() || mods_import_busy();
+    ImGui::BeginDisabled(transfer);
+    int requested_tab = tab_;
+    tab_bar(kTabs, tab_count, requested_tab);
+    ImGui::EndDisabled();
+    const bool switched = (!transfer && requested_tab != tab_) || first_frame_;
+    if (!transfer) tab_ = requested_tab;
     first_frame_ = false;
     begin_content();
     MenuPlace &place = menu_place();
@@ -316,7 +324,7 @@ bool Menu::frame() {
     } else if (!font_list_was_open && (((back || pad_back) && !was_editing_) || start)) {
         close_ = true;
     }
-    if (close_ && !quit_ && texture_pack_import_busy()) close_ = false;
+    if (close_ && !quit_ && (texture_pack_import_busy() || mods_import_busy())) close_ = false;
     if (!confirm_dialog()) return false;
     was_editing_ = ImGui::IsAnyItemActive();
     return !close_;

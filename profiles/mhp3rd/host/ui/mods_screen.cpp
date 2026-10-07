@@ -12,6 +12,9 @@
 #include "install/user_data.hpp"
 #include "mods/mhp3rd_mods.hpp"
 #include "mods/mod_import.hpp"
+#if defined(MHP3RD_ANDROID_APP)
+#include "platform/android_documents.hpp"
+#endif
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -27,6 +30,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -48,7 +52,7 @@ using mods::Mod;
 using mods::ModSession;
 using mods::Resolution;
 
-enum class Stage { List, Details, Choose, Review, Result };
+enum class Stage { List, Details, Choose, Documents, Review, Result };
 
 // A mod's preview image as an ImGui texture, loaded once and kept.
 struct Preview {
@@ -61,6 +65,11 @@ struct State {
     std::string mod; // the mod the details show
     std::unique_ptr<FileBrowser> browser;
     fs::path last_folder;
+    fs::path document_staging;
+#if defined(MHP3RD_ANDROID_APP)
+    android::FolderImport document_import;
+    bool cancel_import{};
+#endif
     mods::ImportCheck check;
     mods::ImportResult result;
     bool focus{};
@@ -102,6 +111,11 @@ void back_to_list() {
     s.return_to = s.stage == Stage::Details ? s.mod : std::string();
     s.stage = Stage::List;
     s.browser.reset();
+    if (!s.document_staging.empty()) {
+        std::error_code ec;
+        fs::remove_all(s.document_staging, ec);
+        s.document_staging.clear();
+    }
     s.focus_row = s.return_to.empty();
 }
 
@@ -238,6 +252,20 @@ void status_rows(ModSession &session) {
 
 void open_browser() {
     State &s = state();
+#if defined(MHP3RD_ANDROID_APP)
+    const char *legacy = std::getenv("MHP3RD_LEGACY_FOLDER_BROWSER");
+    if (legacy == nullptr || std::string(legacy) != "1") {
+        if (!s.document_staging.empty()) {
+            std::error_code ec;
+            fs::remove_all(s.document_staging, ec);
+            s.document_staging.clear();
+        }
+        s.cancel_import = false;
+        s.document_import.start(install::user_data_directory() / "transfer" / "mods");
+        go(Stage::Documents);
+        return;
+    }
+#endif
     FileBrowser::Options options;
     options.extensions = {};
     options.filter_name = "folders";
@@ -272,16 +300,8 @@ void check_folder(const fs::path &chosen) {
 
 void browse(bool back) {
     State &s = state();
-#if defined(MHP3RD_ANDROID_APP)
-    indented("Open the folder of a mod you downloaded and unpacked (the one with its mod.ini), or a folder that "
-             "holds several.");
-    indented("On Android this lists only folders Yakumo can read by itself, which leaves out Downloads and SD "
-             "cards. Importing through Android's file picker is not supported yet.",
-        colors::kTextDim);
-#else
     indented("Open the folder of a mod you downloaded and unpacked (the one with its mod.ini), or a folder that "
              "holds several. You can also drop the folder on the window.");
-#endif
     if (auto dropped = Layer::get().take_dropped_file()) {
         s.last_folder = s.browser->folder();
         s.browser.reset();
@@ -300,6 +320,35 @@ void browse(bool back) {
     }
     check_folder(chosen);
 }
+
+#if defined(MHP3RD_ANDROID_APP)
+void documents_screen(bool back) {
+    State &s = state();
+    section("Import mods");
+    indented("Choose the unpacked mod folder (or a folder holding several mods) in Android's picker. Choose a "
+             "folder inside Downloads or on the SD card, not the storage or Download root.");
+    indented("Copied " + human_size(s.document_import.bytes()) + ". Installed mods stay in place until review.");
+    if (back ||
+        button_row(s.cancel_import ? "Cancelling…" : "Cancel",
+            {s.cancel_import, {}, "Close the system picker too if it is still open. The temporary copy is removed."})) {
+        s.document_import.cancel();
+        s.cancel_import = true;
+    }
+    if (!s.document_import.ready()) return;
+    const auto picked = s.document_import.take();
+    if (!picked || s.cancel_import) {
+        if (picked && !picked->staged.empty()) s.document_staging = picked->staged.parent_path();
+        back_to_list();
+    } else if (!picked->error.empty()) {
+        s.result = {};
+        s.result.error = picked->error;
+        go(Stage::Result);
+    } else {
+        s.document_staging = picked->staged.parent_path();
+        check_folder(picked->staged);
+    }
+}
+#endif
 
 void review(ModSession &session, bool back) {
     State &s = state();
@@ -572,8 +621,10 @@ void details(ModSession &session, bool back) {
             info_row(file_name(session, c->file).c_str(), conflict_text(session, *c));
     }
     ImGui::Dummy({0.0f, px(12.0f)});
+#if !defined(MHP3RD_ANDROID_APP)
     if (button_row("Open its folder", {false, {}, "Show the mod's folder in the file manager."}))
         open_folder(mod.folder);
+#endif
     if (button_row("Back", {false, {}, "Back to the mods."})) back_to_list();
 }
 
@@ -600,11 +651,13 @@ void list(ModSession &session) {
                 "Copy a mod you downloaded into the mods folder: choose its unpacked folder, the one with its "
                 "mod.ini. Yakumo does not download mods; unpack .zip, .rar or .7z archives first."}))
         open_browser();
+#if !defined(MHP3RD_ANDROID_APP)
     if (button_row("Open the mods folder",
             {false, {},
                 "Show the mods folder in the file manager: one folder per mod, as the mhp3reload mod "
                 "manager has them."}))
         open_folder(session.paths().folder);
+#endif
     if (button_row("Read the folder again", {false, {}, "Pick up mods added to or removed from the folder."}))
         session.rescan();
 
@@ -665,6 +718,11 @@ void mods_page(bool back) {
     case Stage::Choose:
         browse(back);
         break;
+    case Stage::Documents:
+#if defined(MHP3RD_ANDROID_APP)
+        documents_screen(back);
+#endif
+        break;
     case Stage::Review:
         review(*session, back);
         break;
@@ -676,6 +734,10 @@ void mods_page(bool back) {
 
 bool mods_screen_open() {
     return state().stage != Stage::List;
+}
+
+bool mods_import_busy() {
+    return state().stage == Stage::Documents;
 }
 
 bool take_mods_restart_request() {
