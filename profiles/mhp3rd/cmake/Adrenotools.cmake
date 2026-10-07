@@ -64,7 +64,16 @@ function(_mhp3rd_adrenotools_fetch out name url sha256)
     set(${out} "${archive}" PARENT_SCOPE)
 endfunction()
 
-if(NOT EXISTS "${_mhp3rd_adrenotools_src}/yakumo.stamp")
+# What the extracted tree was made from. The directory is named after the
+# adrenotools commit alone, so a bumped liblinkernsbypass pin must show up
+# here, or the old sources would be built silently.
+set(_mhp3rd_adrenotools_stamp
+    "${MHP3RD_ADRENOTOOLS_COMMIT} ${MHP3RD_ADRENOTOOLS_SHA256} ${MHP3RD_LINKERNSBYPASS_COMMIT} ${MHP3RD_LINKERNSBYPASS_SHA256}\n")
+set(_mhp3rd_adrenotools_stamped "")
+if(EXISTS "${_mhp3rd_adrenotools_src}/yakumo.stamp")
+    file(READ "${_mhp3rd_adrenotools_src}/yakumo.stamp" _mhp3rd_adrenotools_stamped)
+endif()
+if(NOT _mhp3rd_adrenotools_stamped STREQUAL _mhp3rd_adrenotools_stamp)
     _mhp3rd_adrenotools_fetch(_mhp3rd_adrenotools_archive "libadrenotools-${MHP3RD_ADRENOTOOLS_COMMIT}.tar.gz"
         "${MHP3RD_ADRENOTOOLS_URL}" "${MHP3RD_ADRENOTOOLS_SHA256}")
     _mhp3rd_adrenotools_fetch(_mhp3rd_linkernsbypass_archive
@@ -76,8 +85,7 @@ if(NOT EXISTS "${_mhp3rd_adrenotools_src}/yakumo.stamp")
     file(REMOVE_RECURSE "${_mhp3rd_adrenotools_src}/lib/linkernsbypass")
     file(RENAME "${_mhp3rd_adrenotools_root}/liblinkernsbypass-${MHP3RD_LINKERNSBYPASS_COMMIT}"
         "${_mhp3rd_adrenotools_src}/lib/linkernsbypass")
-    file(WRITE "${_mhp3rd_adrenotools_src}/yakumo.stamp"
-        "${MHP3RD_ADRENOTOOLS_SHA256} ${MHP3RD_LINKERNSBYPASS_SHA256}\n")
+    file(WRITE "${_mhp3rd_adrenotools_src}/yakumo.stamp" "${_mhp3rd_adrenotools_stamp}")
 endif()
 
 # adrenotools' own CMakeLists.txt: its arm64-v8a-only check, the "adrenotools"

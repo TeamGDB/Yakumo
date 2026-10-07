@@ -34,6 +34,18 @@ std::string read_meta_json(const fs::path &directory) {
     return in ? std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()) : std::string{};
 }
 
+// The Video tab asks for the driver's name on every frame it draws; the file
+// is read once per driver, until a pick or a clear changes what is installed.
+struct DisplayNameCache {
+    std::string library;
+    std::string name;
+    bool valid{};
+};
+DisplayNameCache &display_name_cache() {
+    static DisplayNameCache cache;
+    return cache;
+}
+
 // A pick is extracted here first and only moved over driver_directory() once
 // it is known to be a driver package, so a bad pick leaves the working driver
 // (and the setting that names it) as they were.
@@ -71,6 +83,7 @@ std::optional<PickedDriver> pick_custom_gpu_driver() {
         fs::remove_all(staging, ec);
         return picked;
     }
+    display_name_cache() = {};
     fs::remove_all(directory, ec);
     fs::rename(staging, directory, ec);
     if (ec) {
@@ -83,6 +96,7 @@ std::optional<PickedDriver> pick_custom_gpu_driver() {
 }
 
 void clear_custom_gpu_driver() {
+    display_name_cache() = {};
     std::error_code ec;
     fs::remove_all(driver_directory(), ec);
 }
@@ -103,8 +117,12 @@ bool driver_trial_interrupted() {
 
 std::string driver_display_name(const std::string &library) {
     if (library.empty()) return {};
-    const std::string name = json_string_field(read_meta_json(driver_directory()), "name");
-    return name.empty() ? library : name;
+    DisplayNameCache &cache = display_name_cache();
+    if (!cache.valid || cache.library != library) {
+        const std::string name = json_string_field(read_meta_json(driver_directory()), "name");
+        cache = {library, name.empty() ? library : name, true};
+    }
+    return cache.name;
 }
 
 void *open_custom_gpu_driver(const std::string &library, std::string &error) {

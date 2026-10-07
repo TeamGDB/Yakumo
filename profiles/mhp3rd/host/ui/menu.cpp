@@ -332,7 +332,7 @@ bool Menu::frame() {
 }
 
 #if defined(MHP3RD_ANDROID_APP)
-// What "Pick a driver folder…" found, for the row under it: empty before the
+// What "Pick a driver package…" found, for the row under it: empty before the
 // player has picked, or after a pick that needs no comment.
 std::string &gpu_driver_status() {
     static std::string status;
