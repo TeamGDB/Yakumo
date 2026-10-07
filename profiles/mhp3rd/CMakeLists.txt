@@ -541,6 +541,14 @@ if(PSPRECOMP_BUILD_TESTS)
     add_test(NAME mhp3rd_settings_tests COMMAND mhp3rd_settings_tests)
 endif()
 
+# Reading a GPU driver package's meta.json and choosing its main library.
+add_executable(mhp3rd_driver_meta_tests tests/driver_meta_tests.cpp)
+target_include_directories(mhp3rd_driver_meta_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+set_target_properties(mhp3rd_driver_meta_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_driver_meta_tests COMMAND mhp3rd_driver_meta_tests)
+endif()
+
 # Where the data directory is (portable or per-user) and the copy of an
 # installed copy's data into a portable folder. No game data.
 add_executable(mhp3rd_data_directory_tests

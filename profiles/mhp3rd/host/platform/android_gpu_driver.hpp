@@ -24,10 +24,8 @@ struct PickedDriver {
 // further .so's it depends on) and extracts every .so in it into the app's
 // private storage, where adrenotools can load them from (a content:// zip is
 // not a path it can open). The main driver is the only .so found, or, among
-// several, the one whose name holds "vulkan"; meta.json's "libraryName" is
-// not read (ponytail: parse it instead, if a package with several unrelated
-// .so's and none named "vulkan" ever needs it). Nothing when the player
-// cancels.
+// several, the one meta.json's "libraryName" names, else the first whose name
+// holds "vulkan" (platform/driver_meta.hpp). Nothing when the player cancels.
 [[nodiscard]] std::optional<PickedDriver> pick_custom_gpu_driver();
 
 // Removes a driver pick_custom_gpu_driver() installed, so "System default"

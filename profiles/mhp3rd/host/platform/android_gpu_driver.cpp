@@ -2,6 +2,7 @@
 
 #include "app_paths.hpp"
 #include "platform/android_jni.hpp"
+#include "platform/driver_meta.hpp"
 
 #include <adrenotools/driver.h>
 
@@ -25,6 +26,12 @@ namespace fs = std::filesystem;
 fs::path driver_directory() {
     const char *storage = SDL_GetAndroidInternalStoragePath();
     return storage == nullptr ? fs::path{} : fs::path(storage) / "gpu_driver";
+}
+
+// The text of `directory`'s meta.json; empty when there is none.
+std::string read_meta_json(const fs::path &directory) {
+    std::ifstream in(directory / "meta.json", std::ios::binary);
+    return in ? std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()) : std::string{};
 }
 
 // A pick is extracted here first and only moved over driver_directory() once
@@ -71,16 +78,7 @@ std::optional<PickedDriver> pick_custom_gpu_driver() {
         fs::remove_all(staging, ec);
         return picked;
     }
-    // The main driver: the only one, or, among several, the one naming
-    // "vulkan" (libadrenotools' tools/ADPKG.md calls it meta.json's
-    // "libraryName", which is not read here).
-    picked.library = libraries->front();
-    if (libraries->size() > 1u)
-        for (const std::string &name : *libraries)
-            if (name.find("vulkan") != std::string::npos) {
-                picked.library = name;
-                break;
-            }
+    picked.library = choose_main_library(*libraries, json_string_field(read_meta_json(directory), "libraryName"));
     return picked;
 }
 
@@ -105,21 +103,7 @@ bool driver_trial_interrupted() {
 
 std::string driver_display_name(const std::string &library) {
     if (library.empty()) return {};
-    std::ifstream in(driver_directory() / "meta.json", std::ios::binary);
-    if (!in) return library;
-    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    // A hand-rolled read of one string field, not a JSON parser: meta.json is
-    // a flat object (schemaVersion, name, description, ..., libraryName) with
-    // no nesting, and "name" is the only field this needs.
-    std::size_t at = text.find("\"name\"");
-    at = at == std::string::npos ? at : text.find(':', at + 6u);
-    at = at == std::string::npos ? at : text.find('"', at);
-    if (at == std::string::npos) return library;
-    std::string name;
-    for (++at; at < text.size() && text[at] != '"'; ++at) {
-        if (text[at] == '\\' && at + 1u < text.size()) ++at; // skip the escape, keep the escaped character
-        name += text[at];
-    }
+    const std::string name = json_string_field(read_meta_json(driver_directory()), "name");
     return name.empty() ? library : name;
 }
 
