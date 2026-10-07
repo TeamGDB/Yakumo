@@ -10,11 +10,15 @@
 #include "install/game_identity.hpp"
 #include "install/user_data.hpp"
 #include "settings/settings.hpp"
+#if defined(MHP3RD_ANDROID_APP)
+#include "platform/android_documents.hpp"
+#endif
 
 #include "imgui.h"
 
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <future>
 #include <iostream>
@@ -32,7 +36,7 @@ using gpu::TexturePackCheck;
 using gpu::TexturePackCopy;
 using gpu::TexturePackLocation;
 
-enum class Stage { Closed, Choose, Checking, Review, Copying, Result };
+enum class Stage { Closed, Choose, Documents, Checking, Review, Copying, Result };
 
 // What the review screen shows: the pack found, and the one in use now.
 struct Review {
@@ -57,6 +61,10 @@ struct State {
     Stage stage{Stage::Closed};
     std::unique_ptr<FileBrowser> browser;
     fs::path last_folder;
+    fs::path document_staging;
+#if defined(MHP3RD_ANDROID_APP)
+    android::FolderImport document_import;
+#endif
     std::future<Review> checking;
     fs::path checking_folder;
     bool cancel_requested{};
@@ -105,6 +113,11 @@ void close() {
     State &s = state();
     s.stage = Stage::Closed;
     s.browser.reset();
+    if (!s.document_staging.empty()) {
+        std::error_code ec;
+        fs::remove_all(s.document_staging, ec);
+        s.document_staging.clear();
+    }
     s.focus_row = true;
 }
 
@@ -128,6 +141,20 @@ std::string count(std::size_t n, const char *one, const char *many) {
 
 void open_browser() {
     State &s = state();
+#if defined(MHP3RD_ANDROID_APP)
+    const char *legacy = std::getenv("MHP3RD_LEGACY_FOLDER_BROWSER");
+    if (legacy == nullptr || std::string(legacy) != "1") {
+        if (!s.document_staging.empty()) {
+            std::error_code ec;
+            fs::remove_all(s.document_staging, ec);
+            s.document_staging.clear();
+        }
+        s.cancel_requested = false;
+        s.document_import.start(install::user_data_directory() / "transfer" / "textures");
+        go(Stage::Documents);
+        return;
+    }
+#endif
     FileBrowser::Options options;
     options.extensions = {};
     options.filter_name = "folders";
@@ -184,16 +211,8 @@ void log_review(const Review &r) {
 
 bool browse(bool back) {
     State &s = state();
-#if defined(MHP3RD_ANDROID_APP)
-    indented("Import: open the pack's folder, the one that holds textures.ini, or choose a folder that holds it, "
-             "such as PPSSPP's PSP/TEXTURES.");
-    indented("On Android this lists only folders Yakumo can read by itself, which leaves out Downloads and SD "
-             "cards. Importing through Android's file picker is not supported yet.",
-        colors::kTextDim);
-#else
     indented("Import: open the pack's folder, the one that holds textures.ini, or choose a folder that holds it, "
              "such as PPSSPP's PSP/TEXTURES. You can also drop the folder on the window.");
-#endif
     // A folder dropped on the window is chosen at once.
     if (auto dropped = Layer::get().take_dropped_file()) {
         s.last_folder = s.browser->folder();
@@ -215,9 +234,40 @@ bool browse(bool back) {
     return true;
 }
 
+#if defined(MHP3RD_ANDROID_APP)
+void documents_screen(bool back) {
+    State &s = state();
+    section("Import texture pack");
+    indented("Choose the unpacked pack folder in Android's picker, then wait while its files are copied for "
+             "review. Choose a folder inside Downloads or on the SD card, not the storage or Download root.");
+    indented("Copied " + human_size(s.document_import.bytes()) + ". The installed pack stays in place.");
+    if (back ||
+        button_row(s.cancel_requested ? "Cancelling…" : "Cancel",
+            {s.cancel_requested, {},
+                "Close the system picker too if it is still open. The temporary copy is removed."})) {
+        s.document_import.cancel();
+        s.cancel_requested = true;
+    }
+    if (!s.document_import.ready()) return;
+    const auto picked = s.document_import.take();
+    if (!picked || s.cancel_requested) {
+        if (picked && !picked->staged.empty()) s.document_staging = picked->staged.parent_path();
+        close();
+    } else if (!picked->error.empty()) {
+        Outcome outcome;
+        outcome.error = picked->error;
+        s.outcome = std::move(outcome);
+        go(Stage::Result);
+    } else {
+        s.document_staging = picked->staged.parent_path();
+        start_check(picked->staged);
+    }
+}
+#endif
+
 void checking_screen(bool back) {
     State &s = state();
-    if (back) {
+    if (back && s.document_staging.empty()) {
         // The check reads only; let it finish on its own.
         open_browser();
         return;
@@ -361,7 +411,10 @@ void review_screen(bool back) {
                 human_size(c.bytes) + ". The folder must stay where it is." +
                 (installed_exists ? " The installed pack is kept, unused." : "");
         focus_first();
-        if (button_row("Use it where it is", {in_use, {}, place_note})) use_in_place();
+        if (button_row("Use it where it is",
+                {!s.document_staging.empty() || in_use, {},
+                    s.document_staging.empty() ? place_note : "Android-picked files must be installed before use."}))
+            use_in_place();
     }
     focus_first();
     if (button_row("Choose another folder", {false, {}, "Back to the folders."})) open_browser();
@@ -430,8 +483,10 @@ void result_screen(bool back) {
         indented("Nothing changed: the pack in use before is still in place.");
     }
     ImGui::Dummy({0.0f, px(12.0f)});
+#if !defined(MHP3RD_ANDROID_APP)
     if (button_row("Open the textures folder", {false, {}, "Show the folder the pack is in."}))
         open_folder(o.ok && o.in_place ? o.folder : textures_root());
+#endif
     focus_first();
     if (button_row("Done", {false, {}, "Back to the menu."})) close();
 }
@@ -508,9 +563,11 @@ void texture_pack_rows() {
                 "Install an HD texture pack from a folder: the one that holds textures.ini, or one that holds it "
                 "in textures/NPJB40001 or PSP/TEXTURES. It is checked first; the pack it replaces is kept."}))
         open_browser();
+#if !defined(MHP3RD_ANDROID_APP)
     if (button_row("Open the textures folder",
             {false, {}, "Show the textures folder in the data folder, where imported packs go."}))
         open_folder(textures_root());
+#endif
     if (!settings.texture_pack_folder.empty()) info_row("Pack used from", settings.texture_pack_folder);
     if (!settings.texture_pack_folder.empty() &&
         button_row("Stop using the pack folder",
@@ -528,7 +585,7 @@ bool texture_pack_screen_open() {
 }
 
 bool texture_pack_import_busy() {
-    return state().stage == Stage::Copying;
+    return state().stage == Stage::Copying || state().stage == Stage::Documents;
 }
 
 bool texture_pack_screen(bool back) {
@@ -538,6 +595,11 @@ bool texture_pack_screen(bool back) {
         return false;
     case Stage::Choose:
         return browse(back);
+    case Stage::Documents:
+#if defined(MHP3RD_ANDROID_APP)
+        documents_screen(back);
+#endif
+        break;
     case Stage::Checking:
         checking_screen(back);
         break;

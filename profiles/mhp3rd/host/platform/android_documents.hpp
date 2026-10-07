@@ -8,6 +8,9 @@
 // picked one. Only in the Android app (MHP3RD_ANDROID_APP).
 
 #include <filesystem>
+#include <cstdint>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -27,6 +30,37 @@ struct PickedImport {
 // A picked .lang document is copied to a new private staging directory with
 // the translation input budget. The caller imports it, then removes its parent.
 [[nodiscard]] std::optional<PickedImport> pick_translation_to_import(const std::filesystem::path &staging);
+
+// Copy only a user-selected unpacked folder into private staging. The regular
+// texture/mod importer validates it before installing anything. Names, cycles,
+// depth, entry count and aggregate bytes are bounded; failures remove the copy.
+struct FolderImportLimits {
+    std::uint64_t bytes{8ULL << 30};
+    std::size_t entries{100000};
+    unsigned depth{32};
+};
+using FolderImportProgress = std::function<bool(std::uint64_t)>;
+[[nodiscard]] std::optional<PickedImport> pick_folder_to_import(const std::filesystem::path &staging,
+    const FolderImportProgress &progress = {}, const FolderImportLimits &limits = {});
+
+// Picker and provider I/O run away from the drawing thread. Cancelling waits
+// for an outstanding picker/provider call to return, then discards staging.
+class FolderImport {
+public:
+    FolderImport();
+    ~FolderImport();
+    FolderImport(const FolderImport &) = delete;
+    FolderImport &operator=(const FolderImport &) = delete;
+    void start(const std::filesystem::path &staging);
+    void cancel();
+    [[nodiscard]] bool ready() const;
+    [[nodiscard]] std::uint64_t bytes() const;
+    [[nodiscard]] std::optional<PickedImport> take();
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
 
 struct PickedExport {
     std::string where; // the picked folder, for the player

@@ -317,6 +317,16 @@ public class YakumoActivity extends SDLActivity {
             .toString();
     }
 
+    /** The provider's real folder name; document ids can be opaque. */
+    public static String documentName(String uri) {
+        try (Cursor cursor = mSingleton.getContentResolver().query(Uri.parse(uri),
+                new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME}, null, null, null)) {
+            return cursor != null && cursor.moveToFirst() ? cursor.getString(0) : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     /**
      * The children of a folder document in a picked tree, as "d/name/uri" for
      * folders and "f/name/uri" for files (names cannot hold '/').

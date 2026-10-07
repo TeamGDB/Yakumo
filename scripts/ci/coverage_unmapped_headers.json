@@ -16,8 +16,8 @@
     "reason": "Function declarations and aggregate fields have no standalone LLVM line map. Reviewed additions expose a bounded archive-read declaration and result fields only; executable implementation and archive/runtime regressions remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/platform/android_documents.hpp": {
-    "sha256": "db4ebe8bb177b8439c071c90d68d6645305592e8fc79805b6ae68e5d06d203bf",
-    "reason": "Function declarations and aggregate fields have no standalone LLVM line map; corresponding implementation mappings remain subject to the normal diff gate."
+    "sha256": "ed456c89390a6e945a44d2f1b98923ee963b84250a78003e6533a404fb9714e5",
+    "reason": "Reviewed function/class declarations and aggregate member defaults only; no standalone function body is exempted. Folder staging, JNI transport and menu implementations remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/ui/translation_screen.hpp": {
     "sha256": "be45fd2586182b46dfe5f08a84e0564c357ffca14dafc5e7e2932124ee5faa85",
@@ -26,5 +26,13 @@
   "profiles/mhp3rd/host/fonts/game_font.hpp": {
     "sha256": "aaa3f12152c49d0a5ffc87518df4620cffb4bec45ee1420ee29ffb822820c83e",
     "reason": "Constants, aggregate fields and function declarations have no standalone LLVM line map; the Cyrillic classification implementation and tests remain subject to the normal diff gate. This header change documents the traced layout only."
+  },
+  "profiles/mhp3rd/host/platform/android_jni.hpp": {
+    "sha256": "37be29a64d74990724f832706414997bca88ccf277b1b4e35f4e0132510ea91d",
+    "reason": "Reviewed function/class declarations and aggregate member defaults only; no standalone function body is exempted. Folder staging, JNI transport and menu implementations remain subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/ui/mods_screen.hpp": {
+    "sha256": "8464db48399bfca648fdcca31710dc9426456d94fc622c19cb359ee55bea95eb",
+    "reason": "Reviewed function/class declarations and aggregate member defaults only; no standalone function body is exempted. Folder staging, JNI transport and menu implementations remain subject to the normal diff gate."
   }
 }

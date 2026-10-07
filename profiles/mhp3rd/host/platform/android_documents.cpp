@@ -7,10 +7,14 @@
 #include <unistd.h>
 
 #include <array>
+#include <atomic>
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <limits>
 #include <fstream>
+#include <future>
+#include <set>
 #include <vector>
 
 namespace mhp3rd::android {
@@ -35,7 +39,7 @@ std::string describe_tree(const std::string &uri) {
 }
 
 bool copy_document_to_file(const std::string &uri, const fs::path &target, std::string &error,
-    std::size_t limit = std::numeric_limits<std::size_t>::max()) {
+    std::size_t limit = std::numeric_limits<std::size_t>::max(), const FolderImportProgress &progress = {}) {
     const int fd = open_document(uri, "r");
     if (fd < 0) {
         error = "cannot read " + target.filename().string();
@@ -43,7 +47,7 @@ bool copy_document_to_file(const std::string &uri, const fs::path &target, std::
     }
     std::ofstream out(target, std::ios::binary | std::ios::trunc);
     std::array<char, 1 << 16> buffer{};
-    bool ok = static_cast<bool>(out);
+    bool ok = static_cast<bool>(out) && (!progress || progress(0));
     std::size_t copied = 0;
     while (ok) {
         const ssize_t got = ::read(fd, buffer.data(), buffer.size());
@@ -53,17 +57,22 @@ bool copy_document_to_file(const std::string &uri, const fs::path &target, std::
             break;
         }
         if (static_cast<std::size_t>(got) > limit - copied) {
+            error = "the chosen files exceed the import size limit";
             ok = false;
             break;
         }
         copied += static_cast<std::size_t>(got);
         out.write(buffer.data(), got);
         ok = static_cast<bool>(out);
+        if (ok && progress && !progress(copied)) {
+            error = "Import cancelled.";
+            ok = false;
+        }
     }
     ::close(fd);
     out.close();
     ok = ok && static_cast<bool>(out);
-    if (!ok) error = "cannot copy " + target.filename().string();
+    if (!ok && error.empty()) error = "cannot copy " + target.filename().string();
     return ok;
 }
 
@@ -162,7 +171,156 @@ bool copy_tree(const fs::path &local, const std::string &folder_uri, std::string
     return !ec;
 }
 
+bool safe_name(const std::string &name) {
+    return !name.empty() && name != "." && name != ".." && name.find_first_of("/\\:") == std::string::npos &&
+        name.find('\0') == std::string::npos;
+}
+
+struct FolderCopy {
+    const FolderImportLimits &limits;
+    const FolderImportProgress &progress;
+    std::uint64_t bytes{};
+    std::size_t entries{};
+    std::set<std::string> visited;
+    std::string error;
+
+    bool active() {
+        if (!progress || progress(bytes)) return true;
+        error = "Import cancelled.";
+        return false;
+    }
+
+    bool copy(const std::string &uri, const fs::path &target, unsigned depth) {
+        if (!active()) return false;
+        if (depth > limits.depth || !visited.insert(uri).second) {
+            error = "The chosen folder is too deeply nested or contains a document cycle.";
+            return false;
+        }
+        const auto children = list_folder(uri);
+        if (!children) {
+            error = "Android would not let Yakumo read that folder.";
+            return false;
+        }
+        for (const Entry &entry : *children) {
+            if (!active()) return false;
+            if (++entries > limits.entries || !safe_name(entry.name) || entry.uri.empty()) {
+                error = "The chosen folder contains too many entries or an unsafe file name.";
+                return false;
+            }
+            const fs::path path = target / entry.name;
+            // A fresh, private staging directory is required. Refuse duplicate
+            // names rather than letting a provider overwrite an earlier entry.
+            if (fs::exists(path)) {
+                error = "The chosen folder contains duplicate file names.";
+                return false;
+            }
+            if (entry.directory) {
+                fs::create_directory(path);
+                if (!copy(entry.uri, path, depth + 1)) return false;
+            } else {
+                const std::uint64_t before = bytes;
+                const auto remaining = static_cast<std::size_t>(
+                    std::min<std::uint64_t>(limits.bytes - bytes, std::numeric_limits<std::size_t>::max()));
+                if (!copy_document_to_file(entry.uri, path, error, remaining, [&](std::uint64_t done) {
+                        bytes = before + done;
+                        return active();
+                    }))
+                    return false;
+            }
+        }
+        return true;
+    }
+};
+
 } // namespace
+
+std::optional<PickedImport> pick_folder_to_import(
+    const fs::path &staging, const FolderImportProgress &progress, const FolderImportLimits &limits) {
+    const auto tree = pick_folder();
+    if (!tree) return std::nullopt;
+    PickedImport result;
+    fs::path owned;
+    try {
+        if (progress && !progress(0)) {
+            result.error = "Import cancelled.";
+            return result;
+        }
+        fs::create_directories(staging);
+        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        for (unsigned attempt = 0; attempt < 64; ++attempt) {
+            const auto candidate = staging / ("folder-" + std::to_string(stamp) + "-" + std::to_string(attempt));
+            if (fs::create_directory(candidate)) {
+                owned = candidate;
+                break;
+            }
+        }
+        if (owned.empty()) throw std::runtime_error("Cannot create a transfer folder.");
+        const std::string root_uri = tree_root(*tree);
+        const auto display_name = document_name(root_uri);
+        if (!display_name) throw std::runtime_error("Android would not provide the selected folder's name.");
+        const std::string &name = *display_name;
+        if (!safe_name(name)) throw std::runtime_error("The selected folder has an unsafe name.");
+        result.staged = owned / name;
+        fs::create_directory(result.staged);
+        FolderCopy copy{limits, progress, 0, 0, {}, {}};
+        if (!copy.copy(root_uri, result.staged, 0)) result.error = copy.error;
+    } catch (const std::exception &error) {
+        result.error = "Copying the selected folder failed: " + std::string(error.what());
+    }
+    if (!result.error.empty()) {
+        std::error_code ec;
+        if (!owned.empty()) fs::remove_all(owned, ec);
+        result.staged.clear();
+    }
+    return result;
+}
+
+struct FolderImport::Impl {
+    std::atomic_bool cancelled{};
+    std::atomic<std::uint64_t> bytes{};
+    std::future<std::optional<PickedImport>> work;
+};
+
+FolderImport::FolderImport() : impl_(std::make_unique<Impl>()) {}
+
+FolderImport::~FolderImport() {
+    cancel();
+    if (impl_->work.valid()) {
+        const auto result = impl_->work.get();
+        if (result && !result->staged.empty()) {
+            std::error_code ec;
+            fs::remove_all(result->staged.parent_path(), ec);
+        }
+    }
+}
+
+void FolderImport::start(const fs::path &staging) {
+    if (impl_->work.valid()) throw std::logic_error("A folder import is already running.");
+    impl_->cancelled = false;
+    impl_->bytes = 0;
+    impl_->work = std::async(std::launch::async, [this, staging] {
+        return pick_folder_to_import(staging, [this](std::uint64_t bytes) {
+            impl_->bytes = bytes;
+            return !impl_->cancelled;
+        });
+    });
+}
+
+void FolderImport::cancel() {
+    impl_->cancelled = true;
+}
+
+bool FolderImport::ready() const {
+    return impl_->work.valid() && impl_->work.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+}
+
+std::uint64_t FolderImport::bytes() const {
+    return impl_->bytes;
+}
+
+std::optional<PickedImport> FolderImport::take() {
+    return impl_->work.get();
+}
 
 std::optional<PickedImport> pick_translation_to_import(const fs::path &staging) {
     const auto document = pick_document();

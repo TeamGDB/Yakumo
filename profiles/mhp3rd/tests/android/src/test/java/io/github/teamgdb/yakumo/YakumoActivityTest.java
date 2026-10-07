@@ -66,6 +66,7 @@ public class YakumoActivityTest {
         assertArrayEquals(new int[4], YakumoActivity.cutoutInsets());
         assertNull(YakumoActivity.pickFolder());
         assertNull(YakumoActivity.pickDocument());
+        assertNull(YakumoActivity.documentName("content://test/document/opaque-id"));
         assertNull(YakumoActivity.create("content://test/tree/root/document/root", "file", false));
         assertEquals(-1, YakumoActivity.openDocument("content://test/document/file", "r"));
         YakumoActivity.hapticTick();
@@ -112,6 +113,23 @@ public class YakumoActivityTest {
         assertEquals(-1, YakumoActivity.openDocument(folder, "w"));
     }
 
+    @Test
+    public void documentNameUsesProviderMetadataAndClosesCursor() {
+        YakumoActivity activity = Robolectric.buildActivity(YakumoActivity.class).get();
+        ReflectionHelpers.setStaticField(SDLActivity.class, "mSingleton", activity);
+        ListingProvider provider = new ListingProvider();
+        provider.attachInfo(RuntimeEnvironment.getApplication(), null);
+        ShadowContentResolver.registerProviderInternal("documents.test", provider);
+        String uri = "content://documents.test/tree/opaque-id/document/opaque-id";
+        assertEquals("日本語 mod", YakumoActivity.documentName(uri));
+        assertTrue(provider.cursor.isClosed());
+        provider.empty = true;
+        assertNull(YakumoActivity.documentName(uri));
+        assertTrue(provider.cursor.isClosed());
+        provider.fail = true;
+        assertNull(YakumoActivity.documentName(uri));
+    }
+
     public static final class ListingProvider extends ContentProvider {
         boolean empty;
         boolean fail;
@@ -120,6 +138,12 @@ public class YakumoActivityTest {
         @Override public Cursor query(Uri uri, String[] projection, String selection,
                                       String[] selectionArgs, String sortOrder) {
             if (fail) throw new SecurityException("Synthetic denied document access");
+            if (!uri.toString().endsWith("/children")) {
+                assertArrayEquals(new String[]{DocumentsContract.Document.COLUMN_DISPLAY_NAME}, projection);
+                cursor = new MatrixCursor(projection);
+                if (!empty) cursor.addRow(new Object[]{"日本語 mod"});
+                return cursor;
+            }
             assertTrue(uri.toString().endsWith("/children"));
             assertArrayEquals(new String[]{DocumentsContract.Document.COLUMN_DOCUMENT_ID,
                 DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE}, projection);

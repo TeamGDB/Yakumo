@@ -600,9 +600,26 @@ if(UNIX)
         host/platform/android_documents.cpp
         host/text/language.cpp)
     target_include_directories(mhp3rd_translation_document_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+    target_link_libraries(mhp3rd_translation_document_tests PRIVATE Threads::Threads)
     set_target_properties(mhp3rd_translation_document_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
     if(PSPRECOMP_BUILD_TESTS)
         add_test(NAME mhp3rd_translation_document_tests COMMAND mhp3rd_translation_document_tests)
+    endif()
+endif()
+
+# Exercise the actual Android JNI adapter against a synthetic JVM function
+# table on desktop hosts. No native Android library or game startup is used.
+if(MHP3RD_RENDERER AND UNIX AND NOT ANDROID)
+    find_package(JNI QUIET)
+    if(JNI_FOUND)
+        add_executable(mhp3rd_android_jni_tests tests/android_jni_tests.cpp host/platform/android_jni.cpp)
+        target_include_directories(mhp3rd_android_jni_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host" ${JNI_INCLUDE_DIRS})
+        target_compile_definitions(mhp3rd_android_jni_tests PRIVATE SDL_PLATFORM_ANDROID=1)
+        target_link_libraries(mhp3rd_android_jni_tests PRIVATE SDL3::Headers)
+        set_target_properties(mhp3rd_android_jni_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+        if(PSPRECOMP_BUILD_TESTS)
+            add_test(NAME mhp3rd_android_jni_tests COMMAND mhp3rd_android_jni_tests)
+        endif()
     endif()
 endif()
 

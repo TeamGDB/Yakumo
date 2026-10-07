@@ -14,6 +14,9 @@ void mods_page(bool back);
 // Whether a screen of the page is open, so back closes it before the menu.
 [[nodiscard]] bool mods_screen_open();
 
+// Keep the menu open while the system picker or its folder copy is running.
+[[nodiscard]] bool mods_import_busy();
+
 // Once, after the player chose "Restart now" to apply a change.
 [[nodiscard]] bool take_mods_restart_request();
 
