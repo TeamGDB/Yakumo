@@ -2474,14 +2474,24 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
     // A custom GPU driver (host/platform/android_gpu_driver.hpp), opened
     // through adrenotools, backs volk's function-pointer table instead of the
     // system libvulkan.so; failing to open or initialize it falls back to the
-    // system driver at once (ponytail: a failure once vkCreateInstance has
-    // succeeded with it, e.g. in vkCreateDevice below, does not retry with a
-    // fresh instance and system driver; it is reported the same way any other
-    // device failure is, naming the custom driver, so the player knows to
-    // clear it in Settings; add the deeper retry if that proves not enough).
-    const std::string wanted_driver = player.custom_gpu_driver;
+    // system driver at once. A failure once vkCreateInstance has succeeded
+    // with it (e.g. in vkCreateDevice below) or a crash in the driver is not
+    // retried in this run; the driver is on trial until initialization ends
+    // (android::begin_driver_trial), and a trial the next start finds
+    // unfinished drops the driver, so it cannot trap the player in a start-up
+    // failure they cannot reach the Video tab to undo.
+    std::string wanted_driver = player.custom_gpu_driver;
+    if (!wanted_driver.empty() && android::driver_trial_interrupted()) {
+        std::cout << "[render] the custom GPU driver " << wanted_driver
+                  << " did not get the renderer started last time; using the phone's own\n";
+        android::clear_custom_gpu_driver();
+        settings::current().custom_gpu_driver.clear();
+        settings::save();
+        wanted_driver.clear();
+    }
     bool volk_ready = false;
     if (!wanted_driver.empty()) {
+        android::begin_driver_trial();
         std::string driver_error;
         void *handle = android::open_custom_gpu_driver(wanted_driver, driver_error);
         PFN_vkGetInstanceProcAddr get_proc = nullptr;
@@ -2680,7 +2690,9 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
     device_info.ppEnabledExtensionNames = enabled_device_extensions.data();
     if (!check(vkCreateDevice(impl.physical_device, &device_info, nullptr, &impl.device), "vkCreateDevice", error)) {
 #if defined(MHP3RD_ANDROID_APP)
-        if (impl.gpu_driver_handle != nullptr) error = "custom GPU driver " + wanted_driver + ": " + error;
+        if (impl.gpu_driver_handle != nullptr)
+            error = "custom GPU driver " + wanted_driver + ": " + error +
+                " (Restart Yakumo to use the phone's own driver.)";
 #endif
         return false;
     }
@@ -3152,6 +3164,9 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
     std::cout << "Renderer: Vulkan on " << properties.deviceName << ", target " << impl.target_extent.width << "x"
               << impl.target_extent.height << "\n";
     impl.ready = true;
+#if defined(MHP3RD_ANDROID_APP)
+    android::end_driver_trial();
+#endif
     return true;
 }
 

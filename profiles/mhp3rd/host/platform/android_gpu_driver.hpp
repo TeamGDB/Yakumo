@@ -34,6 +34,17 @@ struct PickedDriver {
 // starts clean the next time one is picked.
 void clear_custom_gpu_driver();
 
+// A custom driver is "on trial" from the moment the renderer first opens it
+// until the renderer is up with it. If the app dies in between (a driver that
+// crashes, or fails in vkCreateDevice and shows the fatal-error dialog), the
+// player never reaches the Video tab to undo the pick, so the next start would
+// repeat it forever. begin_driver_trial() leaves a marker and
+// driver_trial_interrupted() finds it at the next start, for the caller to drop
+// the driver; end_driver_trial() removes it once initialization succeeded.
+void begin_driver_trial();
+void end_driver_trial();
+[[nodiscard]] bool driver_trial_interrupted();
+
 // `library`'s driver package's meta.json "name", for the Video tab's row
 // (Winlator and Skyline show this instead of the bare file name); `library`
 // itself when there is no meta.json or it cannot be read, empty when

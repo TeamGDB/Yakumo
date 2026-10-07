@@ -27,6 +27,21 @@ fs::path driver_directory() {
     return storage == nullptr ? fs::path{} : fs::path(storage) / "gpu_driver";
 }
 
+// A pick is extracted here first and only moved over driver_directory() once
+// it is known to be a driver package, so a bad pick leaves the working driver
+// (and the setting that names it) as they were.
+fs::path staging_directory() {
+    fs::path directory = driver_directory();
+    return directory.empty() ? directory : directory.parent_path() / "gpu_driver.new";
+}
+
+// Present from the moment a custom driver is first used until the renderer is
+// up with it: finding it at the next start means that attempt failed or the
+// driver crashed the app, and the player never reached the Video tab to undo it.
+fs::path trial_marker() {
+    return driver_directory() / ".trial";
+}
+
 } // namespace
 
 std::optional<PickedDriver> pick_custom_gpu_driver() {
@@ -34,21 +49,26 @@ std::optional<PickedDriver> pick_custom_gpu_driver() {
     if (!document) return std::nullopt;
     PickedDriver picked;
     const fs::path directory = driver_directory();
+    const fs::path staging = staging_directory();
     if (directory.empty()) {
         picked.error = "no private storage to install the driver into";
         return picked;
     }
     std::error_code ec;
-    fs::remove_all(directory, ec);
-    fs::create_directories(directory, ec);
-    const std::optional<std::vector<std::string>> libraries = install_gpu_driver_zip(*document, directory.string());
-    if (!libraries) {
-        picked.error = "Android would not let Yakumo read that file.";
+    fs::remove_all(staging, ec);
+    fs::create_directories(staging, ec);
+    const std::optional<std::vector<std::string>> libraries = install_gpu_driver_zip(*document, staging.string());
+    if (!libraries || libraries->empty()) {
+        picked.error = libraries ? "not a driver package: no .so file in that .zip"
+                                 : "Android would not let Yakumo read that file.";
+        fs::remove_all(staging, ec);
         return picked;
     }
-    if (libraries->empty()) {
-        picked.error = "not a driver package: no .so file in that .zip";
-        fs::remove_all(directory, ec);
+    fs::remove_all(directory, ec);
+    fs::rename(staging, directory, ec);
+    if (ec) {
+        picked.error = "could not install the driver into the app's private storage";
+        fs::remove_all(staging, ec);
         return picked;
     }
     // The main driver: the only one, or, among several, the one naming
@@ -67,6 +87,20 @@ std::optional<PickedDriver> pick_custom_gpu_driver() {
 void clear_custom_gpu_driver() {
     std::error_code ec;
     fs::remove_all(driver_directory(), ec);
+}
+
+void begin_driver_trial() {
+    std::ofstream(trial_marker()).put('\n');
+}
+
+void end_driver_trial() {
+    std::error_code ec;
+    fs::remove(trial_marker(), ec);
+}
+
+bool driver_trial_interrupted() {
+    std::error_code ec;
+    return fs::exists(trial_marker(), ec);
 }
 
 std::string driver_display_name(const std::string &library) {
