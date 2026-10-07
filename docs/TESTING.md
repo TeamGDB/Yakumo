@@ -203,6 +203,16 @@ On a phone, with Controls → Touch screen → *Layout* set to Action, in a ques
 
 ### Texture pack import (#49)
 
+#### Android folder access (#160)
+
+Before the next release, check texture-pack and mod imports from a folder
+inside Downloads and from an SD card with Android's system picker, without
+root or broad storage permissions. Use unpacked synthetic fixtures first.
+Check cancellation, denied access, restarting with imported content and
+replacement backups. Existing saves, translations and log exports must remain
+available through their respective menu actions. Physical Android 16 testing
+is required before marking the reported device restriction verified.
+
 `mhp3rd_texture_pack_tests` (CTest) checks the import without game data or a window: finding a pack in each layout (the pack folder, `textures/NPJB40001`, `NPJB40001`, `PSP/TEXTURES/NPJB40001`, in any case), a pack named for `ULJM05800` taken only when its `[games]` lists `NPJB40001`, `quick` and hashless packs refused, zipped packs refused with "unpack it first", key, image, size and missing-image counts, the copy into a staging folder, the swap that moves the old pack to `textures/.backup/<date>_<time>/NPJB40001`, cancelling, and where the pack is read from with `MHP3RD_TEXTURE_PACK` and a pack used in place. `mhp3rd_texture_pack_tests --check <folder>` prints what the menu would find in a real folder and reads nothing else.
 
 For the manual check, use a throwaway data folder (`MHP3RD_DATA_DIR`, with a copy of `settings.ini`, `EBOOT.ELF` and the disc image) and a real pack, then in **Video**:
