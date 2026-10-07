@@ -148,3 +148,37 @@ To report a result without editing the page, open a **Test report** issue.
 [#170]: https://github.com/TeamGDB/Yakumo/issues/170
 [#210]: https://github.com/TeamGDB/Yakumo/issues/210
 [#212]: https://github.com/TeamGDB/Yakumo/issues/212
+
+## Android user-file checks (2026-10-08)
+
+PR #292 application source `3f6009a` was checked on a Lenovo TB321FU running
+Android 15 (arm64), in a separate test package. A public synthetic
+`DocumentsProvider` exercised the production Java document methods, JNI
+transport, folder-transfer worker, texture-pack checker/copy/install and mod
+checker/import. The fixture activity replaces SDL activity initialization. Fixture-provider
+checks inject a tree URI; external Downloads checks use the unchanged
+production system picker and its normal user grant. These results do not
+establish gameplay or menu rendering.
+The complete public document-adapter regression executable also passed on the
+physical device under a 30-second deadline.
+
+| Check | Measured result |
+| --- | --- |
+| System picker and Downloads | Passed: selected nested texture/mod folders through Android DocumentsUI and its normal access confirmation; no storage permission or root needed |
+| Texture import | Passed: nested Cyrillic/Japanese names and an emoji filename; existing texture checker, copy and installation completed |
+| Mod import | Passed: the provider's folder display name is retained as the mod identity; existing mod checker and import completed |
+| Cancellation | Passed after 128 KiB from the delayed fixture provider and 768 KiB from a real 128 MiB Downloads file; staging was empty afterwards. Cancelling the system picker itself also returned no staged result |
+| Denied and unreadable documents | Passed: an external tree without a grant and a fixture file refusing reads both failed with staging removed |
+| Transfer byte limit | Passed: both the fixture stream and a real Downloads file exceeded a reduced 1 KiB limit and left no staging |
+| Worker responsiveness | Passed: a delayed 32 MiB provider stream completed while the fixture activity processed 20 heartbeat callbacks; this does not measure game frames |
+| Restart persistence and replacements | Passed: installed synthetic texture/mod bytes remained after force-stop/restart and failed/cancelled transfers; replacing each through Downloads retained the prior installation in its existing backup folder |
+
+The player installations and their data were unchanged. No storage permission,
+root access, game data, generated-game compilation or overlay compilation was
+needed for these checks. Android rejected selection of the storage root;
+selecting nested Downloads folders worked. Test fixtures and the temporary
+native executable were removed, the USB stay-awake setting was restored, and
+only the separate test package was stopped. Android 16, SD-card/cloud
+providers, rendering a real texture pack, enabling a real mod, and long-session
+gameplay were not checked. Compatible Android AOT objects were unavailable in
+the existing build donors, so no full playable APK was rebuilt for this pass.
