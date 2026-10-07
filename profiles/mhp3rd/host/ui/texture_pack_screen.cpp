@@ -241,6 +241,7 @@ void documents_screen(bool back) {
     indented("Choose the unpacked pack folder in Android's picker, then wait while its files are copied for "
              "review. Choose a folder inside Downloads or on the SD card, not the storage or Download root.");
     indented("Copied " + human_size(s.document_import.bytes()) + ". The installed pack stays in place.");
+    focus_first();
     if (back ||
         button_row(s.cancel_requested ? "Cancelling…" : "Cancel",
             {s.cancel_requested, {},
