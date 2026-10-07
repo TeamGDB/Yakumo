@@ -292,6 +292,7 @@ if(MHP3RD_ANDROID_APP)
     add_library(Yakumo SHARED ${MHP3RD_PROGRAM_SOURCES} host/platform/android_app.cpp
         host/platform/android_jni.cpp host/platform/android_documents.cpp host/platform/android_performance.cpp
         host/platform/android_fatal.cpp)
+    target_sources(Yakumo PRIVATE host/platform/android_display.cpp)
     target_compile_definitions(Yakumo PRIVATE MHP3RD_ANDROID_APP=1)
     set_target_properties(Yakumo PROPERTIES
         OUTPUT_NAME main
@@ -595,6 +596,19 @@ endif()
 # Android's fd-based document copy also runs against a synthetic provider on
 # Unix hosts, without JNI or a device. Windows does not provide these fd APIs.
 if(UNIX)
+    add_executable(mhp3rd_android_display_tests
+        tests/android_display_tests.cpp host/platform/android_display.cpp)
+    target_include_directories(mhp3rd_android_display_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+    target_compile_definitions(mhp3rd_android_display_tests PRIVATE
+        dlopen=yakumo_test_dlopen dlsym=yakumo_test_dlsym)
+    target_link_libraries(mhp3rd_android_display_tests PRIVATE ${CMAKE_DL_LIBS})
+    set_target_properties(mhp3rd_android_display_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    if(PSPRECOMP_BUILD_TESTS)
+        foreach(scenario success missing_library missing_symbol rejected disabled)
+            add_custom_target(mhp3rd_android_display_${scenario} DEPENDS mhp3rd_android_display_tests)
+            add_test(NAME mhp3rd_android_display_${scenario} COMMAND mhp3rd_android_display_tests ${scenario})
+        endforeach()
+    endif()
     add_executable(mhp3rd_translation_document_tests
         tests/translation_document_tests.cpp
         host/platform/android_documents.cpp
