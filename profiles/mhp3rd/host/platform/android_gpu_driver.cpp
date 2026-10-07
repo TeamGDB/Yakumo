@@ -124,6 +124,13 @@ std::string driver_display_name(const std::string &library) {
 }
 
 void *open_custom_gpu_driver(const std::string &library, std::string &error) {
+    // settings.ini can be edited by hand: only a plain file name may name the
+    // driver, never a path that leads out of driver_directory().
+    const fs::path name(library);
+    if (name.empty() || name.filename() != name || library == "." || library == "..") {
+        error = "the driver setting is not a file name; pick the driver again";
+        return nullptr;
+    }
     const fs::path directory = driver_directory();
     std::error_code ec;
     if (directory.empty() || !fs::exists(directory / library, ec)) {
