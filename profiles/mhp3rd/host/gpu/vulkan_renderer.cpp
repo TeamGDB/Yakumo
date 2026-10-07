@@ -26,6 +26,7 @@
 #include "settings/settings.hpp"
 
 #if defined(MHP3RD_ANDROID_APP)
+#include "platform/android_display.hpp"
 #include "platform/android_fatal.hpp"
 #include "platform/android_jni.hpp"
 #endif
@@ -2242,6 +2243,7 @@ struct VulkanRenderer::Impl {
     bool create_overlay(std::string &error);
     void record_overlay(VkCommandBuffer commands, VkImage destination);
     void update_display_info();
+    void request_display_rate();
     // `overwritten`: bit 0, the pass's first draw writes every pixel's colour
     // and alpha; bit 1, every pixel's depth.
     void begin_pass(std::uint32_t address, std::uint32_t overwritten = 0u);
@@ -3156,6 +3158,17 @@ void VulkanRenderer::Impl::update_display_info() {
     }
     display_hz = refresh;
     perf::set_display_info(present_mode_name(present_mode), swapchain_extent.width, swapchain_extent.height, refresh);
+    request_display_rate();
+}
+
+void VulkanRenderer::Impl::request_display_rate() {
+#if defined(MHP3RD_ANDROID_APP)
+    auto *native_window = static_cast<ANativeWindow *>(
+        SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr));
+    const float rate = static_cast<float>(pacing::requested_rate(frame_rate, display_hz));
+    if (android::request_display_frame_rate(native_window, rate))
+        std::cout << "[render] requested Android surface frame rate " << rate << " Hz\n";
+#endif
 }
 
 VkPresentModeKHR VulkanRenderer::Impl::wanted_present_mode() const {
@@ -5626,7 +5639,10 @@ bool VulkanRenderer::pump_events() {
         if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) impl_->follow_gamepad(event.gbutton.which);
         // F3 toggles the performance overlay. No pad combination: L3+R3 is
         // reserved for the in-game menu.
-        if (event.type == SDL_EVENT_WINDOW_DISPLAY_CHANGED) impl_->update_display_info();
+        if (event.type == SDL_EVENT_WINDOW_DISPLAY_CHANGED || event.type == SDL_EVENT_WINDOW_FOCUS_GAINED ||
+            (event.type == SDL_EVENT_DISPLAY_CURRENT_MODE_CHANGED &&
+                event.display.displayID == SDL_GetDisplayForWindow(impl_->window)))
+            impl_->update_display_info();
         if (event.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) impl_->swapchain_dirty = true;
         // A phone turned from one landscape to the other keeps its size; only
         // the display's transform changes.
@@ -7797,27 +7813,7 @@ std::int64_t to_us(std::chrono::steady_clock::time_point time) {
 } // namespace
 
 double VulkanRenderer::Impl::wanted_rate() const {
-    double rate = 30.0;
-    switch (frame_rate) {
-    case settings::FrameRate::Fps30:
-        rate = 30.0;
-        break;
-    case settings::FrameRate::Fps45:
-        rate = 45.0;
-        break;
-    case settings::FrameRate::Fps60:
-        rate = 60.0;
-        break;
-    case settings::FrameRate::Fps90:
-        rate = 90.0;
-        break;
-    case settings::FrameRate::Fps120:
-        rate = 120.0;
-        break;
-    case settings::FrameRate::Display:
-        rate = display_hz >= 1.0f ? static_cast<double>(display_hz) : 60.0;
-        break;
-    }
+    double rate = pacing::requested_rate(frame_rate, display_hz);
     // With vsync the display takes no more than its own rate: more presents
     // would wait for it with the game's time.
     if (present_mode == VK_PRESENT_MODE_FIFO_KHR && display_hz >= 1.0f)
@@ -8805,6 +8801,7 @@ void VulkanRenderer::set_frame_rate(settings::FrameRate rate) {
     Impl &impl = *impl_;
     if (impl.frame_rate == rate) return;
     impl.frame_rate = rate;
+    impl.request_display_rate();
     impl.governor.set_requested(rate == settings::FrameRate::Fps30 ? 30.0 : impl.wanted_rate());
     impl.reset_interpolation();
     perf::set_frame_rate_info(rate == settings::FrameRate::Fps30 ? 0.0 : impl.governor.rate(),

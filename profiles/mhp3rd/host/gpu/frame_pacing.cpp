@@ -1,4 +1,5 @@
 #include "frame_pacing.hpp"
+#include "settings/settings.hpp"
 
 #include <algorithm>
 #include <array>
@@ -15,6 +16,24 @@ constexpr std::int64_t kRealignUs = 2000;
 constexpr std::int64_t kGapFrames = 10;
 
 } // namespace
+
+double requested_rate(settings::FrameRate rate, double display_hz) noexcept {
+    switch (rate) {
+    case settings::FrameRate::Fps30:
+        return 30.0;
+    case settings::FrameRate::Fps45:
+        return 45.0;
+    case settings::FrameRate::Fps60:
+        return 60.0;
+    case settings::FrameRate::Fps90:
+        return 90.0;
+    case settings::FrameRate::Fps120:
+        return 120.0;
+    case settings::FrameRate::Display:
+        return std::isfinite(display_hz) && display_hz >= 1.0 ? std::max(30.0, display_hz) : 60.0;
+    }
+    return 30.0;
+}
 
 double presents_per_frame(double rate) noexcept {
     const double presents = rate / 30.0;

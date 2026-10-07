@@ -34,5 +34,9 @@
   "profiles/mhp3rd/host/ui/mods_screen.hpp": {
     "sha256": "8464db48399bfca648fdcca31710dc9426456d94fc622c19cb359ee55bea95eb",
     "reason": "Reviewed function/class declarations and aggregate member defaults only; no standalone function body is exempted. Folder staging, JNI transport and menu implementations remain subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/platform/android_display.hpp": {
+    "sha256": "90e5ee597fbc6e1b5f91702c3fc588813a1065be286e1c415b2ec82107336843",
+    "reason": "Reviewed opaque type and function declarations only; no executable code is exempted. The runtime API adapter and frame-rate policy remain subject to normal diff coverage."
   }
 }

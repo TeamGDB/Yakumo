@@ -6,12 +6,14 @@
 //   mhp3rd_interpolation_tests
 #include "gpu/frame_interpolation.hpp"
 #include "gpu/frame_pacing.hpp"
+#include "settings/settings.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 using namespace mhp3rd::gpu;
@@ -578,6 +580,19 @@ void governor() {
 } // namespace
 
 int main() {
+    using mhp3rd::settings::FrameRate;
+    for (int index = 0; index < 5; ++index) {
+        const double expected = pacing::kRates[index];
+        check(pacing::requested_rate(static_cast<FrameRate>(index), 60.0) == expected,
+            "explicit target remains uncapped before the Android surface request");
+    }
+    check(pacing::requested_rate(FrameRate::Display, 165.0) == 165.0, "match a high refresh display");
+    check(pacing::requested_rate(FrameRate::Display, 59.94) == 59.94, "keep fractional display refresh");
+    check(pacing::requested_rate(FrameRate::Display, 15.0) == 30.0, "game frame rate is the minimum target");
+    for (double unknown :
+        {0.0, -1.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
+        check(pacing::requested_rate(FrameRate::Display, unknown) == 60.0, "unknown display refresh uses 60");
+    check(pacing::requested_rate(static_cast<FrameRate>(99), 120.0) == 30.0, "invalid rate uses game frames");
     blending();
     rigid();
     guards();
