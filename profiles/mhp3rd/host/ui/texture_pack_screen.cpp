@@ -396,7 +396,9 @@ void review_screen(bool back) {
         if (installed_exists) copy_note += " The pack there now moves to textures/.backup; nothing is deleted.";
         if (!room)
             copy_note = "Not enough free space: the copy needs " + human_size(needed) + " and " +
-                human_size(*r.free_space) + " is free. Use it where it is instead.";
+                human_size(*r.free_space) + " is free. " +
+                (s.document_staging.empty() ? "Use it where it is instead."
+                                            : "Free some space, then choose the folder again.");
         if (is_installed) copy_note = "This is the installed pack already.";
         const char *label = installed_exists ? "Copy and replace" : "Copy into Yakumo's data folder";
         // The focus starts on the first thing the player can do; the rows

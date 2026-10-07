@@ -55,7 +55,7 @@ void folder_tests(const std::filesystem::path &dir) {
     using namespace mhp3rd::android;
     const auto staging = dir / "folders";
     require(!pick_folder_to_import(staging) && !fs::exists(staging), "cancelled picker creates nothing");
-    selected_tree = "content://test/tree/primary%3ADownload%2Fmy-pack";
+    selected_tree = "content://test/tree/opaque-123";
     auto denied = pick_folder_to_import(staging);
     require(denied && denied->staged.empty() && !denied->error.empty(), "denied tree is reported and removed");
     const auto provider = dir / "provider-image";
@@ -119,7 +119,7 @@ void folder_tests(const std::filesystem::path &dir) {
     folder_name.reset();
     failed();
     folder_name = "my-pack";
-    selected_tree = "content://test/tree/primary%3ADownload%2Fmy-pack";
+    selected_tree = "content://test/tree/opaque-123";
     folders["root"] = {{false, "image", "image"}};
     FolderImport job;
     require(!job.ready() && job.bytes() == 0, "worker starts idle");
