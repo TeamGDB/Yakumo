@@ -180,5 +180,30 @@ selecting nested Downloads folders worked. Test fixtures and the temporary
 native executable were removed, the USB stay-awake setting was restored, and
 only the separate test package was stopped. Android 16, SD-card/cloud
 providers, rendering a real texture pack, enabling a real mod, and long-session
-gameplay were not checked. Compatible Android AOT objects were unavailable in
-the existing build donors, so no full playable APK was rebuilt for this pass.
+gameplay were not checked. The initial component-only pass did not rebuild a playable APK.
+
+
+### Complete Android APK smoke check
+
+A complete arm64 APK at source `6f6106a` was subsequently built with SDL3
+3.4.16, bundled FFmpeg 7.1.5, the fallback font, 90 reused Android AOT
+objects and all 355 existing overlay libraries. The archived generated corpus
+matched the current corpus byte-for-byte; all 12 framework headers matched
+after pinned formatting. The APK passed signing, 16 KiB ZIP alignment,
+game-file exclusion and Android 29 strong-import checks (359 libraries,
+828 imports, none unresolved). Its certificate matches the existing test
+installation and its version code is higher.
+
+On the same Android 15 tablet, an isolated package with identical native
+libraries and production Java code rendered the opening movie and the native
+pause menu. The native texture menu opened Android's picker, reviewed a
+synthetic Downloads folder and installed it successfully; the result screen
+and installed files were checked. The native mod menu opened the same picker,
+and cancellation returned to the menu with no staged files left. The run had
+a 180-second deadline and the test package exited afterwards. Existing player
+installations were not replaced. The owned Downloads fixtures were removed
+and the temporary stay-awake setting was restored.
+
+This verifies boot/rendering and the stated menu operations. It does not
+verify a hunt, long-session stability, the full mod installation flow through
+the native menu, a player's texture pack/mod, or Android 16 behavior.
