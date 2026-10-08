@@ -82,6 +82,19 @@ Una versión publicada solo necesita tu imagen de disco. Elige el archivo para t
 
 **Versiones de prueba.** La [página de versiones](https://github.com/TeamGDB/Yakumo/releases) también muestra versiones de prueba, marcadas *(test)* (las anteriores, *(unstable)*) y publicadas como pre-release. Traen los cambios más nuevos y pueden tener errores nuevos: instálalas solo si quieres ayudar a probar. Si solo quieres jugar, usa la última versión estable de arriba.
 
+## Traducciones de la comunidad
+
+Las traducciones del texto del juego las mantienen sus autores y se descargan por separado. Consulta el README de cada proyecto para conocer su compatibilidad y sus actualizaciones.
+
+El catálogo solo incluye enlaces a repositorios públicos de GitHub y descargas alojadas en GitHub (archivos del repositorio o Releases).
+
+| Idioma | Autor | Versión | Proyecto | Descarga |
+| --- | --- | --- | --- | --- |
+| Portugués (Brasil) | [devdouglasonofre](https://github.com/devdouglasonofre) | **V1** | [mhp3rd-yakumo-ptbr](https://github.com/devdouglasonofre/mhp3rd-yakumo-ptbr) | [Última versión](https://github.com/devdouglasonofre/mhp3rd-yakumo-ptbr/releases/latest) |
+| Ruso | [MHunterG](https://github.com/MHunterG) | **Draft** | [mhp3rd-yakumo-ru](https://github.com/MHunterG/mhp3rd-yakumo-ru) | [Última versión](https://github.com/MHunterG/mhp3rd-yakumo-ru/releases/latest) |
+
+En una versión de Yakumo con soporte para traducciones, descarga el archivo `.lang`, abre **System → Text → Import translation…**, selecciona el idioma importado en **Game text language** y reinicia el juego. Consulta [la documentación sobre traducción del texto](docs/TEXT_TRANSLATION.md) (en inglés) para más detalles.
+
 ## Requisitos
 
 Compilar desde el código fuente es una forma plenamente compatible de jugar. Se necesita:

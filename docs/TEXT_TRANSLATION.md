@@ -34,8 +34,12 @@ Files must end in `.lang`. To add a language, drop a file into the data
 directory's `translations` folder (the menu shows that folder) and set the
 language, normally through the menu.
 
-No translation ships with Yakumo. Community translations are linked from the
-project README; download one and use **Import translation…** in
+No translation ships with Yakumo. The project README lists
+[community translations](../README.md#community-translations), their authors
+and their versions. The catalog links only to public GitHub repositories and
+downloads hosted on GitHub (repository files or Releases).
+Download a `.lang` file and use
+**Import translation…** in
 **System → Text**, which copies the file into the per-user folder for you, or
 drop the `.lang` file in one of the folders above yourself.
 
