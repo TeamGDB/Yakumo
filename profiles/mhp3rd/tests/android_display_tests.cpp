@@ -29,8 +29,8 @@ void require_loader(bool condition, const char *message) noexcept {
     std::abort();
 }
 
-std::int32_t set_rate(ANativeWindow *window, float rate, std::int8_t compatibility) {
-    require(compatibility == 0, "games use DEFAULT frame-rate compatibility");
+std::int32_t set_rate(ANativeWindow *window, float rate, std::int8_t compatibility) noexcept {
+    require_loader(compatibility == 0, "games use DEFAULT frame-rate compatibility");
     ++requests;
     received_window = window;
     received_rate = rate;
