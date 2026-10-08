@@ -80,6 +80,19 @@ A prebuilt release needs nothing but your disc image. Pick the file for your dev
 
 **Test builds.** The [releases page](https://github.com/TeamGDB/Yakumo/releases) also lists test builds, marked *(test)* (older ones *(unstable)*) and published as pre-releases. They carry the newest changes and may have new bugs: install one only if you want to help test. If you just want to play, use the latest stable release above.
 
+## Community translations
+
+Translations of the game's text are maintained by their authors and downloaded separately. See each project's README for compatibility details and updates.
+
+The catalog links only to public GitHub repositories and downloads hosted on GitHub (repository files or Releases).
+
+| Language | Maintainer | Version | Project | Download |
+| --- | --- | --- | --- | --- |
+| Portuguese (Brazil) | [devdouglasonofre](https://github.com/devdouglasonofre) | **V1** | [mhp3rd-yakumo-ptbr](https://github.com/devdouglasonofre/mhp3rd-yakumo-ptbr) | [Latest release](https://github.com/devdouglasonofre/mhp3rd-yakumo-ptbr/releases/latest) |
+| Russian | [MHunterG](https://github.com/MHunterG) | **Draft** | [mhp3rd-yakumo-ru](https://github.com/MHunterG/mhp3rd-yakumo-ru) | [Latest release](https://github.com/MHunterG/mhp3rd-yakumo-ru/releases/latest) |
+
+In a Yakumo build with translation support, download the `.lang` file, open **System → Text → Import translation…**, select the imported language under **Game text language**, then restart. See [Text translation](docs/TEXT_TRANSLATION.md) for details.
+
 ## Requirements
 
 Building from source is a fully supported way to play. It needs:
