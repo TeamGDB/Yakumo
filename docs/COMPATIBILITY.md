@@ -207,3 +207,50 @@ and the temporary stay-awake setting was restored.
 This verifies boot/rendering and the stated menu operations. It does not
 verify a hunt, long-session stability, the full mod installation flow through
 the native menu, a player's texture pack/mod, or Android 16 behavior.
+
+
+## Android high-refresh display check (2026-10-08)
+
+PR #295 application source `9d3d5a2` was checked on Lenovo TB321FU,
+Snapdragon SM8650 / Adreno 750, Android 15, Vulkan driver 0.762.28. The
+complete arm64 APK used SDL3 3.4.16, bundled FFmpeg 7.1.5, 90 compatible
+AOT objects and all 355 existing overlays. An isolated verification package
+had identical production Java bytecode and all 359 native libraries. Runs
+used a copied save, finite deadlines and Original runtime text, with no
+external texture pack or runtime translation installed.
+
+With **Frame rate = 120**, **Lower when behind = Off**, **Vsync = On**,
+**Game speed = Normal** and **Auto / Fill = 2560 x 1600**, the previous
+application presented about 58–60 FPS in a stationary village scene. Its
+SDL refresh value was 120 Hz, but Android's active display mode was 60 Hz.
+A short diagnostic minimum-refresh override produced 115–120 FPS; the
+original system setting was restored after that diagnostic.
+
+The patched application requested 120 Hz through the surface API and Android
+selected its 120 Hz mode without a global display override. After discarding
+five warm-up samples, 48 one-second village samples measured 114.7–120.2 FPS
+(median 117.75), with reported game speed 98–102%. Resolution was unchanged.
+This measures presented frames; the guest simulation still runs at 30 game
+frames per emulated second.
+
+Changing the native Video menu target through 90, 60, 90 and 120 FPS selected
+Android's corresponding 90, 60, 90 and 120 Hz modes. Returning from Home
+reapplied the 120 Hz request and selected that mode. These setting/lifecycle
+checks ran from the startup screen; they do not measure hunt performance.
+The test package was stopped and removed, and the temporary USB stay-awake
+setting restored. The normal signed update APK was copied to Downloads with
+its checksum verified; the player's installation was not replaced.
+
+All 50 headless and 60 renderer-enabled native tests passed. Synthetic tests
+cover exact surface/rate/compatibility arguments, invalid input, missing
+library/API (Android 10 fallback), rejected requests and the comparison
+switch. Changed executable native lines reached 100% coverage (37/37);
+Android-specific SDL call sites still require physical evidence. The APK
+passed signature and 16 KiB ZIP alignment checks. Android may choose a lower
+refresh under battery, thermal or vendor policy.
+
+Android 10/16 physical devices, Mali and other Snapdragon generations,
+Match display on the device, rotation, translated gameplay, hunts,
+multiplayer, audibility and sustained thermal performance were not verified.
+This fixes the measured 60 Hz display restriction; it does not complete all
+Snapdragon performance work in #291 or the release validation in #290.

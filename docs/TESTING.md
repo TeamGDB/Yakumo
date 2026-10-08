@@ -201,6 +201,30 @@ On a phone, with Controls → Touch screen → *Layout* set to Action, in a ques
 - Rotate the phone and come back from the background: the layout stays clear of the cutout and the game's health, sharpness and item bar.
 - Set *Layout* back to PSP buttons: the old layout is unchanged.
 
+### Android display refresh (#295)
+
+Before the next release, test the packaged APK on an Android 15+ device with
+an available 90/120 Hz mode. Record the OS display mode separately from
+Yakumo's presented FPS, guest FPS and game speed: a cached SDL refresh value
+alone does not establish the physical mode.
+
+- Select 30, 60, 90, 120 and Match display where supported. Check the active
+  display mode and observed frame pacing in the same village and hunt scenes,
+  with the same resolution and Vsync setting. The game must retain normal
+  timing; higher presented FPS must not accelerate the 30 FPS simulation.
+- Change rates while running, restart, rotate and return from the background.
+  Verify the selected setting persists and the surface request is reapplied.
+- Compare Original and runtime-translated text at identical settings, including
+  quest-list/detail loads. Record thermal conditions and sustained performance.
+- Check Android 10 startup/fallback separately: the unavailable API must not
+  prevent loading. Android/vendor battery and thermal policy may choose a
+  lower mode; report that behavior rather than requiring a global override.
+- Use `MHP3RD_NO_DISPLAY_RATE_REQUEST=1` in an isolated developer package for
+  a bounded comparison. Restore test settings and stop owned test processes.
+
+Synthetic loader and frame-rate policy tests do not replace these physical
+checks. List unavailable modes/devices and skipped scenarios explicitly.
+
 ### Texture pack import (#49)
 
 `mhp3rd_texture_pack_tests` (CTest) checks the import without game data or a window: finding a pack in each layout (the pack folder, `textures/NPJB40001`, `NPJB40001`, `PSP/TEXTURES/NPJB40001`, in any case), a pack named for `ULJM05800` taken only when its `[games]` lists `NPJB40001`, `quick` and hashless packs refused, zipped packs refused with "unpack it first", key, image, size and missing-image counts, the copy into a staging folder, the swap that moves the old pack to `textures/.backup/<date>_<time>/NPJB40001`, cancelling, and where the pack is read from with `MHP3RD_TEXTURE_PACK` and a pack used in place. `mhp3rd_texture_pack_tests --check <folder>` prints what the menu would find in a real folder and reads nothing else.
