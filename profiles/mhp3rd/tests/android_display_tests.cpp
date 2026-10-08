@@ -4,6 +4,7 @@
 #include <dlfcn.h>
 
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -21,6 +22,13 @@ void require(bool condition, const char *message) {
     if (!condition) throw std::runtime_error(message);
 }
 
+// Match the system loader's nonthrowing ABI; contract violations fail the test.
+void require_loader(bool condition, const char *message) noexcept {
+    if (condition) return;
+    std::fprintf(stderr, "%s\n", message);
+    std::abort();
+}
+
 std::int32_t set_rate(ANativeWindow *window, float rate, std::int8_t compatibility) {
     require(compatibility == 0, "games use DEFAULT frame-rate compatibility");
     ++requests;
@@ -31,15 +39,15 @@ std::int32_t set_rate(ANativeWindow *window, float rate, std::int8_t compatibili
 } // namespace
 
 extern "C" void *yakumo_test_dlopen(const char *name, int flags) noexcept(noexcept(dlopen(nullptr, 0))) {
-    require(std::strcmp(name, "libandroid.so") == 0, "load the system Android library");
-    require(flags == (RTLD_NOW | RTLD_LOCAL), "keep library symbols local");
+    require_loader(std::strcmp(name, "libandroid.so") == 0, "load the system Android library");
+    require_loader(flags == (RTLD_NOW | RTLD_LOCAL), "keep library symbols local");
     ++opens;
     return scenario == "missing_library" ? nullptr : reinterpret_cast<void *>(1);
 }
 
 extern "C" void *yakumo_test_dlsym(void *library, const char *name) noexcept(noexcept(dlsym(nullptr, nullptr))) {
-    require(library == reinterpret_cast<void *>(1), "look up in the opened Android library");
-    require(std::strcmp(name, "ANativeWindow_setFrameRate") == 0, "resolve the API 30 symbol");
+    require_loader(library == reinterpret_cast<void *>(1), "look up in the opened Android library");
+    require_loader(std::strcmp(name, "ANativeWindow_setFrameRate") == 0, "resolve the API 30 symbol");
     ++lookups;
     return scenario == "missing_symbol" ? nullptr : reinterpret_cast<void *>(set_rate);
 }
