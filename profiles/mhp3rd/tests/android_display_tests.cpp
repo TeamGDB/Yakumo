@@ -30,14 +30,14 @@ std::int32_t set_rate(ANativeWindow *window, float rate, std::int8_t compatibili
 }
 } // namespace
 
-extern "C" void *yakumo_test_dlopen(const char *name, int flags) {
+extern "C" void *yakumo_test_dlopen(const char *name, int flags) noexcept(noexcept(dlopen(nullptr, 0))) {
     require(std::strcmp(name, "libandroid.so") == 0, "load the system Android library");
     require(flags == (RTLD_NOW | RTLD_LOCAL), "keep library symbols local");
     ++opens;
     return scenario == "missing_library" ? nullptr : reinterpret_cast<void *>(1);
 }
 
-extern "C" void *yakumo_test_dlsym(void *library, const char *name) {
+extern "C" void *yakumo_test_dlsym(void *library, const char *name) noexcept(noexcept(dlsym(nullptr, nullptr))) {
     require(library == reinterpret_cast<void *>(1), "look up in the opened Android library");
     require(std::strcmp(name, "ANativeWindow_setFrameRate") == 0, "resolve the API 30 symbol");
     ++lookups;
