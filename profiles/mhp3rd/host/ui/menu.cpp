@@ -45,6 +45,7 @@
 #include "yakumo_version.hpp"
 #if defined(MHP3RD_ANDROID_APP)
 #include "platform/android_fatal.hpp"
+#include "platform/android_gpu_driver.hpp"
 #endif
 
 #include "imgui.h"
@@ -330,6 +331,15 @@ bool Menu::frame() {
     return !close_;
 }
 
+#if defined(MHP3RD_ANDROID_APP)
+// What "Pick a driver package…" found, for the row under it: empty before the
+// player has picked, or after a pick that needs no comment.
+std::string &gpu_driver_status() {
+    static std::string status;
+    return status;
+}
+#endif
+
 void Menu::video() {
     if (font_list(back_)) return;
     if (texture_pack_screen(back_)) return;
@@ -612,6 +622,37 @@ void Menu::video() {
             settings::save();
         }
     }
+#if defined(MHP3RD_ANDROID_APP)
+    {
+        const std::string driver_name = android::driver_display_name(s.custom_gpu_driver);
+        info_row("Custom GPU driver", driver_name.empty() ? "System default" : driver_name);
+        if (button_row("Pick a driver package…",
+                {false, {},
+                    "A custom Vulkan driver (a Turnip/Mesa build for your Adreno GPU) instead of the phone's "
+                    "own, from a .zip such as Winlator, Skyline or the Adreno Tools driver repositories "
+                    "distribute (meta.json and a .so). Applies when Yakumo starts next; if it fails to load, "
+                    "the phone's own driver is used instead."})) {
+            if (const std::optional<android::PickedDriver> picked = android::pick_custom_gpu_driver()) {
+                if (picked->error.empty()) {
+                    s.custom_gpu_driver = picked->library;
+                    settings::save();
+                    gpu_driver_status() =
+                        "Installed " + android::driver_display_name(picked->library) + ". Restart Yakumo to use it.";
+                } else {
+                    gpu_driver_status() = picked->error;
+                }
+            }
+        }
+        if (!gpu_driver_status().empty()) info_row("Driver pick", gpu_driver_status());
+        if (!s.custom_gpu_driver.empty() &&
+            button_row("Use the phone's own driver", {false, {}, "Back to the system's Vulkan driver."})) {
+            s.custom_gpu_driver.clear();
+            android::clear_custom_gpu_driver();
+            settings::save();
+            gpu_driver_status() = "Back to the phone's own driver. Restart Yakumo to use it.";
+        }
+    }
+#endif
     font_rows();
     ImGui::Dummy({0.0f, font_gap()});
     if (button_row("Restore video defaults", {false, {}, "Every setting on this page back to how Yakumo ships."})) {

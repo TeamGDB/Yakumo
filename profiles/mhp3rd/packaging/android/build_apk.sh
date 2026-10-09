@@ -81,6 +81,9 @@ lib="$work/lib/arm64-v8a"
 cp "$sdl_lib" "$lib/libSDL3.so"
 cp "$build_dir/bin/libmain.so" "$lib/"
 cp "$build_dir"/bin/lib/libavcodec.so "$build_dir"/bin/lib/libavutil.so "$lib/"
+# adrenotools' hook libraries (cmake/Adrenotools.cmake): loaded from this same
+# directory (the app's nativeLibraryDir) when a custom GPU driver is picked.
+cp "$build_dir"/bin/lib/libmain_hook.so "$build_dir"/bin/lib/libhook_impl.so "$lib/"
 overlays=("$build_dir"/bin/overlays/libovl*.so)
 if [[ -n "$overlay_limit" ]]; then overlays=("${overlays[@]:0:$overlay_limit}"); fi
 cp "${overlays[@]}" "$lib/"
