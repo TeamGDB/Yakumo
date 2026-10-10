@@ -1,5 +1,6 @@
 #include "vulkan_renderer.hpp"
 
+#include "alpha_test.hpp"
 #include "frame_interpolation.hpp"
 #include "frame_pacing.hpp"
 #include "game_hud.hpp"
@@ -7361,12 +7362,16 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
         key.cull = call.culling_enabled && !call.through && call.primitive != PrimitiveType::Sprites;
         key.cull_clockwise = call.cull_clockwise;
     }
-    // Matches texture_params.w below: without an alpha test the pipeline's
-    // shader has no discard. MHP3RD_NO_ALPHA_VARIANTS keeps the one shader
-    // that tests alpha for every draw, as before.
+    // Comparisons that always pass for normalized alpha use the shader with
+    // no discard, preserving early depth tests. The narrow rollback restores
+    // the old enabled/nonzero predicate; NO_ALPHA_VARIANTS tests every draw.
     static const bool no_alpha_variants = std::getenv("MHP3RD_NO_ALPHA_VARIANTS") != nullptr;
+    static const bool no_trivial_alpha = std::getenv("MHP3RD_NO_TRIVIAL_ALPHA_VARIANTS") != nullptr;
     key.alpha_test = no_alpha_variants || perf::alternate_off(perf::NewPath::Alpha) ||
-        (!call.clear_mode && call.alpha_test.enabled && call.alpha_test.function != 0u);
+        (!call.clear_mode &&
+            (no_trivial_alpha ? call.alpha_test.enabled && call.alpha_test.function != 0u
+                              : requires_alpha_test(call.alpha_test.enabled, call.alpha_test.function,
+                                    call.alpha_test.reference, call.alpha_test.mask)));
     key.raw = raw;
     // Escape hatch for bisecting "nothing is visible" reports.
     static const bool no_cull = std::getenv("MHP3RD_NO_CULL") != nullptr;

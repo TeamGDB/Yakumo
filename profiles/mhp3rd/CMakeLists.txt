@@ -1168,6 +1168,12 @@ if(MHP3RD_RENDERER_TESTS)
         set_tests_properties(mhp3rd_renderer_ui_compat_tests PROPERTIES
             TIMEOUT 90
             ENVIRONMENT "MHP3RD_GPU_COMPAT=on")
+        # Keep the narrow alpha rollback equivalent on public primitive buffers.
+        add_custom_target(mhp3rd_renderer_trivial_alpha_legacy_tests DEPENDS mhp3rd_renderer_ui_tests)
+        add_test(NAME mhp3rd_renderer_trivial_alpha_legacy_tests
+            COMMAND mhp3rd_renderer_ui_tests --primitives)
+        set_tests_properties(mhp3rd_renderer_trivial_alpha_legacy_tests PROPERTIES
+            TIMEOUT 90 ENVIRONMENT "MHP3RD_NO_TRIVIAL_ALPHA_VARIANTS=1")
         # Documented rollback paths must preserve the same independent pixel contracts.
         add_custom_target(mhp3rd_renderer_ui_legacy_tests DEPENDS mhp3rd_renderer_ui_tests)
         add_test(NAME mhp3rd_renderer_ui_legacy_tests COMMAND mhp3rd_renderer_ui_tests)

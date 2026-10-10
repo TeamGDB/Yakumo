@@ -453,6 +453,23 @@ void primitive_contracts(gpu::VulkanRenderer &renderer) {
         expect((pixel() & 0xffffff) == (accepted[function] ? 0x2255ccu : 0u),
             "alpha comparison accepts or discards equal-reference fragment");
     }
+    // Always-passing endpoint comparisons must keep even transparent RGB;
+    // adjacent references must still reject the opposite endpoint.
+    for (const std::uint32_t alpha : {0u, 128u, 255u}) {
+        for (auto &v : draw.vertices) v.color = (alpha << 24u) | 0x2255ccu;
+        for (const auto [function, reference] :
+            {std::pair{7u, 0u}, std::pair{5u, 255u}, std::pair{7u, 1u}, std::pair{5u, 254u}}) {
+            draw.alpha_test.function = function;
+            draw.alpha_test.reference = reference;
+            renderer.begin_frame();
+            renderer.submit(clear, memory);
+            renderer.submit(draw, memory);
+            renderer.present(0x04000000);
+            const bool passes = function == 7u ? alpha >= reference : alpha <= reference;
+            expect((pixel() & 0xffffffu) == (passes ? 0x2255ccu : 0u),
+                "alpha endpoint specialization preserves transparent RGB and adjacent rejection");
+        }
+    }
     draw.alpha_test.enabled = false;
     for (auto &v : draw.vertices) v.color = 0xff2255cc;
     draw.blend.enabled = true;
@@ -599,6 +616,30 @@ void primitive_contracts(gpu::VulkanRenderer &renderer) {
         expect((pixel() & 0xffffff) == (depth_accepted[function] ? 0x2255ccu : 0u),
             "depth comparison tests exact ordering against the cleared far plane");
     }
+    // A transparent but accepted near fragment still writes depth; removing
+    // an always-passing discard must not expose a farther opaque fragment.
+    for (const auto [function, reference] : {std::pair{7u, 0u}, std::pair{5u, 255u}}) {
+        draw.depth.function = 4; // less
+        draw.alpha_test.enabled = true;
+        draw.alpha_test.function = function;
+        draw.alpha_test.reference = reference;
+        for (auto &v : draw.vertices) v.color = 0x002255cc;
+        auto farther = draw;
+        farther.alpha_test.enabled = false;
+        for (auto &v : farther.vertices) {
+            v.position[2] = 0.5f;
+            v.color = 0xff00ff00;
+        }
+        renderer.begin_frame();
+        renderer.submit(clear, memory);
+        renderer.submit(draw, memory);
+        renderer.submit(farther, memory);
+        renderer.present(0x04000000);
+        expect((pixel() & 0xffffffu) == 0x2255ccu,
+            "trivial alpha comparison keeps depth writes and farther-fragment occlusion");
+    }
+    draw.alpha_test.enabled = false;
+    for (auto &v : draw.vertices) v.color = 0xff2255cc;
     draw.depth.test_enabled = false;
 
     draw.fog.enabled = true;
@@ -773,6 +814,34 @@ void primitive_contracts(gpu::VulkanRenderer &renderer) {
     renderer.submit(draw, memory);
     renderer.present(0x04000000);
     expect(pixel() == 0xffee3311, "textured sprite replaces vertex color and repeated draw reuses cached texture");
+    // Texture alpha participates in modulate/replace but decal keeps vertex
+    // alpha. Every combination is bounded and passes both trivial endpoints.
+    const auto alpha_texture_draw = draw;
+    for (const std::uint32_t alpha : {0u, 128u, 255u}) {
+        for (std::uint32_t i = 0; i < 4; ++i) memory.store32(draw.texture.address + i * 4u, (alpha << 24u) | 0xee3311u);
+        for (const std::uint32_t texture_function : {0u, 1u, 3u}) {
+            draw.texture.function = texture_function;
+            draw.alpha_test.enabled = true;
+            for (const auto [function, reference] : {std::pair{7u, 0u}, std::pair{5u, 255u}}) {
+                draw.alpha_test.function = function;
+                draw.alpha_test.reference = reference;
+                renderer.begin_frame();
+                renderer.submit(clear, memory);
+                renderer.begin_display_list();
+                renderer.submit(draw, memory);
+                renderer.present(0x04000000);
+                const auto specialized = pixel();
+                draw.alpha_test.enabled = false;
+                renderer.begin_frame();
+                renderer.submit(clear, memory);
+                renderer.submit(draw, memory);
+                renderer.present(0x04000000);
+                expect(pixel() == specialized, "trivial alpha test preserves textured modulate/decal/replace pixels");
+                draw.alpha_test.enabled = true;
+            }
+        }
+    }
+    draw = alpha_texture_draw;
     memory.store32(draw.texture.address, 0xff11cc77);
     memory.store32(draw.texture.address + 4, 0xff11cc77);
     memory.store32(draw.texture.address + 8, 0xff11cc77);
@@ -4796,7 +4865,7 @@ int run_contracts(int scripts) {
         primitive_contracts(renderer);
         renderer.shutdown();
         std::filesystem::remove_all(sandbox);
-        std::cout << (failures ? "FAIL" : "PASS") << ": bounded texture cache (" << failures << " failures)\n";
+        std::cout << (failures ? "FAIL" : "PASS") << ": bounded renderer primitives (" << failures << " failures)\n";
         return failures ? 1 : 0;
     }
     if (scripts == 3) {
@@ -4935,7 +5004,7 @@ int main(int argc, char **argv) {
                 mode = 2;
             else if (std::string_view(argv[1]) == "--ui-lifecycle")
                 mode = 3;
-            else if (std::string_view(argv[1]) == "--texture-cache")
+            else if ((std::string_view(argv[1]) == "--texture-cache" || std::string_view(argv[1]) == "--primitives"))
                 mode = 4;
             else if (std::string_view(argv[1]) == "--perf-overlay")
                 mode = 5;
