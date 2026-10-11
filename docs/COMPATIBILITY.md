@@ -470,7 +470,8 @@ A bounded stationary-village comparison on `5e1fa00` used a physical Android
 device, with hardware and driver details kept in local testing records. The
 isolated ARM64/API29 build
 reused compatible AOT objects and all 355 overlays. Resolution remained
-1650×720 with explicit 30 FPS, GPU compatibility Auto (self-test passed, Off),
+1650×720 with Frame rate Auto selecting 30 FPS, GPU compatibility Auto
+(self-test passed, Off),
 GPU vertex decode Off, sharp textures Off and no replacement texture pack.
 
 `MHP3RD_PERF_ALTERNATE=opaque` switched only the opacity optimization every
