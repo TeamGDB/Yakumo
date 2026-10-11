@@ -436,6 +436,23 @@ elif args[0] == 'logcat':
         self.assertFalse((self.run_dir / 'data').exists())
         self.assertTrue((self.run_dir / 'shots/opening.bmp').is_file())
 
+    def test_pathological_regex_and_ssh_timeout_are_bounded_failures(self):
+        with self.assertRaises(subprocess.TimeoutExpired):
+            dt.bounded_match('(a+)+$', 'a' * 1000 + '!', time.monotonic() + .2)
+        self.assertTrue(dt.bounded_match('ready', 'ready', time.monotonic() + 2))
+        self.assertFalse(dt.bounded_match('ready', 'not yet', time.monotonic() + 2))
+        device = {**self.device, 'adapter': 'ssh', 'host': 'synthetic-host',
+                  'checkout': str(ROOT), 'remote': self.device}
+        for error in (subprocess.TimeoutExpired('ssh', .1), KeyboardInterrupt()):
+            with patch.object(dt, 'command', side_effect=error):
+                self.assertEqual(dt.ssh_run(self.suite, device, 'deck', self.run_dir, False), 1)
+            self.assertEqual(self.report()['automatic']['verdict'], 'FAIL')
+            self.assertIn('SSH transport failed', (self.run_dir / 'transport.log').read_text())
+        for name in ('org.example.devicetest', 'a.b.devicetest'):
+            self.assertTrue(dt.valid_package(name))
+        for name in ('a.devicetest', 'a..devicetest', 'a.b-devicetest', 'a.' + 'a' * 200 + '.devicetest'):
+            self.assertFalse(dt.valid_package(name))
+
     def test_ssh_failure_and_powershell_quoting(self):
         device = {**self.device, 'adapter': 'ssh', 'host': 'synthetic-host',
                   'checkout': 'C:/Example Space/Yakumo', 'python': ['python'],

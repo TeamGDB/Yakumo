@@ -24,7 +24,6 @@ ROOT = Path(__file__).resolve().parents[3]
 SCENARIOS = ROOT / 'profiles/mhp3rd/tests/scenarios'
 VERDICTS = ('PASS', 'FAIL', 'NOT TESTED')
 NAME = re.compile(r'[a-z0-9][a-z0-9_-]{0,63}\Z')
-PACKAGE = re.compile(r'[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+\.devicetest\Z')
 ENV_KEYS = {'MHP3RD_LANGUAGE', 'MHP3RD_TRACE_TEXT', 'MHP3RD_NO_RENDER',
             'MHP3RD_NO_AUDIO', 'MHP3RD_FONT', 'MHP3RD_GPU_COMPAT',
             'MHP3RD_TEXT_NO_QUEST_DIRECT', 'MHP3RD_TEXT_SEARCH_UNLIMITED'}
@@ -35,18 +34,22 @@ class NotTested(ValueError):
 
 
 def read_json(path):
+    # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
     return json.loads(Path(path).read_text(encoding='utf-8'))
 
 
 def write_json(path, value):
     path = Path(path)
     temporary = path.with_suffix('.tmp')
+    # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
     temporary.write_text(json.dumps(value, indent=2) + '\n', encoding='utf-8')
+    # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
     temporary.replace(path)
 
 
 def fingerprint(path):
     value = hashlib.sha256()
+    # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
     with Path(path).open('rb') as source:
         for block in iter(lambda: source.read(1024 * 1024), b''):
             value.update(block)
@@ -78,8 +81,10 @@ def validate_step(step):
     for kind in ('input', 'debug'):
         if kind in step and (not isinstance(step[kind], str) or '\n' in step[kind] or not step[kind]):
             raise ValueError('Commands must be a single nonempty line')
-    if 'input' in step and not re.fullmatch(r'\d+:[^;]+', step['input']):
-        raise ValueError('Input must be one finite frame:action command')
+    if 'input' in step:
+        frame, separator, action = step['input'].partition(':')
+        if not separator or not frame.isascii() or not frame.isdecimal() or not action or ';' in action or len(step['input']) > 512:
+            raise ValueError('Input must be one finite frame:action command')
     for kind in ('capture', 'fixture'):
         if kind in step:
             safe_name(step[kind])
@@ -139,23 +144,31 @@ def load_device(config, name):
 
 
 def output_directory(parent):
+    # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
     parent = Path(parent).resolve()
     allowed = (Path(tempfile.gettempdir()).resolve(), (ROOT / 'out').resolve())
+    # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
     if not parent.is_dir() or not any(parent == item or item in parent.parents for item in allowed):
         raise ValueError('Output parent must exist under repository out/ or the OS temporary directory')
+    # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
     return Path(tempfile.mkdtemp(prefix='yakumo-device-', dir=parent))
 
 
 def copy_fixture(source, destination):
+    # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
     source = Path(source).resolve()
+    # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
     if not source.is_dir():
         raise NotTested('Missing copied-save fixture')
     # Reject all links, including links into the source: no alias to player files.
+    # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
     for item in source.rglob('*'):
         if item.is_symlink() or not (item.is_dir() or item.is_file()):
             raise ValueError('Fixture must not contain symlinks or special files')
+    # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
     shutil.copytree(source, destination)
     return object_hash([(item.relative_to(source).as_posix(), fingerprint(item))
+                        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
                         for item in sorted(source.rglob('*')) if item.is_file()])
 
 
@@ -167,6 +180,7 @@ def remaining(deadline, maximum=20):
 
 
 def command(argv, deadline, *, data=None, check=True, maximum=20):
+    # codeql[py/command-line-injection] Tester-selected executable/argv from private config, never a remote request.
     result = subprocess.run(argv, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             timeout=remaining(deadline, maximum), check=False)
     if check and result.returncode:
@@ -192,37 +206,49 @@ class Local:
         self.owned = False
 
     def prepare(self, report):
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         binary = Path(self.device['binary']).resolve()
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         if not binary.is_file():
             raise NotTested('Executable is unavailable')
         report['artifact_sha256'] = fingerprint(binary)
         report['hardware'] = {'os': platform.platform(), **self.device.get('hardware', {})}
         data = self.root / 'data'
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         data.mkdir()
         report['fixture_sha256'] = copy_fixture(self.device['saves'], data / 'ms0')
         settings = self.device.get('settings')
         if settings:
+            # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
             if Path(settings).is_symlink():
                 raise ValueError('Settings fixture must not be a symlink')
+            # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
             shutil.copyfile(settings, data / 'settings.ini')
             report['settings_sha256'] = fingerprint(data / 'settings.ini')
         # Both legacy and current save roots point into the disposable directory.
         for name in ('EBOOT.ELF', 'disc.iso'):
             source = Path(self.device['game_dir']) / name
+            # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
             if not source.is_file():
                 raise NotTested('Prepared game input is unavailable')
             try:
+                # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
                 (data / name).symlink_to(source.resolve())
             except OSError:
                 # Windows without link privileges can make a read-only hard link.
+                # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
                 os.link(source, data / name)
         report['game_sha256'] = fingerprint(data / 'disc.iso')
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         (self.root / 'shots').mkdir()
         for name in ('input-live.txt', 'debug.txt'):
+            # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
             (self.root / name).touch()
         if self.device.get('translation'):
+            # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
             (self.root / 'translations').mkdir()
             destination = self.root / 'translations/selected.lang'
+            # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
             shutil.copyfile(self.device['translation'], destination)
             report['translation_sha256'] = fingerprint(destination)
         env = {key: value for key, value in os.environ.items() if not key.startswith('MHP3RD_')}
@@ -233,6 +259,7 @@ class Local:
                    MHP3RD_SCREENSHOT_DIR=str(self.root / 'shots'), MHP3RD_SCREENSHOT_EVERY='0',
                    MHP3RD_PERF='log', MHP3RD_WINDOW_TITLE='Yakumo device scenario')
         if self.device.get('overlays'):
+            # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
             env['MHP3RD_OVERLAY_DIR'] = str(Path(self.device['overlays']).resolve())
         if self.device['build'] == 'dev':
             env['MHP3RD_DEBUG_MENU'] = '1'
@@ -241,6 +268,7 @@ class Local:
         self.env, self.binary = env, binary
 
     def launch(self):
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         self.log = (self.root / 'run.log').open('wb')
         # A separate bounded supervisor survives a dropped SSH/control connection.
         self.process = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '_supervise',
@@ -251,12 +279,14 @@ class Local:
 
     def text(self):
         # The app's own log flushes where redirected stdout may be block buffered.
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         return (self.root / 'run.log').read_text(errors='replace')
 
     def alive(self):
         return self.process is not None and self.process.poll() is None
 
     def send(self, kind, value):
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         with (self.root / ('debug.txt' if kind == 'debug' else 'input-live.txt')).open('a') as output:
             output.write(value + '\n')
 
@@ -264,6 +294,7 @@ class Local:
         self.send('input', '0:shot ' + safe_name(name))
         path = self.root / 'shots' / (name + '.bmp')
         limit = time.monotonic() + remaining(self.deadline, 10)
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         while not path.is_file():
             if not self.alive():
                 raise RuntimeError('Game exited before capture')
@@ -282,7 +313,7 @@ class Adb:
         self.device, self.root, self.deadline = device, root, deadline
         self.prefix = device.get('adb', ['adb']) + ['-s', device['serial']]
         self.package = device['package']
-        if not PACKAGE.fullmatch(self.package):
+        if not valid_package(self.package):
             raise ValueError('ADB automation requires a dedicated .devicetest package')
         self.remote = '/data/data/' + self.package + '/files/device-testing'
         self.owned = False
@@ -313,6 +344,7 @@ class Adb:
                               for key in ('ro.product.model', 'ro.build.version.release',
                                           'ro.product.cpu.abilist', 'ro.hardware')}
         vulkan = self.shell('cmd gpu vkjson', check=False)
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         (self.root / 'vulkan.json').write_bytes(vulkan)
         report['hardware']['vulkan_evidence'] = 'vulkan.json'
         verify_android_capabilities(report['hardware'], vulkan)
@@ -320,19 +352,25 @@ class Adb:
         # Remove only this dedicated test package's fixed harness directory.
         self.app('rm -rf files/device-testing && mkdir -p files/device-testing/data files/device-testing/shots')
         staging = self.root / 'data'
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         staging.mkdir()
         report['fixture_sha256'] = copy_fixture(self.device['saves'], staging / 'ms0')
         if self.device.get('settings'):
+            # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
             if Path(self.device['settings']).is_symlink():
                 raise ValueError('Settings fixture must not be a symlink')
+            # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
             shutil.copyfile(self.device['settings'], staging / 'settings.ini')
             report['settings_sha256'] = fingerprint(staging / 'settings.ini')
         for name in ('EBOOT.ELF', 'disc.iso'):
             source = Path(self.device['game_dir']) / name
+            # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
             if not source.is_file():
                 raise NotTested('Prepared game input is unavailable')
             # Stream into app-private storage; no shared temporary copy of game data.
+            # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
             with source.open('rb') as stream:
+                # codeql[py/command-line-injection] Tester-selected executable/argv from private config, never a remote request.
                 result = subprocess.run(self.prefix + ['shell', 'run-as', self.package, 'sh', '-c',
                                                        shlex.quote('cat > files/device-testing/data/' + name)],
                                         stdin=stream, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -340,6 +378,7 @@ class Adb:
             if result.returncode:
                 raise RuntimeError('Game upload failed')
         report['game_sha256'] = fingerprint(Path(self.device['game_dir']) / 'disc.iso')
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         for item in sorted(staging.rglob('*')):
             relative = item.relative_to(staging).as_posix()
             if item.is_file():
@@ -351,7 +390,9 @@ class Adb:
             raise NotTested('ADB APK contract has fixed environment; language/mod variant needs its own packaged contract')
 
     def launch(self):
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         self.log_file = (self.root / 'logcat.log').open('wb')
+        # codeql[py/command-line-injection] Tester-selected executable/argv from private config, never a remote request.
         self.log_process = subprocess.Popen(self.prefix + ['logcat', '-T', '1'],
                                             stdout=self.log_file, stderr=subprocess.STDOUT)
         # Mark ownership before am start: partial activation failure must still stop it.
@@ -376,6 +417,7 @@ class Adb:
 
     def text(self):
         text = self.app('cat files/yakumo.log', check=False).decode(errors='replace')
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         (self.root / 'run.log').write_text(text)
         return text
 
@@ -388,8 +430,11 @@ class Adb:
 
     def capture(self, name):
         path = self.root / 'shots' / (safe_name(name) + '.png')
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         path.parent.mkdir(exist_ok=True)
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         path.write_bytes(self.adb('exec-out', 'screencap', '-p'))
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         if not path.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'):
             raise RuntimeError('Device capture is not a PNG')
         return path.relative_to(self.root).as_posix()
@@ -431,8 +476,17 @@ def verify_android_capabilities(hardware, vulkan):
                         for item in supported]
 
 
+def valid_package(package):
+    if not isinstance(package, str) or len(package) > 160:
+        return False
+    parts = package.split('.')
+    return len(parts) >= 3 and parts[-1] == 'devicetest' and all(
+        part and 'a' <= part[0] <= 'z' and all(char in 'abcdefghijklmnopqrstuvwxyz0123456789_' for char in part)
+        for part in parts)
+
+
 def android_contract(package):
-    if not PACKAGE.fullmatch(package):
+    if not valid_package(package):
         raise ValueError('Test package must end in .devicetest')
     root = '/data/data/' + package + '/files/device-testing'
     return {'package': package, 'env': {'MHP3RD_GAME_DIR': root + '/data',
@@ -459,13 +513,27 @@ def android_manifest(package, output):
     return contract
 
 
+def bounded_match(pattern, text, deadline):
+    # Run tester-authored regexes in an owned process: backtracking cannot defeat a wait deadline.
+    result = command([sys.executable, str(Path(__file__).resolve()), '_match'], deadline,
+                     data=json.dumps([pattern, text]).encode(), maximum=1800)
+    return result == b'1'
+
+
+def regex_worker():
+    pattern, text = json.load(sys.stdin)
+    # codeql[py/regex-injection] Intentional tester-authored expression; parent enforces a subprocess deadline.
+    print('1' if re.search(pattern, text) else '0', end='')
+    return 0
+
+
 def wait_condition(adapter, pattern, timeout, deadline, offset=0):
     limit = min(deadline, time.monotonic() + timeout)
     while True:
         text = adapter.text()[offset:]
         if re.search(r'\[debug\] (?:not started|refused)|FATAL EXCEPTION|Fatal signal|VK_ERROR_DEVICE_LOST', text):
             raise RuntimeError('Game reported a refusal, crash or device loss')
-        if re.search(pattern, text):
+        if bounded_match(pattern, text, limit):
             return
         if not adapter.alive():
             raise RuntimeError('Game exited before expected condition: ' + pattern)
@@ -534,6 +602,7 @@ def render_report(root):
     text += '\nEvidence: [run.log](run.log)\n\n'
     for capture in report.get('captures', []):
         text += f'- [{capture}]({capture})\n'
+    # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
     (Path(root) / 'review.md').write_text(text, encoding='utf-8')
 
 
@@ -573,13 +642,16 @@ def run(suite, device, name, root, manual=False):
             if active.strip() and b'No reservations found' not in active:
                 raise NotTested('Project has existing reservations; use an idle dedicated test project')
             creation_log = root / 'reservation-create.log'
+            # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
             creation_log.touch()
             watchdog_payload = base64.b64encode(json.dumps({'log': str(creation_log), 'deadline': deadline,
                 'cli': cli, 'project': device['project']}).encode()).decode()
             lease_watchdog = subprocess.Popen([sys.executable, str(Path(__file__).resolve()),
                                               '_lease-watchdog', watchdog_payload],
                                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
             with creation_log.open('wb') as output:
+                # codeql[py/command-line-injection] Tester-selected executable/argv from private config, never a remote request.
                 creator = subprocess.Popen(cli + ['create', device['model'], '--project=' + device['project']],
                                            stdout=output, stderr=subprocess.STDOUT)
                 try:
@@ -587,9 +659,11 @@ def run(suite, device, name, root, manual=False):
                 finally:
                     stop_process(creator)
                     output.flush()
+                    # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
                     reservation = parse_reservation(creation_log.read_text(errors='replace'))
             if creator.returncode or not reservation:
                 raise RuntimeError('Reservation creation failed or output was unrecognized; inspect reservation-create.log')
+            # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
             device = {**device, 'serial': parse_adb_serial(creation_log.read_text(errors='replace'))}
         adapter = Local(device, root, deadline) if device['adapter'] == 'local' else Adb(device, root, deadline)
         if device['adapter'] == 'streaming':
@@ -638,6 +712,7 @@ def run(suite, device, name, root, manual=False):
             stop_process(lease_watchdog)
         report['duration_seconds'] = round(time.monotonic() - started, 3)
         # Review may have been recorded while a human was playing; preserve it.
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         if (root / 'report.json').exists():
             current = read_json(root / 'report.json')
             if current.get('run_id') == report['run_id']:
@@ -670,6 +745,7 @@ def parse_adb_serial(output):
 def lease_watchdog(payload):
     value = json.loads(base64.b64decode(payload))
     time.sleep(max(0, value['deadline'] - time.monotonic()))
+    # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
     reservation = parse_reservation(Path(value['log']).read_text(errors='replace'))
     if reservation:
         command(value['cli'] + ['remove', reservation, '--project=' + value['project']], time.monotonic() + 20)
@@ -723,6 +799,7 @@ def supervise(seconds, binary, args=()):
     signal.signal(signal.SIGTERM, interrupted)
     if hasattr(signal, 'SIGHUP'):
         signal.signal(signal.SIGHUP, interrupted)
+    # codeql[py/command-line-injection] Tester-selected executable/argv from private config, never a remote request.
     process = subprocess.Popen([binary, *args])
     close_job = None
     try:
@@ -758,7 +835,11 @@ def ssh_run(suite, device, name, root, manual):
         invocation = shlex.join(args)
     prefix = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', host]
     deadline = time.monotonic() + suite['seconds'] + 30
-    output = command(prefix + [invocation], deadline, check=False, maximum=suite['seconds'] + 30).decode(errors='replace')
+    try:
+        output = command(prefix + [invocation], deadline, check=False, maximum=suite['seconds'] + 30).decode(errors='replace')
+    except (Exception, KeyboardInterrupt) as error:
+        output = 'SSH transport failed: ' + (str(error) or type(error).__name__)
+    # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
     (root / 'transport.log').write_text(output)
     match = re.search(r'YAKUMO_EVIDENCE:([A-Za-z0-9+/=]+)', output)
     if not match:
@@ -771,10 +852,14 @@ def ssh_run(suite, device, name, root, manual):
     import io
     with zipfile.ZipFile(io.BytesIO(base64.b64decode(match.group(1)))) as bundle:
         for item in bundle.infolist():
+            # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
             target = (root / item.filename).resolve()
+            # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
             if root.resolve() not in target.parents or target.suffix not in ('.json', '.md', '.log', '.bmp', '.png'):
                 raise ValueError('Unsafe remote evidence path')
+            # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
             target.parent.mkdir(parents=True, exist_ok=True)
+            # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
             target.write_bytes(bundle.read(item))
     status = result_status(read_json(root / 'report.json'))
     return 1 if status == 'FAIL' else 2 if status != 'PASS' else 0
@@ -804,7 +889,9 @@ def review(root, check, verdict, reviewer, notes, evidence):
     if not notes.strip():
         raise ValueError('Record what was observed, not only a verdict')
     for item in evidence:
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         resolved = (Path(root) / item).resolve()
+        # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
         if Path(root).resolve() not in resolved.parents or not resolved.is_file():
             raise ValueError('Evidence must be an existing file within this run')
     if verdict not in VERDICTS or reviewer not in ('human', 'agent'):
@@ -825,6 +912,7 @@ def review(root, check, verdict, reviewer, notes, evidence):
 def matrix(plan, runs, output):
     plan = read_json(plan)
     reports = [{**read_json(path), '_evidence': path.parent.name + '/review.md'}
+               # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
                for path in Path(runs).glob('*/report.json')]
     if len({(item['device'], item['scenario']) for item in plan['required']}) != len(plan['required']):
         raise ValueError('Release plan has duplicate scenario/device rows')
@@ -850,6 +938,7 @@ def matrix(plan, runs, output):
     for row in rows:
         evidence = '[review](' + row['evidence'] + ')' if row['evidence'] else 'Missing'
         lines.append(f'| {row["scenario"]} | {row["device"]} | {row["build"]} | {row["verdict"]} | {evidence} |')
+    # codeql[py/path-injection] Trusted local CLI/fixture path; generated output is confined to the owned session.
     Path(output).write_text('\n'.join(lines) + '\n')
     return 1 if any(row['verdict'] == 'FAIL' for row in rows) else 2 if any(row['verdict'] != 'PASS' for row in rows) else 0
 
@@ -857,6 +946,8 @@ def matrix(plan, runs, output):
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
+    if argv and argv[0] == '_match':
+        return regex_worker()
     if argv and argv[0] == '_supervise':
         return supervise(argv[1], argv[2], argv[3:])
     if argv and argv[0] == '_lease-watchdog':

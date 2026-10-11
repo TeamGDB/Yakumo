@@ -6,6 +6,18 @@ local developer tool, not a public game-data CI job. Human play and agent visual
 review complement automatic observations; neither screenshots nor a successful
 process launch establish gameplay correctness.
 
+## Trust boundary
+
+This CLI runs with the tester's permissions. Its private configuration deliberately
+selects executable/tool paths, arguments, source fixtures and remote hosts; review
+that configuration and scenario files like executable test code. Do not run
+downloaded configs or expose this CLI as a service for untrusted users. Narrow
+CodeQL annotations at local path/command sinks document those intentional
+permissions without disabling repository-wide scanning. Archive evidence and
+fixture links still receive explicit confinement checks. Tester-authored log
+regexes execute in a separate process with the wait deadline, so backtracking
+cannot leave the controller hanging.
+
 ## Start locally
 
 Python 3.9 or newer is sufficient. No game build is needed for the tooling.
