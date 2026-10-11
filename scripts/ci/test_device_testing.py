@@ -561,11 +561,14 @@ elif args[0] == 'logcat':
         self.assertEqual(list(self.run_dir.iterdir()), [])
 
     def test_adb_public_transport_stages_controls_and_cleans(self):
-        device = self.make_adb()
+        # First preparation starts many instrumented tool processes; keep it
+        # separate from the unchanged five-second gameplay bound.
+        device = {**self.make_adb(), 'setup_seconds': 20}
         with patch.dict(os.environ, {'FAKE_ADB_ROOT': str(self.adb_root)}):
-            self.assertEqual(dt.run(self.suite, device, 'phone', self.run_dir), 2)
+            self.assertEqual(dt.run(self.suite, device, 'phone', self.run_dir), 2, self.report())
         report = self.report()
         self.assertEqual(report['automatic']['verdict'], 'PASS')
+        self.assertEqual(report['deadline_seconds'], 25)
         self.assertEqual(report['captures'], ['shots/opening.png'])
         self.assertFalse((self.adb_root / 'pid').exists())
         self.assertEqual((self.adb_root / 'files/device-testing/data/ms0/save.dat').read_bytes(), b'original fixture')
