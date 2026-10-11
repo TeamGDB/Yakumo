@@ -535,22 +535,26 @@ class Adb:
         expected = fingerprint(source)
         if raw:
             with Path(source).open('rb') as stream:
+                size = os.fstat(stream.fileno()).st_size
                 command(self.prefix + ['shell', 'run-as', self.package, 'sh', '-c',
                                        shlex.quote('cat > ' + shlex.quote(destination))],
                         self.deadline, input_file=stream, maximum=remaining(self.deadline, 1800))
             self.verify_upload(source, destination, expected)
-            return
+            return {'bytes': size, 'sha256': expected}
         # Keep encoding bounded and private, without a shared device-side game copy.
         with tempfile.TemporaryFile(mode='w+b', dir=self.root) as encoded:
+            size = 0
             with Path(source).open('rb') as stream:
                 for block in iter(lambda: stream.read(3 * 65536), b''):
                     remaining(self.deadline)
+                    size += len(block)
                     encoded.write(base64.b64encode(block))
             encoded.seek(0)
             command(self.prefix + ['shell', 'run-as', self.package, 'sh', '-c',
                                    shlex.quote('base64 -d > ' + shlex.quote(destination))],
                     self.deadline, input_file=encoded, maximum=remaining(self.deadline, 1800))
         self.verify_upload(source, destination, expected)
+        return {'bytes': size, 'sha256': expected}
 
     def verify_upload(self, source, destination, expected):
         actual = self.app('sha256sum ' + shlex.quote(destination)).decode(errors='replace').split()
@@ -624,8 +628,7 @@ class Adb:
         started = time.monotonic()
         record = {'name': safe_name(name), 'status': 'FAIL'}
         try:
-            self.upload(source, destination)
-            record.update(status='PASS', bytes=Path(source).stat().st_size, sha256=fingerprint(source))
+            record.update(self.upload(source, destination), status='PASS')
         except subprocess.TimeoutExpired as error:
             record.update(status='TIMEOUT', stdout=(error.output or b'').decode(errors='replace'),
                           stderr=(error.stderr or b'').decode(errors='replace'))
