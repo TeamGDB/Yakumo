@@ -86,6 +86,47 @@ void test_text() {
     check(game::text_table(ram, game::kTextBlock, 3).empty(), "a table without its end marker is refused");
 }
 
+void test_observation() {
+    BufferRam ram(kBase, kSize);
+    auto observe = [&] {
+        std::vector<std::string> out;
+        check(game_command(ram, "observe", {"17"}, out), "observation command recognized");
+        return out.front();
+    };
+    const auto empty = observe();
+    check(empty.find("\"request\":17") != std::string::npos && empty.find("\"loaded\":false") != std::string::npos &&
+            empty.find("\"active_id\":null") != std::string::npos,
+        "empty guest state cannot prove a loaded character or quest");
+    ram.store16(game::kHunterName, 'A');
+    ram.store32(quests::kCharacterPointer, game::kCharacter - 0x85Cu);
+    ram.store16(game::kCharacter - 0x85Cu + quests::kQuestIdOffset, 204u);
+    ram.store32(game::kTaskSlot, 0x336F574Du);
+    ram.store32(game::kTaskSlot + 8u, game::kTaskSlot);
+    const std::string task = "game_task.ovl";
+    for (std::size_t i = 0; i < task.size(); ++i) ram.store8(game::kTaskSlot + 32u + i, task[i]);
+    ram.store32(0x08A3A630u, 4u);
+    ram.store16(0x08A3A630u + 4u + 0x1Cu, 309u);
+    ram.store32(game::kQuestTimeLeft, 12345u);
+    const std::uint32_t monster = 0x09650000u;
+    ram.store32(game::kMonsterTable, monster);
+    ram.store16(monster + game::kMonsterMostHealth, 900u);
+    ram.store16(monster + game::kMonsterHealth, 800u);
+    const auto active = observe();
+    check(active.find("\"accepted_id\":204") != std::string::npos &&
+            active.find("\"active_id\":309") != std::string::npos &&
+            active.find("\"quest_ticks\":12345") != std::string::npos &&
+            active.find("\"health\":800") != std::string::npos,
+        "observation reads actual active record independently of accepted ID");
+    check(ram.load16(monster + game::kMonsterHealth) == 800u && ram.load32(game::kQuestTimeLeft) == 12345u,
+        "readback leaves quest and monster state unchanged");
+    ram.store32(0x08A3A630u, 0xFFFFFFFFu);
+    check(observe().find("\"active_id\":null") != std::string::npos, "invalid active record is unknown");
+    ram.store32(game::kTaskSlot + 8u, 0u);
+    check(observe().find("\"on_quest\":false") != std::string::npos, "mutated overlay header rejects quest state");
+    ram.store32(quests::kCharacterPointer, 0xFFFFFFFFu);
+    check(observe().find("\"accepted_id\":null") != std::string::npos, "invalid character pointer is unknown");
+}
+
 void test_items() {
     BufferRam ram(kBase, kSize);
     write_text(ram);
@@ -375,6 +416,7 @@ void test_quest_start() {
 
 int main() {
     test_text();
+    test_observation();
     test_items();
     test_equipment();
     test_money_and_name();

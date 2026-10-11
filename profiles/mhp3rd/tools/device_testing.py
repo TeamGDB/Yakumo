@@ -132,6 +132,8 @@ def load_device(config, name):
 
 
 def validate_device(value):
+    if type(value.get('observations', False)) is not bool or value.get('observations') and value.get('build') != 'dev':
+        raise ValueError('Structured observations require an explicit developer artifact')
     if value.get('adapter') not in ('local', 'ssh', 'adb', 'streaming'):
         raise ValueError('Unknown device adapter')
     if value.get('build') not in ('dev', 'release'):
@@ -401,6 +403,9 @@ class Local:
             env['MHP3RD_OVERLAY_DIR'] = str(Path(self.device['overlays']).resolve())
         if self.device['build'] == 'dev':
             env['MHP3RD_DEBUG_MENU'] = '1'
+        if self.device.get('observations'):
+            env['MHP3RD_DEVICE_TEST'] = '1'
+            env['MHP3RD_TRACE_CAMERA'] = '1'
         if self.device.get('translation'):
             env['MHP3RD_TRANSLATIONS_DIR'] = str(self.root / 'translations')
         self.env, self.binary = env, binary
@@ -497,7 +502,7 @@ class Adb:
             if archive.getinfo('assets/device-testing.json').file_size > 1024 * 1024:
                 raise ValueError('APK test contract is oversized')
             contract = json.loads(archive.read('assets/device-testing.json'))
-        if contract != android_contract(self.package, self.device.get('performance', 'log')):
+        if contract != android_contract(self.package, self.device.get('performance', 'log'), self.device.get('observations', False)):
             raise ValueError('APK lacks the generated device-testing contract')
         report['artifact_sha256'] = fingerprint(apk)
         verify_artifact(self.device, report['artifact_sha256'])
@@ -656,7 +661,7 @@ def verify_artifact(device, actual):
         raise ValueError('Artifact differs from the configured fingerprint')
 
 
-def android_contract(package, performance='log'):
+def android_contract(package, performance='log', observations=False):
     if not valid_package(package):
         raise ValueError('Test package must end in .devicetest')
     if performance not in ('log', 'settings'):
@@ -668,11 +673,13 @@ def android_contract(package, performance='log'):
             'MHP3RD_SCREENSHOT_DIR': root + '/shots', 'MHP3RD_PERF': 'log'}}
     if performance == 'settings':
         contract['env'].pop('MHP3RD_PERF')
+    if observations:
+        contract['env'].update(MHP3RD_DEVICE_TEST='1', MHP3RD_TRACE_CAMERA='1')
     return contract
 
 
-def android_manifest(package, output, performance='log'):
-    contract = android_contract(package, performance)
+def android_manifest(package, output, performance='log', observations=False):
+    contract = android_contract(package, performance, observations)
     ns = '{http://schemas.android.com/apk/res/android}'
     ET.register_namespace('android', ns[1:-1])
     tree = ET.parse(ROOT / 'profiles/mhp3rd/packaging/android/AndroidManifest.xml')
@@ -1343,6 +1350,7 @@ def main(argv=None):
     part.add_argument('--output', required=True)
     part.add_argument('--contract', required=True)
     part.add_argument('--performance', choices=('log', 'settings'), default='log')
+    part.add_argument('--observations', action='store_true', help='Enable developer-only structured readbacks')
     args = parser.parse_args(argv)
     try:
         if args.command == 'list':
@@ -1350,7 +1358,7 @@ def main(argv=None):
                 value = validate_scenario(read_json(path))
                 print(f'{value["id"]}: {value["build"]}/{value["execution"]} - {value["description"]}')
         elif args.command == 'android-manifest':
-            write_json(args.contract, android_manifest(args.package, args.output, args.performance))
+            write_json(args.contract, android_manifest(args.package, args.output, args.performance, args.observations))
         elif args.command == 'review':
             review(args.run, args.check, args.verdict, args.reviewer, args.notes, args.evidence)
         elif args.command == 'matrix':

@@ -1104,6 +1104,12 @@ if(MHP3RD_RENDERER_TESTS)
     add_executable(mhp3rd_renderer_ui_tests tests/renderer_ui_tests.cpp
         ${MHP3RD_HOST_SOURCES} ${MHP3RD_RENDERER_SOURCES}
         $<TARGET_OBJECTS:mhp3rd_generated>)
+    if(MHP3RD_DEBUG_MENU AND NOT MHP3RD_RELEASE)
+        target_sources(mhp3rd_renderer_ui_tests PRIVATE
+            host/debug/debug_console.cpp host/debug/debug_tools.cpp
+            host/debug/game_state.cpp host/debug/quest_start.cpp host/ui/debug_screen.cpp)
+        target_compile_definitions(mhp3rd_renderer_ui_tests PRIVATE MHP3RD_DEBUG_MENU=1)
+    endif()
     add_dependencies(mhp3rd_renderer_ui_tests mhp3rd_shaders mhp3rd_version)
     target_sources(mhp3rd_renderer_ui_tests PRIVATE "${MHP3RD_NIDS_INC}")
     target_compile_definitions(mhp3rd_renderer_ui_tests PRIVATE MHP3RD_HAS_RENDERER=1 MHP3RD_HAS_SDL_AUDIO=1 MHP3RD_HAS_SDL=1

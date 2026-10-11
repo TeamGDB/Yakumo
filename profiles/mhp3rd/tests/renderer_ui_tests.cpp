@@ -52,6 +52,10 @@
 #include "ui/bindings_editor.hpp"
 #include "ui/touch_editor.hpp"
 #include "ui/touch_overlay.hpp"
+#if defined(MHP3RD_DEBUG_MENU)
+#include "debug/debug_console.hpp"
+#include "game/guest_ram.hpp"
+#endif
 #include "imgui_internal.h"
 #include "backends/imgui_impl_sdl3.h"
 #include <fstream>
@@ -4875,6 +4879,23 @@ int run_contracts(int scripts) {
     touch_event_contracts(renderer);
     scripted_mouse_contracts(renderer);
     virtual_gamepad_contracts(renderer);
+#if defined(MHP3RD_DEBUG_MENU)
+    {
+        game::GuestRam ram(fixture.runtime.memory());
+        clear_environment("MHP3RD_DEVICE_TEST");
+        auto result = debug::run_command(ram, "observe 41");
+        expect(result.size() == 1 && result[0].find("unavailable") != std::string::npos,
+            "structured observations require explicit developer test mode");
+        set_environment("MHP3RD_DEVICE_TEST", "1");
+        result = debug::run_command(ram, "observe 42");
+        expect(result.size() == 1 && result[0].find("\"request\":42") != std::string::npos &&
+                result[0].find("\"clock_us\":" + std::to_string(kernel().now_us())) != std::string::npos &&
+                result[0].find("\"vblanks\":" + std::to_string(kernel().vblank_count())) != std::string::npos &&
+                result[0].find("\"photo\":false") != std::string::npos,
+            "readbacks report actual kernel clocks and photo state rather than command acknowledgement");
+        clear_environment("MHP3RD_DEVICE_TEST");
+    }
+#endif
     audio_device_contracts();
     terminal_audio_menu_contracts(renderer);
     renderer.shutdown();

@@ -5,6 +5,20 @@
 #include "debug/quest_start.hpp"
 #include "game/guest_ram.hpp"
 #include "platform/utf8_path.hpp"
+#include "hle/hle_common.hpp"
+#include "settings/settings.hpp"
+#include "kernel/fast_loading.hpp"
+#include "kernel/fast_forward.hpp"
+#include "adhoc/session.hpp"
+#include "adhoc/client.hpp"
+#if defined(MHP3RD_HAS_RENDERER)
+#include "camera/free_camera.hpp"
+#include "camera/lock_on.hpp"
+#include "gpu/game_hud.hpp"
+#include "gpu/vulkan_renderer.hpp"
+#include "perf/frame_stats.hpp"
+#include <SDL3/SDL.h>
+#endif
 
 #include <cstdio>
 #include <cstdlib>
@@ -106,6 +120,47 @@ std::vector<std::string> run_command(Ram &ram, const std::string &line) {
     const auto arg = [&](std::size_t i) { return i < args.size() ? number(args[i]) : 0u; };
 
     if (command.empty() || command[0] == '#') return out;
+    if (command == "observe") {
+        if (!std::getenv("MHP3RD_DEVICE_TEST"))
+            return {"observation unavailable: explicit developer test mode required"};
+        game_command(ram, command, args, out);
+        std::string &json = out.front();
+        json.pop_back();
+        json += ",\"clock_us\":" + std::to_string(kernel().now_us()) +
+            ",\"vblanks\":" + std::to_string(kernel().vblank_count()) +
+            ",\"online\":" + (adhoc_session_active() || adhoc_networking_on() ? "true" : "false") +
+            ",\"fast_loading\":" + (fast_loading::active() ? "true" : "false") +
+            ",\"fast_forward\":" + (fast_forward::active() ? "true" : "false");
+        const auto network = adhoc::Client::get().diagnostics();
+        json += ",\"peer_count\":" + std::to_string(network.peers.size()) +
+            ",\"peer_received\":" + std::to_string(network.total.bytes_in);
+#if defined(MHP3RD_HAS_RENDERER)
+        const auto free = camera::free_camera_status();
+        json += ",\"free_camera\":" + std::string(free.active ? "true" : "false") +
+            ",\"photo\":" + (free.paused ? "true" : "false") +
+            ",\"hud_hidden\":" + (gpu::hud::active() ? "true" : "false") +
+            ",\"lock_on\":" + (camera::lock_on_status().locked ? "true" : "false");
+        if (auto *renderer = active_renderer(); renderer && renderer->available()) {
+            const auto pad = renderer->pad();
+            const auto view = renderer->camera();
+            json += ",\"pad_buttons\":" + std::to_string(pad.buttons) + ",\"pad_x\":" + std::to_string(pad.analog_x) +
+                ",\"pad_y\":" + std::to_string(pad.analog_y) +
+                ",\"focus\":" + ((SDL_GetWindowFlags(renderer->window()) & SDL_WINDOW_INPUT_FOCUS) ? "true" : "false") +
+                ",\"camera_valid\":" + (view.valid ? "true" : "false") + ",\"camera_yaw\":" + std::to_string(view.yaw) +
+                ",\"camera_position\":[" + std::to_string(view.position[0]) + ',' + std::to_string(view.position[1]) +
+                ',' + std::to_string(view.position[2]) + ']';
+            json += ",\"frame_ms\":[";
+            const auto &history = perf::frame_history();
+            for (std::size_t i = 0; i < history.size(); ++i) {
+                if (i) json += ',';
+                json += std::to_string(history[(perf::history_cursor() + i) % history.size()]);
+            }
+            json += ']';
+        }
+#endif
+        json += "}";
+        return out;
+    }
     if (command == "find8" || command == "find16" || command == "find32") {
         Search &s = search();
         s.width = command == "find8" ? 1u : command == "find16" ? 2u : 4u;

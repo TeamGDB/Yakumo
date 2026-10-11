@@ -372,6 +372,9 @@ bool run_photo_mode(Runtime &rt, gpu::VulkanRenderer &renderer, std::uint32_t ad
         }
         const perf::Clock::time_point now = perf::Clock::now();
         fly_free_camera_now(rt, renderer);
+#if defined(MHP3RD_DEBUG_MENU)
+        if (std::getenv("MHP3RD_DEVICE_TEST")) debug::frame(rt);
+#endif
         // The picture presented last: the frame as the free camera saw it.
         if (renderer.take_screenshot_request()) (void)ui::take_screenshot();
         // The HUD can be hidden and shown again on the held frame: it was

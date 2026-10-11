@@ -1,6 +1,7 @@
 #include "debug/game_state.hpp"
 
 #include "debug/debug_tools.hpp"
+#include "debug/quest_start.hpp"
 #include "game/guest_ram.hpp"
 
 #include <algorithm>
@@ -8,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <set>
+#include <sstream>
 
 namespace mhp3rd::debug {
 namespace p3rd {
@@ -225,7 +227,62 @@ bool game_command(
     const auto arg = [&](std::size_t i, std::uint32_t fallback = 0u) {
         return i < args.size() ? number(args[i]) : fallback;
     };
-    if (command == "state") {
+    if (command == "observe") {
+        // Read-only, numeric evidence. Do not confuse the accepted ID with the
+        // record the active quest accessor actually resolves (TEXT_TRANSLATION.md).
+        const auto overlay = [&](std::uint32_t at) {
+            if (!ram.contains(at, 64u) || ram.load32(at) != 0x336F574Du || ram.load32(at + 8u) != at)
+                return std::string();
+            const std::string name = read_text(ram, at + 32u);
+            return name.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.") ==
+                    std::string::npos
+                ? name
+                : std::string();
+        };
+        const bool quest = on_quest(ram);
+        const bool loaded = character_loaded(ram);
+        const std::uint32_t character =
+            ram.contains(quests::kCharacterPointer, 4u) ? ram.load32(quests::kCharacterPointer) : 0u;
+        const bool valid_character = character >= 0x08800000u && ram.contains(character, quests::kQuestIdOffset + 2u);
+        constexpr std::uint32_t active = 0x08A3A630u;
+        const std::uint32_t offset = ram.contains(active, 4u) ? ram.load32(active) : 0u;
+        const bool valid_active = quest && offset >= 4u && offset <= 0x10000u && ram.contains(active + offset, 0x48u);
+        std::ostringstream json;
+        json << "{\"schema\":1,\"request\":" << arg(0) << ",\"loaded\":" << (loaded ? "true" : "false")
+             << ",\"task\":\"" << overlay(kTaskSlot) << "\",\"map\":\"" << overlay(quests::kMapSlot)
+             << "\",\"on_quest\":" << (quest ? "true" : "false") << ",\"accepted_id\":";
+        if (valid_character)
+            json << ram.load16(character + quests::kQuestIdOffset);
+        else
+            json << "null";
+        json << ",\"active_id\":";
+        if (valid_active)
+            json << ram.load16(active + offset + 0x1Cu);
+        else
+            json << "null";
+        json << ",\"quest_ticks\":";
+        if (quest && ram.contains(kQuestTimeLeft, 4u))
+            json << ram.load32(kQuestTimeLeft);
+        else
+            json << "null";
+        json << ",\"equipment\":\"";
+        if (loaded && ram.contains(kCharacter + 0x38u, 84u))
+            for (std::uint32_t i = 0; i < 84u; ++i) {
+                char byte[3];
+                std::snprintf(byte, sizeof(byte), "%02x", ram.load8(kCharacter + 0x38u + i));
+                json << byte;
+            }
+        json << "\",\"monsters\":[";
+        bool first = true;
+        for (const Monster &m : monsters(ram)) {
+            if (!first) json << ',';
+            first = false;
+            json << "{\"address\":" << m.address << ",\"kind\":" << static_cast<unsigned>(m.kind)
+                 << ",\"health\":" << m.health << ",\"maximum\":" << m.most << '}';
+        }
+        json << "]}";
+        out.push_back("observation " + json.str());
+    } else if (command == "state") {
         out.push_back("character: " + (character_loaded(ram) ? hunter_name(ram) : std::string("(none)")) + ", zenny " +
             std::to_string(money(ram)) + ", free item slots " + std::to_string(free_item_slots(ram)) +
             ", free equipment slots " + std::to_string(free_equipment_slots(ram)) + ", items named " +

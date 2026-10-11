@@ -1,0 +1,222 @@
+"""Independent, bounded oracles for private device evidence (no game fixtures)."""
+import hashlib
+import math
+from pathlib import Path
+import statistics
+import struct
+import zlib
+
+
+class CheckFailed(ValueError):
+    pass
+
+
+def field(value, path):
+    if isinstance(value, dict) and path in value:
+        return value[path]
+    part, separator, rest = path.partition('.')
+    value = value[int(part)] if isinstance(value, list) else value[part]
+    return field(value, rest) if separator else value
+
+
+def compare(actual, operator, expected):
+    if isinstance(actual, float) and not math.isfinite(actual):
+        raise CheckFailed('Nonfinite observation')
+    if isinstance(expected, float) and not math.isfinite(expected):
+        raise CheckFailed('Nonfinite expectation')
+    if operator == 'eq':
+        ok = type(actual) is type(expected) and actual == expected
+    elif operator == 'ne':
+        ok = type(actual) is type(expected) and actual != expected
+    elif operator in ('gt', 'ge', 'lt', 'le'):
+        if type(actual) not in (int, float) or type(expected) not in (int, float):
+            raise CheckFailed('Numeric comparison requires numbers, not unknown/bool values')
+        ok = {'gt': actual > expected, 'ge': actual >= expected,
+              'lt': actual < expected, 'le': actual <= expected}[operator]
+    else:
+        raise ValueError('Unknown comparison operator')
+    if not ok:
+        raise CheckFailed(f'Expected {operator} {expected!r}; observed {actual!r}')
+
+
+def confined(root, name):
+    root = Path(root).resolve()
+    path = root / name
+    if not isinstance(name, str) or '\\' in name or path.is_absolute() and Path(name).is_absolute():
+        raise ValueError('Evidence names must be relative')
+    if path.resolve() != path or root not in path.parents or '..' in Path(name).parts:
+        raise ValueError('Evidence path escapes or contains a link')
+    return path
+
+
+def inventory(root):
+    root = Path(root)
+    if not root.is_dir() or root.is_symlink():
+        raise CheckFailed('Missing or linked file tree')
+    result = {}
+    for path in sorted(root.rglob('*')):
+        if path.is_symlink() or not (path.is_file() or path.is_dir()):
+            raise CheckFailed('File tree contains a link or special file')
+        if path.is_file():
+            digest = hashlib.sha256()
+            with path.open('rb') as stream:
+                for block in iter(lambda: stream.read(65536), b''):
+                    digest.update(block)
+            result[path.relative_to(root).as_posix()] = digest.hexdigest()
+    if not result:
+        raise CheckFailed('Empty file tree')
+    return result
+
+
+def settings(path):
+    result = {}
+    for line in Path(path).read_text(encoding='utf-8').splitlines():
+        line = line.strip()
+        if line and not line.startswith(('#', ';')) and '=' in line:
+            key, value = line.split('=', 1)
+            result[key.strip()] = value.strip()
+    if not result:
+        raise CheckFailed('Missing settings values')
+    return result
+
+
+def pixels(path):
+    """Decode bounded uncompressed RGB BMP or noninterlaced 8-bit RGB(A) PNG."""
+    data = Path(path).read_bytes()
+    if len(data) > 64 * 1024 * 1024:
+        raise CheckFailed('Oversized capture')
+    if data.startswith(b'BM'):
+        offset = struct.unpack_from('<I', data, 10)[0]
+        width, height, planes, bits, compression = struct.unpack_from('<iiHHI', data, 18)
+        if planes != 1 or bits not in (24, 32) or compression != 0:
+            raise CheckFailed('Unsupported BMP encoding')
+        channels = bits // 8
+        stride = (width * channels + 3) & ~3
+        bounded_dimensions(width, abs(height))
+        if offset < 54 or offset + stride * abs(height) > len(data):
+            raise CheckFailed('Truncated BMP')
+        rows = [data[offset + i * stride:offset + i * stride + width * channels] for i in range(abs(height))]
+        if height > 0:
+            rows.reverse()
+        rgb = bytes(component for row in rows for i in range(0, len(row), channels)
+                    for component in (row[i + 2], row[i + 1], row[i]))
+        return width, abs(height), rgb
+    if not data.startswith(b'\x89PNG\r\n\x1a\n'):
+        raise CheckFailed('Capture is not PNG/BMP')
+    at, header, compressed, ended = 8, None, bytearray(), False
+    while at + 12 <= len(data):
+        size = struct.unpack_from('>I', data, at)[0]
+        kind = data[at + 4:at + 8]
+        chunk = data[at + 8:at + 8 + size]
+        if at + size + 12 > len(data) or zlib.crc32(kind + chunk) != struct.unpack_from('>I', data, at + size + 8)[0]:
+            raise CheckFailed('Truncated PNG or invalid CRC')
+        at += size + 12
+        if kind == b'IHDR':
+            if header or size != 13:
+                raise CheckFailed('Invalid PNG header')
+            header = struct.unpack('>IIBBBBB', chunk)
+        elif kind == b'IDAT':
+            compressed.extend(chunk)
+        elif kind == b'IEND':
+            ended = True
+            break
+    if not header or not ended:
+        raise CheckFailed('Incomplete PNG')
+    width, height, depth, color, compression, filtering, interlace = header
+    bounded_dimensions(width, height)
+    if depth != 8 or color not in (2, 6) or compression or filtering or interlace:
+        raise CheckFailed('Unsupported PNG encoding')
+    channels = 3 if color == 2 else 4
+    stride = width * channels
+    expected = (stride + 1) * height
+    decoder = zlib.decompressobj()
+    raw = decoder.decompress(compressed, expected + 1)
+    if len(raw) != expected or not decoder.eof or decoder.unused_data:
+        raise CheckFailed('Invalid or oversized PNG pixels')
+    previous, rgb = bytearray(stride), bytearray()
+    for row in range(height):
+        start = row * (stride + 1)
+        mode, current = raw[start], bytearray(raw[start + 1:start + 1 + stride])
+        if mode > 4:
+            raise CheckFailed('Invalid PNG filter')
+        for i in range(stride):
+            left = current[i - channels] if i >= channels else 0
+            up = previous[i]
+            corner = previous[i - channels] if i >= channels else 0
+            estimate = left + up - corner
+            paeth = min((left, up, corner), key=lambda v: abs(estimate - v))
+            current[i] = (current[i] + (0, left, up, (left + up) // 2, paeth)[mode]) & 255
+        rgb.extend(component for i in range(0, stride, channels) for component in current[i:i + 3])
+        previous = current
+    return width, height, bytes(rgb)
+
+
+def bounded_dimensions(width, height):
+    if not 0 < width <= 8192 or not 0 < height <= 8192 or width * height > 16 * 1024 * 1024:
+        raise CheckFailed('Invalid or oversized capture dimensions')
+
+
+def image_content(image, minimum_colors=32, minimum_nonblack=0.1):
+    width, height, rgb = image
+    count = width * height
+    colored = sum(max(rgb[i:i + 3]) > 12 for i in range(0, len(rgb), 3))
+    colors = len(set(rgb[i:i + 3] for i in range(0, len(rgb), 3)))
+    if colors < minimum_colors or colored / count < minimum_nonblack:
+        raise CheckFailed('Blank/flat capture')
+    return {'width': width, 'height': height, 'colors': colors, 'nonblack_fraction': colored / count}
+
+
+def image_difference(before, after):
+    if before[:2] != after[:2]:
+        raise CheckFailed('Compared capture dimensions differ')
+    count = before[0] * before[1]
+    changed = sum(before[2][i:i + 3] != after[2][i:i + 3] for i in range(0, len(before[2]), 3))
+    return changed / count
+
+
+def percentile(samples, fraction):
+    if not samples or any(type(x) not in (int, float) or not math.isfinite(x) or x < 0 for x in samples):
+        raise CheckFailed('Missing/invalid timing samples')
+    ordered = sorted(samples)
+    return ordered[min(len(ordered) - 1, math.ceil(len(ordered) * fraction) - 1)]
+
+
+def performance_comparison(baseline, candidate, identity, budget=None):
+    """Thresholds are allowed only after same-device repeated baseline calibration."""
+    required = ('device', 'gpu', 'driver', 'resolution', 'execution_mode', 'route_sha256',
+                'fixture_sha256', 'settings_sha256', 'scenario_sha256')
+    if any(key not in identity for key in required):
+        raise CheckFailed('Incomplete performance comparison identity')
+    if len(baseline) < 3 or len(candidate) < 3:
+        raise CheckFailed('At least three warmed repetitions required per artifact')
+    for run in baseline + candidate:
+        if run.get('identity') != identity or not run.get('artifact_sha256') or run.get('warmup_frames', 0) < 60:
+            raise CheckFailed('Workload/device/mode differs or warm-up is missing')
+        if len(run.get('frame_ms', [])) < 120 or len(run.get('speed_percent', [])) < 3:
+            raise CheckFailed('Insufficient steady-state samples')
+        percentile(run['frame_ms'], .99)
+        percentile(run['speed_percent'], .5)
+        if type(run.get('startup_ms')) not in (int, float) or run['startup_ms'] <= 0:
+            raise CheckFailed('Missing startup measurement')
+        if not run.get('load_ms'):
+            raise CheckFailed('Missing load measurements')
+        percentile(run['load_ms'], .5)
+    summary = {}
+    for metric, extract in (
+            ('p95_ms', lambda run: percentile(run['frame_ms'], .95)),
+            ('p99_ms', lambda run: percentile(run['frame_ms'], .99)),
+            ('load_ms', lambda run: statistics.median(run['load_ms'])),
+            ('startup_ms', lambda run: run['startup_ms']),
+            ('speed_percent', lambda run: statistics.median(run['speed_percent']))):
+        old, new = [extract(run) for run in baseline], [extract(run) for run in candidate]
+        center, changed = statistics.median(old), statistics.median(new)
+        noise = max(old) - min(old)
+        summary[metric] = {'baseline': center, 'candidate': changed, 'baseline_spread': noise}
+        if budget is not None:
+            if metric not in budget or budget[metric] < noise:
+                raise CheckFailed('Regression budget is missing or narrower than measured baseline noise: ' + metric)
+            delta = center - changed if metric == 'speed_percent' else changed - center
+            if delta > budget[metric]:
+                raise CheckFailed('Performance regression: ' + metric)
+    return {'metrics': summary, 'threshold_enabled': budget is not None,
+            'note': 'Presented FPS alone is not simulation or stutter evidence.'}

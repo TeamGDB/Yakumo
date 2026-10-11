@@ -11,6 +11,10 @@
 #include "install/user_data.hpp"
 #include "platform/utf8_path.hpp"
 #include "settings/settings.hpp"
+#if defined(MHP3RD_DEBUG_MENU)
+#include "debug/debug_tools.hpp"
+#include "hle/hle_common.hpp"
+#endif
 
 #include "backends/imgui_impl_sdl3.h"
 #include "imgui.h"
@@ -473,6 +477,10 @@ void Layer::apply_theme() {
 }
 
 void Layer::begin_frame() {
+#if defined(MHP3RD_DEBUG_MENU)
+    // Explicit test mode also services readbacks while the menu holds the guest.
+    if (std::getenv("MHP3RD_DEVICE_TEST")) debug::read([](const game::Ram &) { debug::frame(kernel().runtime()); });
+#endif
     renderer_->begin_ui_frame();
     // Blocked, the interface reads no gamepad at all, while the keyboard,
     // the mouse and touches still work. Afterwards the pads count again once

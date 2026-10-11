@@ -75,9 +75,12 @@ if [[ -n "${DEVICE_TEST_PACKAGE:-}" ]]; then
         echo "device-test APKs require a developer native build" >&2; exit 1;
     }
     manifest="$work/device-testing-manifest.xml"
+    observation_args=()
+    if [[ "${DEVICE_TEST_OBSERVATIONS:-0}" == 1 ]]; then observation_args=(--observations); fi
     python3 "$here/../../tools/device_testing.py" android-manifest \
         --package "$DEVICE_TEST_PACKAGE" --output "$manifest" \
         --performance "${DEVICE_TEST_PERFORMANCE:-log}" \
+        "${observation_args[@]}" \
         --contract "$work/assets/device-testing.json"
 fi
 assets=(-A "$work/assets")
