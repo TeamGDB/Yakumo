@@ -639,14 +639,19 @@ elif args[0] == 'logcat':
         self.assertEqual(list((self.adb_root/'tmp').iterdir()), [])
         for flag, phase in (('FAKE_PUSH_DELAY','apk-transfer'),('FAKE_INSTALL_DELAY','package-install')):
             root=self.root/flag; root.mkdir()
-            timed=dt.Adb({**device,'deployment_share_percent':20},root,time.monotonic()+3)
+            # Leave room for interpreter/coverage startup before the delayed phase.
+            # The deployment deadline must still stop it and retain its output.
+            timed=dt.Adb({**device,'deployment_share_percent':50},root,time.monotonic()+10)
+            deadline=timed.deadline
             evidence={}
-            with patch.dict(os.environ, {'FAKE_ADB_ROOT':str(self.adb_root),flag:'3'}):
+            with patch.dict(os.environ, {'FAKE_ADB_ROOT':str(self.adb_root),flag:'10'}):
                 with self.assertRaises(subprocess.TimeoutExpired): timed.prepare(evidence)
             last=evidence['deployment']['phases'][-1]
             self.assertEqual(last['name'],phase)
             self.assertEqual(last['status'],'TIMEOUT')
             self.assertIn('started',last['stdout'])
+            self.assertLessEqual(evidence['deployment']['budget_seconds'],5)
+            self.assertEqual(timed.deadline,deadline)
             self.assertEqual(evidence['deployment']['apk_staging_cleanup'],'PASS')
             self.assertEqual(list((self.adb_root/'tmp').iterdir()), [])
         rejected=dt.Adb({**device,'gameplay_reserve_seconds':30},self.run_dir,time.monotonic()+10)
