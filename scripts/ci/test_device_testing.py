@@ -411,6 +411,21 @@ class DeviceTests(unittest.TestCase):
             tools.assert_not_called()
         self.assertEqual(dt.read_json(blocked / 'report.json')['automatic']['verdict'], 'FAIL')
 
+    def test_manual_probe_timeout_is_normal_only_at_overall_deadline(self):
+        class TimedProbe(dt.Local):
+            def alive(adapter):
+                time.sleep(.2)
+                raise subprocess.TimeoutExpired(['public-probe'], .1)
+        for cap, verdict in ((.1, 'PASS'), (5, 'FAIL')):
+            with self.subTest(cap=cap):
+                evidence = self.run_dir / str(cap)
+                evidence.mkdir()
+                with patch.object(dt, 'Local', TimedProbe):
+                    code = dt.run(dt.scenario('performance-overlay'), dict(self.device, seconds=cap),
+                                  'fixture', evidence, True)
+                self.assertEqual(code, 2 if verdict == 'PASS' else 1)
+                self.assertEqual(dt.read_json(evidence / 'report.json')['automatic']['verdict'], verdict)
+
     def make_adb(self):
         if os.name == 'nt':
             self.skipTest('Synthetic ADB transport uses POSIX shell; real Windows supervisor is tested separately')

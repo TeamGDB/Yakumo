@@ -868,8 +868,8 @@ def run(suite, device, name, root, manual=False):
         report['automatic'] = {'verdict': 'PASS', 'reason': 'Harness completed; see observations and separate review'}
     except NotTested as error:
         report['automatic'] = {'verdict': 'NOT TESTED', 'reason': str(error)}
-    except TimeoutError as error:
-        ready = manual and launched
+    except (TimeoutError, subprocess.TimeoutExpired) as error:
+        ready = manual and launched and time.monotonic() >= deadline
         report['automatic'] = {'verdict': 'PASS' if ready else 'FAIL',
                                'reason': 'Manual session deadline reached' if ready else str(error)}
     except (KeyboardInterrupt, Exception) as error:
