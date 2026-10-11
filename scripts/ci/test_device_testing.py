@@ -1,5 +1,7 @@
 """Public contracts for bounded device scenarios; no game files or cloud account."""
 import importlib.util
+import copy
+import io
 import json
 import os
 from pathlib import Path
@@ -7,7 +9,10 @@ import subprocess
 import sys
 import tempfile
 import time
+import signal
+import stat
 import unittest
+import zipfile
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -48,10 +53,10 @@ class DeviceTests(unittest.TestCase):
         self.fake = self.root / 'fake.py'
         self.fake.write_text(FAKE_GAME)
         self.device = {'adapter': 'local', 'build': 'dev', 'commit': 'a' * 40,
-                       'binary': sys.executable, 'args': [str(self.fake)], 'seconds': 5,
+                       'binary': sys.executable, 'args': [str(self.fake)], 'seconds': 12 if os.name == 'nt' else 5,
                        'game_dir': str(self.game), 'saves': str(self.saves)}
         self.suite = dt.scenario('boot')
-        self.suite['seconds'] = 5
+        self.suite['seconds'] = 12 if os.name == 'nt' else 5
         self.run_dir = self.root / 'evidence'
         self.run_dir.mkdir()
 
@@ -62,7 +67,7 @@ class DeviceTests(unittest.TestCase):
         return dt.read_json(self.run_dir / 'report.json')
 
     def test_real_bounded_game_fixture_and_review(self):
-        self.assertEqual(dt.run(self.suite, self.device, 'mac', self.run_dir), 2)
+        self.assertEqual(dt.run(self.suite, self.device, 'mac', self.run_dir), 2, self.report())
         report = self.report()
         self.assertEqual(report['automatic']['verdict'], 'PASS')
         self.assertEqual(dt.result_status(report), 'NOT TESTED')
@@ -93,7 +98,7 @@ class DeviceTests(unittest.TestCase):
         self.assertEqual(self.report()['automatic']['verdict'], 'NOT TESTED')
         self.device['build'] = 'dev'
         self.suite['steps'] = [{'fixture': 'load-character'}]
-        self.assertEqual(dt.run(self.suite, self.device, 'mac', self.run_dir), 2)
+        self.assertEqual(dt.run(self.suite, self.device, 'mac', self.run_dir), 2, self.report())
         self.assertIn('Missing fixture navigation', self.report()['automatic']['reason'])
 
     def test_manual_run_does_not_automate_or_infer_visual_pass(self):
@@ -216,15 +221,16 @@ class DeviceTests(unittest.TestCase):
                 return 'shots/' + name + '.png'
         adapter = Adapter()
         report = {'observations': [], 'captures': []}
-        dt.execute_steps(adapter, [{'input': '0:pad a'}, {'wait': 'new-marker'}, {'capture': 'one'}], self.device, report, time.monotonic() + 2)
+        dt.execute_steps(adapter, [{'input': '0:pad a'}, {'wait': 'new-marker'}, {'capture': 'one'}], self.device, report, time.monotonic() + (5 if os.name == 'nt' else 2))
         self.assertEqual(report['observations'], ['new-marker'])
         with self.assertRaises(RuntimeError):
-            dt.wait_condition(adapter, 'old-marker', 1, time.monotonic() + 2, len('old-marker'))
+            dt.wait_condition(adapter, 'old-marker', 5 if os.name == 'nt' else 1,
+                              time.monotonic() + (6 if os.name == 'nt' else 2), len('old-marker'))
         self.device['fixtures'] = {'load': [{'wait': 'new-marker'}]}
-        dt.execute_steps(adapter, [{'fixture': 'load'}], self.device, report, time.monotonic() + 2)
+        dt.execute_steps(adapter, [{'fixture': 'load'}], self.device, report, time.monotonic() + (5 if os.name == 'nt' else 2))
         self.device['build'] = 'release'
         with self.assertRaises(dt.NotTested):
-            dt.execute_steps(adapter, [{'debug': 'state'}], self.device, report, time.monotonic() + 2)
+            dt.execute_steps(adapter, [{'debug': 'state'}], self.device, report, time.monotonic() + (5 if os.name == 'nt' else 2))
 
     def test_artifact_bound_matrix_and_regeneration(self):
         report = dt.new_report(dt.scenario('boot'), self.device, 'mac')
@@ -362,10 +368,10 @@ elif args[0] == 'logcat':
 
     def test_adb_running_package_is_not_disrupted(self):
         device = self.make_adb()
-        (self.adb_root / 'pid').write_text('current-user-session')
+        (self.adb_root / 'pid').write_text('12344')
         with patch.dict(os.environ, {'FAKE_ADB_ROOT': str(self.adb_root)}):
             self.assertEqual(dt.run(self.suite, device, 'phone', self.run_dir), 2)
-        self.assertEqual((self.adb_root / 'pid').read_text(), 'current-user-session')
+        self.assertEqual((self.adb_root / 'pid').read_text(), '12344')
         self.assertIn('already running', self.report()['automatic']['reason'])
 
     def test_adb_replacement_pid_and_capture_failure(self):
@@ -373,11 +379,11 @@ elif args[0] == 'logcat':
         with patch.dict(os.environ, {'FAKE_ADB_ROOT': str(self.adb_root)}):
             adapter = dt.Adb(device, self.run_dir, time.monotonic() + 5)
             adapter.owned = True
-            adapter.pid = 'original-owned-pid'
-            (self.adb_root / 'pid').write_text('other-pid')
+            adapter.pid = '12345'
+            (self.adb_root / 'pid').write_text('12347')
             with self.assertRaises(RuntimeError):
                 adapter.close()
-            self.assertEqual((self.adb_root / 'pid').read_text(), 'other-pid')
+            self.assertEqual((self.adb_root / 'pid').read_text(), '12347')
             with patch.object(adapter, 'adb', return_value=b'not a screenshot'):
                 with self.assertRaises(RuntimeError):
                     adapter.capture('screen')
@@ -389,7 +395,7 @@ elif args[0] == 'logcat':
         calls = []
         def cleanup(args, deadline, **kwargs):
             calls.append(args)
-            return b''
+            return subprocess.CompletedProcess(args, 1, b'No reservations found.\n', b'') if kwargs.get('return_status') else b''
         with patch.object(dt, 'command', cleanup):
             self.assertEqual(dt.run(self.suite, device, 'cloud', self.run_dir), 1)
         self.assertTrue(any('remove' in item and 'abcdefgh1234' in item for item in calls))
@@ -399,7 +405,7 @@ elif args[0] == 'logcat':
         device = {**self.device, 'adapter': 'streaming', 'seconds': 5, 'model': 'synthetic/33',
                   'project': 'public-fixture', 'android': [sys.executable, str(self.root / 'cloud.py')]}
         (self.root / 'cloud.py').write_text("print('No available device'); raise SystemExit(3)")
-        with patch.object(dt, 'command', return_value=b'No reservations found.') as calls:
+        with patch.object(dt, 'command', return_value=subprocess.CompletedProcess([], 1, b'No reservations found.\n', b'')) as calls:
             self.assertEqual(dt.run(self.suite, device, 'cloud', self.run_dir), 1)
         self.assertFalse(any('remove' in item.args[0] for item in calls.call_args_list))
         self.assertIsNone(dt.parse_reservation('unrelated output'))
@@ -414,7 +420,7 @@ elif args[0] == 'logcat':
         calls = []
         def command(args, deadline, **kwargs):
             calls.append(args)
-            return b'No reservations found.' if 'list' in args else b''
+            return subprocess.CompletedProcess(args, 1, b'No reservations found.\n', b'') if kwargs.get('return_status') else b''
         with patch.object(dt, 'command', command), patch.object(dt, 'Adb', side_effect=ValueError('bad contract')):
             self.assertEqual(dt.run(self.suite, device, 'cloud', self.run_dir), 1)
         self.assertEqual(calls[-1][-3:], ['remove', 'abcdefgh1234', '--project=public-fixture'])
@@ -439,15 +445,15 @@ elif args[0] == 'logcat':
     def test_pathological_regex_and_ssh_timeout_are_bounded_failures(self):
         with self.assertRaises(subprocess.TimeoutExpired):
             dt.bounded_match('(a+)+$', 'a' * 1000 + '!', time.monotonic() + .2)
-        self.assertTrue(dt.bounded_match('ready', 'ready', time.monotonic() + 2))
-        self.assertFalse(dt.bounded_match('ready', 'not yet', time.monotonic() + 2))
+        self.assertTrue(dt.bounded_match('ready', 'ready', time.monotonic() + (5 if os.name == 'nt' else 2)))
+        self.assertFalse(dt.bounded_match('ready', 'not yet', time.monotonic() + (5 if os.name == 'nt' else 2)))
         device = {**self.device, 'adapter': 'ssh', 'host': 'synthetic-host',
                   'checkout': str(ROOT), 'remote': self.device}
         for error in (subprocess.TimeoutExpired('ssh', .1), KeyboardInterrupt()):
             with patch.object(dt, 'command', side_effect=error):
                 self.assertEqual(dt.ssh_run(self.suite, device, 'deck', self.run_dir, False), 1)
             self.assertEqual(self.report()['automatic']['verdict'], 'FAIL')
-            self.assertIn('SSH transport failed', (self.run_dir / 'transport.log').read_text())
+            self.assertIn('SSH transport/evidence failed', (self.run_dir / 'transport.log').read_text())
         for name in ('org.example.devicetest', 'a.b.devicetest'):
             self.assertTrue(dt.valid_package(name))
         for name in ('a.devicetest', 'a..devicetest', 'a.b-devicetest', 'a.' + 'a' * 200 + '.devicetest'):
@@ -457,9 +463,12 @@ elif args[0] == 'logcat':
         device = {**self.device, 'adapter': 'ssh', 'host': 'synthetic-host',
                   'checkout': 'C:/Example Space/Yakumo', 'python': ['python'],
                   'shell': 'powershell', 'remote': self.device}
-        with patch.object(dt, 'command', return_value=b'connection failed') as calls:
+        with patch.object(dt, 'command', return_value=subprocess.CompletedProcess([], 255, b'', b'connection failed')) as calls:
             self.assertEqual(dt.ssh_run(self.suite, device, 'windows', self.run_dir, False), 1)
         self.assertIn('EncodedCommand', calls.call_args.args[0][-1])
+        script = dt.base64.b64decode(calls.call_args.args[0][-1].split()[-1]).decode('utf-16le')
+        self.assertIn("'C:/Example Space/Yakumo/profiles/mhp3rd/tools/device_testing.py'", script)
+        self.assertTrue(script.endswith('; exit $LASTEXITCODE'))
         device['host'] = '-option'
         with self.assertRaises(ValueError):
             dt.ssh_run(self.suite, device, 'windows', self.run_dir, False)
@@ -520,6 +529,415 @@ elif args[0] == 'logcat':
                            (hardware, b'{"devices": [{"properties": {"apiVersion": 4194304}}]}')):
             with self.assertRaises(dt.NotTested):
                 dt.verify_android_capabilities(device, vk)
+
+    def test_config_is_snapshot_and_remote_validation_matches_local_rules(self):
+        config = self.root / 'devices.json'
+        dt.write_json(config, {'devices': {'mac': self.device}})
+        loaded = dt.load_device(config, 'mac')
+        dt.write_json(config, {'devices': {'mac': {**self.device, 'env': {'MHP3RD_DATA_DIR': '/other'}}}})
+        self.assertEqual(loaded, self.device)
+        remote = {**self.device, 'adapter': 'ssh', 'remote': copy.deepcopy(self.device)}
+        self.assertEqual(dt.validate_device(remote), remote)
+        for change in ({'env': {'MHP3RD_DATA_DIR': '/other'}}, {'python': 'shell words'},
+                       {'args': ['nul\0']}, {'artifact_sha256': 'bad'},
+                       {'fixtures': {'one': [{'fixture': 'two'}]}}, {'build': 'release'}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                dt.validate_device({**remote, 'remote': {**self.device, **change}})
+
+    def test_atomic_json_does_not_follow_planted_temporary_link(self):
+        victim = self.root / 'victim'
+        victim.write_text('keep')
+        planted = self.run_dir / 'report.tmp'
+        try:
+            planted.symlink_to(victim)
+        except OSError:
+            self.skipTest('Symlink privilege unavailable')
+        dt.write_json(self.run_dir / 'report.json', {'safe': True})
+        self.assertEqual(victim.read_text(), 'keep')
+        self.assertEqual(list(self.run_dir.glob('.report.json-*')), [])
+        with patch.object(dt.Path, 'replace', side_effect=OSError('synthetic failure')), self.assertRaises(OSError):
+            dt.write_json(self.run_dir / 'report.json', {})
+        self.assertEqual(list(self.run_dir.glob('.report.json-*')), [])
+
+    def test_copied_fixture_hashes_snapshot_and_rejects_late_links(self):
+        original = dt.shutil.copytree
+        def changed_source(source, destination, **kwargs):
+            result = original(source, destination, **kwargs)
+            (self.saves / 'save.dat').write_bytes(b'changed original')
+            return result
+        with patch.object(dt.shutil, 'copytree', changed_source):
+            digest = dt.copy_fixture(self.saves, self.root / 'snapshot')
+        self.assertEqual(digest, dt.object_hash([('save.dat', dt.fingerprint(self.root / 'snapshot/save.dat'))]))
+        self.assertEqual((self.root / 'snapshot/save.dat').read_bytes(), b'original fixture')
+        def late_link(source, destination, **kwargs):
+            result = original(source, destination, **kwargs)
+            try:
+                (Path(destination) / 'late').symlink_to(self.saves / 'save.dat')
+            except OSError:
+                self.skipTest('Symlink privilege unavailable')
+            return result
+        with patch.object(dt.shutil, 'copytree', late_link), self.assertRaises(ValueError):
+            dt.copy_fixture(self.saves, self.root / 'late-copy')
+        with self.assertRaises(dt.NotTested):
+            dt.copy_fixture(self.root / 'missing', self.root / 'missing-copy')
+
+    def test_regular_copy_rejects_identity_race_and_mutation(self):
+        source = self.saves / 'save.dat'
+        original = dt.os.open
+        def swap(path, flags):
+            source.rename(source.with_suffix('.old'))
+            source.write_bytes(b'replacement')
+            return original(path, flags)
+        with patch.object(dt.os, 'open', swap), self.assertRaises(ValueError):
+            dt.copy_regular_file(source, self.root / 'copy')
+        original_copy = dt.shutil.copyfileobj
+        def mutate(input_file, output):
+            original_copy(input_file, output)
+            source.write_bytes(b'changed while copying')
+        with patch.object(dt.shutil, 'copyfileobj', mutate), self.assertRaises(ValueError):
+            dt.copy_regular_file(source, self.root / 'mutated-copy')
+
+    def test_artifact_identity_is_checked_before_and_after_play(self):
+        # Use the fake script as executable only for preparation, not launch.
+        device = {**self.device, 'binary': str(self.fake)}
+        adapter = dt.Local(device, self.run_dir, time.monotonic() + 2)
+        adapter.prepare(dt.new_report(self.suite, device, 'mac'))
+        self.fake.write_text('changed')
+        with self.assertRaises(ValueError):
+            adapter.launch()
+        adapter.owned = True
+        with self.assertRaises(ValueError):
+            adapter.close()
+        with self.assertRaises(ValueError):
+            dt.verify_artifact({'artifact_sha256': '0' * 64}, '1' * 64)
+
+    def test_command_bounds_outputs_stdin_exit_status_and_deadline(self):
+        for stream in ('stdout', 'stderr'):
+            with self.subTest(stream=stream), self.assertRaises(ValueError):
+                dt.command([sys.executable, '-c', f'import sys; sys.{stream}.write("x"*100000)'],
+                           time.monotonic() + 5, output_limit=10)
+        result = dt.command([sys.executable, '-c', 'import sys; print(sys.stdin.read()); sys.exit(3)'],
+                            time.monotonic() + 5, data=b'input', check=False, return_status=True)
+        self.assertEqual(result.returncode, 3)
+        self.assertEqual(result.stdout.strip(), b'input')
+        with self.assertRaises(RuntimeError):
+            dt.command([sys.executable, '-c', 'raise SystemExit(4)'], time.monotonic() + 5)
+        with self.assertRaises(TimeoutError):
+            dt.command([sys.executable], time.monotonic() - 1)
+
+    def test_command_kills_descendant_holding_pipe_after_parent_exit(self):
+        marker = self.root / 'descendant-survived'
+        child = 'import time,pathlib; time.sleep(1.5); pathlib.Path(' + repr(str(marker)) + ').touch()'
+        parent = 'import subprocess,sys; subprocess.Popen([sys.executable,"-c",' + repr(child) + '])'
+        started = time.monotonic()
+        with self.assertRaises((subprocess.TimeoutExpired, RuntimeError)):
+            dt.command([sys.executable, '-c', parent], time.monotonic() + .7)
+        self.assertLess(time.monotonic() - started, 4)
+        time.sleep(1)
+        self.assertFalse(marker.exists())
+
+    def test_command_partial_thread_setup_and_interrupt_collect_owned_process(self):
+        original = dt.subprocess.Popen
+        children = []
+        def spawn(*args, **kwargs):
+            child = original(*args, **kwargs)
+            children.append(child)
+            return child
+        for error in (RuntimeError('cannot start reader'), KeyboardInterrupt()):
+            with patch.object(dt.subprocess, 'Popen', spawn), patch.object(dt.threading.Thread, 'start', side_effect=error):
+                with self.assertRaises(type(error)):
+                    dt.command([sys.executable, '-c', 'import time; time.sleep(10)'], time.monotonic() + 5)
+            self.assertIsNotNone(children[-1].poll())
+            self.assertTrue(children[-1].stdout.closed and children[-1].stderr.closed)
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX controller signal regression')
+    def test_regex_worker_has_own_lifetime_after_controller_killed(self):
+        pidfile = self.root / 'regex-supervisor-pid'
+        controller_script = f'''
+import importlib.util,pathlib,time
+spec = importlib.util.spec_from_file_location('runner', {dt.__file__!r})
+runner = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runner)
+original = runner.subprocess.Popen
+def spawn(*args, **kwargs):
+    child = original(*args, **kwargs)
+    pathlib.Path({str(pidfile)!r}).write_text(str(child.pid))
+    return child
+runner.subprocess.Popen = spawn
+runner.bounded_match('(a+)+$', 'a'*1000+'!', time.monotonic()+2)
+'''
+        controller = subprocess.Popen([sys.executable, '-c', controller_script], start_new_session=True,
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            deadline = time.monotonic() + 4
+            while not pidfile.exists():
+                dt.remaining(deadline)
+                time.sleep(.02)
+            supervisor_pid = int(pidfile.read_text())
+            controller.kill()
+            controller.communicate(timeout=4)
+            # The orphaned supervisor kills the regex by its own cap.
+            while True:
+                state = subprocess.run(['ps', '-o', 'stat=', '-p', str(supervisor_pid)], capture_output=True).stdout.strip()
+                if not state or state.startswith(b'Z'):
+                    break
+                dt.remaining(deadline)
+                time.sleep(.05)
+            self.assertTrue(not state or state.startswith(b'Z'))
+        finally:
+            try:
+                os.killpg(controller.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            controller.communicate(timeout=4)
+
+    def test_activity_and_pid_results_cannot_be_shell_fragments(self):
+        device = self.make_adb()
+        for activity in ('OtherActivity', dt.ACTIVITY + ';echo bad'):
+            with self.assertRaises(ValueError):
+                dt.Adb({**device, 'activity': activity}, self.run_dir, time.monotonic() + 5)
+        self.assertEqual(dt.parse_pids(b'234 123\n'), '123 234')
+        self.assertEqual(dt.parse_pids(b''), '')
+        for value in (b'1;touch bad', b'"123"', b'0', b'-1', b'2147483648', b'1 1', b'01 1', b'\xff'):
+            with self.subTest(value=value), self.assertRaises((ValueError, UnicodeError)):
+                dt.parse_pids(value)
+        for value in ('Device connected on port 0', 'localhost:65536', 'localhost:123456'):
+            with self.assertRaises(ValueError):
+                dt.parse_adb_serial(value)
+
+    def test_adb_partial_activation_uses_cleanup_budget_and_manual_is_failure(self):
+        device = {**self.make_adb(), 'seconds': .15}
+        package = device['package']
+        class Partial(dt.Adb):
+            def prepare(self, report):
+                report['artifact_sha256'] = 'a' * 64
+            def shell(inner, text, **kwargs):
+                dt.remaining(inner.deadline)
+                if text.startswith('am start'):
+                    (self.adb_root / 'pid').write_text('12345')
+                    time.sleep(.18)
+                    raise subprocess.TimeoutExpired('am start', .15)
+                if text.startswith('pidof'):
+                    return (self.adb_root / 'pid').read_bytes() if (self.adb_root / 'pid').exists() else b''
+                if text.startswith('am force-stop ' + package):
+                    (self.adb_root / 'pid').unlink()
+                return b''
+            def text(inner):
+                dt.remaining(inner.deadline)
+                return 'partial'
+        with patch.object(dt, 'Adb', Partial):
+            self.assertEqual(dt.run(dt.scenario('quest-translation'), {**device, 'translation': 'fixture'},
+                                    'phone', self.run_dir, True), 1)
+        self.assertFalse((self.adb_root / 'pid').exists())
+        self.assertEqual(self.report()['automatic']['verdict'], 'FAIL')
+
+    def test_adb_manual_deadline_collects_logs_with_cleanup_budget(self):
+        device = {**self.device, 'adapter': 'adb', 'seconds': .15}
+        class Manual(dt.Adb):
+            def __init__(inner, device, root, deadline):
+                inner.deadline, inner.owned = deadline, False
+            def prepare(inner, report):
+                report['artifact_sha256'] = 'a' * 64
+            def launch(inner):
+                inner.owned = True
+            def alive(inner):
+                return True
+            def text(inner):
+                dt.remaining(inner.deadline)
+                return 'completed session'
+            def close(inner):
+                dt.remaining(inner.deadline)
+                inner.owned = False
+        with patch.object(dt, 'Adb', Manual):
+            self.assertEqual(dt.run(dt.scenario('quest-translation'), {**device, 'translation': 'fixture'},
+                                    'phone', self.run_dir, True), 2)
+        self.assertEqual(self.report()['automatic']['verdict'], 'PASS')
+
+    def test_cloud_preflight_fails_closed_except_exact_idle_response(self):
+        for result in (subprocess.CompletedProcess([], 1, b'No reservations found.\n', b''),
+                       subprocess.CompletedProcess([], 0, b'No reservations found.\n', b'')):
+            with patch.object(dt, 'command', return_value=result):
+                dt.require_idle_project(['android'], 'public-fixture', time.monotonic() + 2)
+        for code, output, error in ((1, b'', b''), (1, b'auth failed', b''),
+                                   (0, b'', b''), (0, b'unknown', b''),
+                                   (1, b'No reservations found.', b'network error')):
+            with patch.object(dt, 'command', return_value=subprocess.CompletedProcess([], code, output, error)) as calls:
+                with self.assertRaises((RuntimeError, dt.NotTested)):
+                    dt.require_idle_project(['android'], 'public-fixture', time.monotonic() + 2)
+                self.assertEqual(calls.call_count, 1)
+
+    def remote_bundle(self, change=None, extra=()):
+        device = {**self.device, 'adapter': 'ssh', 'host': 'synthetic', 'checkout': str(ROOT), 'remote': self.device}
+        report = dt.new_report(self.suite, self.device, 'deck')
+        report.update(request_id='nonce', artifact_sha256='a' * 64,
+                      observations=dt.expected_actions(self.suite, self.device, 'wait'), captures=['shots/opening.bmp'])
+        report['automatic'] = {'verdict': 'PASS', 'reason': 'synthetic run'}
+        if change:
+            change(report)
+        data = io.BytesIO()
+        with zipfile.ZipFile(data, 'w') as archive:
+            archive.writestr('report.json', json.dumps(report))
+            archive.writestr('shots/opening.bmp', b'BM synthetic')
+            for name, contents in extra:
+                archive.writestr(name, contents)
+        return device, data.getvalue()
+
+    def test_remote_report_identity_verdict_and_artifact_are_verified(self):
+        device, data = self.remote_bundle()
+        report = dt.import_evidence(data, self.suite, device, 'deck', self.run_dir, 'nonce', 2)
+        self.assertEqual(report['automatic']['verdict'], 'PASS')
+        self.assertTrue((self.run_dir / 'shots/opening.bmp').is_file())
+        changes = [lambda r: r.update(commit='b' * 40), lambda r: r.update(device='other'),
+                   lambda r: r.update(request_id='old'), lambda r: r.update(scenario_sha256='bad'),
+                   lambda r: r.update(artifact_sha256='bad'), lambda r: r.update(observations=[]),
+                   lambda r: r.update(captures=[]), lambda r: r.update(review={}),
+                   lambda r: r['automatic'].update(verdict='MAYBE'),
+                   lambda r: r['review']['opening'].update(verdict='PASS'),
+                   lambda r: r['review']['opening'].update(requires='human')]
+        for change in changes:
+            device, data = self.remote_bundle(change)
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                dt.import_evidence(data, self.suite, device, 'deck', self.run_dir, 'nonce', 2)
+        device, data = self.remote_bundle()
+        with self.assertRaises(ValueError):
+            dt.import_evidence(data, self.suite, device, 'deck', self.run_dir, 'nonce', 0)
+        device['artifact_sha256'] = 'b' * 64
+        with self.assertRaises(ValueError):
+            dt.import_evidence(data, self.suite, device, 'deck', self.run_dir, 'nonce', 2)
+
+    def test_remote_archive_rejects_traversal_duplicates_types_and_limits(self):
+        for entry in ('../escape', 'data/save.dat', 'review.md', 'shots/../escape.png', 'shots/a\\b.png'):
+            device, data = self.remote_bundle(extra=[(entry, b'bad')])
+            with self.subTest(entry=entry), self.assertRaises(ValueError):
+                dt.import_evidence(data, self.suite, device, 'deck', self.run_dir, 'nonce', 2)
+        bad = zipfile.ZipInfo('shots/link.png')
+        bad.create_system, bad.external_attr = 3, (stat.S_IFLNK | 0o777) << 16
+        device, data = self.remote_bundle(extra=[(bad, b'outside')])
+        with self.assertRaises(ValueError):
+            dt.import_evidence(data, self.suite, device, 'deck', self.run_dir, 'nonce', 2)
+        device, data = self.remote_bundle(extra=[('shots/opening.bmp', b'duplicate')])
+        with self.assertRaises(ValueError):
+            dt.import_evidence(data, self.suite, device, 'deck', self.run_dir, 'nonce', 2)
+        device, data = self.remote_bundle(extra=[('shots/' + str(i) + '.png', b'x') for i in range(128)])
+        with self.assertRaises(ValueError):
+            dt.import_evidence(data, self.suite, device, 'deck', self.run_dir, 'nonce', 2)
+        with patch.object(dt, 'EVIDENCE_LIMIT', 10), self.assertRaises(ValueError):
+            dt.import_evidence(data, self.suite, device, 'deck', self.run_dir, 'nonce', 2)
+
+    def test_export_and_import_reject_capture_symlinks(self):
+        device, data = self.remote_bundle()
+        shots = self.run_dir / 'shots'
+        shots.mkdir()
+        try:
+            (shots / 'opening.bmp').symlink_to(self.saves / 'save.dat')
+        except OSError:
+            self.skipTest('Symlink privilege unavailable')
+        with self.assertRaises(ValueError):
+            dt.import_evidence(data, self.suite, device, 'deck', self.run_dir, 'nonce', 2)
+        dt.write_json(self.run_dir / 'report.json', dt.new_report(self.suite, self.device, 'deck'))
+        with self.assertRaises(ValueError):
+            dt.export_evidence(self.run_dir)
+        self.assertEqual((self.saves / 'save.dat').read_bytes(), b'original fixture')
+
+    def test_malformed_ssh_transport_always_leaves_a_fail_report(self):
+        device, data = self.remote_bundle()
+        outputs = [b'no marker', b'YAKUMO_EVIDENCE:AAAA\n',
+                   b'YAKUMO_EVIDENCE:' + dt.base64.b64encode(data) + b'\n']
+        for output in outputs:
+            result = subprocess.CompletedProcess([], 2, output, b'')
+            with patch.object(dt, 'command', return_value=result):
+                self.assertEqual(dt.ssh_run(self.suite, device, 'deck', self.run_dir, False), 1)
+            self.assertEqual(self.report()['automatic']['verdict'], 'FAIL')
+            self.assertTrue((self.run_dir / 'review.md').exists())
+
+    def test_empty_review_cannot_make_unreviewed_scenario_green(self):
+        report = dt.new_report(self.suite, self.device, 'mac')
+        report['automatic']['verdict'] = 'PASS'
+        report['review'] = {}
+        self.assertEqual(dt.result_status(report), 'NOT TESTED')
+
+    def test_remote_review_needs_actor_verdict_notes_and_owned_evidence(self):
+        def reviewed(report):
+            report['review']['opening'].update(verdict='PASS', assessments={
+                'agent': {'verdict': 'PASS', 'notes': 'Synthetic image inspected', 'evidence': ['shots/opening.bmp']}})
+        device, data = self.remote_bundle(reviewed)
+        report = dt.import_evidence(data, self.suite, device, 'deck', self.run_dir, 'nonce', 0)
+        self.assertEqual(dt.result_status(report), 'PASS')
+        for field, value in (('verdict', 'UNKNOWN'), ('notes', ''), ('evidence', ['run.log']),
+                             ('evidence', ['../private']), ('evidence', 'shots/opening.bmp')):
+            def invalid(report):
+                reviewed(report)
+                report['review']['opening']['assessments']['agent'][field] = value
+            device, data = self.remote_bundle(invalid)
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                dt.import_evidence(data, self.suite, device, 'deck', self.run_dir, 'nonce', 0)
+        def invalid_actor(report):
+            reviewed(report)
+            report['review']['opening']['assessments']['unknown'] = report['review']['opening']['assessments'].pop('agent')
+        device, data = self.remote_bundle(invalid_actor)
+        with self.assertRaises(ValueError):
+            dt.import_evidence(data, self.suite, device, 'deck', self.run_dir, 'nonce', 0)
+
+    def test_archive_metadata_limits_and_export_races_fail_closed(self):
+        info = zipfile.ZipInfo('report.json')
+        archive = unittest.mock.Mock()
+        archive.infolist.return_value = [info]
+        info.file_size = 1024 * 1024 + 1
+        with self.assertRaises(ValueError):
+            dt.evidence_members(archive)
+        info.file_size, info.flag_bits = 1, 1
+        with self.assertRaises(ValueError):
+            dt.evidence_members(archive)
+        archive.infolist.return_value = []
+        with self.assertRaises(ValueError):
+            dt.evidence_members(archive)
+        report = self.run_dir / 'report.json'
+        dt.write_json(report, dt.new_report(self.suite, self.device, 'deck'))
+        original_open = dt.os.open
+        def swap(path, flags):
+            Path(path).rename(Path(path).with_suffix('.old'))
+            Path(path).write_text('replacement')
+            return original_open(path, flags)
+        with patch.object(dt.os, 'open', swap), self.assertRaises(ValueError):
+            dt.export_evidence(self.run_dir)
+        with patch.object(dt, 'EVIDENCE_LIMIT', 1), self.assertRaises(ValueError):
+            dt.export_evidence(self.run_dir)
+
+    def test_remote_pass_cannot_drop_human_requirement(self):
+        suite = dt.scenario('release-player')
+        device = {**self.device, 'build': 'release'}
+        ssh = {**device, 'adapter': 'ssh', 'remote': device}
+        report = dt.new_report(suite, device, 'deck')
+        report.update(request_id='nonce', artifact_sha256='a' * 64)
+        report['automatic'] = {'verdict': 'PASS', 'reason': 'manual bounded session'}
+        dt.validate_remote_report(report, suite, ssh, 'deck', 'nonce', {'report.json'})
+        first = next(iter(report['review'].values()))
+        first.update(verdict='PASS', assessments={'agent': {'verdict': 'PASS', 'notes': 'Only agent', 'evidence': []}})
+        with self.assertRaises(ValueError):
+            dt.validate_remote_report(report, suite, ssh, 'deck', 'nonce', {'report.json'})
+
+    def test_run_uses_config_snapshot_even_when_original_changes(self):
+        original = dt.Local.prepare
+        def prepare(adapter, report):
+            self.device['env'] = {'MHP3RD_DATA_DIR': 'changed'}
+            self.suite['steps'] = []
+            return original(adapter, report)
+        with patch.object(dt.Local, 'prepare', prepare):
+            self.assertEqual(dt.run(self.suite, self.device, 'mac', self.run_dir), 2, self.report())
+        self.assertEqual(self.report()['captures'], ['shots/opening.bmp'])
+        self.assertEqual(self.report()['settings'], {})
+
+    def test_watchdog_setup_failure_stops_only_owned_android_activation(self):
+        device = self.make_adb()
+        class BrokenWatchdog(dt.Adb):
+            def shell(inner, text, **kwargs):
+                if text.startswith('nohup'):
+                    raise RuntimeError('synthetic watchdog setup failed')
+                return super().shell(text, **kwargs)
+        with patch.dict(os.environ, {'FAKE_ADB_ROOT': str(self.adb_root)}), patch.object(dt, 'Adb', BrokenWatchdog):
+            self.assertEqual(dt.run(self.suite, device, 'phone', self.run_dir), 1)
+        self.assertFalse((self.adb_root / 'pid').exists())
+        self.assertIn('watchdog setup failed', self.report()['automatic']['reason'])
 
 
 if __name__ == '__main__':

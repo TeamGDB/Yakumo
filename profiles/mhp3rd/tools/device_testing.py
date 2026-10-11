@@ -6,15 +6,18 @@ import copy
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import platform
+import queue
 import re
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 import zipfile
@@ -27,6 +30,9 @@ NAME = re.compile(r'[a-z0-9][a-z0-9_-]{0,63}\Z')
 ENV_KEYS = {'MHP3RD_LANGUAGE', 'MHP3RD_TRACE_TEXT', 'MHP3RD_NO_RENDER',
             'MHP3RD_NO_AUDIO', 'MHP3RD_FONT', 'MHP3RD_GPU_COMPAT',
             'MHP3RD_TEXT_NO_QUEST_DIRECT', 'MHP3RD_TEXT_SEARCH_UNLIMITED'}
+EVIDENCE_LIMIT = 64 * 1024 * 1024
+EVIDENCE_FILES = {'report.json', 'run.log', 'vulkan.json', 'logcat.log'}
+ACTIVITY = 'io.github.teamgdb.yakumo.YakumoActivity'
 
 
 class NotTested(ValueError):
@@ -40,9 +46,16 @@ def read_json(path):
 
 def write_json(path, value):
     path = Path(path)
-    temporary = path.with_suffix('.tmp')
-    temporary.write_text(json.dumps(value, indent=2) + '\n', encoding='utf-8')
-    temporary.replace(path)
+    # An exclusive random sibling avoids following a planted report.tmp symlink.
+    fd, name = tempfile.mkstemp(prefix='.' + path.name + '-', dir=path.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as output:
+            json.dump(value, output, indent=2)
+            output.write('\n')
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def fingerprint(path):
@@ -115,7 +128,10 @@ def scenario(name):
 
 
 def load_device(config, name):
-    value = copy.deepcopy(read_json(config)['devices'][safe_name(name)])
+    return validate_device(copy.deepcopy(read_json(config)['devices'][safe_name(name)]))
+
+
+def validate_device(value):
     if value.get('adapter') not in ('local', 'ssh', 'adb', 'streaming'):
         raise ValueError('Unknown device adapter')
     if value.get('build') not in ('dev', 'release'):
@@ -126,6 +142,12 @@ def load_device(config, name):
         raise ValueError('Device cap must be 1..1800 seconds')
     if set(value.get('env', {})) - ENV_KEYS:
         raise ValueError('Unsupported environment override; isolation controls cannot be replaced')
+    for key in ('adb', 'android', 'python', 'args'):
+        if key in value and (not isinstance(value[key], list) or
+                (key != 'args' and not value[key]) or any(not isinstance(item, str) or '\0' in item for item in value[key])):
+            raise ValueError('Tool prefixes and arguments must be explicit string arrays')
+    if 'artifact_sha256' in value and not re.fullmatch(r'[0-9a-f]{64}', value['artifact_sha256']):
+        raise ValueError('Expected artifact fingerprint must be SHA-256')
     for steps in value.get('fixtures', {}).values():
         for step in steps:
             validate_step(step)
@@ -134,7 +156,9 @@ def load_device(config, name):
             if 'debug' in step and value['build'] != 'dev':
                 raise ValueError('Release fixture cannot use debug commands')
     if value['adapter'] == 'ssh':
-        remote = value['remote']
+        remote = validate_device(value['remote'])
+        if remote['adapter'] not in ('local', 'adb') or value.get('shell', 'posix') not in ('posix', 'powershell'):
+            raise ValueError('SSH delegates local/ADB execution through POSIX or PowerShell')
         if remote.get('build') != value['build'] or remote.get('commit') != value['commit']:
             raise ValueError('SSH wrapper and remote artifact identity must match')
     return value
@@ -149,16 +173,54 @@ def output_directory(parent):
 
 
 def copy_fixture(source, destination):
-    source = Path(source).resolve()
+    requested = Path(source).absolute()
+    if not requested.exists() and not requested.is_symlink():
+        raise NotTested('Missing copied-save fixture')
+    original = requested.lstat()
+    if stat.S_ISLNK(original.st_mode):
+        raise ValueError('Fixture root must not be a symlink')
+    source = requested.resolve()
     if not source.is_dir():
         raise NotTested('Missing copied-save fixture')
     # Reject all links, including links into the source: no alias to player files.
     for item in source.rglob('*'):
         if item.is_symlink() or not (item.is_dir() or item.is_file()):
             raise ValueError('Fixture must not contain symlinks or special files')
-    shutil.copytree(source, destination)
-    return object_hash([(item.relative_to(source).as_posix(), fingerprint(item))
-                        for item in sorted(source.rglob('*')) if item.is_file()])
+    before = source.stat()
+    if (original.st_dev, original.st_ino) != (before.st_dev, before.st_ino):
+        raise ValueError('Fixture root changed before copying')
+    # Preserve late-added links instead of dereferencing them, then reject them.
+    shutil.copytree(source, destination, symlinks=True, copy_function=copy_regular_file)
+    after = source.lstat()
+    requested_after = requested.lstat()
+    if not stat.S_ISDIR(after.st_mode) or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino) or \
+            (original.st_dev, original.st_ino) != (requested_after.st_dev, requested_after.st_ino):
+        raise ValueError('Fixture root changed during copying')
+    destination = Path(destination)
+    for item in destination.rglob('*'):
+        if item.is_symlink() or not (item.is_dir() or item.is_file()):
+            raise ValueError('Fixture changed to contain links or special files')
+    return object_hash([(item.relative_to(destination).as_posix(), fingerprint(item))
+                        for item in sorted(destination.rglob('*')) if item.is_file()])
+
+
+def copy_regular_file(source, destination):
+    """Copy a regular-file snapshot without following a late source symlink."""
+    before = Path(source).lstat()
+    if not stat.S_ISREG(before.st_mode):
+        raise ValueError('Fixture must be a regular file')
+    flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0) | getattr(os, 'O_BINARY', 0)
+    fd = os.open(source, flags)
+    with os.fdopen(fd, 'rb') as input_file:
+        opened = os.fstat(input_file.fileno())
+        if not stat.S_ISREG(opened.st_mode) or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+            raise ValueError('Fixture changed before opening')
+        with Path(destination).open('xb') as output:
+            shutil.copyfileobj(input_file, output)
+        after = os.fstat(input_file.fileno())
+        if (opened.st_size, opened.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            raise ValueError('Fixture changed while copying')
+    return str(destination)
 
 
 def remaining(deadline, maximum=20):
@@ -168,13 +230,93 @@ def remaining(deadline, maximum=20):
     return seconds
 
 
-def command(argv, deadline, *, data=None, check=True, maximum=20):
+def kill_command(process, force_group=False):
+    # On failure the leader has not been reaped: its PGID cannot be reused.
+    if os.name != 'nt' and force_group:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    elif process.poll() is None:
+        if os.name == 'nt':
+            process.kill()
+        else:
+            os.killpg(process.pid, signal.SIGKILL)
+    process.wait(timeout=8)
+
+
+def command(argv, deadline, *, data=None, check=True, maximum=20, return_status=False,
+            input_file=None, output_limit=EVIDENCE_LIMIT):
     """Execute trusted configured tools with argv boundaries and a time limit."""
-    result = subprocess.run(argv, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            timeout=remaining(deadline, maximum), check=False)
+    seconds = remaining(deadline, maximum)
+    launch = argv
+    if os.name == 'nt':
+        # The supervisor joins its own job BEFORE spawning the requested tool.
+        launch = [sys.executable, str(Path(__file__).resolve()), '_supervise', str(seconds), *argv]
+    stopped = threading.Event()
+    threads = []
+    completed = False
+    process = subprocess.Popen(launch, stdin=subprocess.PIPE if data is not None else input_file,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               start_new_session=os.name != 'nt')
+    try:
+        chunks = queue.Queue(maxsize=4)
+        def enqueue(item):
+            while not stopped.is_set():
+                try:
+                    chunks.put(item, timeout=.1)
+                    return
+                except queue.Full:
+                    pass
+        def reader(pipe, key):
+            try:
+                for block in iter(lambda: pipe.read1(65536), b''):
+                    enqueue((key, block))
+            finally:
+                enqueue((key, None))
+        def writer():
+            try:
+                process.stdin.write(data)
+            except (BrokenPipeError, OSError):
+                pass
+            finally:
+                process.stdin.close()
+        threads = [threading.Thread(target=reader, args=(pipe, key), daemon=True)
+                   for key, pipe in (('stdout', process.stdout), ('stderr', process.stderr))]
+        if data is not None:
+            threads.append(threading.Thread(target=writer, daemon=True))
+        for thread in threads:
+            thread.start()
+        output = {'stdout': bytearray(), 'stderr': bytearray()}
+        eof = 0
+        limit = min(deadline, time.monotonic() + seconds)
+        while eof != 2:
+            if time.monotonic() >= limit:
+                raise subprocess.TimeoutExpired(argv, seconds)
+            try:
+                key, block = chunks.get(timeout=max(.001, min(.1, limit - time.monotonic())))
+            except queue.Empty:
+                continue
+            if block is None:
+                eof += 1
+            else:
+                output[key].extend(block)
+                if sum(map(len, output.values())) > output_limit:
+                    raise ValueError('Command output exceeds the evidence limit')
+        process.wait(timeout=remaining(limit))
+        completed = True
+    finally:
+        stopped.set()
+        kill_command(process, force_group=not completed)
+        for thread in threads:
+            if thread.ident is not None:
+                thread.join(timeout=2)
+        process.stdout.close()
+        process.stderr.close()
+    result = subprocess.CompletedProcess(argv, process.returncode, bytes(output['stdout']), bytes(output['stderr']))
     if check and result.returncode:
         raise RuntimeError(f'Command failed ({result.returncode}): {(result.stderr or result.stdout).decode(errors="replace")[-1500:]}')
-    return result.stdout
+    return result if return_status else result.stdout
 
 
 def stop_process(process):
@@ -199,6 +341,8 @@ class Local:
         if not binary.is_file():
             raise NotTested('Executable is unavailable')
         report['artifact_sha256'] = fingerprint(binary)
+        verify_artifact(self.device, report['artifact_sha256'])
+        self.artifact_hash = report['artifact_sha256']
         report['hardware'] = {'os': platform.platform(), **self.device.get('hardware', {})}
         data = self.root / 'data'
         data.mkdir()
@@ -207,7 +351,7 @@ class Local:
         if settings:
             if Path(settings).is_symlink():
                 raise ValueError('Settings fixture must not be a symlink')
-            shutil.copyfile(settings, data / 'settings.ini')
+            copy_regular_file(settings, data / 'settings.ini')
             report['settings_sha256'] = fingerprint(data / 'settings.ini')
         # Both legacy and current save roots point into the disposable directory.
         for name in ('EBOOT.ELF', 'disc.iso'):
@@ -226,7 +370,7 @@ class Local:
         if self.device.get('translation'):
             (self.root / 'translations').mkdir()
             destination = self.root / 'translations/selected.lang'
-            shutil.copyfile(self.device['translation'], destination)
+            copy_regular_file(self.device['translation'], destination)
             report['translation_sha256'] = fingerprint(destination)
         env = {key: value for key, value in os.environ.items() if not key.startswith('MHP3RD_')}
         env.update(self.device.get('env', {}))
@@ -244,6 +388,8 @@ class Local:
         self.env, self.binary = env, binary
 
     def launch(self):
+        if fingerprint(self.binary) != self.artifact_hash:
+            raise ValueError('Executable changed after preparation')
         self.log = (self.root / 'run.log').open('wb')
         # A separate bounded supervisor survives a dropped SSH/control connection.
         self.process = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '_supervise',
@@ -253,7 +399,7 @@ class Local:
         self.owned = True
 
     def text(self):
-        # The app's own log flushes where redirected stdout may be block buffered.
+        # PERF=log flushes redirected stdout at every frame-statistics interval.
         return (self.root / 'run.log').read_text(errors='replace')
 
     def alive(self):
@@ -278,6 +424,8 @@ class Local:
         stop_process(self.process)
         if self.log:
             self.log.close()
+        if self.owned and fingerprint(self.binary) != self.artifact_hash:
+            raise ValueError('Executable changed during the session')
 
 
 class Adb:
@@ -287,6 +435,8 @@ class Adb:
         self.package = device['package']
         if not valid_package(self.package):
             raise ValueError('ADB automation requires a dedicated .devicetest package')
+        if device.get('activity', ACTIVITY) != ACTIVITY:
+            raise ValueError('Dedicated test APK must use the generated Yakumo activity')
         self.remote = '/data/data/' + self.package + '/files/device-testing'
         self.owned = False
         self.pid = None
@@ -303,13 +453,17 @@ class Adb:
         return self.shell('run-as ' + self.package + ' sh -c ' + shlex.quote(text), **kwargs)
 
     def prepare(self, report):
-        apk = Path(self.device['apk'])
+        apk = self.root / 'artifact.apk'
+        copy_regular_file(self.device['apk'], apk)
         with zipfile.ZipFile(apk) as archive:
+            if archive.getinfo('assets/device-testing.json').file_size > 1024 * 1024:
+                raise ValueError('APK test contract is oversized')
             contract = json.loads(archive.read('assets/device-testing.json'))
         if contract != android_contract(self.package):
             raise ValueError('APK lacks the generated device-testing contract')
         report['artifact_sha256'] = fingerprint(apk)
-        if self.shell('pidof ' + self.package, check=False).strip():
+        verify_artifact(self.device, report['artifact_sha256'])
+        if self.pids():
             raise NotTested('Dedicated test package is already running; stop it manually first')
         props = self.shell('getprop').decode(errors='replace')
         report['hardware'] = {key: next((line for line in props.splitlines() if key in line), 'unknown')
@@ -328,7 +482,7 @@ class Adb:
         if self.device.get('settings'):
             if Path(self.device['settings']).is_symlink():
                 raise ValueError('Settings fixture must not be a symlink')
-            shutil.copyfile(self.device['settings'], staging / 'settings.ini')
+            copy_regular_file(self.device['settings'], staging / 'settings.ini')
             report['settings_sha256'] = fingerprint(staging / 'settings.ini')
         for name in ('EBOOT.ELF', 'disc.iso'):
             source = Path(self.device['game_dir']) / name
@@ -336,31 +490,37 @@ class Adb:
                 raise NotTested('Prepared game input is unavailable')
             # Stream into app-private storage; no shared temporary copy of game data.
             with source.open('rb') as stream:
-                result = subprocess.run(self.prefix + ['shell', 'run-as', self.package, 'sh', '-c',
-                                                       shlex.quote('cat > files/device-testing/data/' + name)],
-                                        stdin=stream, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                        timeout=remaining(self.deadline, 240), check=False)
-            if result.returncode:
-                raise RuntimeError('Game upload failed')
+                command(self.prefix + ['shell', 'run-as', self.package, 'sh', '-c',
+                                       shlex.quote('cat > files/device-testing/data/' + name)],
+                        self.deadline, input_file=stream, maximum=240)
         report['game_sha256'] = fingerprint(Path(self.device['game_dir']) / 'disc.iso')
         for item in sorted(staging.rglob('*')):
             relative = item.relative_to(staging).as_posix()
             if item.is_file():
                 destination = 'files/device-testing/data/' + relative
-                self.app('mkdir -p ' + shlex.quote(str(Path(destination).parent)) +
+                self.app('mkdir -p ' + shlex.quote(str(PurePosixPath(destination).parent)) +
                          ' && cat > ' + shlex.quote(destination), data=item.read_bytes())
         self.app('touch files/device-testing/input-live.txt files/device-testing/debug.txt')
         if self.device.get('env') or self.device.get('translation'):
             raise NotTested('ADB APK contract has fixed environment; language/mod variant needs its own packaged contract')
 
     def launch(self):
+        if self.pids():
+            raise NotTested('Dedicated package started after preparation; refusing to interfere')
         self.log_file = (self.root / 'logcat.log').open('wb')
         self.log_process = subprocess.Popen(self.prefix + ['logcat', '-T', '1'],
                                             stdout=self.log_file, stderr=subprocess.STDOUT)
-        # Mark ownership before am start: partial activation failure must still stop it.
-        self.owned = True
-        self.shell('am start -W -n ' + self.package + '/' + self.device.get('activity', 'io.github.teamgdb.yakumo.YakumoActivity'))
-        self.pid = self.shell('pidof ' + self.package).decode().strip()
+        try:
+            self.shell('am start -W -n ' + self.package + '/' + ACTIVITY)
+        finally:
+            # A partial activation is owned only after observing safe numeric PIDs.
+            original_deadline = self.deadline
+            self.deadline = getattr(self, 'cleanup_deadline', None) or time.monotonic() + 15
+            try:
+                self.pid = self.pids()
+                self.owned = bool(self.pid)
+            finally:
+                self.deadline = original_deadline
         if not self.pid:
             raise RuntimeError('Android app did not start')
         # Detached, PID-guarded watchdog survives a lost host/SSH connection.
@@ -368,12 +528,12 @@ class Adb:
         script = (f'#!/system/bin/sh\nsleep {seconds} &\nsleeper=$!\n'
                   "trap 'kill $sleeper 2>/dev/null; exit' TERM INT HUP\n"
                   'wait $sleeper\n'
-                  f'[ "$(pidof {self.package})" = "{self.pid}" ] && am force-stop {self.package}\n')
+                  f'[ "$(pidof {self.package} | tr \' \' \'\\n\' | sort -n | xargs)" = "{self.pid}" ] && am force-stop {self.package}\n')
         remote = '/data/local/tmp/yakumo-test-' + uuid.uuid4().hex + '.sh'
         self.shell('cat > ' + remote, data=script.encode())
         self.watchdog = remote
-        watchdog_pid = self.shell('nohup sh ' + remote + ' >/dev/null 2>&1 </dev/null & echo $!').decode().strip()
-        if not watchdog_pid.isdigit():
+        watchdog_pid = parse_pids(self.shell('nohup sh ' + remote + ' >/dev/null 2>&1 </dev/null & echo $!'))
+        if not watchdog_pid or ' ' in watchdog_pid:
             raise RuntimeError('Android watchdog did not return its PID')
         self.watchdog_pid = watchdog_pid
 
@@ -383,7 +543,10 @@ class Adb:
         return text
 
     def alive(self):
-        return bool(self.shell('pidof ' + self.package, check=False).strip())
+        return bool(self.pids())
+
+    def pids(self):
+        return parse_pids(self.shell('pidof ' + self.package, check=False))
 
     def send(self, kind, value):
         path = 'files/device-testing/' + ('debug.txt' if kind == 'debug' else 'input-live.txt')
@@ -402,7 +565,7 @@ class Adb:
         self.deadline = getattr(self, 'cleanup_deadline', None) or time.monotonic() + 15
         try:
             if self.owned:
-                current = self.shell('pidof ' + self.package, check=False).decode().strip()
+                current = self.pids()
                 if self.pid and current and current != self.pid:
                     raise RuntimeError('Android PID changed; refusing to stop a replacement process')
                 self.shell('am force-stop ' + self.package)
@@ -443,6 +606,21 @@ def valid_package(package):
         for part in parts)
 
 
+def parse_pids(value):
+    parts = value.decode('ascii').split()
+    if any(not part.isdecimal() or len(part) > 10 or not 0 < int(part) <= 2147483647 for part in parts) or len(parts) != len(set(parts)):
+        raise ValueError('Device returned an invalid PID list')
+    numeric = sorted(map(int, parts))
+    if len(numeric) != len(set(numeric)):
+        raise ValueError('Device returned duplicate PIDs')
+    return ' '.join(map(str, numeric))
+
+
+def verify_artifact(device, actual):
+    if device.get('artifact_sha256', actual) != actual:
+        raise ValueError('Artifact differs from the configured fingerprint')
+
+
 def android_contract(package):
     if not valid_package(package):
         raise ValueError('Test package must end in .devicetest')
@@ -473,14 +651,19 @@ def android_manifest(package, output):
 
 def bounded_match(pattern, text, deadline):
     # Run tester-authored regexes in an owned process: backtracking cannot defeat a wait deadline.
-    result = command([sys.executable, str(Path(__file__).resolve()), '_match'], deadline,
+    runner = str(Path(__file__).resolve())
+    argv = [sys.executable, runner, '_match']
+    if os.name != 'nt':
+        # Windows command() already adds the independent job-owning supervisor.
+        argv = [sys.executable, runner, '_supervise', str(remaining(deadline, 1800)), *argv]
+    result = command(argv, deadline,
                      data=json.dumps([pattern, text]).encode(), maximum=1800)
     return result == b'1'
 
 
 def regex_worker():
     pattern, text = json.load(sys.stdin)
-    # Intentional tester-authored expression; parent enforces a subprocess deadline.
+    # Intentional tester-authored expression; an independent supervisor bounds it.
     print('1' if re.search(pattern, text) else '0', end='')
     return 0
 
@@ -536,6 +719,8 @@ def result_status(report):
     automatic = report['automatic']['verdict']
     if automatic == 'FAIL' or 'FAIL' in checks:
         return 'FAIL'
+    if not checks:
+        return 'NOT TESTED'
     manual_complete = report.get('execution') == 'manual' and report.get('artifact_sha256') and all(value == 'PASS' for value in checks)
     if (automatic != 'PASS' and not manual_complete) or any(value != 'PASS' for value in checks):
         return 'NOT TESTED'
@@ -574,6 +759,7 @@ def new_report(suite, device, name):
 
 
 def run(suite, device, name, root, manual=False):
+    suite, device = copy.deepcopy(suite), copy.deepcopy(device)
     report = new_report(suite, device, name)
     cap = min(suite['seconds'], device.get('seconds', suite['seconds']))
     hard_deadline = time.monotonic() + cap
@@ -582,6 +768,7 @@ def run(suite, device, name, root, manual=False):
     reservation = None
     lease_watchdog = None
     reservation_released = False
+    launched = False
     started = time.monotonic()
     try:
         if manual and suite['execution'] != 'manual':
@@ -595,9 +782,7 @@ def run(suite, device, name, root, manual=False):
                 raise ValueError('Streaming requires an explicit overall cap of at most 300 seconds')
             cli = device.get('android', ['android']) + ['--no-metrics', 'device', 'remote']
             # Parse the CLI's own creation output. Never delete a different user's reservation.
-            active = command(cli + ['list', '--short', '--project=' + device['project']], deadline, check=False)
-            if active.strip() and b'No reservations found' not in active:
-                raise NotTested('Project has existing reservations; use an idle dedicated test project')
+            require_idle_project(cli, device['project'], deadline)
             creation_log = root / 'reservation-create.log'
             creation_log.touch()
             watchdog_payload = base64.b64encode(json.dumps({'log': str(creation_log), 'deadline': deadline,
@@ -626,6 +811,7 @@ def run(suite, device, name, root, manual=False):
         if suite['execution'] == 'manual' and not manual:
             raise NotTested('Use --manual to run this human checklist')
         adapter.launch()
+        launched = True
         if manual:
             while adapter.alive():
                 remaining(deadline)
@@ -639,14 +825,17 @@ def run(suite, device, name, root, manual=False):
     except NotTested as error:
         report['automatic'] = {'verdict': 'NOT TESTED', 'reason': str(error)}
     except TimeoutError as error:
-        report['automatic'] = {'verdict': 'PASS' if manual and adapter and adapter.owned else 'FAIL',
-                               'reason': 'Manual session deadline reached' if manual else str(error)}
+        ready = manual and launched
+        report['automatic'] = {'verdict': 'PASS' if ready else 'FAIL',
+                               'reason': 'Manual session deadline reached' if ready else str(error)}
     except (KeyboardInterrupt, Exception) as error:
         report['automatic'] = {'verdict': 'FAIL', 'reason': str(error) or type(error).__name__}
     finally:
         try:
             if adapter:
                 try:
+                    if isinstance(adapter, Adb):
+                        adapter.deadline = getattr(adapter, 'cleanup_deadline', None) or time.monotonic() + 15
                     if adapter.owned:
                         final_log = adapter.text()
                         report['metrics'] = summarize_log(final_log)
@@ -670,11 +859,22 @@ def run(suite, device, name, root, manual=False):
                 report['review'] = current['review']
         write_json(root / 'report.json', report)
         render_report(root)
-    return 1 if report['automatic']['verdict'] == 'FAIL' else 2 if result_status(report) != 'PASS' else 0
+    return report_exit(report)
 
 
 def plain_output(text):
     return re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', text)
+
+
+def require_idle_project(cli, project, deadline):
+    result = command(cli + ['list', '--short', '--project=' + project], deadline,
+                     check=False, return_status=True)
+    text = plain_output(result.stdout.decode(errors='replace')).strip()
+    if result.returncode in (0, 1) and not result.stderr.strip() and text == 'No reservations found.':
+        return
+    if result.returncode or result.stderr.strip() or not text:
+        raise RuntimeError('Idle project preflight failed; no reservation was created')
+    raise NotTested('Idle project could not be verified; no reservation was created')
 
 
 def parse_reservation(output):
@@ -686,11 +886,17 @@ def parse_adb_serial(output):
     text = plain_output(output)
     match = re.search(r'(?:localhost|127\.0\.0\.1):\d+', text)
     if match:
-        return match.group(0)
-    match = re.search(r'(?:device |already )?connected on port\s+(\d+)', text, re.I)
-    if not match:
-        raise RuntimeError('No connected ADB endpoint in reservation output')
-    return 'localhost:' + match.group(1)
+        endpoint = match.group(0)
+        port = endpoint.rsplit(':', 1)[1]
+    else:
+        match = re.search(r'(?:device |already )?connected on port\s+(\d+)', text, re.I)
+        if not match:
+            raise RuntimeError('No connected ADB endpoint in reservation output')
+        port = match.group(1)
+        endpoint = 'localhost:' + port
+    if len(port) > 5 or not 0 < int(port) <= 65535:
+        raise ValueError('Invalid ADB endpoint port')
+    return endpoint
 
 
 def lease_watchdog(payload):
@@ -702,7 +908,7 @@ def lease_watchdog(payload):
     return 0
 
 
-def windows_job(process):
+def windows_job(pid):
     """Kill the owned game if Windows forcibly terminates its supervisor."""
     import ctypes
     from ctypes import wintypes
@@ -729,7 +935,7 @@ def windows_job(process):
         raise ctypes.WinError(ctypes.get_last_error())
     limits = Limits()
     limits.basic.flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-    handle = api.OpenProcess(0x0101, False, process.pid)  # SET_QUOTA | TERMINATE
+    handle = api.OpenProcess(0x0101, False, pid)  # SET_QUOTA | TERMINATE
     try:
         if not handle or not api.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)) or not api.AssignProcessToJobObject(job, handle):
             raise ctypes.WinError(ctypes.get_last_error())
@@ -749,21 +955,21 @@ def supervise(seconds, binary, args=()):
     signal.signal(signal.SIGTERM, interrupted)
     if hasattr(signal, 'SIGHUP'):
         signal.signal(signal.SIGHUP, interrupted)
+    if os.name == 'nt':
+        # The sole handle stays open until interpreter exit. Closing it here
+        # would kill this supervisor too; OS exit closes it and all descendants.
+        windows_job(os.getpid())
     process = subprocess.Popen([binary, *args])
-    close_job = None
     try:
-        if os.name == 'nt':
-            close_job = windows_job(process)
         return process.wait(timeout=float(seconds))
     except (subprocess.TimeoutExpired, KeyboardInterrupt):
         return 124
     finally:
         stop_process(process)
-        if close_job:
-            close_job()
 
 
 def ssh_run(suite, device, name, root, manual):
+    suite, device = copy.deepcopy(suite), copy.deepcopy(device)
     remote = device['remote']
     if remote.get('adapter') not in ('local', 'adb'):
         raise ValueError('SSH delegates only local or ADB execution')
@@ -773,57 +979,225 @@ def ssh_run(suite, device, name, root, manual):
     windows = device.get('shell') == 'powershell'
     remote_root = device['checkout'].rstrip('/\\')
     runner = remote_root + '/profiles/mhp3rd/tools/device_testing.py'
+    request_id = uuid.uuid4().hex
     payload = base64.b64encode(json.dumps({'scenario': suite, 'device': remote, 'name': name,
-                                          'manual': manual}).encode()).decode()
+                                          'manual': manual, 'request_id': request_id}).encode()).decode()
     args = device.get('python', ['python3']) + [runner, '_remote', payload]
     if windows:
         quote = lambda text: "'" + text.replace("'", "''") + "'"
-        script = '& ' + ' '.join(quote(item) for item in args)
+        script = '& ' + ' '.join(quote(item) for item in args) + '; exit $LASTEXITCODE'
         invocation = 'powershell -NoProfile -EncodedCommand ' + base64.b64encode(script.encode('utf-16le')).decode()
     else:
         invocation = shlex.join(args)
     prefix = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', host]
     deadline = time.monotonic() + suite['seconds'] + 30
     try:
-        output = command(prefix + [invocation], deadline, check=False, maximum=suite['seconds'] + 30).decode(errors='replace')
+        transport = command(prefix + [invocation], deadline, check=False, return_status=True,
+                            maximum=suite['seconds'] + 30, output_limit=EVIDENCE_LIMIT * 3 // 2)
+        output = transport.stdout.decode(errors='replace')
+        (root / 'transport.log').write_text(output + transport.stderr.decode(errors='replace'))
+        matches = re.findall(r'^YAKUMO_EVIDENCE:([A-Za-z0-9+/=]+)\r?$', output, re.M)
+        if len(matches) != 1:
+            raise ValueError('Expected exactly one remote evidence bundle')
+        raw = base64.b64decode(matches[0], validate=True)
+        report = import_evidence(raw, suite, device, name, root, request_id, transport.returncode)
+        write_json(root / 'report.json', report)
+        render_report(root)
+        return report_exit(report)
     except (Exception, KeyboardInterrupt) as error:
-        output = 'SSH transport failed: ' + (str(error) or type(error).__name__)
-    (root / 'transport.log').write_text(output)
-    match = re.search(r'YAKUMO_EVIDENCE:([A-Za-z0-9+/=]+)', output)
-    if not match:
+        message = 'SSH transport/evidence failed: ' + (str(error) or type(error).__name__)
+        with (root / 'transport.log').open('a') as output:
+            output.write('\n' + message + '\n')
         report = new_report(suite, device, name)
-        report['automatic'] = {'verdict': 'FAIL', 'reason': 'No remote evidence bundle; see transport.log'}
+        report['automatic'] = {'verdict': 'FAIL', 'reason': message}
         write_json(root / 'report.json', report)
         render_report(root)
         return 1
-    # The bundle contains evidence only, not game data or copied saves.
-    import io
-    with zipfile.ZipFile(io.BytesIO(base64.b64decode(match.group(1)))) as bundle:
-        for item in bundle.infolist():
-            target = (root / item.filename).resolve()
-            if root.resolve() not in target.parents or target.suffix not in ('.json', '.md', '.log', '.bmp', '.png'):
-                raise ValueError('Unsafe remote evidence path')
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(bundle.read(item))
-    status = result_status(read_json(root / 'report.json'))
+
+
+def report_exit(report):
+    status = result_status(report)
     return 1 if status == 'FAIL' else 2 if status != 'PASS' else 0
 
 
-def remote_run(payload):
+def evidence_name(name):
+    if not isinstance(name, str):
+        raise ValueError('Invalid evidence filename')
+    if name in EVIDENCE_FILES:
+        return name
+    path = PurePosixPath(name)
+    if len(path.parts) == 2 and path.parts[0] == 'shots' and path.suffix in ('.bmp', '.png') and name == path.as_posix():
+        safe_name(path.stem)
+        return name
+    raise ValueError('Unexpected evidence file: ' + name)
+
+
+def owned_evidence_path(root, name):
+    path = Path(root).resolve() / evidence_name(name)
+    if path.resolve() != path or Path(root).resolve() not in path.parents:
+        raise ValueError('Evidence path contains a symlink or escapes its session')
+    return path
+
+
+def evidence_members(bundle):
+    names = set()
+    total = 0
+    members = bundle.infolist()
+    if len(members) > 128:
+        raise ValueError('Too many evidence files')
+    for item in members:
+        name = evidence_name(item.filename)
+        mode = stat.S_IFMT(item.external_attr >> 16)
+        if name in names or item.is_dir() or mode not in (0, stat.S_IFREG) or item.flag_bits & 1:
+            raise ValueError('Duplicate, nonregular or encrypted evidence entry')
+        if item.file_size > EVIDENCE_LIMIT or (name == 'report.json' and item.file_size > 1024 * 1024):
+            raise ValueError('Oversized evidence file')
+        names.add(name)
+        total += item.file_size
+    if total > EVIDENCE_LIMIT * 4 or 'report.json' not in names:
+        raise ValueError('Missing report or oversized evidence archive')
+    return members, names
+
+
+def review_verdict(item):
+    assessments = item.get('assessments', {})
+    values = [value['verdict'] for value in assessments.values()]
+    required = item.get('requires', 'either')
+    return ('FAIL' if 'FAIL' in values else
+            assessments.get(required, {}).get('verdict', 'NOT TESTED') if required != 'either' else
+            'PASS' if 'PASS' in values else 'NOT TESTED')
+
+
+def expected_actions(suite, device, kind):
+    def expand(steps):
+        for step in steps:
+            if 'fixture' in step:
+                yield from expand(device.get('fixtures', {}).get(step['fixture'], []))
+            elif kind in step:
+                yield step[kind]
+    return list(expand(suite['steps']))
+
+
+def validate_remote_report(report, suite, device, name, request_id, names):
+    remote = device['remote']
+    expected = new_report(suite, remote, name)
+    for key in ('schema', 'scenario', 'scenario_sha256', 'execution', 'device', 'build', 'commit', 'settings', 'deadline_seconds'):
+        if report.get(key) != expected[key]:
+            raise ValueError('Remote report identity differs: ' + key)
+    if report.get('request_id') != request_id or not re.fullmatch(r'[0-9a-f]{32}', report.get('run_id', '')):
+        raise ValueError('Remote report is stale or lacks the request identity')
+    automatic = report['automatic']
+    if automatic.get('verdict') not in VERDICTS or not isinstance(automatic.get('reason'), str):
+        raise ValueError('Invalid remote automatic verdict')
+    artifact = report.get('artifact_sha256')
+    if (artifact is not None or automatic['verdict'] == 'PASS') and not re.fullmatch(r'[0-9a-f]{64}', artifact or ''):
+        raise ValueError('Remote report lacks a valid artifact fingerprint')
+    verify_artifact(device, artifact)
+    verify_artifact(remote, artifact)
+    captures = report['captures']
+    if not isinstance(captures, list) or len(captures) != len(set(captures)):
+        raise ValueError('Invalid remote captures')
+    for path in captures:
+        if evidence_name(path) not in names or not path.startswith('shots/'):
+            raise ValueError('Remote capture is missing or invalid')
+    if automatic['verdict'] == 'PASS' and suite['execution'] == 'automatic':
+        if report['observations'] != expected_actions(suite, remote, 'wait') or captures != [
+                'shots/' + key + ('.png' if remote['adapter'] == 'adb' else '.bmp')
+                for key in expected_actions(suite, remote, 'capture')]:
+            raise ValueError('Remote PASS lacks the required observations/captures')
+    if set(report['review']) != set(expected['review']):
+        raise ValueError('Remote review checklist differs')
+    for key, check in expected['review'].items():
+        item = report['review'][key]
+        if item.get('expect') != check['expect'] or item.get('requires', 'either') != check.get('requires', 'either') or item.get('id') != key:
+            raise ValueError('Remote review requirements differ')
+        assessments = item.get('assessments', {})
+        if set(assessments) - {'human', 'agent'}:
+            raise ValueError('Unknown remote reviewer')
+        for value in assessments.values():
+            if value.get('verdict') not in VERDICTS or not isinstance(value.get('notes'), str) or not value['notes'].strip():
+                raise ValueError('Invalid remote review verdict')
+            if not isinstance(value.get('evidence'), list) or any(evidence_name(path) not in names for path in value['evidence']):
+                raise ValueError('Remote assessment evidence is missing or invalid')
+        if item.get('verdict') != review_verdict(item):
+            raise ValueError('Remote review verdict does not follow its requirements')
+    return report
+
+
+def import_evidence(raw, suite, device, name, root, request_id, returncode):
     import io
+    if len(raw) > EVIDENCE_LIMIT:
+        raise ValueError('Oversized encoded evidence bundle')
+    with zipfile.ZipFile(io.BytesIO(raw)) as bundle:
+        members, names = evidence_members(bundle)
+        report = validate_remote_report(json.loads(bundle.read('report.json')), suite, device, name, request_id, names)
+        if returncode != report_exit(report):
+            raise ValueError('SSH exit status differs from remote report')
+        # Validate every destination before writing; regenerate Markdown locally.
+        targets = {item.filename: owned_evidence_path(root, item.filename) for item in members}
+        for item in members:
+            if item.filename == 'report.json':
+                continue
+            target = targets[item.filename]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open('xb') as output:
+                output.write(bundle.read(item))
+    return report
+
+
+def export_evidence(root):
+    import io
+    output = io.BytesIO()
+    paths = [root / name for name in EVIDENCE_FILES] + list((root / 'shots').glob('*'))
+    paths = [path for path in paths if path.exists() or path.is_symlink()]
+    if len(paths) > 128:
+        raise ValueError('Too many exported evidence files')
+    total = 0
+    for path in paths:
+        owned_evidence_path(root, path.relative_to(root).as_posix())
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError('Exported evidence must be a regular owned file')
+        total += before.st_size
+        if before.st_size > EVIDENCE_LIMIT or total > EVIDENCE_LIMIT * 4:
+            raise ValueError('Exported evidence is oversized')
+    with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as bundle:
+        for path in paths:
+            # Hold a checked descriptor, never reopen a capture by its name.
+            before = path.lstat()
+            flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0) | getattr(os, 'O_BINARY', 0)
+            with os.fdopen(os.open(path, flags), 'rb') as source:
+                opened = os.fstat(source.fileno())
+                if not stat.S_ISREG(opened.st_mode) or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+                    raise ValueError('Evidence changed before export')
+                with bundle.open(path.relative_to(root).as_posix(), 'w') as destination:
+                    copied = 0
+                    while chunk := source.read(65536):
+                        copied += len(chunk)
+                        if copied > opened.st_size:
+                            raise ValueError('Evidence grew during export')
+                        destination.write(chunk)
+                        if output.tell() > EVIDENCE_LIMIT:
+                            raise ValueError('Exported evidence archive is oversized')
+                after = os.fstat(source.fileno())
+                if (opened.st_size, opened.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                    raise ValueError('Evidence changed during export')
+        evidence_members(bundle)
+    if output.tell() > EVIDENCE_LIMIT:
+        raise ValueError('Exported evidence archive is oversized')
+    return output.getvalue()
+
+
+def remote_run(payload):
     value = json.loads(base64.b64decode(payload))
     suite = validate_scenario(value['scenario'])
-    device = value['device']
+    device = validate_device(value['device'])
     root = output_directory(tempfile.gettempdir())
     code = run(suite, device, safe_name(value['name']), root, value['manual'])
-    output = io.BytesIO()
-    with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as bundle:
-        paths = [root / 'report.json', root / 'review.md', root / 'run.log', root / 'vulkan.json',
-                 *list((root / 'shots').glob('*'))]
-        for path in paths:
-            if path.is_file():
-                bundle.write(path, path.relative_to(root).as_posix())
-    print('YAKUMO_EVIDENCE:' + base64.b64encode(output.getvalue()).decode(), flush=True)
+    report = read_json(root / 'report.json')
+    report['request_id'] = value['request_id']
+    write_json(root / 'report.json', report)
+    print('YAKUMO_EVIDENCE:' + base64.b64encode(export_evidence(root)).decode(), flush=True)
     return code
 
 
@@ -841,12 +1215,7 @@ def review(root, check, verdict, reviewer, notes, evidence):
     item = report['review'][check]
     assessments = item.setdefault('assessments', {})
     assessments[reviewer] = {'verdict': verdict, 'notes': notes, 'evidence': evidence}
-    required = item.get('requires', 'either')
-    values = [value['verdict'] for value in assessments.values()]
-    effective = ('FAIL' if 'FAIL' in values else
-                 assessments.get(required, {}).get('verdict', 'NOT TESTED') if required != 'either' else
-                 'PASS' if 'PASS' in values else 'NOT TESTED')
-    item.update(verdict=effective, reviewer=reviewer, notes=notes, evidence=evidence)
+    item.update(verdict=review_verdict(item), reviewer=reviewer, notes=notes, evidence=evidence)
     write_json(path, report)
     render_report(root)
 

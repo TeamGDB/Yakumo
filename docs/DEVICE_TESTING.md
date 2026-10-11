@@ -243,6 +243,34 @@ Add public synthetic success/failure/cleanup tests in
 and the existing Python coverage job discover these tests; game files and cloud
 reservations are not involved.
 
+## Runner trust and cleanup boundaries
+
+Run this developer CLI with your own permissions. Configuration, executable/tool
+paths, fixture navigation and observation regular expressions are intentional
+tester input, with the same authority as running those tools yourself. They are
+not accepted from a network service. Load only configurations you trust; each
+run snapshots its configuration and copied save/settings/APK inputs. The source
+game files and local executable remain external dependencies: do not rebuild or
+modify them during a session. Artifact fingerprints are checked before launch
+and after cleanup.
+
+Device output and SSH evidence are checked separately. Android process IDs must
+be numeric; automation uses the dedicated package's fixed generated activity.
+SSH bundles have bounded sizes, regular-file whitelists and no links; identity,
+scenario, artifact, observations, review requirements and exit status must
+match the current request. A remote host is still a trusted test operator,
+not a cryptographic attestation service. Image files alone never certify visual
+correctness. Local Markdown is regenerated from validated report data.
+
+Tool subprocesses and regex workers have independent lifetime limits. Local
+games have a supervisor, and an Android PID-guarded watchdog is armed after
+successful activation. Responsive startup failures use a bounded cleanup grace;
+hard controller/link loss during Android activation, before the watchdog is
+armed, cannot guarantee app cleanup. Check and stop only the dedicated test
+package in that case before another run. Streaming preflight accepts only the
+CLI's recognized idle response; authentication/network failures or unknown output
+cannot trigger creation. Cleanup time is reserved within the streaming cap.
+
 ## Before a release
 
 Prepare `device-release.local.json` with an explicit row for every required
