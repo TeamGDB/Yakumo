@@ -134,6 +134,8 @@ def settings(path):
 
 def pixels(path):
     """Decode bounded uncompressed RGB BMP or noninterlaced 8-bit RGB(A) PNG."""
+    if Path(path).stat().st_size > 64 * 1024 * 1024:
+        raise CheckFailed('Oversized capture')
     data = Path(path).read_bytes()
     if len(data) > 64 * 1024 * 1024:
         raise CheckFailed('Oversized capture')

@@ -98,7 +98,7 @@ def render(root, report):
                                                           item['verdict'], item['reason']))) + ' |')
     lines.extend(['', 'Private evidence only. Developer readbacks do not certify exact release artifacts.',
                   'Physical controls, audible playback and long hunts require complementary human sign-off.'])
-    (root / 'suite.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    checks.confined(root, 'suite.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
 
 class Session:
@@ -348,7 +348,7 @@ class Session:
         if unicode:
             (directory / 'portable.txt').write_text('')
         env = dict(self.adapter.env, MHP3RD_GAME_DIR=str(data), MHP3RD_DATA_DIR=str(data))
-        image = str((Path(self.device['game_dir']) / 'disc.iso').resolve())
+        image = str(checks.confined(self.device['game_dir'], 'disc.iso'))
         output = runner.command([str(binary), '--install', image, '--in-place'], self.deadline,
                                 maximum=120, env=env).decode(errors='replace')
         (directory / 'install.log').write_text(output)
@@ -358,7 +358,7 @@ class Session:
             try:
                 (data / 'disc.iso').symlink_to(image)
             except OSError:
-                runner.os.link(image, data / 'disc.iso')
+                runner.os.link(image, checks.confined(self.root, (data / 'disc.iso').relative_to(self.root).as_posix()))
         after = checks.inventory(data / 'ms0')
         checks.compare(after, 'eq', before)
         persisted = checks.settings(data / 'settings.ini')
@@ -409,14 +409,14 @@ class Session:
         for filename in ('EBOOT.ELF', 'disc.iso'):
             target = self.data_root / filename
             target.unlink()
-            source = (directory / filename).resolve()
+            source = checks.confined(directory, filename)
             if filename == 'EBOOT.ELF':
                 runner.copy_regular_file(source, target)
             else:
                 try:
                     target.symlink_to(source)
                 except OSError:
-                    os.link(source, target)
+                    os.link(source, checks.confined(self.root, target.relative_to(self.root).as_posix()))
 
     def close(self):
         try:
@@ -719,7 +719,8 @@ def execute(session, steps, context, parameters, device, deadline):
                 raise runner.NotTested('Missing reviewed navigation reference for this hardware: ' + step['name'])
             if runner.fingerprint(reference['path']) != reference['sha256']:
                 raise ValueError('Navigation reference changed')
-            expected = checks.pixels(reference['path'])
+            reference_path = Path(reference['path'])
+            expected = checks.pixels(checks.confined(reference_path.parent, reference_path.name))
             limit = min(deadline, time.monotonic() + step.get('timeout', 20))
             first_capture, previous_capture = None, None
             while True:

@@ -178,10 +178,17 @@ def validate_device(value):
 
 def output_directory(parent):
     parent = os.path.normcase(os.path.realpath(parent))
-    allowed = (os.path.normcase(os.path.realpath(tempfile.gettempdir())),
-               os.path.normcase(os.path.realpath(ROOT / 'out')))
-    if not (parent == allowed[0] or parent.startswith(allowed[0].rstrip(os.sep) + os.sep) or
-            parent == allowed[1] or parent.startswith(allowed[1].rstrip(os.sep) + os.sep)):
+    temporary = os.path.normcase(os.path.realpath(tempfile.gettempdir()))
+    output = os.path.normcase(os.path.realpath(ROOT / 'out'))
+    if parent == temporary:
+        parent = temporary
+    elif parent == output:
+        parent = output
+    elif parent.startswith(temporary.rstrip(os.sep) + os.sep):
+        pass
+    elif parent.startswith(output.rstrip(os.sep) + os.sep):
+        pass
+    else:
         raise ValueError('Output parent must exist under repository out/ or the OS temporary directory')
     if not os.path.isdir(parent):
         raise ValueError('Output parent must be an existing directory')
@@ -1106,10 +1113,12 @@ def evidence_name(name):
 def owned_evidence_path(root, name, control=False):
     if control and name not in ('debug.txt', 'input-live.txt'):
         raise ValueError('Unsupported control file')
-    path = Path(root).resolve() / (name if control else evidence_name(name))
-    if path.resolve() != path or Path(root).resolve() not in path.parents:
+    root = os.path.normcase(os.path.realpath(root))
+    lexical = os.path.normcase(os.path.abspath(os.path.join(root, name if control else evidence_name(name))))
+    path = os.path.normcase(os.path.realpath(lexical))
+    if path != lexical or not path.startswith(root.rstrip(os.sep) + os.sep):
         raise ValueError('Evidence path contains a symlink or escapes its session')
-    return path
+    return Path(path)
 
 
 def evidence_members(bundle):
