@@ -414,6 +414,8 @@ void opaque_alpha_contracts(gpu::VulkanRenderer &renderer) {
         matrix->fill(0.0f);
         (*matrix)[0] = (*matrix)[5] = (*matrix)[10] = (*matrix)[15] = 1.0f;
     }
+    // Synthetic submissions use fresh versions, just as GE register writes do.
+    draw.environment_version = draw.material_version = 0x10000u;
     draw.projection[10] = -1.020202f;
     draw.projection[11] = -1.0f;
     draw.projection[14] = -0.2020202f;
@@ -5008,8 +5010,8 @@ int run_contracts(int scripts) {
         return failures ? 1 : 0;
     }
     if (scripts == 4) {
-        opaque_alpha_contracts(renderer);
         primitive_contracts(renderer);
+        opaque_alpha_contracts(renderer);
         renderer.shutdown();
         std::filesystem::remove_all(sandbox);
         std::cout << (failures ? "FAIL" : "PASS") << ": bounded renderer primitives (" << failures << " failures)\n";
@@ -5051,7 +5053,6 @@ int run_contracts(int scripts) {
     layered_armor_ui_contracts(renderer, fixture.runtime);
     media_renderer_contracts(fixture, renderer);
     render_contracts(renderer);
-    opaque_alpha_contracts(renderer);
     primitive_contracts(renderer);
     screenshot_contracts(renderer, sandbox);
     held_frame_contracts(renderer, sandbox);
@@ -5083,6 +5084,7 @@ int run_contracts(int scripts) {
         "queued UI screenshot reports asynchronous write failure and preserves the blocking file");
     std::filesystem::remove(screenshot_directory);
     camera_probe_contracts(renderer, sandbox);
+    opaque_alpha_contracts(renderer);
     free_camera_lifecycle_contracts();
     keyboard_contracts(renderer);
     input_capture_contracts(renderer);

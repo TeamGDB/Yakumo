@@ -464,3 +464,32 @@ persistent game-data upload or billing/IAM change was made. The maintainer has
 now deferred Google testing and transfer/downloader work from the local QUICK
 delivery. The unused attempt is not being spent in this stage; all original
 FAIL/NOT TESTED reports and private reservation history remain preserved.
+## Opaque-draw renderer checks (2026-10-11)
+
+A bounded stationary-village comparison on `5e1fa00` used a Redmi 12C,
+Android 14/API 34, and Mali-G52 MC2 (r32p1). The isolated ARM64/API29 build
+reused compatible AOT objects and all 355 overlays. Resolution remained
+1650×720 with explicit 30 FPS, GPU compatibility Auto (self-test passed, Off),
+GPU vertex decode Off, sharp textures Off and no replacement texture pack.
+
+`MHP3RD_PERF_ALTERNATE=opaque` switched only the opacity optimization every
+second. In the final 26 one-second samples of two runs, GPU-time medians were
+26.5 → 24.8 ms and 27.6 → 26.0 ms. Adjacent on-then-off comparisons saved a
+median 1.75 ms and 1.90 ms; 23 of 24 pairs improved. Both optimized medians
+were 30 game FPS and 100% speed; the old path measured 100% and 99%. CPU
+render medians increased by 0.2 ms in both runs. GPU frequency varied, so
+these adjacent comparisons show reduced cost in this scene, not a fixed
+performance guarantee.
+
+Synthetic offscreen comparisons of the production shaders on the same Mali
+GPU covered 1,400 filtered, unequal-perspective-W, lit/unlit and alpha-test
+cases: zero differing images, with a forced-unsafe control changing pixels.
+EQUAL255 and GEQUAL255 checks drew pixels rather than passing vacuously.
+Game captures were inspected at the same resolution; animation and wall-clock
+state were not pinned for pixel-identical game comparisons.
+
+Only the isolated diagnostic application was updated. The player's installed
+`0.7.0-test.1` build, whose source commit is unknown, was not replaced. Moving
+combat, other physical GPUs, raw GPU decoding, interpolation, prolonged play
+and the separate Android surface-loss startup crash remain unverified by
+these checks. No quality setting, phone-wide setting or upscaler changed.
