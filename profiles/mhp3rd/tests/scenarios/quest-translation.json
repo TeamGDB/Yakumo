@@ -1,0 +1,17 @@
+{
+  "id": "quest-translation", "build": "dev", "execution": "manual", "seconds": 600,
+  "translation": true,
+  "description": "Reproduce quest translation latency with the existing eight-checkpoint visual matrix.",
+  "prerequisites": ["Copied character and translation covering selected quest IDs", "Repeat with Japanese and English-patched images and record their fingerprints", "Normal search budget; diagnostic unlimited mode is a separate comparison"],
+  "steps": [],
+  "review": [
+    {"id": "01-menu", "expect": "A shop/smithy contains covered translated text as positive control."},
+    {"id": "02-village-list", "expect": "Covered quest titles translated on first display, within one second."},
+    {"id": "03-village-details", "expect": "Covered title, objective, failure, description, monsters and client translated on first display."},
+    {"id": "04-reopen", "expect": "Changing star level and reopening refreshes all covered fields without delay."},
+    {"id": "05-hall-list", "expect": "Covered Hall names translated on first display without recurring stalls."},
+    {"id": "06-hall-details", "expect": "Covered Hall detail fields translated correctly and fit the layout."},
+    {"id": "07-active-quest", "expect": "After accepting and departing, the same covered quest fields remain translated in Current Quest Details."},
+    {"id": "08-original", "expect": "A separate original-language run of the same quest has intact original text; record its run ID."}
+  ]
+}

@@ -48,6 +48,11 @@ help:
 	  'make coverage-tools  Install the pinned Python coverage collector' \
 	  'make python-coverage Run full Python suites with source/branch coverage' \
 	  'make project-coverage Collect reports and enforce 80% changed-line coverage' \
+	  'make device-scenarios List shared hardware/regression scenarios' \
+	  'make device-prepare  Prepare a fingerprinted manual checklist (DEVICE=...)' \
+	  'make device-run      Run a bounded device session (DEVICE=..., DEVICE_SCENARIO=...)' \
+	  'make device-review   Record human/agent review (DEVICE_ARGS=...)' \
+	  'make device-matrix   Generate the required artifact-specific release matrix' \
 	  'make app             Build Yakumo in an already configured APP_BUILD_DIR' \
 	  'Overrides: JOBS=2 BUILD_DIR=out/tests CMAKE_ARGS="..." CTEST_ARGS="..."'
 
@@ -143,3 +148,27 @@ project-coverage:
 app:
 	@test -n "$(APP_BUILD_DIR)" || { printf '%s\n' 'Set APP_BUILD_DIR to an existing game build; see docs/BUILDING.md.' >&2; exit 1; }
 	$(CMAKE) --build "$(APP_BUILD_DIR)" --target Yakumo --parallel $(JOBS)
+
+# Explicit developer-only hardware workflow; public CI uses synthetic contracts.
+DEVICE_TEST := profiles/mhp3rd/tools/device_testing.py
+DEVICE_CONFIG ?= device-testing.local.json
+DEVICE_SCENARIO ?= boot
+DEVICE_OUTPUT ?= out/device-testing
+.PHONY: device-scenarios device-prepare device-run device-review device-matrix
+
+device-scenarios:
+	$(PYTHON) $(DEVICE_TEST) list
+
+device-prepare:
+	mkdir -p "$(DEVICE_OUTPUT)"
+	$(PYTHON) $(DEVICE_TEST) prepare "$(DEVICE_SCENARIO)" --config "$(DEVICE_CONFIG)" --device "$(DEVICE)" --output-parent "$(DEVICE_OUTPUT)"
+
+device-run:
+	mkdir -p "$(DEVICE_OUTPUT)"
+	$(PYTHON) $(DEVICE_TEST) run "$(DEVICE_SCENARIO)" --config "$(DEVICE_CONFIG)" --device "$(DEVICE)" --output-parent "$(DEVICE_OUTPUT)" $(DEVICE_ARGS)
+
+device-review:
+	$(PYTHON) $(DEVICE_TEST) review $(DEVICE_ARGS)
+
+device-matrix:
+	$(PYTHON) $(DEVICE_TEST) matrix --plan device-release.local.json --runs "$(DEVICE_OUTPUT)" --output "$(DEVICE_OUTPUT)/release.md"

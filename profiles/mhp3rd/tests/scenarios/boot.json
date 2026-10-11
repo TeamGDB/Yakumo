@@ -1,0 +1,11 @@
+{
+  "id": "boot", "build": "either", "execution": "automatic", "seconds": 60,
+  "description": "Observe generated execution and opening overlays, then capture the screen.",
+  "prerequisites": ["Prepared game inputs", "Compatible overlays", "Disposable copied save fixture"],
+  "steps": [
+    {"wait": "Functions:[ \t]+[1-9][0-9]+", "timeout": 40},
+    {"wait": "\\[overlay\\] installed demo_task", "fresh": false, "timeout": 20},
+    {"capture": "opening"}
+  ],
+  "review": [{"id": "opening", "expect": "Opening scene is rendered correctly; no black/blank picture, corruption or error dialog."}]
+}

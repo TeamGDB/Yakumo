@@ -1,0 +1,23 @@
+{
+  "id": "quest-village", "build": "dev", "execution": "automatic", "seconds": 180,
+  "description": "Start village quest 204 from an isolated loaded character and verify the handoff.",
+  "prerequisites": ["Developer artifact with Debug enabled", "Copied character with sufficient funds", "load-character navigation fixture; menus closed and offline village reached"],
+  "steps": [
+    {"wait": "\\[debug\\] developer tools on", "timeout": 30},
+    {"fixture": "load-character"},
+    {"wait": "\\[overlay\\] installed lobby_task", "fresh": false, "timeout": 40},
+    {"wait": "\\[overlay\\] installed P_v00a00d", "fresh": false, "timeout": 40},
+    {"debug": "quest start 204"},
+    {"wait": "\\[debug\\] started quest 204 \\(", "timeout": 10},
+    {"wait": "\\[overlay\\] installed game_task", "timeout": 40},
+    {"debug": "peek 0x09FAF8C2 2"},
+    {"wait": "09[fF][aA][fF]8[cC]2.*[cC][cC] 00", "timeout": 10},
+    {"debug": "quest"},
+    {"wait": "\\[debug\\] Time [0-9]+:[0-9]+ left of 50 min", "timeout": 10},
+    {"capture": "active-quest"}
+  ],
+  "review": [
+    {"id": "quest-identity", "expect": "Current Quest Details names quest 204; the expected Misty Peaks map and Arzuros are present. Verify actual loaded quest, not only the start acknowledgement."},
+    {"id": "quest-render", "expect": "Hunter, terrain, minimap and effects display without corruption. Camera/movement work; review perf samples and report stalls separately."}
+  ]
+}
