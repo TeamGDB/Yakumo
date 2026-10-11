@@ -254,3 +254,30 @@ Match display on the device, rotation, translated gameplay, hunts,
 multiplayer, audibility and sustained thermal performance were not verified.
 This fixes the measured 60 Hz display restriction; it does not complete all
 Snapdragon performance work in #291 or the release validation in #290.
+
+## Settings and compact overlay checks (2026-10-11)
+
+PR #308 native application source `93ea2ff50840fdf17901e1e349ab089efd47862a`
+was tested with compatible prebuilt AOT objects and overlays. Later review
+commits change the device harness, tests and documentation only; reports retain
+separate harness/source declarations and exact artifact hashes.
+
+| Platform | Native suites | Inspected scope |
+| --- | --- | --- |
+| macOS / Apple M1 / MoltenVK | 65/65 | Rendered menu sections, readable QoL labels, compact overlay, F3 hide/restore and menu reopening |
+| Windows x64 / MSVC / Vulkan | 58/58 | Interactive desktop renderer/UI tests and rendered menu/compact/F3 captures; developer environment required for the generated-code compile fixture |
+| Steam Deck / SteamOS / RADV | 64/64 | Gamescope/X11 renderer/UI variants and bounded full-game menu/compact captures; window-size tests use a controlled initial logical size |
+| Physical Android arm64 / API 29 build | 52/52 headless suites | Dedicated developer APK: all seven public menu sections and compact/F3 captures; scripted keyboard/virtual-controller input |
+
+Real UI regressions verify section-specific resets, preserved startup overrides,
+all performance modes, glyphs, buffer bounds and unchanged pixels outside the
+overlay. The first Windows-to-Android binary upload exposed Ctrl-Z truncation;
+ASCII encoding with source/destination SHA-256 verification now prevents launch
+with damaged inputs. The harness also separates the bounded first-upload budget
+from the shorter gameplay session and checks manual PID-probe deadline expiry.
+
+These are focused menu/overlay checks. Actual physical-control feel, touch-only
+navigation, audible output, representative hunts, multiplayer, long sessions,
+final player-package updates, other Android GPUs and fresh emulator variants
+remain unverified. Runs used copied saves/settings and bounded owned processes;
+player/release installations, original saves and launchers were preserved.
