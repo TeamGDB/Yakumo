@@ -302,9 +302,9 @@ First HUD hiding while already paused in photo mode did not activate before a
 guest flip. Quest-retire confirmation did not return to village within the bound,
 also on an earlier baseline and with audio enabled. Desktop activation did not
 produce observed SDL focus on macOS. These remain failed/unverified outcomes.
-Normal counter/gate, patched-image translation, complete photo/lifecycle checks,
-save/backup, real replacement textures, two-peer hunts and repeated performance
-workloads remain in progress. At application source `751424a`, Windows native
+The extended translation matrix, complete photo/lifecycle checks, real save/backup
+and replacement textures, two-peer hunts and repeated performance comparisons
+remain deferred follow-up. At application source `751424a`, Windows native
 results are 61/61 (51 SSH tests plus 10 interactive renderer tests); physical
 Android native results are a fresh 56/56 after staging the actual FFmpeg/SDL
 runtime dependencies. The initial Android run retained nine link failures from
@@ -318,12 +318,22 @@ and no quest cheats. Complete device scenarios and cloud validation are pending;
 no cloud reservations have been consumed at this checkpoint. The suite does not
 complete any exact-candidate release or human playtesting sign-off.
 
-The current delivery scope is the QUICK stage. The first macOS run passed all
-ten categories (12 automatic subchecks) in 99.7 seconds with cleanup passing,
-using application source `751424a`. The aggregate identifies actual quest/input/
+The current delivery scope is the QUICK stage. Harness `738ed74` passed all ten
+categories (12 automatic subchecks) on macOS in 100.7 seconds, after an earlier
+99.7-second run; both passed cleanup, using application source `751424a` and
+artifact SHA-256 `9e33423b4bed48cef751102d4be9c167b0cfd953f60b82070c907a75f2836339`.
+The aggregate identifies actual quest/input/
 text/photo/telemetry smoke separately from executed synthetic/native installation,
 save/mod, two-peer transport and lifecycle/PCM contracts. This result does not
 claim completion of the deferred extended matrix. Initial physical Android
 preparation measured about 329.5 seconds before the short game checks, exceeding
 the entire 300-second Google pilot cap; no paid reservation is justified by that
 transfer path at this checkpoint.
+
+On Windows, QUICK harness `738ed74` passed 11/12 subchecks in 135.4 seconds with
+cleanup passing, using the `751424a` application artifact
+`65b4089b34975fffdff3c695a915f9d7c6a63b3aae7f9a269a5b3b884dcc1c2a`.
+The lifecycle contract group was NOT TESTED because that build does not register
+all required Android-specific contracts; the aggregate correctly remained NOT
+TESTED. The current Steam Deck preflight timed out over SSH, so no QUICK device
+result is claimed. Earlier native results retain their earlier source qualifier.

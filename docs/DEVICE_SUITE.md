@@ -11,6 +11,25 @@ contracts remain mandatory; their synthetic inputs are not device gameplay
 evidence. Physical controls, audible playback and long hunts retain separate
 human sign-offs. Developer shortcuts never satisfy exact release-artifact rows.
 
+## QUICK scope
+
+| Category | Automatic QUICK evidence |
+| --- | --- |
+| 01 Installation/update/boot | Real copied-character boot, preserved save inventory, nonblank frame; native data-directory/settings contracts |
+| 02 Settings/controls | Real guest pad press/release, neutral axes and preserved settings |
+| 03 Quest/combat/camera | Real offline quest ID/map/timer, loaded monsters and camera turn; combat/return routes deferred |
+| 04 Save/backup | Native savedata outcome contracts; real UI round trips deferred |
+| 05 Translations | Real private source-derived active-field byte checks and native translation contracts; full Japanese/patched UI matrix deferred |
+| 06 Mods/textures/layered appearance | Native mod/texture/equipment outcome contracts; real appearance matrix deferred |
+| 07 Photo tools | Real in-quest freeze, exact two-vblank step and exit; extended HUD checks retain their failures |
+| 08 Two-peer multiplayer | Native two-peer ad hoc/kernel transport contracts; Hall/hunts deferred |
+| 09 Platform lifecycle | Native JNI/display/PCM contracts where registered; physical lifecycle deferred |
+| 10 Performance | Three short real fixed-scene speed/frame-time samples; calibrated comparisons deferred |
+
+Missing contract executables, private expectations or supported device channels
+remain NOT TESTED; an assertion failure remains FAIL. QUICK has its own profile,
+definition fingerprints and aggregate, separate from the extended matrix.
+
 ## Contract audit
 
 Each top-level scenario has bounded subchecks. An action acknowledgement is not
@@ -74,7 +93,8 @@ were never reached. Keep the configuration, expected text, game/save inputs,
 navigation captures and reservation ledger private. Do not attach their contents
 to a pull request.
 
-QUICK is the default profile. It covers copied-character boot and preservation,
+QUICK is the default profile, with a 360-second session cap (extended: 1800).
+It covers copied-character boot and preservation,
 input/settings release, an offline quest/camera smoke, active quest text and photo
 freeze/step through the real game. Installation/settings, save/backup, mod/texture/
 equipment, two-peer transport and lifecycle/PCM groups run existing public native

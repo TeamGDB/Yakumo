@@ -377,8 +377,27 @@ while time.monotonic()<end:
             with mock.patch.object(suite, 'run_device', return_value={'name': 'mac', 'verdict': 'NOT TESTED', 'scenarios': []}) as run:
                 self.assertEqual(suite.main(['--config', str(config), '--devices', 'mac', '--scenarios', '03', '--seconds', '2']), 2)
                 self.assertEqual(run.call_args.args[2][0]['id'], '03')
+                for profile, cap in (('quick', 360), ('extended', 1800)):
+                    self.assertEqual(suite.main(['--config', str(config), '--devices', 'mac',
+                                                '--profile', profile, '--scenarios', '03']), 2)
+                    self.assertEqual(run.call_args.args[-1], cap)
 
 class SshSuiteTests(unittest.TestCase):
+    def test_unavailable_ssh_is_incomplete_but_unknown_transport_failures_are_not_hidden(self):
+        import subprocess
+        device = {'remote': {'build': 'dev', 'commit': 'a' * 40}, 'checkout': '/fixture', 'host': 'fixture'}
+        with tempfile.TemporaryDirectory() as temp:
+            for reason in ('Connection timed out', 'Operation timed out', 'Connection refused', 'No route to host',
+                           'Could not resolve hostname fixture'):
+                result = subprocess.CompletedProcess([], 255, b'', ('ssh: ' + reason).encode())
+                with mock.patch.object(runner, 'command', return_value=result), self.assertRaises(runner.NotTested):
+                    suite.ssh_device(device, 'deck', [], Path(temp), 2)
+            for output, reason in ((b'game already started', b'Connection timed out'),
+                                   (b'', b'Host key verification failed'), (b'', b'remote process crashed')):
+                result = subprocess.CompletedProcess([], 255, output, reason)
+                with mock.patch.object(runner, 'command', return_value=result), self.assertRaises(ValueError):
+                    suite.ssh_device(device, 'deck', [], Path(temp), 2)
+
     def test_remote_bundle_roundtrip_and_rejections(self):
         import base64
         import io

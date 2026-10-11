@@ -1029,6 +1029,8 @@ def run_device(device, name, suite, root, seconds):
             raise runner.NotTested('Suite session delegation for this adapter is not implemented')
         session = Session(device, root, deadline)
         session.prepare(launch=False)
+        report['setup_duration_seconds'] = round(time.monotonic() - started, 3)
+        report['setup_cap_seconds'] = setup
         runner.remaining(deadline)
         deadline = min(hard_deadline, time.monotonic() + seconds)
         session.deadline = session.adapter.deadline = deadline
@@ -1124,6 +1126,10 @@ def ssh_device(device, name, definitions, root, seconds):
                             return_status=True, output_limit=runner.EVIDENCE_LIMIT * 3 // 2)
     output = result.stdout.decode(errors='replace')
     (root / 'transport.log').write_text(output + result.stderr.decode(errors='replace'))
+    unavailable = re.search(r'(?:(?:Connection|Operation) timed out|Connection refused|No route to host|Could not resolve hostname)',
+                            result.stderr.decode(errors='replace'), re.I)
+    if result.returncode == 255 and not output and unavailable:
+        raise runner.NotTested('SSH device is unavailable: ' + unavailable[0])
     matches = re.findall(r'^YAKUMO_SUITE:([A-Za-z0-9+/=]+)\r?$', output, re.M)
     if len(matches) != 1:
         raise ValueError('Expected exactly one remote suite evidence bundle')
@@ -1264,10 +1270,12 @@ def main(argv=None):
     parser.add_argument('--devices', nargs='+')
     parser.add_argument('--scenarios', nargs='+', choices=[f'{i:02}' for i in range(1, 11)])
     parser.add_argument('--profile', choices=('quick', 'extended'), default='quick')
-    parser.add_argument('--seconds', type=int, default=1800)
+    parser.add_argument('--seconds', type=int, help='Per-device cap (QUICK: 360; extended: 1800)')
     parser.add_argument('--output-parent', default=tempfile.gettempdir())
     parser.add_argument('--list', action='store_true')
     args = parser.parse_args(argv)
+    if args.seconds is None:
+        args.seconds = 360 if args.profile == 'quick' else 1800
     suite = definitions(args.profile)
     if args.list:
         for item in suite:
