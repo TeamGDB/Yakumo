@@ -311,6 +311,8 @@ def command(argv, deadline, *, data=None, check=True, maximum=20, return_status=
         for thread in threads:
             if thread.ident is not None:
                 thread.join(timeout=2)
+        if process.stdin:
+            process.stdin.close()
         process.stdout.close()
         process.stderr.close()
     result = subprocess.CompletedProcess(argv, process.returncode, bytes(output['stdout']), bytes(output['stderr']))

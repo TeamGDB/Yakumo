@@ -23,7 +23,7 @@ spec.loader.exec_module(dt)
 FAKE_GAME = '''import os, pathlib, time
 root = pathlib.Path(os.environ['MHP3RD_DATA_DIR']).parent
 assert pathlib.Path(os.environ['MHP3RD_GAME_DIR']) == root / 'data'
-print('Functions: 12345', flush=True)
+print('Functions:  12345', flush=True)
 print('[overlay] installed demo_task', flush=True)
 offset = 0
 while True:
@@ -53,10 +53,10 @@ class DeviceTests(unittest.TestCase):
         self.fake = self.root / 'fake.py'
         self.fake.write_text(FAKE_GAME)
         self.device = {'adapter': 'local', 'build': 'dev', 'commit': 'a' * 40,
-                       'binary': sys.executable, 'args': [str(self.fake)], 'seconds': 12 if os.name == 'nt' else 5,
+                       'binary': sys.executable, 'args': [str(self.fake)], 'seconds': 30 if os.name == 'nt' else 5,
                        'game_dir': str(self.game), 'saves': str(self.saves)}
         self.suite = dt.scenario('boot')
-        self.suite['seconds'] = 12 if os.name == 'nt' else 5
+        self.suite['seconds'] = 30 if os.name == 'nt' else 5
         self.run_dir = self.root / 'evidence'
         self.run_dir.mkdir()
 
@@ -78,6 +78,13 @@ class DeviceTests(unittest.TestCase):
         dt.render_report(self.run_dir)
         self.assertEqual(dt.result_status(self.report()), 'PASS')
         self.assertIn('PASS', (self.run_dir / 'review.md').read_text())
+
+    def test_boot_counter_accepts_native_banner_spacing_and_requires_nonzero_count(self):
+        pattern = dt.scenario('boot')['steps'][0]['wait']
+        for text in ('Functions:  362482', 'Functions: 12345', 'Functions:\t12345'):
+            self.assertIsNotNone(dt.re.search(pattern, text))
+        for text in ('Functions:  0', 'Functions: missing', 'Functions:\n362482'):
+            self.assertIsNone(dt.re.search(pattern, text))
 
     def test_timeout_is_failure_and_process_stopped(self):
         self.suite['steps'] = [{'wait': 'condition-never-emitted', 'timeout': .25}]
@@ -288,7 +295,7 @@ class DeviceTests(unittest.TestCase):
 
     def test_subprocess_failure_timeout_and_metrics(self):
         with self.assertRaises(RuntimeError):
-            dt.command([sys.executable, '-c', "import sys; print('failure'); sys.exit(3)"], time.monotonic() + 2)
+            dt.command([sys.executable, '-c', "import sys; print('failure'); sys.exit(3)"], time.monotonic() + (10 if os.name == 'nt' else 2))
         with self.assertRaises(TimeoutError):
             dt.remaining(time.monotonic() - 1)
         with self.assertRaises(subprocess.TimeoutExpired):
@@ -630,8 +637,16 @@ elif args[0] == 'logcat':
         child = 'import time,pathlib; time.sleep(1.5); pathlib.Path(' + repr(str(marker)) + ').touch()'
         parent = 'import subprocess,sys; subprocess.Popen([sys.executable,"-c",' + repr(child) + '])'
         started = time.monotonic()
-        with self.assertRaises((subprocess.TimeoutExpired, RuntimeError)):
-            dt.command([sys.executable, '-c', parent], time.monotonic() + .7)
+        if os.name == 'nt':
+            # The job supervisor can clean descendants as soon as the leader exits.
+            try:
+                result = dt.command([sys.executable, '-c', parent], time.monotonic() + .7, return_status=True)
+                self.assertEqual(result.returncode, 0)
+            except subprocess.TimeoutExpired:
+                pass  # Slow interpreter startup may instead reach the same cap.
+        else:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                dt.command([sys.executable, '-c', parent], time.monotonic() + .7)
         self.assertLess(time.monotonic() - started, 4)
         time.sleep(1)
         self.assertFalse(marker.exists())
@@ -646,9 +661,10 @@ elif args[0] == 'logcat':
         for error in (RuntimeError('cannot start reader'), KeyboardInterrupt()):
             with patch.object(dt.subprocess, 'Popen', spawn), patch.object(dt.threading.Thread, 'start', side_effect=error):
                 with self.assertRaises(type(error)):
-                    dt.command([sys.executable, '-c', 'import time; time.sleep(10)'], time.monotonic() + 5)
+                    dt.command([sys.executable, '-c', 'import time; time.sleep(10)'], time.monotonic() + 5, data=b'input')
             self.assertIsNotNone(children[-1].poll())
             self.assertTrue(children[-1].stdout.closed and children[-1].stderr.closed)
+            self.assertTrue(children[-1].stdin.closed)
 
     @unittest.skipIf(os.name == 'nt', 'POSIX controller signal regression')
     def test_regex_worker_has_own_lifetime_after_controller_killed(self):

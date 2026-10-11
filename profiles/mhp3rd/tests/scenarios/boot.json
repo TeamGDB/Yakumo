@@ -3,7 +3,7 @@
   "description": "Observe generated execution and opening overlays, then capture the screen.",
   "prerequisites": ["Prepared game inputs", "Compatible overlays", "Disposable copied save fixture"],
   "steps": [
-    {"wait": "Functions: [1-9][0-9]+", "timeout": 40},
+    {"wait": "Functions:[ \t]+[1-9][0-9]+", "timeout": 40},
     {"wait": "\\[overlay\\] installed demo_task", "fresh": false, "timeout": 20},
     {"capture": "opening"}
   ],
