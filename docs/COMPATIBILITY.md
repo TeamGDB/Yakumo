@@ -318,9 +318,10 @@ and no quest cheats. Complete device scenarios and cloud validation are pending;
 no cloud reservations have been consumed at this checkpoint. The suite does not
 complete any exact-candidate release or human playtesting sign-off.
 
-The current delivery scope is the QUICK stage. Harness `738ed74` passed all ten
-categories (12 automatic subchecks) on macOS in 100.7 seconds, after an earlier
-99.7-second run; both passed cleanup, using application source `751424a` and
+The current delivery scope is the QUICK stage. Harness `755d872` passed all ten
+categories (12 automatic subchecks) on macOS in 103.0 seconds, with 0.84 seconds
+of preparation; earlier runs took 99.7 and 100.7 seconds. All passed cleanup,
+using application source `751424a` and
 artifact SHA-256 `9e33423b4bed48cef751102d4be9c167b0cfd953f60b82070c907a75f2836339`.
 The aggregate identifies actual quest/input/
 text/photo/telemetry smoke separately from executed synthetic/native installation,
@@ -337,3 +338,16 @@ The lifecycle contract group was NOT TESTED because that build does not register
 all required Android-specific contracts; the aggregate correctly remained NOT
 TESTED. The current Steam Deck preflight timed out over SSH, so no QUICK device
 result is claimed. Earlier native results retain their earlier source qualifier.
+
+On physical Android (Mali-G52 MC2, driver r32p1), QUICK harness `738ed74` passed
+all six real-game subchecks: copied-character boot, pad/settings, offline quest/
+camera, active field bytes, photo freeze/step and fixed-scene telemetry. They took
+142.4 seconds; the complete run including preparation and cleanup took 431.2
+seconds. Six native-contract rows remained NOT TESTED because the ADB suite
+adapter has no executable native-contract build context, so its aggregate also
+remained NOT TESTED. Separate native 56/56 evidence above does not silently turn
+these rows green. The isolated APK SHA-256 was
+`a8f080a66530832854976887dcbffb529b00f5a9206ccf85db50c0cbd2016295` at application
+source `751424a`. Cleanup passed and the owned package returned to the idle
+launcher with no game PID. The current end-to-end transfer path does not fit the
+inclusive Google cap; the private reservation ledger remains at zero attempts.
