@@ -87,6 +87,12 @@ blocks, independently of whether any language key was applied. Nested dialogue
 tables use their source-derived `base_offset` within the observed block; invalid
 or partial loader ranges supply no address. These byte readbacks complement the
 synthetic renderer contracts; they do not certify all real-world text layout.
+An image variant may override `suite_fixtures` and `navigation_references` for
+menus whose source artwork differs. Overrides inherit the same finite-program
+and hardware/hash checks and are cleared when the original inputs are restored.
+Navigation matches execute zero outcome assertions: the actual loaded state and
+expected text bytes still determine the verdict. Covered text expectations should
+differ from the original source bytes so disabling translation is detectable.
 
 Performance profiles declare finite preparation and route programs, scene state
 and execution mode, with a distinct pinned baseline artifact. Collection runs

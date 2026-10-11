@@ -252,6 +252,7 @@ while time.monotonic()<end:
                 self.assertNotIn('MHP3RD_TRACE_TEXT', session.adapter.env)
                 self.assertEqual((root / 'translations/selected.lang').read_bytes(), language.read_bytes())
                 self.assertFalse(session.variant_active)
+                self.assertIsNone(session.variant_name)
                 with self.assertRaises(runner.NotTested):
                     session.variant('missing')
                 (alternate / 'disc.iso').write_bytes(b'wrong image')
@@ -501,6 +502,9 @@ class CombatOracleTests(unittest.TestCase):
         actor.snapshot.return_value = self.sample(cheats=True)
         with self.assertRaises(checks.CheckFailed):
             suite.attack(actor, target, time.monotonic() + 5)
+        actor.snapshot.return_value = self.sample(health=30)
+        with self.assertRaises(checks.CheckFailed):
+            suite.attack(actor, target, time.monotonic() + 5)
         with self.assertRaises(ValueError):
             suite.attack(actor, target, time.monotonic() + 5, strikes=4)
 
@@ -632,6 +636,18 @@ class ExtendedSuiteTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 suite.execute(session, program, {}, {}, device, session.deadline)
 
+    def test_variant_navigation_uses_its_own_route_and_returns_to_default(self):
+        with tempfile.TemporaryDirectory() as temp:
+            session = self.session(Path(temp), Adapter({'schema': 1, 'active_id': 309}))
+            default = [{'action': 'snapshot', 'as': 'q'}, {'action': 'assert', 'actual': 'q.active_id', 'op': 'eq', 'expected': 204}]
+            patched = [{'action': 'snapshot', 'as': 'q'}, {'action': 'assert', 'actual': 'q.active_id', 'op': 'eq', 'expected': 309}]
+            device = {'suite_fixtures': {'load': default}, 'game_variants': {'patched': {'suite_fixtures': {'load': patched}}}}
+            session.variant_name = 'patched'
+            self.assertEqual(suite.execute(session, [{'action': 'fixture', 'name': 'load'}], {}, {}, device, session.deadline), 1)
+            session.variant_name = None
+            with self.assertRaises(checks.CheckFailed):
+                suite.execute(session, [{'action': 'fixture', 'name': 'load'}], {}, {}, device, session.deadline)
+
     def test_lifecycle_requires_actual_focus_clock_and_neutral_release(self):
         with tempfile.TemporaryDirectory() as temp:
             session = self.session(Path(temp), Adapter())
@@ -733,7 +749,7 @@ class ExtendedSuiteTests(unittest.TestCase):
                 runner.validate_device({**device, 'rtc_epoch_us': epoch})
         with tempfile.TemporaryDirectory() as temp:
             session = self.session(Path(temp), Adapter())
-            for command in ('quest start 204', 'quest one_hit on', 'quest health on'):
+            for command in ('quest start 204', 'quest one_hit on', 'quest health on', ' quest start 204', '\tquest one_hit on'):
                 with self.assertRaises(ValueError):
                     suite.execute(session, [{'action': 'debug', 'value': command}], {}, {'multiplayer': True}, device, session.deadline)
             with self.assertRaises(runner.NotTested):

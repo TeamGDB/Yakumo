@@ -167,6 +167,7 @@ class Session:
                     target.unlink()
                     runner.copy_regular_file(self.device['translation'], target)
                 self.variant_active = False
+                self.variant_name = None
             target = self.data_root / 'ms0'
             if target.is_symlink():
                 raise ValueError('Owned save tree became a link')
@@ -401,6 +402,7 @@ class Session:
         self.adapter.env['MHP3RD_LANGUAGE'] = variant['language']
         self.adapter.env['MHP3RD_TRACE_TEXT'] = '1'
         self.variant_active = True
+        self.variant_name = name
         self.restart(reset=True, retain_variant=True)
         return {'variant': name, 'game_sha256': variant['game_sha256'], 'language': variant['language'],
                 'translation_sha256': language_hash, 'eboot_sha256': runner.fingerprint(self.data_root / 'EBOOT.ELF')}
@@ -570,6 +572,8 @@ def attack(session, target, deadline, strikes=3):
         if current is None or not current.get('same_area'):
             raise checks.CheckFailed('Target disappeared before an independently observed hit')
         if current['health'] < target['health']:
+            if sent == 0:
+                raise checks.CheckFailed('Target health changed before the attack input')
             return {'before_health': target['health'], 'after_health': current['health'], 'address': target['address']}
         runner.remaining(limit)
         # Send the next finite strike only after the previous one had time to land.
@@ -672,17 +676,19 @@ def execute(session, steps, context, parameters, device, deadline):
         runner.remaining(deadline)
         action = step['action']
         name = step.get('as', '')
+        variant = device.get('game_variants', {}).get(getattr(session, 'variant_name', None), {})
         if action == 'fixture':
-            fixture = device.get('suite_fixtures', {}).get(step['name'])
+            fixture = variant.get('suite_fixtures', {}).get(step['name']) or device.get('suite_fixtures', {}).get(step['name'])
             if not fixture:
                 raise runner.NotTested('Missing finite fixture navigation: ' + step['name'])
             validate_program(fixture, fixture=True)
             assertions += execute(session, fixture, context, parameters, device, deadline)
         elif action in ('input', 'debug'):
             if action == 'debug':
-                if device['build'] != 'dev' or step['value'].split()[0] not in ('quest', 'state', 'peek', 'table'):
+                command = step['value'].split()[0]
+                if device['build'] != 'dev' or command not in ('quest', 'state', 'peek', 'table'):
                     raise runner.NotTested('Only declared developer navigation/read commands are supported')
-                if step['value'].startswith('quest ') and parameters.get('multiplayer'):
+                if command == 'quest' and parameters.get('multiplayer'):
                     raise ValueError('Quest mutations and shortcuts are forbidden in multiplayer')
             context['_log_offset'] = len(session.adapter.text())
             session.adapter.send(action, step['value'])
@@ -720,7 +726,7 @@ def execute(session, steps, context, parameters, device, deadline):
         elif action == 'capture':
             context[name] = session.capture(name)
         elif action == 'reference':
-            reference = device.get('navigation_references', {}).get(step['name'])
+            reference = variant.get('navigation_references', {}).get(step['name']) or device.get('navigation_references', {}).get(step['name'])
             if not reference or not reference.get('reviewed') or reference.get('hardware') != device.get('hardware'):
                 raise runner.NotTested('Missing reviewed navigation reference for this hardware: ' + step['name'])
             if runner.fingerprint(reference['path']) != reference['sha256']:
