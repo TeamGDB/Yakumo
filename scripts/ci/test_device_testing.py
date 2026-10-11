@@ -404,6 +404,12 @@ class DeviceTests(unittest.TestCase):
                              2, self.report())
         self.assertEqual(self.report()['deadline_seconds'], 2)
         self.assertEqual(self.report()['automatic']['verdict'], 'PASS', self.report())
+        blocked = self.run_dir / 'streaming-blocked'
+        blocked.mkdir()
+        with patch.object(dt, 'command') as tools:
+            self.assertEqual(dt.run(self.suite, {**device, 'adapter': 'streaming'}, 'fixture', blocked), 1)
+            tools.assert_not_called()
+        self.assertEqual(dt.read_json(blocked / 'report.json')['automatic']['verdict'], 'FAIL')
 
     def make_adb(self):
         if os.name == 'nt':
