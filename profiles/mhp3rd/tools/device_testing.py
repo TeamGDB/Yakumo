@@ -258,7 +258,8 @@ def command(argv, deadline, *, data=None, check=True, maximum=20, return_status=
     stopped = threading.Event()
     threads = []
     completed = False
-    process = subprocess.Popen(launch, stdin=subprocess.PIPE if data is not None else input_file,
+    process = subprocess.Popen(launch, stdin=subprocess.PIPE if data is not None else
+                               input_file if input_file is not None else subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                start_new_session=os.name != 'nt')
     try:
@@ -457,7 +458,26 @@ class Adb:
         return self.adb('shell', text, **kwargs)
 
     def app(self, text, **kwargs):
+        if kwargs.get('data') is not None:
+            # ADB's Windows stdin treats Ctrl-Z as EOF; send binary payloads as ASCII.
+            kwargs['data'] = base64.b64encode(kwargs['data'])
+            text = 'base64 -d | ( ' + text + ' )'
         return self.shell('run-as ' + self.package + ' sh -c ' + shlex.quote(text), **kwargs)
+
+    def upload(self, source, destination):
+        expected = fingerprint(source)
+        # Keep encoding bounded and private, without a shared device-side game copy.
+        with tempfile.TemporaryFile(mode='w+b', dir=self.root) as encoded:
+            with Path(source).open('rb') as stream:
+                for block in iter(lambda: stream.read(3 * 65536), b''):
+                    encoded.write(base64.b64encode(block))
+            encoded.seek(0)
+            command(self.prefix + ['shell', 'run-as', self.package, 'sh', '-c',
+                                   shlex.quote('base64 -d > ' + shlex.quote(destination))],
+                    self.deadline, input_file=encoded, maximum=240)
+        actual = self.app('sha256sum ' + shlex.quote(destination)).decode(errors='replace').split()
+        if not actual or actual[0] != expected or fingerprint(source) != expected:
+            raise ValueError('Android upload fingerprint mismatch')
 
     def prepare(self, report):
         apk = self.root / 'artifact.apk'
@@ -496,17 +516,14 @@ class Adb:
             if not source.is_file():
                 raise NotTested('Prepared game input is unavailable')
             # Stream into app-private storage; no shared temporary copy of game data.
-            with source.open('rb') as stream:
-                command(self.prefix + ['shell', 'run-as', self.package, 'sh', '-c',
-                                       shlex.quote('cat > files/device-testing/data/' + name)],
-                        self.deadline, input_file=stream, maximum=240)
+            self.upload(source, 'files/device-testing/data/' + name)
         report['game_sha256'] = fingerprint(Path(self.device['game_dir']) / 'disc.iso')
         for item in sorted(staging.rglob('*')):
             relative = item.relative_to(staging).as_posix()
             if item.is_file():
                 destination = 'files/device-testing/data/' + relative
-                self.app('mkdir -p ' + shlex.quote(str(PurePosixPath(destination).parent)) +
-                         ' && cat > ' + shlex.quote(destination), data=item.read_bytes())
+                self.app('mkdir -p ' + shlex.quote(str(PurePosixPath(destination).parent)))
+                self.upload(item, destination)
         self.app('touch files/device-testing/input-live.txt files/device-testing/debug.txt')
         if self.device.get('env') or self.device.get('translation'):
             raise NotTested('ADB APK contract has fixed environment; language/mod variant needs its own packaged contract')

@@ -193,6 +193,12 @@ Logs come from the app's actual `files/yakumo.log`; logcat and Vulkan diagnostic
 are retained separately. Different physical GPUs require separate rows: emulator
 or old PowerVR results do not establish support for every Dimensity/PowerVR GPU.
 
+Android uploads use bounded Base64 encoding into a private host temporary file,
+decode directly into the dedicated app's storage, and verify source/destination
+SHA-256 before launch. This avoids Windows ADB stdin truncation at Ctrl-Z bytes.
+No game input is staged in shared device storage. The device needs `base64` and
+`sha256sum`; transfer/decode/hash failures keep the run failed.
+
 ### Optional Device Streaming
 
 Use `adapter: "streaming"`, `project`, `model: "<codename>/<api>"` and an explicit

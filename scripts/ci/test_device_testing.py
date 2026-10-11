@@ -364,6 +364,26 @@ class DeviceTests(unittest.TestCase):
         self.assertEqual(dt.main(['prepare', 'boot', '--config', str(config), '--device', 'mac', '--output-parent', str(self.root)]), 2)
         manifest = self.root / 'test.xml'
         self.assertEqual(dt.main(['android-manifest', '--package', 'org.example.yakumo.devicetest', '--output', str(manifest), '--contract', str(self.root / 'contract.json')]), 0)
+    def test_tool_without_input_does_not_wait_for_controller_stdin(self):
+        program = ('import importlib.util, pathlib, sys, time; '
+                   f'spec=importlib.util.spec_from_file_location("dt", {str(ROOT / "profiles/mhp3rd/tools/device_testing.py")!r}); '
+                   'dt=importlib.util.module_from_spec(spec); spec.loader.exec_module(dt); '
+                   'print(dt.command([sys.executable,"-c","import sys; print(len(sys.stdin.buffer.read()))"], '
+                   'time.monotonic()+3).decode().strip())')
+        process = subprocess.Popen([sys.executable, '-c', program], stdin=subprocess.PIPE,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            process.wait(timeout=12)
+            self.assertEqual(process.returncode, 0, process.stderr.read().decode(errors='replace'))
+            self.assertEqual(process.stdout.read().strip(), b'0')
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+            process.stdin.close()
+            process.stdout.close()
+            process.stderr.close()
+
     def make_adb(self):
         if os.name == 'nt':
             self.skipTest('Synthetic ADB transport uses POSIX shell; real Windows supervisor is tested separately')
@@ -376,7 +396,7 @@ class DeviceTests(unittest.TestCase):
         with zipfile.ZipFile(apk, 'w') as archive:
             archive.writestr('assets/device-testing.json', json.dumps(dt.android_contract(package)))
         adb = self.root / 'fake-adb.py'
-        adb.write_text('''import os, pathlib, shlex, subprocess, sys
+        adb.write_text('''import os, pathlib, shlex, subprocess, sys, hashlib
 root = pathlib.Path(os.environ['FAKE_ADB_ROOT'])
 args = sys.argv[3:]
 if args[0] == 'install':
@@ -387,7 +407,14 @@ elif args[0] == 'shell':
     words = shlex.split(' '.join(args[1:]))
     if words[0] == 'run-as':
         payload = words[4]
-        result = subprocess.run(['sh', '-c', payload], cwd=root, input=sys.stdin.buffer.read(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        data = sys.stdin.buffer.read()
+        if os.environ.get('TRUNCATE_BINARY_STDIN'):
+            data = data.split(b'\\x1a', 1)[0]
+        if payload.startswith('sha256sum '):
+            target = root / shlex.split(payload)[1]
+            print(hashlib.sha256(target.read_bytes()).hexdigest() + '  ' + str(target))
+            raise SystemExit(0)
+        result = subprocess.run(['sh', '-c', payload], cwd=root, input=data, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         sys.stdout.buffer.write(result.stdout)
         sys.stderr.buffer.write(result.stderr)
         raise SystemExit(result.returncode)
@@ -414,6 +441,22 @@ elif args[0] == 'logcat':
         device = {**self.device, 'adapter': 'adb', 'package': package, 'serial': 'synthetic-usb',
                   'apk': str(apk), 'adb': [sys.executable, str(adb)]}
         return device
+
+    def test_adb_binary_upload_and_controls_survive_windows_eof_bytes(self):
+        device = self.make_adb()
+        payload = bytes(range(256)) * 1700
+        source = self.root / 'binary-fixture.bin'
+        source.write_bytes(payload)
+        adapter = dt.Adb(device, self.run_dir, time.monotonic() + 20)
+        with patch.dict(os.environ, {'FAKE_ADB_ROOT': str(self.adb_root), 'TRUNCATE_BINARY_STDIN': '1'}):
+            adapter.upload(source, 'files/binary-fixture.bin')
+            self.assertEqual((self.adb_root / 'files/binary-fixture.bin').read_bytes(), payload)
+            adapter.app('cat > files/piped.bin', data=payload)
+            self.assertEqual((self.adb_root / 'files/piped.bin').read_bytes(), payload)
+            with patch.object(adapter, 'app', return_value=b'0' * 64 + b'  files/binary-fixture.bin'):
+                with self.assertRaisesRegex(ValueError, 'fingerprint mismatch'):
+                    adapter.upload(source, 'files/binary-fixture.bin')
+        self.assertEqual(list(self.run_dir.iterdir()), [])
 
     def test_adb_public_transport_stages_controls_and_cleans(self):
         device = self.make_adb()
