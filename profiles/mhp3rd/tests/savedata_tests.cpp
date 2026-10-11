@@ -207,9 +207,14 @@ void test_transfer() {
         fs::copy_file(entry.path(), damaged / entry.path().filename());
     {
         std::fstream data(damaged / "MHP3RD.BIN", std::ios::binary | std::ios::in | std::ios::out);
+        data.seekg(200);
+        const int original = data.get();
+        check(original != std::char_traits<char>::eof(), "the encrypted fixture contains the mutation byte");
         data.seekp(200);
-        data.put('\x7f');
+        if (original != std::char_traits<char>::eof()) data.put(static_cast<char>(original ^ 1));
     }
+    check(file_bytes(damaged / "MHP3RD.BIN") != file_bytes(source_saves / "ULJM05800" / "MHP3RD.BIN"),
+        "the corruption case always changes the encrypted data");
     check(!check_save_folder(damaged, key).ok(), "a damaged data file is refused");
     // A damaged PARAM.SFO: the title changed, which its hashes cover.
     fs::copy_file(
