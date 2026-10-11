@@ -349,3 +349,19 @@ To move to a new key without stranding players, sign releases with both for a wh
 ### Publish
 
 Attach the APK and `SHA256SUMS` to the GitHub release, and the FFmpeg source archive as for Linux: the APK carries the same LGPL FFmpeg.
+
+## Device scenario sign-off
+
+Before publishing, follow [DEVICE_TESTING.md](DEVICE_TESTING.md#before-a-release)
+and generate the required scenario-by-device matrix with `make device-matrix`.
+Pin the exact commit and executable/APK SHA-256 for each artifact. Run relevant
+dev regression/quest scenarios separately, then test the final packages through
+normal player setup, counters and gates. Debug quest starts cannot certify a
+release artifact and must never be used during multiplayer.
+
+Include our available physical platforms, controller/touch/audio checks, saves,
+representative hunts, installation/update, suspend/resume and a coordinated
+multiplayer pair. Cloud/emulator evidence complements physical tests; it does
+not replace human play. Record missing hardware/DLC fixtures as NOT TESTED and
+retain consciously accepted gaps in release notes. Review captures/logs locally
+and redact personal or game-derived content before sharing public evidence.

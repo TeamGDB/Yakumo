@@ -80,3 +80,7 @@ __pycache__/
 
 # Signing keys (the Android release key): never committed
 /keys/
+
+# Private device-testing configuration and release plans
+/device-testing.local.json
+/device-release.local.json

@@ -16,6 +16,9 @@
 # ANDROID_HOME must name the SDK (build-tools and a platform are needed).
 # DEBUGGABLE=1 marks the app debuggable, so `adb shell run-as` reaches its
 # files (its log, its data) on a test device; leave it out for players.
+# DEVICE_TEST_PACKAGE=<unique.name.devicetest> generates an isolated test APK
+# contract. Requires DEBUGGABLE=1 and MHP3RD_RELEASE=OFF in the native build.
+# It repacks existing libraries; it does not rebuild AOT or overlays.
 # KEYSTORE (with KEYSTORE_PASS and KEY_ALIAS) signs with a key of your own, so
 # that later builds install over earlier ones and keep the player's data;
 # without it a throwaway key is made in the build directory.
@@ -63,6 +66,17 @@ if [[ -n "${FONT_DIR:-}" ]]; then
     cp "$FONT_DIR/NotoSansCJKjp-Regular.otf" "$work/assets/fonts/"
     cp "$FONT_DIR/NotoSansCJK-LICENSE.txt" "$work/assets/licenses/NotoSansCJK-OFL.txt"
 fi
+manifest="$here/AndroidManifest.xml"
+if [[ -n "${DEVICE_TEST_PACKAGE:-}" ]]; then
+    [[ "${DEBUGGABLE:-}" == 1 ]] || { echo "device tests require DEBUGGABLE=1" >&2; exit 1; }
+    grep -q '^MHP3RD_RELEASE:BOOL=OFF$' "$build_dir/CMakeCache.txt" || {
+        echo "device-test APKs require a developer native build" >&2; exit 1;
+    }
+    manifest="$work/device-testing-manifest.xml"
+    python3 "$here/../../tools/device_testing.py" android-manifest \
+        --package "$DEVICE_TEST_PACKAGE" --output "$manifest" \
+        --contract "$work/assets/device-testing.json"
+fi
 assets=(-A "$work/assets")
 "$build_tools/aapt2" compile --dir "$here/res" -o "$work/res.zip"
 # The version: `git describe` of the checkout, and the number of commits as
@@ -71,7 +85,7 @@ assets=(-A "$work/assets")
 repo="$(cd "$here/../../../.." && pwd)"
 version_name="${VERSION_NAME:-$(git -C "$repo" describe --tags --always --dirty 2>/dev/null || echo 0.0)}"
 version_code="${VERSION_CODE:-$(git -C "$repo" rev-list --count HEAD 2>/dev/null || echo 1)}"
-"$build_tools/aapt2" link -I "$android_jar" --manifest "$here/AndroidManifest.xml" \
+"$build_tools/aapt2" link -I "$android_jar" --manifest "$manifest" \
     --min-sdk-version "$min_sdk" --target-sdk-version 35 --version-name "$version_name" \
     --version-code "$version_code" ${DEBUGGABLE:+--debug-mode} "${assets[@]}" -o "$work/unsigned.apk" \
     "$work/res.zip"

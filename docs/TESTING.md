@@ -477,3 +477,18 @@ Follow the [quest translation visual scenario](../profiles/mhp3rd/tests/manual/t
 for bounded human or visual-agent checks with local game data. Run the synthetic
 `mhp3rd_quest_translation_latency_tests` through CTest to detect delayed quest
 list/detail translation under multiple pending loads.
+
+## Shared device scenarios and manual evidence
+
+[DEVICE_TESTING.md](DEVICE_TESTING.md) describes bounded copied-fixture scenarios
+for local physical hosts, SSH, physical/emulated Android and optional Device
+Streaming. Use `make device-scenarios`, `make device-run` and the review CLI to
+reproduce bugs with the same expectations for humans and visual agents.
+Automatic observations and visual/gameplay assessments are separate; captures
+and process startup alone never establish a pass. Save addresses, project IDs
+and fixture paths in ignored local configuration, not committed scenarios.
+
+The public Python suite discovers synthetic runner contracts without game data
+or cloud access. Hardware/gameplay and human checks remain explicit evidence
+gaps. Final release packages use the normal-player checklist; developer quest
+shortcuts are diagnostic only.

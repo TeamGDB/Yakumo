@@ -1,0 +1,19 @@
+{
+  "id": "release-player", "build": "release", "execution": "manual", "seconds": 900,
+  "description": "Check the exact final release package through normal player paths; repeat focused sessions if needed.",
+  "prerequisites": ["Exact artifact intended for publication; no dev shortcuts", "Fresh/disposable installation and copied save fixtures", "Human tester with physical audio/controller access", "Separate coordinated pair for multiplayer"],
+  "steps": [],
+  "review": [
+    {"id": "install-update", "requires": "human", "expect": "Fresh installation and update from the prior release work; copied saves/settings survive. Record both artifacts and installation evidence."},
+    {"id": "boot-load", "requires": "human", "expect": "Normal setup/title/Continue loads the copied character and village; no Debug shortcut."},
+    {"id": "hunt", "requires": "human", "expect": "Accept/depart through normal counter/gate; fight, change area, return and inspect rewards. Record quest IDs, weapons and duration."},
+    {"id": "save-reload", "requires": "human", "expect": "Save to the disposable fixture, restart the exact artifact, and reload successfully."},
+    {"id": "graphics-text", "requires": "human", "expect": "World/effects/UI, selected languages, quest fields and camera are correct; review captures."},
+    {"id": "audio", "requires": "human", "expect": "Music/effects/voice and mute settings work; no recurring crackle, missing music or timing problems."},
+    {"id": "controls", "requires": "human", "expect": "Physical controller/touch/keyboard used on this platform respond correctly, including menus and reconnect."},
+    {"id": "performance", "requires": "human", "expect": "Normal game speed remains 100%; record frame-rate/thermal trends during a representative hunt. Repeat bounded sessions for long-play coverage."},
+    {"id": "multiplayer", "requires": "human", "expect": "Two normal-path offline/online fixtures discover/join, depart, fight, return, disconnect/reconnect; no debug writes. Record both builds/devices and session evidence."},
+    {"id": "dlc", "requires": "human", "expect": "Locally available DLC/event quests load through normal player paths. Missing fixtures remain NOT TESTED."},
+    {"id": "platform", "requires": "human", "expect": "Platform packaging, suspend/resume, display changes and relevant permissions behave correctly; Deck Game Mode and Android lifecycle require actual device evidence."}
+  ]
+}

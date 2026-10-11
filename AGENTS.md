@@ -17,6 +17,7 @@ Read the documents relevant to the task before changing code, testing, packaging
 | [BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md) | Build locks, Ninja dependency logs, compiler caching and expensive rebuilds |
 | [FORMATTING.md](docs/FORMATTING.md) | C++ style, pinned formatter, scoped commands and enforcement |
 | [COVERAGE.md](docs/COVERAGE.md) | Coverage scope, full-suite/diff policy and remaining test gaps |
+| [DEVICE_TESTING.md](docs/DEVICE_TESTING.md) | Shared device scenarios, regression reproduction, human/agent review and artifact-specific release matrices |
 | [TESTING.md](docs/TESTING.md) | Automated checks, manual smoke tests and subsystem regression checks |
 | [COMPATIBILITY.md](docs/COMPATIBILITY.md) | Verified behavior and remaining problems by platform, with tested commits |
 | [RELEASING.md](docs/RELEASING.md) | Release branches, stable/test policy, packaging, artifact checks and publishing; `release/X.Y` branches are retained for patch releases |
