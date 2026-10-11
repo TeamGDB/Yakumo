@@ -140,6 +140,11 @@ def validate_device(value):
         raise ValueError('Declare the exact 40-character source commit')
     if not 1 <= value.get('seconds', 60) <= 1800:
         raise ValueError('Device cap must be 1..1800 seconds')
+    setup = value.get('setup_seconds', 0)
+    if type(setup) is not int or not 0 <= setup <= 900 or (setup and value['adapter'] != 'adb'):
+        raise ValueError('Setup cap must be 0..900 seconds on physical/emulated ADB devices only')
+    if setup + value.get('seconds', 60) > 1800:
+        raise ValueError('Setup and gameplay must fit the 1800-second total cap')
     if set(value.get('env', {})) - ENV_KEYS:
         raise ValueError('Unsupported environment override; isolation controls cannot be replaced')
     if value.get('performance', 'log') not in ('log', 'settings'):
@@ -470,11 +475,12 @@ class Adb:
         with tempfile.TemporaryFile(mode='w+b', dir=self.root) as encoded:
             with Path(source).open('rb') as stream:
                 for block in iter(lambda: stream.read(3 * 65536), b''):
+                    remaining(self.deadline)
                     encoded.write(base64.b64encode(block))
             encoded.seek(0)
             command(self.prefix + ['shell', 'run-as', self.package, 'sh', '-c',
                                    shlex.quote('base64 -d > ' + shlex.quote(destination))],
-                    self.deadline, input_file=encoded, maximum=240)
+                    self.deadline, input_file=encoded, maximum=remaining(self.deadline, 1800))
         actual = self.app('sha256sum ' + shlex.quote(destination)).decode(errors='replace').split()
         if not actual or actual[0] != expected or fingerprint(source) != expected:
             raise ValueError('Android upload fingerprint mismatch')
@@ -781,7 +787,7 @@ def new_report(suite, device, name):
     return {'schema': 1, 'run_id': uuid.uuid4().hex, 'scenario': suite['id'],
             'scenario_sha256': object_hash(suite), 'execution': suite['execution'], 'device': name, 'build': device['build'],
             'commit': device['commit'], 'started_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-            'deadline_seconds': min(suite['seconds'], device.get('seconds', suite['seconds'])),
+            'deadline_seconds': min(suite['seconds'], device.get('seconds', suite['seconds'])) + device.get('setup_seconds', 0),
             'settings': device.get('env', {}), 'hardware': device.get('hardware', {'os': 'NOT TESTED', 'gpu': 'NOT TESTED', 'driver': 'NOT TESTED'}), 'automatic': {'verdict': 'NOT TESTED', 'reason': 'Not run'},
             'observations': [], 'captures': [],
             'review': {item['id']: {**item, 'verdict': 'NOT TESTED'} for item in suite['review']}}
@@ -791,8 +797,11 @@ def run(suite, device, name, root, manual=False):
     suite, device = copy.deepcopy(suite), copy.deepcopy(device)
     report = new_report(suite, device, name)
     cap = min(suite['seconds'], device.get('seconds', suite['seconds']))
-    hard_deadline = time.monotonic() + cap
-    deadline = hard_deadline - min(20, cap / 5) if device['adapter'] == 'streaming' else hard_deadline
+    setup = device.get('setup_seconds', 0)
+    started_clock = time.monotonic()
+    hard_deadline = started_clock + cap + setup
+    deadline = (started_clock + setup if setup else
+                hard_deadline - min(20, cap / 5) if device['adapter'] == 'streaming' else hard_deadline)
     adapter = None
     reservation = None
     lease_watchdog = None
@@ -800,6 +809,8 @@ def run(suite, device, name, root, manual=False):
     launched = False
     started = time.monotonic()
     try:
+        if setup and device['adapter'] != 'adb':
+            raise ValueError('Setup extension is not permitted for this adapter')
         if manual and suite['execution'] != 'manual':
             raise NotTested('Use an explicit manual scenario; automatic observations must not be bypassed')
         if suite['build'] != 'either' and suite['build'] != device['build']:
@@ -835,6 +846,10 @@ def run(suite, device, name, root, manual=False):
         if device['adapter'] == 'streaming':
             adapter.cleanup_deadline = hard_deadline
         adapter.prepare(report)
+        if setup:
+            remaining(deadline)
+            deadline = min(hard_deadline, time.monotonic() + cap)
+            adapter.deadline = deadline
         write_json(root / 'report.json', report)
         render_report(root)
         if suite['execution'] == 'manual' and not manual:
@@ -1019,10 +1034,11 @@ def ssh_run(suite, device, name, root, manual):
     else:
         invocation = shlex.join(args)
     prefix = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', host]
-    deadline = time.monotonic() + suite['seconds'] + 30
+    transport_cap = suite['seconds'] + remote.get('setup_seconds', 0) + 30
+    deadline = time.monotonic() + transport_cap
     try:
         transport = command(prefix + [invocation], deadline, check=False, return_status=True,
-                            maximum=suite['seconds'] + 30, output_limit=EVIDENCE_LIMIT * 3 // 2)
+                            maximum=transport_cap, output_limit=EVIDENCE_LIMIT * 3 // 2)
         output = transport.stdout.decode(errors='replace')
         (root / 'transport.log').write_text(output + transport.stderr.decode(errors='replace'))
         matches = re.findall(r'^YAKUMO_EVIDENCE:([A-Za-z0-9+/=]+)\r?$', output, re.M)

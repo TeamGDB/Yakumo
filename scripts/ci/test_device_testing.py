@@ -384,6 +384,27 @@ class DeviceTests(unittest.TestCase):
             process.stdout.close()
             process.stderr.close()
 
+    def test_adb_setup_budget_does_not_extend_gameplay_or_streaming(self):
+        device = dict(self.device, adapter='adb', setup_seconds=1, seconds=1)
+        self.assertEqual(dt.validate_device(device)['setup_seconds'], 1)
+        for change in ({'adapter': 'streaming'}, {'adapter': 'local'}, {'setup_seconds': True},
+                       {'setup_seconds': -1}, {'setup_seconds': 901}, {'seconds': 1800}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                dt.validate_device({**device, **change})
+        class SlowPrepare(dt.Local):
+            def prepare(adapter, report):
+                time.sleep(.6)
+                super().prepare(report)
+            def launch(adapter):
+                self.assertLessEqual(adapter.deadline - time.monotonic(), 1.01)
+                self.assertGreater(adapter.deadline - time.monotonic(), .8)
+                super().launch()
+        with patch.object(dt, 'Adb', SlowPrepare):
+            self.assertEqual(dt.run(dt.scenario('performance-overlay'), device, 'fixture', self.run_dir, True),
+                             2, self.report())
+        self.assertEqual(self.report()['deadline_seconds'], 2)
+        self.assertEqual(self.report()['automatic']['verdict'], 'PASS', self.report())
+
     def make_adb(self):
         if os.name == 'nt':
             self.skipTest('Synthetic ADB transport uses POSIX shell; real Windows supervisor is tested separately')

@@ -199,6 +199,12 @@ SHA-256 before launch. This avoids Windows ADB stdin truncation at Ctrl-Z bytes.
 No game input is staged in shared device storage. The device needs `base64` and
 `sha256sum`; transfer/decode/hash failures keep the run failed.
 
+For the first large ADB upload, optionally set `"setup_seconds": 600` alongside
+`"seconds": 60`. Preparation has its own deadline, then gameplay receives at
+most 60 seconds. Setup is limited to 900 seconds and the total to 1800; SSH
+delegation includes the declared remote setup cap. Streaming rejects this
+extension and keeps its original total reservation/transfer/gameplay cap.
+
 ### Optional Device Streaming
 
 Use `adapter: "streaming"`, `project`, `model: "<codename>/<api>"` and an explicit
