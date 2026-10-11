@@ -538,7 +538,8 @@ class CloudAllowanceTests(unittest.TestCase):
             legacy={'streaming_cap_seconds':500,'model':'old-a/30'}
             with self.assertRaises(runner.NotTested): suite.cloud_authorization(value,legacy,500)
             phase={'id':'quick-rerun','allowance':2,'maximum_seconds':800,'target_seconds':600,
-                   'rate_usd_per_minute':.15,'maximum_cost_usd':2,'models':['fixture-a/30','fixture-b/31']}
+                   'rate_usd_per_minute':.15,'maximum_cost_usd':2,'previous_total_attempts':2,
+                   'models':['fixture-a/30','fixture-b/31']}
             value['authorization_phases']=[phase];ledger.write_text(json.dumps(value))
             fake=base/'android.py';fake.write_text("""import sys
 if 'create' in sys.argv: print('new reservation created with id owned123456; connected on port 5555')
@@ -555,6 +556,17 @@ elif 'list' in sys.argv: print('No reservations found.')
             bad=copy.deepcopy(value);bad['authorization_phases'][0]['rate_usd_per_minute']=.20
             with self.assertRaises(ValueError):suite.cloud_authorization(bad,device,800)
             with self.assertRaises(ValueError):suite.cloud_authorization(value,device,801)
+            for retained in ([],old[:1],old+old):
+                bad=copy.deepcopy(value);bad['reservations']=retained
+                with self.assertRaisesRegex(ValueError,'historical attempts'):
+                    suite.cloud_authorization(bad,device,800)
+            for count in (None,0,1,3):
+                bad=copy.deepcopy(value);bad['authorization_phases'][0]['previous_total_attempts']=count
+                with self.assertRaisesRegex(ValueError,'historical attempts'):
+                    suite.cloud_authorization(bad,device,800)
+            bad=copy.deepcopy(value);bad['maximum_seconds']=800
+            with self.assertRaisesRegex(ValueError,'historical attempts'):
+                suite.cloud_authorization(bad,device,800)
             for index,model in enumerate(phase['models']):
                 root=base/str(index);root.mkdir()
                 with mock.patch.object(suite,'run_device',return_value={'verdict':'NOT TESTED','launched':True}):

@@ -1181,6 +1181,9 @@ def cloud_authorization(ledger, device, seconds):
         if len(matches) != 1:
             raise ValueError('Select one explicitly authorized phase; history cannot be reset')
         authorization = matches[0]
+        prior = [row for row in ledger['reservations'] if not row.get('authorization_phase')]
+        if authorization.get('previous_total_attempts') != 2 or len(prior) != 2 or ledger.get('maximum_seconds') != 500:
+            raise ValueError('The rerun phase must retain both exhausted historical attempts and their authorization')
         if authorization.get('allowance') != 2 or authorization.get('maximum_seconds') != 800 or \
                 authorization.get('rate_usd_per_minute') != .15 or authorization.get('maximum_cost_usd') != 2:
             raise ValueError('Rerun phase requires two attempts, 800 seconds and the verified per-device cost limit')
