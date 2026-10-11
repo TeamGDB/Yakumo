@@ -218,6 +218,9 @@ No game input is staged in shared device storage. The device needs `base64` and
 On POSIX hosts, an explicitly selected `raw_adb_upload: true` streams the file
 directly without an encoded temporary copy, retaining source/destination SHA-256
 checks. Windows rejects that option and keeps its verified Base64 path.
+Raw game inputs must resolve within their declared game directory; an escaping
+input symlink is rejected. The runner stages declared inputs in its owned tree
+before reading them for raw transfer.
 `android_cli_install: true` optionally uses the installed official Android CLI's
 `install` command, with `--no-metrics` and the selected device serial. It installs
 the verified owned APK copy without activating it; the same operation and total

@@ -579,6 +579,13 @@ elif args[0] == 'logcat':
         for name, digest in originals.items():
             self.assertEqual(dt.fingerprint(Path(device['game_dir']) / name), digest)
             self.assertEqual(dt.fingerprint(self.run_dir / 'upload-inputs' / name), digest)
+        outside = self.root / 'unrelated.iso'; outside.write_bytes(b'unrelated private input')
+        disc = Path(device['game_dir']) / 'disc.iso'; disc.unlink(); disc.symlink_to(outside)
+        another = self.root / 'escaped-game-run'; another.mkdir()
+        rejected = dt.Adb(device, another, time.monotonic() + 20)
+        with patch.dict(os.environ, {'FAKE_ADB_ROOT': str(self.adb_root)}), self.assertRaisesRegex(ValueError, 'escapes'):
+            rejected.prepare({})
+        self.assertFalse((another / 'upload-inputs/disc.iso').exists())
 
     def test_adb_running_package_is_not_disrupted(self):
         device = self.make_adb()

@@ -595,11 +595,15 @@ class Adb:
             # Stream into app-private storage; no shared temporary copy of game data.
             if self.device.get('raw_adb_upload'):
                 # Read-only upload can reuse an owned hard link without copying the ISO.
+                game_root = os.path.normcase(os.path.realpath(self.device['game_dir']))
+                declared = os.path.normcase(os.path.realpath(source))
+                if not declared.startswith(game_root.rstrip(os.sep) + os.sep):
+                    raise ValueError('Raw game input escapes its declared directory')
                 staged = self.root / 'upload-inputs' / name
                 try:
-                    os.link(source.resolve(), staged)
+                    os.link(declared, staged)
                 except OSError:
-                    copy_regular_file(source, staged)
+                    copy_regular_file(declared, staged)
                 source = staged
             self.upload(source, 'files/device-testing/data/' + name)
         report['game_sha256'] = fingerprint(Path(self.device['game_dir']) / 'disc.iso')
