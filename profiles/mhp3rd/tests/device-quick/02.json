@@ -1,0 +1,77 @@
+{
+  "id": "02",
+  "title": "Settings and controls",
+  "profile": "quick",
+  "scope": "Bounded smoke and public contracts; extended real-game/release outcomes deferred",
+  "checks": [
+    {
+      "id": "pad-and-settings-smoke",
+      "seconds": 60,
+      "evidence_kind": "real-game smoke",
+      "steps": [
+        {
+          "action": "settings",
+          "as": "settings"
+        },
+        {
+          "action": "snapshot",
+          "as": "neutral",
+          "until": {
+            "pad_buttons": 0
+          }
+        },
+        {
+          "action": "input",
+          "value": "0:pad y+b 30"
+        },
+        {
+          "action": "snapshot",
+          "as": "pressed",
+          "until": {
+            "pad_buttons": {
+              "op": "eq",
+              "value": 12288
+            }
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "pressed.pad_buttons",
+          "op": "eq",
+          "expected": 12288
+        },
+        {
+          "action": "snapshot",
+          "as": "released",
+          "until": {
+            "pad_buttons": 0
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "released.pad_x",
+          "op": "eq",
+          "expected": 128
+        },
+        {
+          "action": "assert",
+          "actual": "released.pad_y",
+          "op": "eq",
+          "expected": 128
+        },
+        {
+          "action": "settings",
+          "as": "persisted"
+        },
+        {
+          "action": "assert",
+          "actual": "persisted",
+          "op": "eq",
+          "expected": {
+            "from": "settings"
+          }
+        }
+      ]
+    }
+  ]
+}

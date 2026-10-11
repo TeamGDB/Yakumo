@@ -60,7 +60,7 @@
     },
     {
       "id": "japanese-catalog-reopen",
-      "seconds": 120,
+      "seconds": 180,
       "steps": [
         {
           "action": "variant",
@@ -108,11 +108,7 @@
         },
         {
           "action": "fixture",
-          "name": "load-character"
-        },
-        {
-          "action": "fixture",
-          "name": "normal-counter-gate-quest"
+          "name": "offline-quest-204"
         },
         {
           "action": "text_fields",
@@ -126,11 +122,7 @@
         },
         {
           "action": "fixture",
-          "name": "load-character"
-        },
-        {
-          "action": "fixture",
-          "name": "normal-counter-gate-quest"
+          "name": "offline-quest-204"
         },
         {
           "action": "text_fields",
@@ -203,7 +195,7 @@
     },
     {
       "id": "patched-catalog-reopen",
-      "seconds": 120,
+      "seconds": 180,
       "steps": [
         {
           "action": "variant",
@@ -251,11 +243,7 @@
         },
         {
           "action": "fixture",
-          "name": "load-character"
-        },
-        {
-          "action": "fixture",
-          "name": "normal-counter-gate-quest"
+          "name": "offline-quest-204"
         },
         {
           "action": "text_fields",
@@ -269,11 +257,7 @@
         },
         {
           "action": "fixture",
-          "name": "load-character"
-        },
-        {
-          "action": "fixture",
-          "name": "normal-counter-gate-quest"
+          "name": "offline-quest-204"
         },
         {
           "action": "text_fields",

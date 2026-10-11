@@ -1,0 +1,46 @@
+{
+  "id": "05",
+  "title": "Translations",
+  "profile": "quick",
+  "scope": "Bounded smoke and public contracts; extended real-game/release outcomes deferred",
+  "checks": [
+    {
+      "id": "active-field-smoke",
+      "seconds": 60,
+      "evidence_kind": "real-game smoke",
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "ensure-offline-quest-204"
+        },
+        {
+          "action": "text_fields",
+          "name": "quick-active-fields",
+          "as": "fields"
+        },
+        {
+          "action": "snapshot",
+          "as": "quest"
+        },
+        {
+          "action": "assert",
+          "actual": "quest.active_id",
+          "op": "eq",
+          "expected": 204
+        }
+      ]
+    },
+    {
+      "id": "translations-contracts",
+      "seconds": 60,
+      "evidence_kind": "synthetic/native contract",
+      "steps": [
+        {
+          "action": "native_contract",
+          "group": "translations",
+          "as": "contract"
+        }
+      ]
+    }
+  ]
+}

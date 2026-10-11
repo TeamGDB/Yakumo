@@ -1,0 +1,74 @@
+{
+  "id": "01",
+  "title": "Installation, update and boot",
+  "profile": "quick",
+  "scope": "Bounded smoke and public contracts; extended real-game/release outcomes deferred",
+  "checks": [
+    {
+      "id": "copied-character-boot",
+      "seconds": 90,
+      "evidence_kind": "real-game smoke",
+      "steps": [
+        {
+          "action": "tree",
+          "path": "data/ms0",
+          "as": "before"
+        },
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "snapshot",
+          "as": "world",
+          "until": {
+            "loaded": true,
+            "task": "lobby_task.ovl",
+            "village_ready": true,
+            "fast_loading": false
+          }
+        },
+        {
+          "action": "tree",
+          "path": "data/ms0",
+          "as": "after"
+        },
+        {
+          "action": "assert",
+          "actual": "after",
+          "op": "eq",
+          "expected": {
+            "from": "before"
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "world.on_quest",
+          "op": "eq",
+          "expected": false
+        },
+        {
+          "action": "capture",
+          "as": "boot"
+        },
+        {
+          "action": "image",
+          "image": "boot",
+          "as": "boot-content"
+        }
+      ]
+    },
+    {
+      "id": "installation-contracts",
+      "seconds": 60,
+      "evidence_kind": "synthetic/native contract",
+      "steps": [
+        {
+          "action": "native_contract",
+          "group": "installation",
+          "as": "contract"
+        }
+      ]
+    }
+  ]
+}

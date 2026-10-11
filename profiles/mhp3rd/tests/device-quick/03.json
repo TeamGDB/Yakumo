@@ -1,0 +1,76 @@
+{
+  "id": "03",
+  "title": "Single-player quest, combat and camera",
+  "profile": "quick",
+  "scope": "Bounded smoke and public contracts; extended real-game/release outcomes deferred",
+  "checks": [
+    {
+      "id": "offline-quest-camera-smoke",
+      "seconds": 120,
+      "evidence_kind": "real-game smoke",
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "offline-quest-204"
+        },
+        {
+          "action": "snapshot",
+          "as": "quest",
+          "until": {
+            "camera_valid": true
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "quest.active_id",
+          "op": "eq",
+          "expected": 204
+        },
+        {
+          "action": "assert",
+          "actual": "quest.monsters",
+          "op": "ne",
+          "expected": []
+        },
+        {
+          "action": "input",
+          "value": "0:axis rightx 1"
+        },
+        {
+          "action": "input",
+          "value": "30:axis rightx 0"
+        },
+        {
+          "action": "snapshot",
+          "as": "turned",
+          "until": {
+            "camera_yaw": {
+              "op": "angle_delta_gt",
+              "value": {
+                "angle": {
+                  "from": "quest.camera_yaw"
+                },
+                "minimum": 5
+              }
+            }
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "turned.quest_cheats",
+          "op": "eq",
+          "expected": false
+        },
+        {
+          "action": "capture",
+          "as": "quest-frame"
+        },
+        {
+          "action": "image",
+          "image": "quest-frame",
+          "as": "content"
+        }
+      ]
+    }
+  ]
+}

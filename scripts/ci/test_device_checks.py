@@ -34,6 +34,26 @@ def png(width, height, rgb, mode=0, color=2):
 
 
 class OracleTests(unittest.TestCase):
+    def test_authored_colour_marker_rejects_wrong_channel_region_and_buffer(self):
+        picture = (2, 2, bytes([240, 40, 40, 0, 255, 0, 240, 40, 40, 0, 0, 255]))
+        self.assertEqual(checks.colour_count(picture, [0, 0, 2, 2], [240, 40, 40], 0), 2)
+        self.assertEqual(checks.colour_count(picture, [1, 0, 1, 2], [240, 40, 40], 0), 0)
+        self.assertEqual(checks.colour_count(picture, [0, 0, 2, 2], [40, 40, 240], 0), 0)
+        for region in ([0, 0, 3, 2], [-1, 0, 1, 1], [0, 0, 0, 1], [True, 0, 1, 1]):
+            with self.assertRaises(ValueError):
+                checks.colour_count(picture, region, [240, 40, 40])
+        for colour in ([300, 0, 0], [True, 0, 0], [0, 0]):
+            with self.assertRaises(ValueError):
+                checks.colour_count(picture, [0, 0, 1, 1], colour)
+        with self.assertRaises(ValueError):
+            checks.colour_count((2, 2, b''), [0, 0, 1, 1], [0, 0, 0])
+        shaded = (2, 1, bytes([122, 4, 110, 0, 0, 0]))
+        self.assertEqual(checks.colour_count(shaded, [0, 0, 2, 1], [244, 8, 220], 5, normalise=True), 1)
+        self.assertEqual(checks.colour_count(shaded, [0, 0, 2, 1], [244, 8, 220], 5), 0)
+        self.assertEqual(checks.colour_count(shaded, [0, 0, 2, 1], [8, 244, 220], 5, normalise=True), 0)
+        with self.assertRaises(ValueError):
+            checks.colour_count(shaded, [0, 0, 1, 1], [0, 0, 0], normalise=True)
+
     def test_comparisons_and_mutations(self):
         checks.compare(204, 'eq', 204)
         for wrong in (309, None, True, '204', 204.0):

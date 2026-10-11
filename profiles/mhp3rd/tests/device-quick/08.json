@@ -1,0 +1,20 @@
+{
+  "id": "08",
+  "title": "Two-peer multiplayer",
+  "profile": "quick",
+  "scope": "Bounded smoke and public contracts; extended real-game/release outcomes deferred",
+  "checks": [
+    {
+      "id": "multiplayer-contracts",
+      "seconds": 60,
+      "evidence_kind": "synthetic/native contract",
+      "steps": [
+        {
+          "action": "native_contract",
+          "group": "multiplayer",
+          "as": "contract"
+        }
+      ]
+    }
+  ]
+}

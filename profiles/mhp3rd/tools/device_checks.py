@@ -220,6 +220,35 @@ def image_content(image, minimum_colors=32, minimum_nonblack=0.1):
     return {'width': width, 'height': height, 'colors': colors, 'nonblack_fraction': colored / count}
 
 
+def colour_count(picture, region, colour, tolerance=20, normalise=False):
+    """Count an authored RGB marker in a bounded region, without a reference frame."""
+    width, height, rgb = picture
+    if len(rgb) != width * height * 3:
+        raise ValueError('Colour check needs a complete decoded RGB image')
+    if len(region) != 4 or any(type(value) is not int for value in region):
+        raise ValueError('Colour regions need four integer bounds')
+    x, y, w, h = region
+    if x < 0 or y < 0 or w <= 0 or h <= 0 or x + w > width or y + h > height:
+        raise ValueError('Colour region leaves the decoded image')
+    if len(colour) != 3 or any(type(value) is not int or not 0 <= value <= 255 for value in colour) or type(tolerance) is not int or not 0 <= tolerance <= 255:
+        raise ValueError('Expected RGB colour/tolerance is invalid')
+    expected_max = max(colour)
+    if normalise and not expected_max:
+        raise ValueError('A chromatic marker cannot be black')
+    expected = [value * 255 / expected_max for value in colour] if normalise else colour
+    count = 0
+    for row in range(y, y + h):
+        for column in range(x, x + w):
+            pixel = rgb[(row * width + column) * 3:(row * width + column) * 3 + 3]
+            maximum = max(pixel)
+            if normalise:
+                if maximum < 24:
+                    continue
+                pixel = [value * 255 / maximum for value in pixel]
+            count += all(abs(pixel[channel] - expected[channel]) <= tolerance for channel in range(3))
+    return count
+
+
 def image_difference(before, after):
     if before[:2] != after[:2]:
         raise CheckFailed('Compared capture dimensions differ')

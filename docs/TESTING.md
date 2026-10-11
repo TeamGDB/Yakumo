@@ -24,6 +24,12 @@
 - **Full application builds on every platform** — further work tracked in [#15](https://github.com/TeamGDB/Yakumo/issues/15). Unit-test CI does not build playable releases; release packaging remains a separate process.
 - **Regression tests on your own copy of the game**, replaying recorded input and comparing frames against reference images — planned in [#16](https://github.com/TeamGDB/Yakumo/issues/16).
 
+The current automatic device deliverable selects `--profile quick`: bounded
+real-game smoke and executed synthetic/native contract rows for ten categories,
+with evidence kinds in the report. `--profile extended` retains the deeper
+follow-up matrix and its failures/gaps. Neither a QUICK pass nor native transport
+contracts certify full multiplayer hunts, imports, lifecycle or a release.
+
 Unit tests do not replace gameplay checks. Use the smoke test below for changes that affect the game.
 
 To reproduce the headless CI configuration from a clean checkout without game data:

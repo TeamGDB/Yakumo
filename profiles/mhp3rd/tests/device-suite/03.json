@@ -4,23 +4,11 @@
   "checks": [
     {
       "id": "quest-identity-clock",
-      "seconds": 90,
+      "seconds": 120,
       "steps": [
         {
           "action": "fixture",
-          "name": "load-character"
-        },
-        {
-          "action": "snapshot",
-          "as": "loaded",
-          "until": {
-            "loaded": true,
-            "on_quest": false
-          }
-        },
-        {
-          "action": "debug",
-          "value": "quest start 204"
+          "name": "offline-quest-204"
         },
         {
           "action": "snapshot",
@@ -73,8 +61,12 @@
     },
     {
       "id": "movement-camera",
-      "seconds": 90,
+      "seconds": 120,
       "steps": [
+        {
+          "action": "fixture",
+          "name": "offline-quest-204"
+        },
         {
           "action": "snapshot",
           "as": "before"
@@ -148,29 +140,8 @@
       "seconds": 120,
       "steps": [
         {
-          "action": "restart",
-          "reset": true
-        },
-        {
           "action": "fixture",
-          "name": "load-character"
-        },
-        {
-          "action": "debug",
-          "value": "quest start 204"
-        },
-        {
-          "action": "snapshot",
-          "as": "fresh-quest",
-          "until": {
-            "on_quest": true,
-            "active_id": 204,
-            "quest_ticks": {
-              "op": "lt",
-              "value": 89970
-            },
-            "fast_loading": false
-          }
+          "name": "offline-quest-204"
         },
         {
           "action": "fixture",
@@ -210,8 +181,12 @@
     },
     {
       "id": "large-lock-on",
-      "seconds": 90,
+      "seconds": 120,
       "steps": [
+        {
+          "action": "fixture",
+          "name": "offline-quest-204"
+        },
         {
           "action": "fixture",
           "name": "reach-live-large-monster"
@@ -241,17 +216,15 @@
     },
     {
       "id": "area-return",
-      "seconds": 90,
+      "seconds": 120,
       "steps": [
         {
-          "action": "snapshot",
-          "as": "before"
+          "action": "fixture",
+          "name": "offline-quest-204"
         },
         {
-          "action": "assert",
-          "actual": "before.map",
-          "op": "ne",
-          "expected": "P_m12a00d.ovl"
+          "action": "fixture",
+          "name": "quest-area-transition"
         },
         {
           "action": "fixture",

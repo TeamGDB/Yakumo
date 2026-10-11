@@ -1,0 +1,29 @@
+{
+  "id": "10",
+  "title": "Performance",
+  "profile": "quick",
+  "scope": "Bounded smoke and public contracts; extended real-game/release outcomes deferred",
+  "checks": [
+    {
+      "id": "fixed-scene-telemetry",
+      "seconds": 30,
+      "evidence_kind": "real-game smoke",
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "ensure-offline-quest-204"
+        },
+        {
+          "action": "telemetry",
+          "as": "timing"
+        },
+        {
+          "action": "assert",
+          "actual": "timing.collected",
+          "op": "eq",
+          "expected": true
+        }
+      ]
+    }
+  ]
+}

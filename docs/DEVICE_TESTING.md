@@ -10,11 +10,13 @@ The ten automatic pre-release categories use a separate aggregate command:
 
 ```sh
 python3 profiles/mhp3rd/tools/device_suite.py --config device-testing.local.json \
-  --devices mac windows deck android --seconds 1800 --output-parent out
+  --profile quick --devices mac windows deck android --seconds 360 --output-parent out
 ```
 
 See [DEVICE_SUITE.md](DEVICE_SUITE.md) for the private fixture/observation contract,
-focused reruns and current implementation boundaries. Each subcheck determines
+focused reruns and the limited QUICK stage. Evidence kinds distinguish real-game
+smoke from executed public native contracts; the deeper matrix is deferred.
+Each subcheck determines
 its own assertions without a person reviewing a capture. Required missing routes
 or capabilities remain NOT TESTED, and any failure makes the aggregate fail.
 The command prepares compatible inputs once per device, then resets only owned

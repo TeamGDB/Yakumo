@@ -1,0 +1,20 @@
+{
+  "id": "04",
+  "title": "Save and backup round trips",
+  "profile": "quick",
+  "scope": "Bounded smoke and public contracts; extended real-game/release outcomes deferred",
+  "checks": [
+    {
+      "id": "saves-contracts",
+      "seconds": 60,
+      "evidence_kind": "synthetic/native contract",
+      "steps": [
+        {
+          "action": "native_contract",
+          "group": "saves",
+          "as": "contract"
+        }
+      ]
+    }
+  ]
+}

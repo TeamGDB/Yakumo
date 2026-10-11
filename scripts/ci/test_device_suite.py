@@ -571,6 +571,124 @@ sys.exit(0 if 'list' in sys.argv else 1)
 class ExtendedSuiteTests(unittest.TestCase):
     session = SuiteTests.session
 
+    def test_quick_profile_has_ten_limited_categories_and_no_deep_prerequisites(self):
+        quick = suite.definitions('quick')
+        self.assertEqual(len(quick), 10)
+        self.assertTrue(all(value['profile'] == 'quick' for value in quick))
+        self.assertTrue(all(check['evidence_kind'] in ('real-game smoke', 'synthetic/native contract')
+                            for value in quick for check in value['checks']))
+        text = json.dumps(quick)
+        for forbidden in ('normal-counter-gate', 'abandon-quest', 'reach-live-large', '"measure"', 'peer_fixture'):
+            self.assertNotIn(forbidden, text)
+        with self.assertRaises(ValueError):
+            suite.definitions('pretend-full')
+
+    @unittest.skipIf(sys.platform == 'win32', 'Public CTest transport oracle uses the POSIX C++ compiler')
+    def test_native_contract_executes_registered_oracle_and_rejects_mutated_file(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp).resolve(); build = base / 'out/native'; build.mkdir(parents=True)
+            oracle = build / 'oracle'; source = build / 'oracle.cpp'; data = build / 'fixture.bin'
+            data.write_bytes(b'public independently expected save payload')
+            source.write_text('#include <fstream>\n#include <string>\nint main(int n,char **v){if(n!=2)return 2;std::ifstream f(v[1]);std::string s;std::getline(f,s);return s=="public independently expected save payload"?0:1;}\n')
+            subprocess.run(['c++', str(source), '-o', str(oracle)], check=True, timeout=30)
+            # An actual CTest run exercises process, output and artifact recording.
+            (build / 'CTestTestfile.cmake').write_text('add_test(mhp3rd_savedata_tests "' + str(oracle).replace('\\', '/') +
+                '" "' + str(data).replace('\\', '/') + '")\n')
+            session = self.session(base, object.__new__(runner.Local))
+            device = {'native_test_dir': 'out/native'}
+            with mock.patch.object(runner, 'ROOT', base):
+                # Test executables are fingerprinted within the owned build directory.
+                result = suite.native_contract(session, 'saves', device, time.monotonic() + 15)
+                self.assertTrue(result['all_passed'])
+                self.assertEqual(result['evidence_kind'], 'synthetic/native contract')
+                self.assertEqual(result['artifact_sha256']['mhp3rd_savedata_tests'], runner.fingerprint(oracle))
+                data.write_bytes(b'corrupted payload')
+                with self.assertRaises(RuntimeError):
+                    suite.native_contract(session, 'saves', device, time.monotonic() + 15)
+                with self.assertRaises(runner.NotTested):
+                    suite.native_contract(session, 'mods', device, time.monotonic() + 15)
+            with self.assertRaises(ValueError):
+                suite.native_contract(session, 'invented', device, session.deadline)
+            with self.assertRaises(runner.NotTested):
+                suite.native_contract(session, 'saves', {}, session.deadline)
+
+    def test_short_telemetry_preserves_slow_speed_and_tails_without_claiming_comparison(self):
+        with tempfile.TemporaryDirectory() as temp:
+            session = self.session(Path(temp), Adapter())
+            scene = {'map': 'P_m12a00d.ovl', 'vblanks': 100, 'fast_loading': False, 'fast_forward': False,
+                     'quest_cheats': False, 'photo': False, 'perf_valid': True, 'speed_percent': 83,
+                     'game_fps': 25, 'presented_fps': 90, 'frame_ms': [500] * 75 + [33.3] * 25 + [90] * 5,
+                     'target_width': 480, 'target_height': 272}
+            samples = [scene, scene] + [{**scene, 'perf_second': n} for n in range(3)]
+            session.snapshot = mock.Mock(side_effect=samples)
+            with mock.patch.object(suite.time, 'sleep'):
+                value = suite.quick_telemetry(session, session.deadline)
+            self.assertEqual(value['samples'][0]['speed_percent'], 83)
+            self.assertEqual(value['samples'][0]['p99_ms'], 90)
+            self.assertNotIn(500, value['samples'][0]['frame_ms'])
+            self.assertIn('Deferred', value['comparison'])
+            self.assertEqual(value['resolution'], [480, 272])
+            session.snapshot.side_effect = [scene, scene, {**scene, 'fast_forward': True}]
+            with self.assertRaises(checks.CheckFailed):
+                suite.quick_telemetry(session, session.deadline)
+            session.snapshot.side_effect = [scene, scene, {**scene, 'perf_second': 1, 'frame_ms': [0] * 192}]
+            with self.assertRaises(checks.CheckFailed):
+                suite.quick_telemetry(session, session.deadline)
+
+    def test_builtin_offline_setup_proves_actual_state_and_refuses_online_or_release(self):
+        with tempfile.TemporaryDirectory() as temp:
+            session = self.session(Path(temp), Adapter())
+            session.restart = mock.Mock()
+            village = {'loaded': True, 'task': 'lobby_task.ovl', 'village_ready': True, 'fast_loading': False,
+                       'on_quest': False, 'quest_cheats': False, 'online': False}
+            quest = {**village, 'task': 'game_task.ovl', 'on_quest': True, 'map': 'P_m12a00d.ovl',
+                     'accepted_id': 204, 'active_id': 204, 'quest_ticks': 89960}
+            device = {'build': 'dev', 'suite_fixtures': {'load-character': [{'action': 'input', 'value': '0:pad start 4'}]}}
+            program = [{'action': 'fixture', 'name': 'offline-quest-204'}]
+            suite.validate_program(program, fixture=True)
+            context = {}
+            session.snapshot = mock.Mock(side_effect=[village, quest, {**quest, 'quest_ticks': 89959}])
+            self.assertEqual(suite.execute(session, program, context, {}, device, session.deadline), 7)
+            self.assertEqual(context['_offline_setup']['method'], 'developer quest start')
+            session.restart.assert_called_once_with(reset=True, retain_variant=True)
+            self.assertIn(('debug', 'quest start 204'), session.adapter.sent)
+            self.assertEqual(session.snapshot.call_args.kwargs['until'], {'quest_ticks': {'op': 'lt', 'value': 89960}})
+            for mutation in ({**quest, 'quest_cheats': True}, {**quest, 'accepted_id': 309}, {**quest, 'map': 'P_v00a00d.ovl'},
+                             {**quest, 'quest_ticks': 0}):
+                session.snapshot.side_effect = [village, mutation]
+                with self.assertRaises(checks.CheckFailed):
+                    suite.execute(session, program, {}, {}, device, session.deadline)
+            session.snapshot.side_effect = [{**village, 'online': True}]
+            with self.assertRaises(checks.CheckFailed):
+                suite.execute(session, program, {}, {}, device, session.deadline)
+            for parameters, build in (({'multiplayer': True}, 'dev'), ({}, 'release')):
+                with self.assertRaises((ValueError, runner.NotTested)):
+                    suite.execute(session, program, {}, parameters, {**device, 'build': build}, session.deadline)
+            with self.assertRaises(runner.NotTested):
+                suite.execute(session, program, {}, {}, {'build': 'dev'}, session.deadline)
+            with self.assertRaises(ValueError):
+                suite.execute(session, [{'action': 'fixture', 'name': 'offline-quest-1'}], {}, {}, device, session.deadline)
+
+    def test_failed_subcheck_recovers_without_erasing_failure_or_skipping_next(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            session = self.session(root, Adapter())
+            session.identity = {}; session.prepare = lambda launch=True: None
+            session.restart = mock.Mock()
+            bad = [{'action': 'snapshot', 'as': 'q'}, {'action': 'assert', 'actual': 'q.active_id', 'op': 'eq', 'expected': 309}]
+            good = [{**bad[0]}, {**bad[1], 'expected': 204}]
+            definition = [{'id': '03', 'title': 'Core', 'checks': [{'id': 'failed-route', 'steps': bad},
+                                                                {'id': 'independent-core', 'steps': good}]}]
+            with mock.patch.object(suite, 'Session', return_value=session):
+                report = suite.run_device({'adapter': 'local', 'build': 'dev', 'commit': 'a' * 40}, 'mac', definition, root, 3)
+            checks_rows = report['scenarios'][0]['checks']
+            self.assertEqual([row['verdict'] for row in checks_rows], ['FAIL', 'PASS'])
+            self.assertEqual(report['verdict'], 'FAIL')
+            self.assertEqual(report['cleanup'], 'PASS')
+            self.assertEqual(report['recovery'][0]['after'], 'failed-route')
+            session.restart.assert_called_once_with(reset=True, retain_variant=True)
+
     def test_photo_pixels_screenshot_file_and_mutated_frozen_frame(self):
         from test_device_checks import png
         with tempfile.TemporaryDirectory() as temp:
@@ -647,6 +765,44 @@ class ExtendedSuiteTests(unittest.TestCase):
             session.variant_name = None
             with self.assertRaises(checks.CheckFailed):
                 suite.execute(session, [{'action': 'fixture', 'name': 'load'}], {}, {}, device, session.deadline)
+
+    def test_finite_menu_advancing_stops_on_target_and_rejects_nonconvergence(self):
+        from test_device_checks import png
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            (root / 'expected.png').write_bytes(png(8, 8, bytes(range(192))))
+            (root / 'wrong.png').write_bytes(png(8, 8, bytes(reversed(range(192)))))
+            session = self.session(root, Adapter())
+            session.capture = mock.Mock(side_effect=['wrong.png', 'expected.png'])
+            session.snapshot = mock.Mock(return_value={'vblanks': 100})
+            device = {'hardware': {'gpu': 'public synthetic GPU'}, 'navigation_references': {'stars': {
+                'reviewed': True, 'hardware': {'gpu': 'public synthetic GPU'}, 'path': str(root / 'expected.png'),
+                'sha256': runner.fingerprint(root / 'expected.png'), 'region': [0, 0, 8, 8]}}}
+            program = [{'action': 'menu_advance', 'name': 'stars', 'input': '0:pad b 4', 'maximum_presses': 2}]
+            suite.validate_program(program)
+            with mock.patch.object(suite.time, 'sleep'):
+                self.assertEqual(suite.execute(session, program, {}, {}, device, session.deadline), 0)
+            self.assertEqual(session.adapter.sent, [('input', '0:pad b 4')])
+            self.assertEqual(session.snapshot.call_args.kwargs['until'], {'vblanks': {'op': 'ge', 'value': 460}})
+            session.adapter.sent.clear()
+            session.capture = lambda name: 'wrong.png'
+            with mock.patch.object(suite.time, 'sleep'), self.assertRaises(checks.CheckFailed):
+                suite.execute(session, program, {}, {}, device, session.deadline)
+            self.assertEqual(len(session.adapter.sent), 2)
+            (root / 'ready.png').write_bytes(png(8, 8, bytes([240, 40, 40]) * 64))
+            session.adapter.sent.clear()
+            session.capture = mock.Mock(side_effect=['wrong.png', 'ready.png', 'expected.png'])
+            ready_program = [{**program[0], 'ready_colour': {'region': [0, 0, 8, 8], 'rgb': [240, 40, 40],
+                                                          'tolerance': 0, 'minimum_pixels': 16}}]
+            with mock.patch.object(suite.time, 'sleep'):
+                self.assertEqual(suite.execute(session, ready_program, {}, {}, device, session.deadline), 0)
+            self.assertEqual(session.adapter.sent, [('input', '0:pad b 4')])
+            for minimum in (True, 0, 4097):
+                with self.assertRaises(ValueError):
+                    suite.validate_program([{**ready_program[0], 'ready_colour': {'minimum_pixels': minimum}}])
+            for value in (True, 0, 5):
+                with self.assertRaises(ValueError):
+                    suite.validate_program([{**program[0], 'maximum_presses': value}])
 
     def test_lifecycle_requires_actual_focus_clock_and_neutral_release(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -1,0 +1,131 @@
+{
+  "id": "07",
+  "title": "Photo tools",
+  "profile": "quick",
+  "scope": "Bounded smoke and public contracts; extended real-game/release outcomes deferred",
+  "checks": [
+    {
+      "id": "quest-freeze-step-smoke",
+      "seconds": 120,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "ensure-offline-quest-204"
+        },
+        {
+          "action": "fixture",
+          "name": "enable-free-camera"
+        },
+        {
+          "action": "input",
+          "value": "0:window raise"
+        },
+        {
+          "action": "input",
+          "value": "0:key F6 4"
+        },
+        {
+          "action": "snapshot",
+          "as": "flying",
+          "until": {
+            "free_camera": true
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "flying.free_camera",
+          "op": "eq",
+          "expected": true
+        },
+        {
+          "action": "input",
+          "value": "0:key P 4"
+        },
+        {
+          "action": "snapshot",
+          "as": "held",
+          "until": {
+            "photo": true
+          }
+        },
+        {
+          "action": "hold",
+          "fields": [
+            "clock_us",
+            "vblanks",
+            "quest_ticks"
+          ],
+          "seconds": 0.6
+        },
+        {
+          "action": "input",
+          "value": "0:scan . 2"
+        },
+        {
+          "action": "snapshot",
+          "as": "stepped",
+          "until": {
+            "vblanks": {
+              "op": "ge",
+              "value": {
+                "from": "held.vblanks",
+                "add": 2
+              }
+            }
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "stepped.vblanks",
+          "op": "eq",
+          "expected": 2,
+          "subtract": "held.vblanks"
+        },
+        {
+          "action": "assert",
+          "actual": "stepped.photo",
+          "op": "eq",
+          "expected": true
+        },
+        {
+          "action": "hold",
+          "fields": [
+            "clock_us",
+            "vblanks",
+            "quest_ticks"
+          ],
+          "seconds": 0.5
+        },
+        {
+          "action": "input",
+          "value": "0:key P 4"
+        },
+        {
+          "action": "snapshot",
+          "as": "resumed",
+          "until": {
+            "photo": false
+          }
+        },
+        {
+          "action": "input",
+          "value": "0:key F6 4"
+        },
+        {
+          "action": "snapshot",
+          "as": "left",
+          "until": {
+            "free_camera": false
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "left.free_camera",
+          "op": "eq",
+          "expected": false
+        }
+      ],
+      "evidence_kind": "real-game smoke"
+    }
+  ]
+}

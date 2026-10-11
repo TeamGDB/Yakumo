@@ -4,19 +4,11 @@
   "checks": [
     {
       "id": "freeze-step",
-      "seconds": 90,
+      "seconds": 120,
       "steps": [
         {
           "action": "fixture",
-          "name": "load-character"
-        },
-        {
-          "action": "snapshot",
-          "as": "loaded",
-          "until": {
-            "loaded": true,
-            "on_quest": false
-          }
+          "name": "offline-quest-204"
         },
         {
           "action": "fixture",
@@ -58,7 +50,8 @@
           "action": "hold",
           "fields": [
             "clock_us",
-            "vblanks"
+            "vblanks",
+            "quest_ticks"
           ],
           "seconds": 0.6
         },
@@ -96,7 +89,8 @@
           "action": "hold",
           "fields": [
             "clock_us",
-            "vblanks"
+            "vblanks",
+            "quest_ticks"
           ],
           "seconds": 0.5
         },

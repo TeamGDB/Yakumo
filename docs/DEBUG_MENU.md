@@ -97,6 +97,20 @@ overlay.
 
 ## The command file
 
+The automatic [device suite](DEVICE_SUITE.md) uses `observe REQUEST`,
+`observe REQUEST perf`, `observe REQUEST text BASE TABLE INDEX` and
+`observe REQUEST field BASE REF` for structured read-only results. This channel
+requires a developer build and the exact `MHP3RD_DEVICE_TEST=1` gate; it does not
+write guest memory. Invalid/unloaded actor, overlay and text ranges produce
+unknown fields, rather than evidence of a successful check. Completed original
+text loads remain observable even when the selected language has no matching key.
+Observation requests also work while the test session is held in photo mode.
+
+`MHP3RD_DEVICE_TEST_RTC_US` optionally pins the boot RTC to a Unix timestamp in
+microseconds from 2000 through 2100. It is accepted only with explicit developer
+test mode; ordinary/release runs keep the wall clock. Pin the same value for
+repeatable same-device comparisons and record it in the private configuration.
+
 `MHP3RD_DEBUG_COMMANDS=<file>` (with `MHP3RD_DEBUG_MENU=1`) names a file read
 while the game runs, like `MHP3RD_INPUT_LIVE`: each line appended to it runs
 at the next flip, and its answer is printed as `[debug]` lines. Together with

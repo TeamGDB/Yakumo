@@ -31,10 +31,23 @@ ACTIONS.update(('audio', 'text_fields'))
 ACTIONS.add('variant')
 ACTIONS.update(('peer_start', 'peer_fixture', 'peer_snapshot', 'peer_close'))
 ACTIONS.add('focus_cycle')
+ACTIONS.add('menu_advance')
+ACTIONS.update(('native_contract', 'telemetry'))
+CONTRACTS = {
+    'installation': ['mhp3rd_data_directory_tests', 'mhp3rd_settings_tests'],
+    'saves': ['mhp3rd_savedata_tests'],
+    'translations': ['mhp3rd_text_runtime_tests'],
+    'mods': ['mhp3rd_mods_tests', 'mhp3rd_texture_pack_tests', 'mhp3rd_equipment_models_tests'],
+    'multiplayer': ['mhp3rd_adhoc_tests', 'mhp3rd_kernel_hle_tests'],
+    'lifecycle': ['mhp3rd_android_jni_tests', 'mhp3rd_android_display_success', 'mhp3rd_guest_pcm_tests'],
+}
 
 
-def definitions():
-    values = [runner.read_json(path) for path in sorted(DEFINITIONS.glob('*.json'))]
+def definitions(profile='extended'):
+    if profile not in ('quick', 'extended'):
+        raise ValueError('Choose the QUICK stage or the deferred extended matrix')
+    directory = DEFINITIONS if profile == 'extended' else DEFINITIONS.parent / 'device-quick'
+    values = [runner.read_json(path) for path in sorted(directory.glob('*.json'))]
     if len(values) != 10 or [value['id'] for value in values] != [f'{i:02}' for i in range(1, 11)]:
         raise ValueError('Suite must have exactly ten ordered standard scenario IDs')
     for value in values:
@@ -43,7 +56,7 @@ def definitions():
         for item in value['checks']:
             runner.safe_name(item['id'])
             validate_program(item['steps'])
-            if not any(step['action'] in ('assert', 'image', 'difference') for step in item['steps']):
+            if not any(step['action'] in ('assert', 'image', 'difference', 'native_contract') for step in item['steps']):
                 raise ValueError('Every subcheck requires an independent outcome assertion')
     return values
 
@@ -52,12 +65,20 @@ def validate_program(steps, fixture=False):
     if not isinstance(steps, list) or not 0 < len(steps) <= 128:
         raise ValueError('Programs need 1..128 finite steps')
     for step in steps:
-        if step.get('action') not in ACTIONS or fixture and step['action'] == 'fixture':
+        offline = step.get('action') == 'fixture' and re.fullmatch(r'(?:ensure-)?offline-quest-[0-9]{1,5}', step.get('name', ''))
+        if step.get('action') not in ACTIONS or fixture and step['action'] == 'fixture' and not offline:
             raise ValueError('Unknown action or recursive fixture')
         if not 0 < step.get('timeout', 20) <= 120:
             raise ValueError('Step deadline must be 0..120 seconds')
         if step['action'] in ('input', 'debug'):
             runner.validate_step({step['action']: step['value']})
+        if step['action'] == 'menu_advance':
+            runner.validate_step({'input': step['input']})
+            if type(step['maximum_presses']) is not int or not 1 <= step['maximum_presses'] <= 4:
+                raise ValueError('Menu navigation permits at most four finite presses')
+            ready = step.get('ready_colour')
+            if ready and (type(ready.get('minimum_pixels')) is not int or not 1 <= ready['minimum_pixels'] <= 4096):
+                raise ValueError('Menu readiness needs a bounded positive colour marker count')
         if step['action'] in ('hold',) and not 0.1 <= step['seconds'] <= 10:
             raise ValueError('Stable-state hold must be 0.1..10 seconds')
 
@@ -87,14 +108,15 @@ def exit_status(report):
 
 def render(root, report):
     runner.write_json(root / 'report.json', report)
-    lines = ['# Automatic pre-release suite', '', f'Status: **{verdict(report["devices"])}**', '',
-             '| Device | Scenario | Subcheck | Verdict | Reason |', '| --- | --- | --- | --- | --- |']
+    lines = ['# Automatic pre-release suite: ' + report.get('profile', 'extended').upper(), '',
+             f'Status: **{verdict(report["devices"])}**', '',
+             '| Device | Scenario | Subcheck | Evidence kind | Verdict | Reason |', '| --- | --- | --- | --- | --- | --- |']
     def clean(value):
         return str(value).replace('|', '\\|').replace('\n', ' ')
     for device in report['devices']:
         for scenario in device['scenarios']:
             for item in scenario['checks']:
-                lines.append('| ' + ' | '.join(map(clean, (device['name'], scenario['id'], item['id'],
+                lines.append('| ' + ' | '.join(map(clean, (device['name'], scenario['id'], item['id'], item.get('evidence_kind', 'Not reached'),
                                                           item['verdict'], item['reason']))) + ' |')
     lines.extend(['', 'Private evidence only. Developer readbacks do not certify exact release artifacts.',
                   'Physical controls, audible playback and long hunts require complementary human sign-off.'])
@@ -670,6 +692,101 @@ def measure(session, profile_name, device, deadline, scenario_hash):
         session.start()
 
 
+def offline_quest(session, quest_id, context, parameters, device, deadline, reuse=False):
+    """Reusable offline setup, with actual state assertions after the existing shortcut."""
+    if parameters.get('multiplayer'):
+        raise ValueError('Offline quest setup is forbidden in multiplayer')
+    if device['build'] != 'dev':
+        raise runner.NotTested('Offline quest setup needs developer tools; release-player UI is separate')
+    if not 2 <= quest_id <= 65535:
+        raise ValueError('Offline setup needs a valid nonempty quest ID')
+    if reuse:
+        current = session.snapshot()
+        if condition(current, {'task': 'game_task.ovl', 'on_quest': True, 'active_id': quest_id,
+                               'quest_cheats': False, 'online': False, 'fast_loading': False}):
+            later = session.snapshot(until={'quest_ticks': {'op': 'lt', 'value': current['quest_ticks']}})
+            context['_offline_setup'] = {'method': 'reused verified offline quest', 'quest_id': quest_id,
+                                        'loaded': current, 'advancing': later}
+            return 2
+    session.restart(reset=True, retain_variant=True)
+    variant = device.get('game_variants', {}).get(getattr(session, 'variant_name', None), {})
+    load = variant.get('suite_fixtures', {}).get('load-character') or device.get('suite_fixtures', {}).get('load-character')
+    if not load:
+        raise runner.NotTested('Missing finite copied-character navigation for offline setup')
+    validate_program(load, fixture=True)
+    count = execute(session, load, context, parameters, device, deadline)
+    ready = session.snapshot(until={'loaded': True, 'task': 'lobby_task.ovl', 'village_ready': True,
+                                   'fast_loading': False, 'on_quest': False})
+    checks.compare(ready['quest_cheats'], 'eq', False)
+    checks.compare(ready['online'], 'eq', False)
+    session.adapter.send('debug', f'quest start {quest_id}')
+    quest = session.snapshot(timeout=min(40, runner.remaining(deadline)),
+        until={'task': 'game_task.ovl', 'on_quest': True, 'active_id': quest_id, 'fast_loading': False,
+               'quest_ticks': {'op': 'lt', 'value': 89970}})
+    checks.compare(quest['accepted_id'], 'eq', quest_id)
+    checks.compare(quest['quest_cheats'], 'eq', False)
+    checks.compare(quest['quest_ticks'], 'gt', 0)
+    checks.compare(quest['map'].startswith('P_m'), 'eq', True)
+    later = session.snapshot(until={'quest_ticks': {'op': 'lt', 'value': quest['quest_ticks']}})
+    checks.compare(later['active_id'], 'eq', quest_id)
+    context['_offline_setup'] = {'method': 'developer quest start', 'quest_id': quest_id,
+                                  'village': ready, 'loaded': quest, 'advancing': later}
+    return count + 7
+
+
+def native_contract(session, group, device, deadline):
+    if group not in CONTRACTS:
+        raise ValueError('Unknown public native contract group')
+    if not isinstance(session.adapter, runner.Local) or not device.get('native_test_dir'):
+        raise runner.NotTested('This adapter/configuration has no executable public native contract build')
+    build = checks.confined(runner.ROOT, device['native_test_dir'])
+    tests = json.loads(runner.command(['ctest', '--test-dir', str(build), '--show-only=json-v1'], deadline).decode())['tests']
+    selected = [item for item in tests if item['name'] in CONTRACTS[group]]
+    if {item['name'] for item in selected} != set(CONTRACTS[group]):
+        raise runner.NotTested('Required public native contracts are absent from the registered build')
+    artifacts = {}
+    for test in selected:
+        path = checks.confined(build, Path(test['command'][0]).relative_to(build).as_posix())
+        artifacts[test['name']] = runner.fingerprint(path)
+    output = runner.command(['ctest', '--test-dir', str(build), '-R', '^(' + '|'.join(CONTRACTS[group]) + ')$',
+                             '--output-on-failure', '--no-tests=error', '--timeout', '60'], deadline,
+                            maximum=runner.remaining(deadline, 120)).decode(errors='replace')
+    if '100% tests passed' not in output:
+        raise checks.CheckFailed('Native contract runner did not report all registered checks passed')
+    path = session.root / ('contract-' + runner.safe_name(group) + '.log')
+    path.write_text(output, encoding='utf-8')
+    return {'evidence_kind': 'synthetic/native contract', 'tests': CONTRACTS[group], 'artifact_sha256': artifacts,
+            'log': path.name, 'all_passed': True, 'scope': 'Public synthetic inputs; no real-game release sign-off'}
+
+
+def quick_telemetry(session, deadline):
+    first = session.snapshot()
+    session.snapshot(until={'vblanks': {'op': 'ge', 'value': first['vblanks'] + 60}})
+    values, seen = [], set()
+    until = min(deadline, time.monotonic() + 8)
+    while len(values) < 3:
+        sample = session.snapshot(performance=True)
+        if sample['fast_loading'] or sample['fast_forward'] or sample['quest_cheats'] or sample['photo']:
+            raise checks.CheckFailed('Quick telemetry requires an unpaused, ordinary fixed scene')
+        checks.compare(sample['map'], 'eq', first['map'])
+        if sample.get('perf_valid') and sample['perf_second'] not in seen:
+            checks.compare(sample['speed_percent'], 'gt', 0)
+            frames = [value for value in sample['frame_ms'][-30:] if value > 0]
+            if len(frames) < 30 or any(not math.isfinite(value) for value in frames):
+                raise checks.CheckFailed('Missing or invalid short frame-time sample')
+            values.append({'speed_percent': sample['speed_percent'], 'game_fps': sample['game_fps'],
+                           'presented_fps': sample['presented_fps'], 'frame_ms': frames,
+                           'p95_ms': checks.percentile(frames, .95), 'p99_ms': checks.percentile(frames, .99)})
+            seen.add(sample['perf_second'])
+        runner.remaining(until)
+        time.sleep(.1)
+    gpu = re.findall(r'^\[gpu\] (.+driver .+)$', session.adapter.text(), re.M)
+    return {'collected': True, 'evidence_kind': 'real-game smoke', 'scene': first['map'], 'samples': values,
+            'gpu_driver': gpu[0] if len(gpu) == 1 else 'NOT TESTED: GPU/driver log unavailable',
+            'resolution': [sample.get('target_width'), sample.get('target_height')],
+            'comparison': 'Deferred: no calibrated regression budget or improvement claim'}
+
+
 def execute(session, steps, context, parameters, device, deadline):
     assertions = 0
     for step in steps:
@@ -678,6 +795,10 @@ def execute(session, steps, context, parameters, device, deadline):
         name = step.get('as', '')
         variant = device.get('game_variants', {}).get(getattr(session, 'variant_name', None), {})
         if action == 'fixture':
+            offline = re.fullmatch(r'(ensure-)?offline-quest-([0-9]{1,5})', step['name'])
+            if offline:
+                assertions += offline_quest(session, int(offline[2]), context, parameters, device, deadline, bool(offline[1]))
+                continue
             fixture = variant.get('suite_fixtures', {}).get(step['name']) or device.get('suite_fixtures', {}).get(step['name'])
             if not fixture:
                 raise runner.NotTested('Missing finite fixture navigation: ' + step['name'])
@@ -725,7 +846,7 @@ def execute(session, steps, context, parameters, device, deadline):
             context[name] = session.tree(step['path'])
         elif action == 'capture':
             context[name] = session.capture(name)
-        elif action == 'reference':
+        elif action in ('reference', 'menu_advance'):
             reference = variant.get('navigation_references', {}).get(step['name']) or device.get('navigation_references', {}).get(step['name'])
             if not reference or not reference.get('reviewed') or reference.get('hardware') != device.get('hardware'):
                 raise runner.NotTested('Missing reviewed navigation reference for this hardware: ' + step['name'])
@@ -735,6 +856,7 @@ def execute(session, steps, context, parameters, device, deadline):
             expected = checks.pixels(checks.confined(reference_path.parent, reference_path.name))
             limit = min(deadline, time.monotonic() + step.get('timeout', 20))
             first_capture, previous_capture = None, None
+            presses = 0
             while True:
                 path = session.capture('navigation-' + step['name'])
                 if previous_capture and previous_capture != first_capture:
@@ -748,6 +870,19 @@ def execute(session, steps, context, parameters, device, deadline):
                     break
                 except checks.CheckFailed:
                     runner.remaining(limit)
+                    if action == 'menu_advance':
+                        ready = step.get('ready_colour')
+                        if ready and checks.colour_count(checks.pixels(checks.confined(session.root, path)),
+                                ready['region'], ready['rgb'], ready.get('tolerance', 20)) < ready['minimum_pixels']:
+                            time.sleep(.5)
+                            continue
+                        if presses >= step['maximum_presses']:
+                            raise checks.CheckFailed('Finite menu navigation exhausted without its observed target')
+                        before = session.snapshot()['vblanks']
+                        session.adapter.send('input', step['input'])
+                        presses += 1
+                        session.snapshot(timeout=min(10, runner.remaining(limit)),
+                                         until={'vblanks': {'op': 'ge', 'value': before + 360}})
                     time.sleep(.5)
         elif action == 'image':
             picture = checks.pixels(checks.confined(session.root, checks.field(context, step['image'])))
@@ -788,6 +923,11 @@ def execute(session, steps, context, parameters, device, deadline):
             context[name] = session.game_png()
         elif action == 'measure':
             context[name] = measure(session, step['profile'], device, deadline, runner.object_hash(steps))
+        elif action == 'native_contract':
+            context[name] = native_contract(session, step['group'], device, deadline)
+            assertions += len(context[name]['tests'])
+        elif action == 'telemetry':
+            context[name] = quick_telemetry(session, deadline)
         elif action == 'audio':
             if not device.get('audio_capture'):
                 raise runner.NotTested('Guest PCM capture is unavailable in this artifact/session contract')
@@ -896,11 +1036,14 @@ def run_device(device, name, suite, root, seconds):
         session.start()
         report['launched'] = True
         report.update(session.identity)
+        quick = bool(suite and suite[0].get('profile') == 'quick')
+        report['profile'] = 'quick' if quick else 'extended'
         for definition, row in zip(suite, rows):
-            if definition is not suite[0]:
+            if definition is not suite[0] and not quick:
                 session.restart(reset=True)
             for check, result in zip(definition['checks'], row['checks']):
                 context = {}
+                result['evidence_kind'] = check.get('evidence_kind', 'real-game/device scenario')
                 check_started = time.monotonic()
                 check_deadline = min(deadline, check_started + check.get('seconds', 90))
                 session.deadline = session.adapter.deadline = check_deadline
@@ -926,7 +1069,14 @@ def run_device(device, name, suite, root, seconds):
                     raise runner.NotTested('Session cap reached; remaining checks not run')
                 if not session.adapter.alive():
                     code = getattr(session.adapter.process, 'returncode', None) if isinstance(session.adapter, runner.Local) else None
-                    raise checks.CheckFailed('Owned game exited before session completion; observed exit code ' + str(code))
+                    result.update(verdict='FAIL', reason='Owned game exited during subcheck; observed exit code ' + str(code))
+                if result['verdict'] != 'PASS' and check is not definition['checks'][-1]:
+                    # Preserve the original failure, then reset only owned copies.
+                    # A failed UI route must not become setup for the next core check.
+                    session.deadline = session.adapter.deadline = deadline
+                    session.restart(reset=True, retain_variant=True)
+                    report.setdefault('recovery', []).append({'scenario': definition['id'], 'after': check['id'],
+                                                              'method': 'owned isolated restart'})
     except runner.NotTested as error:
         report['session_reason'] = str(error)
     except (Exception, KeyboardInterrupt) as error:
@@ -1113,11 +1263,12 @@ def main(argv=None):
     parser.add_argument('--config')
     parser.add_argument('--devices', nargs='+')
     parser.add_argument('--scenarios', nargs='+', choices=[f'{i:02}' for i in range(1, 11)])
+    parser.add_argument('--profile', choices=('quick', 'extended'), default='quick')
     parser.add_argument('--seconds', type=int, default=1800)
     parser.add_argument('--output-parent', default=tempfile.gettempdir())
     parser.add_argument('--list', action='store_true')
     args = parser.parse_args(argv)
-    suite = definitions()
+    suite = definitions(args.profile)
     if args.list:
         for item in suite:
             print(item['id'] + ': ' + item['title'] + ' (' + str(len(item['checks'])) + ' automatic subchecks)')
@@ -1127,7 +1278,7 @@ def main(argv=None):
     if args.scenarios:
         suite = [value for value in suite if value['id'] in args.scenarios]
     root = runner.output_directory(args.output_parent)
-    report = {'schema': 1, 'run_id': uuid.uuid4().hex,
+    report = {'schema': 1, 'run_id': uuid.uuid4().hex, 'profile': args.profile,
               'started_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'devices': []}
     devices = [(name, runner.load_device(args.config, name)) for name in args.devices]
     for name, device in devices:

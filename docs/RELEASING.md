@@ -368,6 +368,9 @@ setup, normal counter/gate routes and multiplayer. Keep the existing reviewed
 matrix and human sign-offs alongside these automatic results. An incomplete
 route, unsupported capability or failed check cannot be turned green to satisfy
 a release checklist.
+The current PR stage is explicitly `--profile quick`: its contract rows and short
+telemetry are useful preliminary evidence, while the extended real-game matrix
+remains deferred. A QUICK pass cannot complete an exact-candidate sign-off.
 
 Performance baselines use the same physical device, GPU/driver, resolution,
 execution mode, scene/route and settings, with warm-up and repeated measurements.

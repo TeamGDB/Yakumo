@@ -304,6 +304,26 @@ also on an earlier baseline and with audio enabled. Desktop activation did not
 produce observed SDL focus on macOS. These remain failed/unverified outcomes.
 Normal counter/gate, patched-image translation, complete photo/lifecycle checks,
 save/backup, real replacement textures, two-peer hunts and repeated performance
-workloads remain in progress. Physical Android and cloud validation are pending;
+workloads remain in progress. At application source `751424a`, Windows native
+results are 61/61 (51 SSH tests plus 10 interactive renderer tests); physical
+Android native results are a fresh 56/56 after staging the actual FFmpeg/SDL
+runtime dependencies. The initial Android run retained nine link failures from
+an omitted dependency. An isolated full Android APK also passed copied-character
+boot with four independent state assertions and verified input hashes; desktop
+installer/portable variants remain unsupported on that adapter. Japanese and
+verified English-patched inputs pass the menu/dialogue field checks, including
+covered expectations that differ from source and original fallback. The normal
+counter/gate route has independently reached quest 204 with an advancing timer
+and no quest cheats. Complete device scenarios and cloud validation are pending;
 no cloud reservations have been consumed at this checkpoint. The suite does not
 complete any exact-candidate release or human playtesting sign-off.
+
+The current delivery scope is the QUICK stage. The first macOS run passed all
+ten categories (12 automatic subchecks) in 99.7 seconds with cleanup passing,
+using application source `751424a`. The aggregate identifies actual quest/input/
+text/photo/telemetry smoke separately from executed synthetic/native installation,
+save/mod, two-peer transport and lifecycle/PCM contracts. This result does not
+claim completion of the deferred extended matrix. Initial physical Android
+preparation measured about 329.5 seconds before the short game checks, exceeding
+the entire 300-second Google pilot cap; no paid reservation is justified by that
+transfer path at this checkpoint.
