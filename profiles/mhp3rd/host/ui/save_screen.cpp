@@ -701,36 +701,36 @@ void save_rows() {
     }
 #if defined(MHP3RD_ANDROID_APP)
     // Android's picker offers no storage's root and no Download folder itself.
-    if (button_row("Import save…",
+    if (button_row("Import Save…",
             {!available, {},
                 "Copy a save from PPSSPP, a memory stick or an export: pick its PSP folder, or "
                 "a folder holding it or the save folders. A save it replaces is kept."}))
         open_browser(Stage::ChooseImport);
-    if (button_row("Export save…",
+    if (button_row("Export Save…",
             {!available, {},
                 "Copy your game data and downloaded quests to a folder you pick (Android does "
                 "not offer Download itself: make or pick a folder in it)."}))
         open_browser(Stage::ChooseExport);
 #else
-    if (button_row("Import save…",
+    if (button_row("Import Save…",
             {!available, {},
                 "Copy a save from a PSP memory stick, PPSSPP or another installation: choose "
                 "its folder (ULJM05800, ULJM05800QST) or the PSP/SAVEDATA folder that holds "
                 "it. A save it replaces is kept, not deleted."}))
         open_browser(Stage::ChooseImport);
-    if (button_row("Export save…",
+    if (button_row("Export Save…",
             {!available, {},
                 "Copy your game data and downloaded quests to a folder you choose, to take them "
                 "to a PSP or another machine."}))
         open_browser(Stage::ChooseExport);
 #endif
-    if (button_row("Back up saves…",
+    if (button_row("Back Up Saves…",
             {!available, {},
                 "Copy all of this game's saves, the install data included, to the backups "
                 "folder or a folder you choose."}))
         go(Stage::Backup);
     settings::Settings &settings = settings::current();
-    if (toggle_row("Remind me to back up after updates", settings.backup_reminder,
+    if (toggle_row("Remind Me to Back Up After Updates", settings.backup_reminder,
             {false, {},
                 "On: the first time a new version of Yakumo starts, it asks you to back up your saves, with a "
                 "button that does it for you."})) {
@@ -738,10 +738,10 @@ void save_rows() {
         settings::save();
     }
 #if !defined(MHP3RD_ANDROID_APP)
-    if (button_row("Open the saves folder",
+    if (button_row("Open the Saves Folder",
             {!available, {}, "Show the folder the game saves to (PSP/SAVEDATA) in the file manager."}))
         open_folder(sd::memory_stick() / "PSP" / "SAVEDATA");
-    if (button_row("Open the backups folder", {false, {}, "Show " + utf8(backups_directory()) + "."}))
+    if (button_row("Open the Backups Folder", {false, {}, "Show " + utf8(backups_directory()) + "."}))
         open_folder(backups_directory());
 #endif
 }

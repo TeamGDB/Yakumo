@@ -4,8 +4,12 @@
     "reason": "AudioSink method declarations have no standalone LLVM line map. Their out-of-line implementations and actual SDL output-gain behavior are covered by renderer/audio regression tests and remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/settings/settings.hpp": {
-    "sha256": "9767f4139450d8007a00819e7f4ebd6ef0e6d393b0f76ebf723fc4f8c7b7793c",
-    "reason": "Reviewed combined declarations and aggregate member defaults from the translation and background-audio/input changes; no standalone function body is exempted. Executable implementations remain subject to the normal diff gate."
+    "sha256": "d2b0cd32d64cd56b18a2f589e275618f0884a9f0131e6cd5db19dfa07b2aea7f",
+    "reason": "Reviewed declarations and aggregate member defaults, including the two appended compact performance enum values; no standalone function body is exempted. Settings round trips and mode selection are tested. Executable implementations remain subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/perf/perf_overlay.hpp": {
+    "sha256": "48d8fd2b2912a0231e0d8293bf0f9027a091235c0bae95d68845a6d4a058bc79",
+    "reason": "Reviewed constants and function declarations only; no executable function body is exempted. Compact text, bounds, scaling and renderer captures are tested in the out-of-line implementations, which remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/app_paths.hpp": {
     "sha256": "17ac7c479a32e74dc2b1e80cce27db2e2d601cfdac31926a25006d5528eba4c9",
@@ -32,8 +36,12 @@
     "reason": "Reviewed function/class declarations and aggregate member defaults only; no standalone function body is exempted. Folder staging, JNI transport and menu implementations remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/ui/mods_screen.hpp": {
-    "sha256": "8464db48399bfca648fdcca31710dc9426456d94fc622c19cb359ee55bea95eb",
-    "reason": "Reviewed function/class declarations and aggregate member defaults only; no standalone function body is exempted. Folder staging, JNI transport and menu implementations remain subject to the normal diff gate."
+    "sha256": "f81cd59c91e5f83e627bcf0327a5535404da18c0202fbc8162b7b3dd68f69b35",
+    "reason": "Reviewed function declarations only; this edit updates a documented menu label. No executable body is exempted. Mod menu implementations and renderer/UI regressions remain subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/ui/layered_armor_screen.hpp": {
+    "sha256": "c154c41c563ca09adbb76ecfe0376247dcf7c2867af6100b1b5a51602573ef96",
+    "reason": "Reviewed function declarations only; these edits document the move from Mods to QoL. No executable body is exempted. Layered armor menu implementations and renderer/UI regressions remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/platform/android_display.hpp": {
     "sha256": "90e5ee597fbc6e1b5f91702c3fc588813a1065be286e1c415b2ec82107336843",

@@ -108,7 +108,7 @@ int cycle(int value, int delta, int count) {
     return ((value + delta) % count + count) % count;
 }
 
-constexpr const char *kTabs[] = {"Video", "Audio", "Controls", "Network", "Mods", "System", "Debug"};
+constexpr const char *kTabs[] = {"Video", "Audio", "Controls", "Network", "QoL", "Mods", "System", "Debug"};
 constexpr int kTabCount = static_cast<int>(std::size(kTabs));
 
 // Where the menu was when it last closed (#189): its page, how far that page
@@ -164,6 +164,7 @@ private:
     void controls();
     void preset_rows();
     void network();
+    void qol();
     void mods();
     void system();
     bool confirm_dialog();
@@ -201,11 +202,10 @@ bool Menu::frame() {
     // Back closes the font list, or the save import and export, before it
     // closes the menu.
     bool font_list_was_open = (tab_ == 0 && (font_list_open() || texture_pack_screen_open())) ||
-        (tab_ == 2 && controllers_screen_open()) ||
-        (tab_ == 4 && (mods_screen_open() || layered_armor_screen_open())) ||
-        (tab_ == 5 && (save_screen_open() || translation_screen_open()));
+        (tab_ == 2 && controllers_screen_open()) || (tab_ == 4 && layered_armor_screen_open()) ||
+        (tab_ == 5 && mods_screen_open()) || (tab_ == 6 && (save_screen_open() || translation_screen_open()));
 #if defined(MHP3RD_DEBUG_MENU)
-    font_list_was_open = font_list_was_open || (tab_ == 6 && debug_screen_open());
+    font_list_was_open = font_list_was_open || (tab_ == 7 && debug_screen_open());
 #endif
     back_ = back || pad_back;
 
@@ -219,9 +219,9 @@ bool Menu::frame() {
     begin_panel("##menu", "Yakumo", paused_ ? "Paused" : "Running", true);
 #if defined(MHP3RD_DEBUG_MENU)
     // The developer tools' page, in developer builds run with MHP3RD_DEBUG_MENU=1.
-    const int tab_count = debug::enabled() ? 7 : 6;
+    const int tab_count = debug::enabled() ? 8 : 7;
 #else
-    const int tab_count = 6;
+    const int tab_count = 7;
 #endif
     // A page that is not there this run (Debug) gives way to the first.
     if (tab_ >= tab_count) tab_ = 0;
@@ -267,10 +267,13 @@ bool Menu::frame() {
         network();
         break;
     case 4:
+        qol();
+        break;
+    case 5:
         mods();
         break;
 #if defined(MHP3RD_DEBUG_MENU)
-    case 6:
+    case 7:
         debug_page(back_);
         if (debug_page_resume()) close_ = true;
         break;
@@ -310,7 +313,7 @@ bool Menu::frame() {
     else if (binding == BindingsFocus::Reset)
         hints({{Control::Confirm, "Reset action"}, {Control::Back, "Back"}, {Control::Tabs, "Section"},
             {Control::Menu, "Resume"}});
-    else if (tab_ >= 4 || binding == BindingsFocus::Fix)
+    else if (tab_ >= 5 || (tab_ == 4 && layered_armor_screen_open()) || binding == BindingsFocus::Fix)
         hints({{Control::Confirm, "Select"}, {Control::Back, "Back"}, {Control::Tabs, "Section"},
             {Control::Menu, "Resume"}});
     else
@@ -334,7 +337,7 @@ void Menu::video() {
     if (font_list(back_)) return;
     if (texture_pack_screen(back_)) return;
     settings::Settings &s = settings::current();
-    section("Picture");
+    section("Display Settings:");
     {
         RowOptions o = options_for("video.internal_scale",
             "Auto draws the game at the window's own size and follows it (at most 1632 "
@@ -356,7 +359,7 @@ void Menu::video() {
 #if !defined(__ANDROID__)
     // A phone is always full screen: no window to size.
     {
-        const int delta = choice_row("Display", s.fullscreen ? "Fullscreen" : "Window",
+        const int delta = choice_row("Window Mode", s.fullscreen ? "Fullscreen" : "Window",
             options_for("video.fullscreen", "Fill the screen, or play in a window you can resize."));
         if (delta != 0) {
             s.fullscreen = !s.fullscreen;
@@ -371,7 +374,7 @@ void Menu::video() {
             o.note = "Fullscreen";
         }
         const std::string value = "×" + std::to_string(s.window_scale) + "   " + size_text(s.window_scale);
-        if (const int delta = choice_row("Window size", value, o)) {
+        if (const int delta = choice_row("Window Resolution", value, o)) {
             s.window_scale = static_cast<std::uint32_t>(
                 cycle(static_cast<int>(s.window_scale) - 1, delta, static_cast<int>(settings::kMaxWindowScale)) + 1);
             renderer().set_window_scale(s.window_scale);
@@ -382,7 +385,7 @@ void Menu::video() {
     {
         static const char *const kAspects[] = {"Original", "Stretch", "Fill"};
         const int current = static_cast<int>(s.aspect);
-        if (const int delta = choice_row("Aspect ratio", kAspects[current],
+        if (const int delta = choice_row("Aspect Ratio", kAspects[current],
                 options_for("video.aspect",
                     "Original keeps the PSP's shape with black bars at the sides or top. "
                     "Stretch fills the window by stretching the picture. Fill widens (or "
@@ -393,7 +396,7 @@ void Menu::video() {
             settings::save();
         }
     }
-    if (choice_row("Scaling filter", s.sharp_screen ? "Sharp" : "Smooth",
+    if (choice_row("Scaling Filter", s.sharp_screen ? "Sharp" : "Smooth",
             options_for("video.sharp_screen",
                 "How the finished picture is scaled to the window: smooth "
                 "(bilinear) or sharp (nearest pixel)."))) {
@@ -401,7 +404,8 @@ void Menu::video() {
         renderer().set_sharp_screen(s.sharp_screen);
         settings::save();
     }
-    if (choice_row("Texture filter", s.sharp_textures ? "Sharp" : "Smooth",
+    section("Textures:");
+    if (choice_row("Texture Filter", s.sharp_textures ? "Sharp" : "Smooth",
             options_for("video.sharp_textures",
                 "How the game's textures are sampled: smooth (bilinear) or "
                 "sharp (nearest texel)."))) {
@@ -412,7 +416,7 @@ void Menu::video() {
     {
         static const char *const kModes[] = {"Off", "Sharp bilinear", "MMPX"};
         const int current = static_cast<int>(s.ui_textures);
-        if (const int delta = choice_row("UI textures", kModes[current],
+        if (const int delta = choice_row("UI Textures", kModes[current],
                 options_for("video.ui_textures",
                     "Above x1, how the game's 2D interface (HUD, menus, icons) is drawn; the 3D world is "
                     "not touched. Off: as before. Sharp bilinear: crisp pixels at any scale, without blur. "
@@ -421,6 +425,18 @@ void Menu::video() {
             s.ui_textures = static_cast<settings::UiTextures>(cycle(current, delta, 3));
             settings::save();
         }
+    }
+    {
+        const std::string key = input::format(s.controls.keys[static_cast<std::size_t>(input::Action::HideHud)]);
+        RowOptions o;
+        o.description = "Hides the game's HUD for pictures and videos: health, stamina, sharpness, the clock, the "
+                        "item bar, the map, name tags and prompts. Menus and dialogs stay. Its key (" +
+            (key.empty() ? std::string("none: set it in Controls") : key) + ") does the same.";
+        if (!gpu::hud::available()) {
+            o.disabled = true;
+            o.note = "Not with this game's code";
+        }
+        if (toggle_row("Hide HUD", gpu::hud::hidden(), o)) gpu::hud::toggle();
     }
     {
         RowOptions o = options_for("video.texture_pack",
@@ -437,14 +453,14 @@ void Menu::video() {
                 o.note = "Pack folder missing: " +
                     install::path_to_utf8(install::path_from_utf8(status.substr(16)).filename());
         }
-        if (choice_row("Texture pack", s.texture_pack ? "On" : "Off", o)) {
+        if (choice_row("Texture Pack", s.texture_pack ? "On" : "Off", o)) {
             s.texture_pack = !s.texture_pack;
             renderer().set_texture_pack(s.texture_pack);
             settings::save();
         }
     }
     texture_pack_rows();
-    section("Timing");
+    section("Framerate and Timings:");
     {
         struct Mode {
             settings::PresentMode mode;
@@ -496,7 +512,7 @@ void Menu::video() {
                     : "Lowered to keep the game at full speed; it tries the chosen rate again later.";
             }
         }
-        if (const int delta = choice_row("Frame rate", value, o)) {
+        if (const int delta = choice_row("Frame Rate", value, o)) {
             s.frame_rate = static_cast<settings::FrameRate>(cycle(current, delta, 6));
             renderer().set_frame_rate(s.frame_rate);
             settings::save();
@@ -507,13 +523,13 @@ void Menu::video() {
             "On lowers the frame rate by itself when presenting that often would slow the "
             "game. Off keeps the chosen rate, and the game may then run below full speed.");
         if (s.unthrottled || s.frame_rate == settings::FrameRate::Fps30) o.disabled = true;
-        if (choice_row("Lower when behind", s.frame_rate_auto ? "On" : "Off", o)) {
+        if (choice_row("Lower When Behind", s.frame_rate_auto ? "On" : "Off", o)) {
             s.frame_rate_auto = !s.frame_rate_auto;
             renderer().set_frame_rate_auto(s.frame_rate_auto);
             settings::save();
         }
     }
-    if (choice_row("Game speed", s.unthrottled ? "Unlimited" : "Normal",
+    if (choice_row("Game Speed", s.unthrottled ? "Unlimited" : "Normal",
             options_for("video.unthrottled",
                 "Normal holds the game to real time. Unlimited lets it run as "
                 "fast as frames can be drawn, which also speeds up the game."))) {
@@ -521,83 +537,20 @@ void Menu::video() {
         settings::save();
     }
     {
-        RowOptions o = options_for("video.fast_loading",
-            "Lets the game run ahead of real time while it loads and is silent, so loads "
-            "take as long as the computer needs. Never during play, sound, movies or "
-            "ad hoc play.");
-        if (s.unthrottled && !o.disabled) {
-            o.disabled = true;
-            o.note = "Game speed is Unlimited";
-        }
-        if (toggle_row("Fast loading", s.fast_loading, o)) {
-            s.fast_loading = !s.fast_loading;
-            settings::save();
-        }
-    }
-    {
-        // Single player only: during ad hoc play the bind does nothing.
-        const bool online = adhoc_networking_on() || adhoc_session_active();
-        const auto guarded = [&](RowOptions o) {
-            if (o.disabled) return o;
-            if (s.unthrottled) {
-                o.disabled = true;
-                o.note = "Game speed is Unlimited";
-            } else if (online) {
-                o.disabled = true;
-                o.note = "Single player only";
-            }
-            return o;
-        };
-        static const char *const kModes[] = {"Hold", "Toggle", "Off"};
-        const int current = static_cast<int>(s.fast_forward);
-        const std::string key = input::format(s.controls.keys[static_cast<std::size_t>(input::Action::FastForward)]);
-        // Two lines at most, so the note of a disabled row still fits under it.
-        const std::string help = "The game runs faster while its key (" +
-            (key.empty() ? std::string("none: set it in Controls") : key) +
-            ") is held, or from one press to the next, muted. Single player only.";
-        if (const int delta =
-                choice_row("Fast-forward", kModes[current], guarded(options_for("video.fast_forward", help)))) {
-            s.fast_forward = static_cast<fast_forward::Mode>(cycle(current, delta, 3));
-            settings::save();
-        }
-        RowOptions o = guarded(options_for("video.fast_forward_speed",
-            "How many times faster than real time the game runs while it "
-            "fast-forwards, if the computer keeps up."));
-        if (s.fast_forward == fast_forward::Mode::Off && !o.disabled) {
-            o.disabled = true;
-            o.note = "Fast-forward is off";
-        }
-        int speed = static_cast<int>(s.fast_forward_speed);
-        if (slider_row("Fast-forward speed", speed, static_cast<int>(fast_forward::kMinSpeed),
-                static_cast<int>(fast_forward::kMaxSpeed), 1, "%dx", o)) {
-            s.fast_forward_speed = static_cast<std::uint32_t>(speed);
-            settings::save();
-        }
-    }
-    {
-        const std::string key = input::format(s.controls.keys[static_cast<std::size_t>(input::Action::HideHud)]);
-        RowOptions o;
-        o.description = "Hides the game's HUD for pictures and videos: health, stamina, sharpness, the clock, the "
-                        "item bar, the map, name tags and prompts. Menus and dialogs stay. Its key (" +
-            (key.empty() ? std::string("none: set it in Controls") : key) + ") does the same.";
-        if (!gpu::hud::available()) {
-            o.disabled = true;
-            o.note = "Not with this game's code";
-        }
-        if (toggle_row("Hide HUD", gpu::hud::hidden(), o)) gpu::hud::toggle();
-    }
-    {
-        static const char *const kPerf[] = {"Off", "Overlay", "Overlay and log", "Log only"};
+        static const char *const kPerf[] = {
+            "Off", "Overlay", "Overlay and Log", "Log Only", "Compact", "Compact and Log"};
         const int current = static_cast<int>(s.perf);
-        if (const int delta = choice_row("Performance", kPerf[current],
+        if (const int delta = choice_row("Performance Overlay", kPerf[current],
                 options_for("video.performance",
-                    "Frame times and speed in the top-left corner, and a [perf] line "
-                    "per second on the console. F3 shows or hides the overlay."))) {
-            s.perf = static_cast<settings::PerfDisplay>(cycle(current, delta, 4));
+                    "Overlay shows frame times and speed in the top-left corner. Compact shows FPS, speed and "
+                    "Vsync in the bottom-left corner. Log modes print a [perf] line per second on the console. "
+                    "F3 shows or hides the selected overlay."))) {
+            s.perf = static_cast<settings::PerfDisplay>(cycle(current, delta, static_cast<int>(std::size(kPerf))));
             renderer().set_perf_overlay(perf::options().overlay);
             settings::save();
         }
     }
+    section("Hardware Settings:");
     {
         static const char *const kCompat[] = {"Auto", "On", "Off"};
         const int current = static_cast<int>(s.gpu_compat);
@@ -607,14 +560,14 @@ void Menu::video() {
             "when the start-up test picture comes out wrong or the driver refuses a shader. Applies when Yakumo "
             "starts next. Now: " +
                 renderer().gpu_compat_status() + ".");
-        if (const int delta = choice_row("GPU compatibility", kCompat[current], o)) {
+        if (const int delta = choice_row("GPU Compatibility", kCompat[current], o)) {
             s.gpu_compat = static_cast<settings::GpuCompat>(cycle(current, delta, 3));
             settings::save();
         }
     }
     font_rows();
-    ImGui::Dummy({0.0f, font_gap()});
-    if (button_row("Restore video defaults", {false, {}, "Every setting on this page back to how Yakumo ships."})) {
+    section("Reset to Defaults:");
+    if (button_row("Restore Video Defaults", {false, {}, "Every setting on this page back to how Yakumo ships."})) {
         const settings::Settings &d = settings::defaults();
         const auto restore = [&](const char *key, auto &value, const auto &fallback) {
             if (settings::overridden_by(key) == nullptr) value = fallback;
@@ -632,9 +585,6 @@ void Menu::video() {
         restore("video.frame_rate", s.frame_rate, d.frame_rate);
         restore("video.frame_rate_auto", s.frame_rate_auto, d.frame_rate_auto);
         restore("video.unthrottled", s.unthrottled, d.unthrottled);
-        restore("video.fast_loading", s.fast_loading, d.fast_loading);
-        restore("video.fast_forward", s.fast_forward, d.fast_forward);
-        restore("video.fast_forward_speed", s.fast_forward_speed, d.fast_forward_speed);
         restore("video.performance", s.perf, d.perf);
         renderer().set_internal_scale(s.internal_scale);
         renderer().set_fullscreen(s.fullscreen);
@@ -663,7 +613,7 @@ void Menu::audio() {
         }
         return options;
     };
-    section("Output");
+    section("Output:");
     int volume = static_cast<int>(s.volume);
     if (slider_row(
             "Volume", volume, 0, 100, 5, "%d%%", locked("audio.volume", "Loudness of everything the game plays."))) {
@@ -676,7 +626,7 @@ void Menu::audio() {
         sink.refresh_settings();
         settings::save();
     }
-    if (toggle_row("Mute in background", s.background_mute,
+    if (toggle_row("Mute in Background", s.background_mute,
             locked("audio.background_mute", "Silence the game while it runs in the background."))) {
         s.background_mute = !s.background_mute;
         sink.refresh_settings();
@@ -684,8 +634,8 @@ void Menu::audio() {
     }
     info_row(
         "Device", device ? (paused_ ? "44100 Hz stereo, paused while this menu is open" : "44100 Hz stereo") : "None");
-    ImGui::Dummy({0.0f, font_gap()});
-    if (button_row("Restore audio defaults", {!device, {}, "Full volume, not muted."})) {
+    section("Reset to Defaults:");
+    if (button_row("Restore Audio Defaults", {!device, {}, "Full volume, not muted."})) {
         s.volume = settings::defaults().volume;
         s.mute = settings::defaults().mute;
         s.background_mute = settings::defaults().background_mute;
@@ -804,7 +754,7 @@ bool preset_name_character(char32_t c) {
 
 void Menu::preset_rows() {
     settings::Settings &s = settings::current();
-    section("Control preset");
+    section("Controls Preset:");
     const RowOptions locked = options_for("input.preset", "");
     // The shipped presets, then the player's.
     const int shipped = static_cast<int>(input::kPresets);
@@ -864,7 +814,7 @@ void Menu::preset_rows() {
             o.disabled = true;
             o.note = "At most " + std::to_string(input::kMaxUserPresets) + " presets";
         }
-        if (button_row("Save as a new preset", o)) {
+        if (button_row("Save as a New Preset", o)) {
             const std::string base = s.control_preset.shipped ? std::string("Custom") : s.control_preset.user;
             const std::string name = input::unique_preset_name(s.user_presets, base);
             s.user_presets.push_back({name, s.controls, settings::base_preset(s)});
@@ -876,7 +826,7 @@ void Menu::preset_rows() {
     if (!s.control_preset.shipped) {
         RowOptions o = locked;
         o.description = "Removes this preset for good and goes back to Default. Asks first.";
-        if (button_row("Delete this preset", o, colors::kDanger)) confirm_ = Confirm::DeletePreset;
+        if (button_row("Delete This Preset", o, colors::kDanger)) confirm_ = Confirm::DeletePreset;
     }
     // Clashes anywhere in the layout.
     const std::size_t clashes = bindings_conflicts();
@@ -892,10 +842,10 @@ void Menu::controls() {
     controllers_rows();
     preset_rows();
     bindings_editor(preset_notice_);
-    section("Combinations");
+    section("Combinations:");
     {
         int window = static_cast<int>(s.chord_window);
-        if (slider_row("Chord window", window, 0, static_cast<int>(input::kMaxChordWindowMs), 10,
+        if (slider_row("Chord Window", window, 0, static_cast<int>(input::kMaxChordWindowMs), 10,
                 window == 0 ? "Off" : "%d ms",
                 options_for("input.chord_window",
                     "How long a button that begins a combination waits for the rest of it, such as "
@@ -906,7 +856,7 @@ void Menu::controls() {
             settings::save();
         }
     }
-    section("Gamepad");
+    section("Gamepad:");
     {
         SDL_Gamepad *pad = renderer().gamepad();
         const char *name = pad != nullptr ? SDL_GetGamepadName(pad) : nullptr;
@@ -914,14 +864,14 @@ void Menu::controls() {
             pad == nullptr ? "No gamepad; the keyboard and mouse drive the game"
                            : (name != nullptr ? name : "Gamepad"));
     }
-    if (toggle_row("Gamepad in background", s.background_gamepad,
+    if (toggle_row("Gamepad in Background", s.background_gamepad,
             options_for("input.background_gamepad",
                 "Allow this window to read the gamepad while unfocused. "
                 "Other running games may also read the same controller. Keyboard and mouse remain focused."))) {
         s.background_gamepad = !s.background_gamepad;
         settings::save();
     }
-    if (choice_row("Confirm button", s.confirm_south ? "Bottom (Western)" : "Right, ○ (Japanese)",
+    if (choice_row("Confirm Button", s.confirm_south ? "Bottom (Western)" : "Right, ○ (Japanese)",
             options_for("input.confirm",
                 "Which face button confirms, in the game and in this menu. The "
                 "game's prompts show ○ to confirm and × to go back. It swaps the "
@@ -930,7 +880,7 @@ void Menu::controls() {
         settings::save();
     }
     int dead_zone = static_cast<int>(std::lround(s.dead_zone * 100.0f));
-    if (slider_row("Stick dead zone", dead_zone, 0, 50, 1, "%d%%",
+    if (slider_row("Stick Dead Zone", dead_zone, 0, 50, 1, "%d%%",
             options_for("input.dead_zone",
                 "How far the left stick moves before the hunter does. Raise it if "
                 "the hunter drifts."))) {
@@ -938,7 +888,7 @@ void Menu::controls() {
         settings::save();
     }
     int trigger = static_cast<int>(std::lround(s.trigger * 100.0f));
-    if (slider_row("Trigger point", trigger, 5, 100, 5, "%d%%",
+    if (slider_row("Trigger Point", trigger, 5, 100, 5, "%d%%",
             options_for("input.trigger", "How far LT/RT (L2/R2) travel before they press anything."))) {
         s.trigger = static_cast<float>(trigger) / 100.0f;
         settings::save();
@@ -946,7 +896,7 @@ void Menu::controls() {
     {
         static const char *const kModes[] = {"Camera", "D-pad", "Off"};
         const int current = static_cast<int>(s.right_stick);
-        if (const int delta = choice_row("Camera stick", kModes[current],
+        if (const int delta = choice_row("Camera Stick", kModes[current],
                 options_for("input.right_stick",
                     "Camera uses the HD release's own right-stick camera. D-pad "
                     "presses the D-pad instead, like the PSP's camera controls. "
@@ -968,7 +918,7 @@ void Menu::controls() {
             o.disabled = true;
             o.note = "Camera stick is not the camera";
         }
-        if (toggle_row("Analog camera", s.analog_camera, o)) {
+        if (toggle_row("Analog Camera", s.analog_camera, o)) {
             s.analog_camera = !s.analog_camera;
             settings::save();
         }
@@ -978,7 +928,7 @@ void Menu::controls() {
             o.note = "Analog camera is off";
         }
         int speed = static_cast<int>(s.camera_speed);
-        if (slider_row("Camera speed", speed, 20, 720, 10, "%d deg/s", o)) {
+        if (slider_row("Camera Speed", speed, 20, 720, 10, "%d deg/s", o)) {
             s.camera_speed = static_cast<float>(speed);
             settings::save();
         }
@@ -991,34 +941,8 @@ void Menu::controls() {
             o.note = "Analog camera is off";
         }
         int aim = static_cast<int>(s.aim_speed);
-        if (slider_row("Aim speed", aim, 10, 360, 5, "%d deg/s", o)) {
+        if (slider_row("Aim Speed", aim, 10, 360, 5, "%d deg/s", o)) {
             s.aim_speed = static_cast<float>(aim);
-            settings::save();
-        }
-    }
-    {
-        const auto slot = static_cast<std::size_t>(input::Action::LockOn);
-        std::string bind = input::format(s.controls.keys[slot]);
-        const std::string pad = input::format(s.controls.pad[slot]);
-        if (!pad.empty()) bind += (bind.empty() ? "" : " / ") + pad;
-        const std::string help = "A tap of Lock on" +
-            (bind.empty() ? std::string(" (unbound: set it in Controls)") : " (" + bind + ")") +
-            " turns the quest camera to the nearest large monster and keeps it in view. Tap again for the next "
-            "large monster in the area; after the last one, a tap lets go. Turning the camera by hand, the D-pad's "
-            "camera and L let go too. Off, the bind does nothing.";
-        if (toggle_row("Lock-on", s.lock_on, options_for("input.lock_on", help.c_str()))) {
-            s.lock_on = !s.lock_on;
-            settings::save();
-        }
-        RowOptions o = options_for("input.lock_on_marker",
-            "A small ring over the monster the camera is locked "
-            "onto.");
-        if (!s.lock_on && !o.disabled) {
-            o.disabled = true;
-            o.note = "Lock-on is off";
-        }
-        if (toggle_row("Lock-on marker", s.lock_on_marker, o)) {
-            s.lock_on_marker = !s.lock_on_marker;
             settings::save();
         }
     }
@@ -1028,7 +952,7 @@ void Menu::controls() {
             o.disabled = true;
             o.note = "Camera stick is not the camera";
         }
-        if (toggle_row("Invert camera horizontally", s.invert_camera_x, o)) {
+        if (toggle_row("Invert Camera Horizontally", s.invert_camera_x, o)) {
             s.invert_camera_x = !s.invert_camera_x;
             settings::save();
         }
@@ -1037,7 +961,7 @@ void Menu::controls() {
             o.disabled = true;
             o.note = "Camera stick is not the camera";
         }
-        if (toggle_row("Invert camera vertically", s.invert_camera_y, o)) {
+        if (toggle_row("Invert Camera Vertically", s.invert_camera_y, o)) {
             s.invert_camera_y = !s.invert_camera_y;
             settings::save();
         }
@@ -1051,31 +975,13 @@ void Menu::controls() {
             o.note = "Camera stick is not the D-pad";
         }
         int zone = static_cast<int>(std::lround(s.right_stick_zone * 100.0f));
-        if (slider_row("Camera stick D-pad point", zone, 10, 100, 5, "%d%%", o)) {
+        if (slider_row("Camera Stick D-Pad Point", zone, 10, 100, 5, "%d%%", o)) {
             s.right_stick_zone = static_cast<float>(zone) / 100.0f;
             settings::save();
         }
     }
 
-    section("Hunter name");
-    {
-        const bool keyboard = s.name_entry == settings::NameEntry::Keyboard;
-        if (choice_row("When the game asks for a name", keyboard ? "On-screen keyboard" : "Use the name below",
-                options_for("input.name_entry",
-                    "On-screen keyboard: type the name with the gamepad or the keyboard while the "
-                    "game waits. Otherwise the name below is given at once."))) {
-            s.name_entry = keyboard ? settings::NameEntry::Fixed : settings::NameEntry::Keyboard;
-            settings::save();
-        }
-    }
-    if (text_row("name", "Hunter name", s.name, kHunterNameLength, false, hunter_name_character,
-            options_for("input.name",
-                "Given when the game asks for a name and the on-screen keyboard is "
-                "off, and to other players when the network nickname is empty. "
-                "Letters, digits, spaces and simple punctuation.")))
-        settings::save();
-
-    section("Keyboard and mouse");
+    section("Keyboard and Mouse:");
     {
         RowOptions o = options_for("input.mouse",
             "While the game runs, the window takes the pointer: moving the mouse turns the "
@@ -1093,7 +999,7 @@ void Menu::controls() {
             o.note = "Mouse is off";
         }
         int sensitivity = static_cast<int>(std::lround(s.mouse_sensitivity * 100.0f));
-        if (slider_row("Mouse sensitivity", sensitivity, 1, 99, 1, "0.%02d deg", o)) {
+        if (slider_row("Mouse Sensitivity", sensitivity, 1, 99, 1, "0.%02d deg", o)) {
             s.mouse_sensitivity = static_cast<float>(sensitivity) / 100.0f;
             settings::save();
         }
@@ -1102,7 +1008,7 @@ void Menu::controls() {
             o.disabled = true;
             o.note = "Mouse is off";
         }
-        if (toggle_row("Invert mouse horizontally", s.invert_mouse_x, o)) {
+        if (toggle_row("Invert Mouse Horizontally", s.invert_mouse_x, o)) {
             s.invert_mouse_x = !s.invert_mouse_x;
             settings::save();
         }
@@ -1111,14 +1017,93 @@ void Menu::controls() {
             o.disabled = true;
             o.note = "Mouse is off";
         }
-        if (toggle_row("Invert mouse vertically", s.invert_mouse_y, o)) {
+        if (toggle_row("Invert Mouse Vertically", s.invert_mouse_y, o)) {
             s.invert_mouse_y = !s.invert_mouse_y;
             settings::save();
         }
     }
 
-    ImGui::Dummy({0.0f, font_gap()});
-    if (button_row("Restore control defaults",
+    section("Touch Screen:");
+    {
+        RowOptions o = options_for("input.touch_controls",
+            "Controls drawn over the game once the screen is touched, in the layout below. "
+            "They hide again when a gamepad or the keyboard is used.");
+        if (toggle_row("On-Screen Controls", s.touch_controls, o)) {
+            s.touch_controls = !s.touch_controls;
+            settings::save();
+        }
+        const auto off = [&](RowOptions options) {
+            if (!s.touch_controls && !options.disabled) {
+                options.disabled = true;
+                options.note = "On-screen controls are off";
+            }
+            return options;
+        };
+        const bool action = s.touch_layout == settings::TouchLayout::Action;
+        if (choice_row("Layout", action ? "Action" : "PSP buttons",
+                off(options_for("input.touch_layout",
+                    "PSP buttons: a stick where the left thumb lands, the face buttons on the "
+                    "right, L and R at the top corners. Action: large buttons named for what "
+                    "they do (attack, evade, guard, the combined attack), a fixed stick, the "
+                    "item pouch, and swipes for the item bar; every element can be moved, "
+                    "resized and rebound.")))) {
+            s.touch_layout = action ? settings::TouchLayout::Psp : settings::TouchLayout::Action;
+            settings::save();
+        }
+        const auto action_only = [&](RowOptions options) {
+            options = off(std::move(options));
+            if (s.touch_layout != settings::TouchLayout::Action && !options.disabled) {
+                options.disabled = true;
+                options.note = "For the Action layout";
+            }
+            return options;
+        };
+        if (button_row("Edit the Action Layout…",
+                action_only({false, {},
+                    "Move, resize, rebind and hide the Action layout's elements, over "
+                    "the game. Kept on this device."})))
+            open_touch_editor();
+        if (toggle_row("Haptic Feedback", s.touch_haptics,
+                action_only(options_for("input.touch_haptics",
+                    "A short vibration when an Action button is pressed or a swipe is "
+                    "taken, where the device can.")))) {
+            s.touch_haptics = !s.touch_haptics;
+            settings::save();
+        }
+        RowOptions dpad = off(options_for("input.touch_dpad",
+            "A D-pad at the left edge, for the game's menus, the "
+            "item box and the camera's D-pad controls. Off gives "
+            "its place to the stick."));
+        if (action && !dpad.disabled) {
+            dpad.disabled = true;
+            dpad.note = "For the PSP buttons layout";
+        }
+        if (toggle_row("D-Pad", s.touch_dpad, dpad)) {
+            s.touch_dpad = !s.touch_dpad;
+            settings::save();
+        }
+        int opacity = static_cast<int>(std::lround(s.touch_opacity * 100.0f));
+        if (slider_row("Controls Opacity", opacity, 10, 100, 5, "%d%%",
+                off(options_for("input.touch_opacity", "How strongly the on-screen controls are drawn.")))) {
+            s.touch_opacity = static_cast<float>(opacity) / 100.0f;
+            settings::save();
+        }
+        int size = static_cast<int>(std::lround(s.touch_size * 100.0f));
+        if (slider_row("Controls Size", size, 60, 160, 5, "%d%%",
+                off(options_for("input.touch_size", "The size of the on-screen controls.")))) {
+            s.touch_size = static_cast<float>(size) / 100.0f;
+            settings::save();
+        }
+        int speed = static_cast<int>(std::lround(s.touch_camera_speed));
+        if (slider_row("Touch Camera Speed", speed, 30, 720, 10, "%d deg",
+                off(options_for("input.touch_camera_speed",
+                    "Degrees the camera turns for a drag across the height of the screen.")))) {
+            s.touch_camera_speed = static_cast<float>(speed);
+            settings::save();
+        }
+    }
+    section("Reset to Defaults:");
+    if (button_row("Restore Control Defaults",
             {false, {},
                 "Every gamepad, keyboard, mouse, touch, name and free camera setting back to how "
                 "Yakumo ships, with the Default preset. Your own presets and the Action layout's "
@@ -1156,133 +1141,6 @@ void Menu::controls() {
         if (settings::overridden_by("input.preset") == nullptr) settings::choose_preset(s, d.control_preset);
         preset_notice_.clear();
         settings::save();
-    }
-
-    section("Touch screen");
-    {
-        RowOptions o = options_for("input.touch_controls",
-            "Controls drawn over the game once the screen is touched, in the layout below. "
-            "They hide again when a gamepad or the keyboard is used.");
-        if (toggle_row("On-screen controls", s.touch_controls, o)) {
-            s.touch_controls = !s.touch_controls;
-            settings::save();
-        }
-        const auto off = [&](RowOptions options) {
-            if (!s.touch_controls && !options.disabled) {
-                options.disabled = true;
-                options.note = "On-screen controls are off";
-            }
-            return options;
-        };
-        const bool action = s.touch_layout == settings::TouchLayout::Action;
-        if (choice_row("Layout", action ? "Action" : "PSP buttons",
-                off(options_for("input.touch_layout",
-                    "PSP buttons: a stick where the left thumb lands, the face buttons on the "
-                    "right, L and R at the top corners. Action: large buttons named for what "
-                    "they do (attack, evade, guard, the combined attack), a fixed stick, the "
-                    "item pouch, and swipes for the item bar; every element can be moved, "
-                    "resized and rebound.")))) {
-            s.touch_layout = action ? settings::TouchLayout::Psp : settings::TouchLayout::Action;
-            settings::save();
-        }
-        const auto action_only = [&](RowOptions options) {
-            options = off(std::move(options));
-            if (s.touch_layout != settings::TouchLayout::Action && !options.disabled) {
-                options.disabled = true;
-                options.note = "For the Action layout";
-            }
-            return options;
-        };
-        if (button_row("Edit the action layout…",
-                action_only({false, {},
-                    "Move, resize, rebind and hide the Action layout's elements, over "
-                    "the game. Kept on this device."})))
-            open_touch_editor();
-        if (toggle_row("Haptic feedback", s.touch_haptics,
-                action_only(options_for("input.touch_haptics",
-                    "A short vibration when an Action button is pressed or a swipe is "
-                    "taken, where the device can.")))) {
-            s.touch_haptics = !s.touch_haptics;
-            settings::save();
-        }
-        RowOptions dpad = off(options_for("input.touch_dpad",
-            "A D-pad at the left edge, for the game's menus, the "
-            "item box and the camera's D-pad controls. Off gives "
-            "its place to the stick."));
-        if (action && !dpad.disabled) {
-            dpad.disabled = true;
-            dpad.note = "For the PSP buttons layout";
-        }
-        if (toggle_row("D-pad", s.touch_dpad, dpad)) {
-            s.touch_dpad = !s.touch_dpad;
-            settings::save();
-        }
-        int opacity = static_cast<int>(std::lround(s.touch_opacity * 100.0f));
-        if (slider_row("Controls opacity", opacity, 10, 100, 5, "%d%%",
-                off(options_for("input.touch_opacity", "How strongly the on-screen controls are drawn.")))) {
-            s.touch_opacity = static_cast<float>(opacity) / 100.0f;
-            settings::save();
-        }
-        int size = static_cast<int>(std::lround(s.touch_size * 100.0f));
-        if (slider_row("Controls size", size, 60, 160, 5, "%d%%",
-                off(options_for("input.touch_size", "The size of the on-screen controls.")))) {
-            s.touch_size = static_cast<float>(size) / 100.0f;
-            settings::save();
-        }
-        int speed = static_cast<int>(std::lround(s.touch_camera_speed));
-        if (slider_row("Touch camera speed", speed, 30, 720, 10, "%d deg",
-                off(options_for("input.touch_camera_speed",
-                    "Degrees the camera turns for a drag across the height of the screen.")))) {
-            s.touch_camera_speed = static_cast<float>(speed);
-            settings::save();
-        }
-    }
-    section("Experimental");
-    if (toggle_row("Free camera", s.free_camera,
-            options_for("experimental.free_camera",
-                "Experimental, and it may break or change. F6, or Back and R3 on a gamepad, "
-                "detaches the view from the game's camera and flies it about; the same again gives "
-                "the game's camera back. The game keeps running and gets no input meanwhile. "
-                "What the game does not draw from its own camera's place is missing."))) {
-        s.free_camera = !s.free_camera;
-        settings::save();
-    }
-    {
-        RowOptions o = options_for("experimental.free_camera_speed",
-            "How fast the free camera flies, in the game's units a second. The mouse "
-            "wheel, + and -, and the D-pad change it in flight.");
-        if (!s.free_camera && !o.disabled) {
-            o.disabled = true;
-            o.note = "Free camera is off";
-        }
-        int speed = static_cast<int>(std::lround(s.free_camera_speed));
-        if (slider_row("Free camera speed", speed, 50, 5000, 50, "%d/s", o)) {
-            s.free_camera_speed = static_cast<float>(speed);
-            settings::save();
-        }
-    }
-    {
-        RowOptions o = options_for("experimental.free_camera_hide_hud",
-            "Hides the game's HUD and name tags while the free camera flies or holds a "
-            "picture: they belong to the game's own view.");
-        if (!s.free_camera && !o.disabled) {
-            o.disabled = true;
-            o.note = "Free camera is off";
-        }
-        if (toggle_row("Hide the HUD while flying", s.free_camera_hide_hud, o)) {
-            s.free_camera_hide_hud = !s.free_camera_hide_hud;
-            settings::save();
-        }
-    }
-    if (s.free_camera) {
-        info_row("On and off", "F6; Back and R3");
-        info_row("Fly", "W A S D, E and Q up and down; left stick, RB and LB");
-        info_row("Look", "Mouse; right stick");
-        info_row("Faster, slower", "Left Shift, Left Ctrl; RT, LT");
-        info_row("Photo mode", "P, or Start: the game stands still");
-        info_row("Step one frame (photo mode)", binds_of(input::Action::FrameStep));
-        info_row("Back to the game's camera", "R, or Y");
-        info_row("Screenshot", binds_of(input::Action::Screenshot));
     }
 }
 
@@ -1375,7 +1233,7 @@ void play_together() {
     settings::Settings &s = settings::current();
     static std::string copied;
     static std::string typed_address;
-    section("Play together");
+    section("Play Together:");
     if (adhoc_hosting()) {
         const adhoc::ServerStatus status = adhoc_host_status();
         const std::string suffix =
@@ -1385,7 +1243,7 @@ void play_together() {
                 " connected. Everyone now enters the Online Guild "
                 "Hall and picks the same hall.");
         const std::vector<adhoc::LocalAddress> addresses = adhoc::local_addresses();
-        if (addresses.empty()) info_row("Your addresses", "No network is connected");
+        if (addresses.empty()) info_row("Your Addresses", "No network is connected");
         for (const adhoc::LocalAddress &address : addresses) {
             const std::string text = address.address + suffix;
             const std::string label =
@@ -1409,22 +1267,22 @@ void play_together() {
         }
         ImGui::PopID();
         // One ID for Host and Stop, so the focus stays on the row.
-        if (button_row("Stop hosting###hosting",
+        if (button_row("Stop Hosting###hosting",
                 {false, {}, "Stops the server. Everyone in the session is disconnected, as when a connection drops."},
                 colors::kDanger)) {
             adhoc_host_stop();
             copied.clear();
         }
     } else {
-        if (button_row("Host a session###hosting",
+        if (button_row("Host a Session###hosting",
                 {false, {},
                     "Runs a server in this game for the others to join: no other program, no port forwarding "
                     "on a local network or a VPN. Then everyone enters the Online Guild Hall."}))
             adhoc_host_start();
-        if (const std::string error = adhoc_host_error(); !error.empty()) info_row("Cannot host", error);
+        if (const std::string error = adhoc_host_error(); !error.empty()) info_row("Cannot Host", error);
     }
 
-    section("Join a session");
+    section("Join a Session:");
     adhoc::Discovery &discovery = adhoc::Discovery::get();
     discovery.start_listening();
     discovery.query(s.adhoc_recent);
@@ -1441,7 +1299,7 @@ void play_together() {
                     "other; then enter the Online Guild Hall."}))
             adhoc_join(address);
     }
-    if (hosts.empty()) info_row("On this network", "Looking for hosted sessions…");
+    if (hosts.empty()) info_row("On This Network", "Looking for hosted sessions…");
     if (text_row("join_address", "Address", typed_address, 100u, true, address_character,
             {false, {},
                 "The host's address, for a VPN without broadcast such as Tailscale: the host's screen lists it. "
@@ -1465,8 +1323,8 @@ void Menu::network() {
     adhoc::Client &client = adhoc::Client::get();
     const adhoc::Diagnostics d = client.diagnostics();
     play_together();
-    section("Ad hoc play");
-    if (toggle_row("Ad hoc play", s.adhoc,
+    section("Ad Hoc Play:");
+    if (toggle_row("Ad Hoc Play", s.adhoc,
             options_for("network.adhoc",
                 "Multiplayer with other players. Off, the game says the wireless "
                 "switch is off. Turning it off in a gathering hall leaves it."))) {
@@ -1491,7 +1349,7 @@ void Menu::network() {
         adhoc_apply_settings();
     }
 
-    section("Status");
+    section("Status:");
     info_row("Connection", connection_text(d));
     if (adhoc_hosting()) {
         const adhoc::ServerStatus st = adhoc_host_status();
@@ -1543,16 +1401,16 @@ void Menu::network() {
         std::to_string(d.dropped) + " datagrams dropped, " + std::to_string(d.timeouts) + " calls timed out, " +
             std::to_string(d.reconnects) + " reconnections");
 
-    section("Troubleshooting");
-    if (toggle_row("Network overlay", network_overlay(),
+    section("Troubleshooting:");
+    if (toggle_row("Network Overlay", network_overlay(),
             {false, {}, "A small panel over the game with the connection, the group and the traffic."}))
         network_overlay() = !network_overlay();
-    if (toggle_row("Log every call and packet", adhoc::Client::tracing(),
+    if (toggle_row("Log Every Call and Packet", adhoc::Client::tracing(),
             {false, {},
                 "The same as MHP3RD_TRACE_ADHOC=1: every ad hoc call and packet header goes to the "
                 "console and to the network log. Busy; for finding a problem."}))
         adhoc::Client::set_tracing(!adhoc::Client::tracing());
-    if (button_row("Save network log",
+    if (button_row("Save Network Log",
             {false, {},
                 "Writes the recent network log and this page's state to a file in the data folder's "
                 "logs folder, to send with a problem report."})) {
@@ -1568,7 +1426,7 @@ void Menu::network() {
         std::cout << "[adhoc] network log: " << saved_log_path() << std::endl;
     }
     if (!saved_log_path().empty()) info_row("Saved", saved_log_path());
-    if (button_row("Reconnect now",
+    if (button_row("Reconnect Now",
             {d.state == adhoc::ServerState::Off, {},
                 "Drop the server connection and connect again at once. The group is joined "
                 "again; a quest in progress may end, as when a connection drops."}))
@@ -1580,8 +1438,8 @@ void Menu::network() {
             colors::kDanger))
         client.disconnect_now();
 
-    ImGui::Dummy({0.0f, font_gap()});
-    if (button_row("Restore network defaults", {false, {}, "Ad hoc play off and no server. Your address stays."})) {
+    section("Reset to Defaults:");
+    if (button_row("Restore Network Defaults", {false, {}, "Ad hoc play off and no server. Your address stays."})) {
         const settings::Settings &defaults = settings::defaults();
         const auto restore = [&](const char *key, auto &value, const auto &fallback) {
             if (settings::overridden_by(key) == nullptr) value = fallback;
@@ -1594,9 +1452,153 @@ void Menu::network() {
     }
 }
 
-void Menu::mods() {
+void Menu::qol() {
     if (layered_armor_screen(back_)) return;
-    if (!mods_screen_open()) layered_armor_row();
+    settings::Settings &s = settings::current();
+    section("Modern Features:");
+    {
+        const auto slot = static_cast<std::size_t>(input::Action::LockOn);
+        std::string bind = input::format(s.controls.keys[slot]);
+        const std::string pad = input::format(s.controls.pad[slot]);
+        if (!pad.empty()) bind += (bind.empty() ? "" : " / ") + pad;
+        const std::string help = "A tap of Lock on" +
+            (bind.empty() ? std::string(" (unbound: set it in Controls)") : " (" + bind + ")") +
+            " turns the quest camera to the nearest large monster and keeps it in view. Tap again for the next "
+            "large monster in the area; after the last one, a tap lets go. Turning the camera by hand, the D-pad's "
+            "camera and L let go too. Off, the bind does nothing.";
+        if (toggle_row("Lock-On", s.lock_on, options_for("input.lock_on", help.c_str()))) {
+            s.lock_on = !s.lock_on;
+            settings::save();
+        }
+        RowOptions o = options_for("input.lock_on_marker", "A small ring over the monster the camera is locked onto.");
+        if (!s.lock_on && !o.disabled) {
+            o.disabled = true;
+            o.note = "Lock-on is off";
+        }
+        if (toggle_row("Lock-On Marker", s.lock_on_marker, o)) {
+            s.lock_on_marker = !s.lock_on_marker;
+            settings::save();
+        }
+    }
+    layered_armor_row();
+    section("Quality of Life:");
+    {
+        RowOptions o = options_for("video.fast_loading",
+            "Speeds up loading screens and transitions between areas. "
+            "Disabled in multiplayer.");
+        if (s.unthrottled && !o.disabled) {
+            o.disabled = true;
+            o.note = "Game speed is Unlimited";
+        }
+        if (toggle_row("Fast Loading", s.fast_loading, o)) {
+            s.fast_loading = !s.fast_loading;
+            settings::save();
+        }
+    }
+    section("Singleplayer Only Cheats:");
+    {
+        // Single player only: during ad hoc play the bind does nothing.
+        const bool online = adhoc_networking_on() || adhoc_session_active();
+        const auto guarded = [&](RowOptions o) {
+            if (o.disabled) return o;
+            if (s.unthrottled) {
+                o.disabled = true;
+                o.note = "Game speed is Unlimited";
+            } else if (online) {
+                o.disabled = true;
+                o.note = "Single player only";
+            }
+            return o;
+        };
+        static const char *const kModes[] = {"Hold", "Toggle", "Off"};
+        const int current = static_cast<int>(s.fast_forward);
+        const std::string key = input::format(s.controls.keys[static_cast<std::size_t>(input::Action::FastForward)]);
+        // Two lines at most, so the note of a disabled row still fits under it.
+        const std::string help = "The game runs faster while its key (" +
+            (key.empty() ? std::string("none: set it in Controls") : key) +
+            ") is held, or from one press to the next, muted. Single player only.";
+        if (const int delta =
+                choice_row("Fast-Forward", kModes[current], guarded(options_for("video.fast_forward", help)))) {
+            s.fast_forward = static_cast<fast_forward::Mode>(cycle(current, delta, 3));
+            settings::save();
+        }
+        RowOptions o = guarded(options_for("video.fast_forward_speed",
+            "How many times faster than real time the game runs while it "
+            "fast-forwards, if the computer keeps up."));
+        if (s.fast_forward == fast_forward::Mode::Off && !o.disabled) {
+            o.disabled = true;
+            o.note = "Fast-forward is off";
+        }
+        int speed = static_cast<int>(s.fast_forward_speed);
+        if (slider_row("Fast-Forward Speed", speed, static_cast<int>(fast_forward::kMinSpeed),
+                static_cast<int>(fast_forward::kMaxSpeed), 1, "%dx", o)) {
+            s.fast_forward_speed = static_cast<std::uint32_t>(speed);
+            settings::save();
+        }
+    }
+    section("Experimental Options:");
+    if (toggle_row("Free Camera", s.free_camera,
+            options_for("experimental.free_camera",
+                "Experimental, and it may break or change. F6, or Back and R3 on a gamepad, "
+                "detaches the view from the game's camera and flies it about; the same again gives "
+                "the game's camera back. The game keeps running and gets no input meanwhile. "
+                "What the game does not draw from its own camera's place is missing."))) {
+        s.free_camera = !s.free_camera;
+        settings::save();
+    }
+    {
+        RowOptions o = options_for("experimental.free_camera_speed",
+            "How fast the free camera flies, in the game's units a second. The mouse "
+            "wheel, + and -, and the D-pad change it in flight.");
+        if (!s.free_camera && !o.disabled) {
+            o.disabled = true;
+            o.note = "Free camera is off";
+        }
+        int speed = static_cast<int>(std::lround(s.free_camera_speed));
+        if (slider_row("Free Camera Speed", speed, 50, 5000, 50, "%d/s", o)) {
+            s.free_camera_speed = static_cast<float>(speed);
+            settings::save();
+        }
+    }
+    {
+        RowOptions o = options_for("experimental.free_camera_hide_hud",
+            "Hides the game's HUD and name tags while the free camera flies or holds a "
+            "picture: they belong to the game's own view.");
+        if (!s.free_camera && !o.disabled) {
+            o.disabled = true;
+            o.note = "Free camera is off";
+        }
+        if (toggle_row("Hide the HUD While Flying", s.free_camera_hide_hud, o)) {
+            s.free_camera_hide_hud = !s.free_camera_hide_hud;
+            settings::save();
+        }
+    }
+    if (s.free_camera) {
+        info_row("On and off", "F6; Back and R3");
+        info_row("Fly", "W A S D, E and Q up and down; left stick, RB and LB");
+        info_row("Look", "Mouse; right stick");
+        info_row("Faster, slower", "Left Shift, Left Ctrl; RT, LT");
+        info_row("Photo mode", "P, or Start: the game stands still");
+        info_row("Step one frame (photo mode)", binds_of(input::Action::FrameStep));
+        info_row("Back to the game's camera", "R, or Y");
+        info_row("Screenshot", binds_of(input::Action::Screenshot));
+    }
+    section("Reset to Defaults:");
+    if (button_row("Restore QoL Defaults", {false, {}, "Every setting on this page back to how Yakumo ships."})) {
+        const settings::Settings &d = settings::defaults();
+        const auto restore = [&](const char *key, auto &value, const auto &fallback) {
+            if (settings::overridden_by(key) == nullptr) value = fallback;
+        };
+        restore("video.fast_loading", s.fast_loading, d.fast_loading);
+        restore("video.fast_forward", s.fast_forward, d.fast_forward);
+        restore("video.fast_forward_speed", s.fast_forward_speed, d.fast_forward_speed);
+        restore("input.lock_on", s.lock_on, d.lock_on);
+        restore("input.lock_on_marker", s.lock_on_marker, d.lock_on_marker);
+        settings::save();
+    }
+}
+
+void Menu::mods() {
     mods_page(back_);
     if (take_mods_restart_request()) {
         install::request_restart_on_exit();
@@ -1615,15 +1617,34 @@ void Menu::system() {
         }
         return;
     }
+    settings::Settings &s = settings::current();
+    section("Hunter Name:");
+    {
+        const bool keyboard = s.name_entry == settings::NameEntry::Keyboard;
+        if (choice_row("When the Game Asks for a Name", keyboard ? "On-screen keyboard" : "Use the name below",
+                options_for("input.name_entry",
+                    "On-screen keyboard: type the name with the gamepad or the keyboard while the "
+                    "game waits. Otherwise the name below is given at once."))) {
+            s.name_entry = keyboard ? settings::NameEntry::Fixed : settings::NameEntry::Keyboard;
+            settings::save();
+        }
+    }
+    if (text_row("name", "Hunter Name", s.name, kHunterNameLength, false, hunter_name_character,
+            options_for("input.name",
+                "Given when the game asks for a name and the on-screen keyboard is "
+                "off, and to other players when the network nickname is empty. "
+                "Letters, digits, spaces and simple punctuation.")))
+        settings::save();
+
     std::string data_dir;
     try {
         data_dir = install::path_to_utf8(install::user_data_directory());
     } catch (const std::exception &e) {
         data_dir = e.what();
     }
-    section("Game");
+    section("Game:");
     if (button_row("Resume", {false, {}, "Back to the game."})) close_ = true;
-    if (button_row("Take a screenshot",
+    if (button_row("Take a Screenshot",
             {false, {},
                 "Saves the game's picture behind the menu, at the size it is drawn at, as a PNG in "
                 "the screenshots folder. In play: " +
@@ -1633,7 +1654,7 @@ void Menu::system() {
     }
     if (!screenshot_path_.empty()) info_row("Screenshot", screenshot_path_);
 #if !defined(MHP3RD_ANDROID_APP)
-    if (button_row("Open the screenshots folder", {false, {}, "Show the screenshots in the file manager."})) {
+    if (button_row("Open the Screenshots Folder", {false, {}, "Show the screenshots in the file manager."})) {
         try {
             std::error_code ec;
             const std::filesystem::path folder = screenshot::folder();
@@ -1645,8 +1666,7 @@ void Menu::system() {
         }
     }
 #endif
-    settings::Settings &s = settings::current();
-    if (toggle_row("Pause the game when the menu opens", s.menu_pause,
+    if (toggle_row("Pause the Game When the Menu Opens", s.menu_pause,
             options_for("ui.menu_pause",
                 "On: the game stops while this menu is open. Off: it keeps running "
                 "and playing sound behind the menu, which takes all input. Applies "
@@ -1654,7 +1674,7 @@ void Menu::system() {
         s.menu_pause = !s.menu_pause;
         settings::save();
     }
-    if (toggle_row("Pause during multiplayer", s.menu_pause_multiplayer,
+    if (toggle_row("Pause During Multiplayer", s.menu_pause_multiplayer,
             options_for("ui.menu_pause_multiplayer",
                 "In ad hoc play the game keeps running behind the menu unless this is on: a paused "
                 "game stops answering the other players and can drop a quest. Applies the next time "
@@ -1663,14 +1683,14 @@ void Menu::system() {
         settings::save();
     }
 
-    section("Text");
+    section("Text:");
     {
         const TextLanguages &available = text_languages();
         int index = 0;
         for (std::size_t i = 0; i < available.codes.size(); ++i)
             if (available.codes[i] == s.language || (s.language == "en" && available.codes[i] == "original"))
                 index = static_cast<int>(i);
-        const int delta = choice_row("Game text language", available.names[static_cast<std::size_t>(index)],
+        const int delta = choice_row("Game Text Language", available.names[static_cast<std::size_t>(index)],
             options_for("text.language",
                 "The language of the game's text itself, with the entries named in a "
                 "translation file of the translations folder replaced. Original keeps the "
@@ -1688,7 +1708,7 @@ void Menu::system() {
     // An Android app's data folder is out of the file manager's reach; its
     // log goes where the player picks instead, to send with a report.
     (void)data_dir;
-    if (button_row("Save the log…",
+    if (button_row("Save the Log…",
             {false, {},
                 "Copies Yakumo's logs (this run's, the previous run's, the last "
                 "error's and the logs folder) to a folder you pick, to send with a "
@@ -1699,21 +1719,21 @@ void Menu::system() {
     }
     if (!saved_log_path().empty()) info_row("Log", saved_log_path());
 #else
-    if (button_row("Open the data folder", {false, {}, "Show Yakumo's data folder in the file manager."})) {
+    if (button_row("Open the Data Folder", {false, {}, "Show Yakumo's data folder in the file manager."})) {
         if (!SDL_OpenURL(folder_url(path_from_utf8(data_dir)).c_str()))
             std::cout << "[menu] cannot open " << data_dir << ": " << SDL_GetError() << "\n";
     }
 #endif
-    if (button_row("Set up game data again…",
+    if (button_row("Set Up Game Data Again…",
             {false, {}, "Choose the disc image again, for example after moving it. The game closes first."}))
         confirm_ = Confirm::Setup;
-    if (button_row("Quit game", {false, {}, "Close Yakumo. Progress since your last save is lost."}, colors::kDanger))
+    if (button_row("Quit Game", {false, {}, "Close Yakumo. Progress since your last save is lost."}, colors::kDanger))
         confirm_ = Confirm::Quit;
 
-    section("Saves");
+    section("Saves:");
     save_rows();
 
-    section("About");
+    section("About:");
     info_row("Yakumo", std::string(kYakumoVersion));
     info_row("Game", std::string(install::kGameTitle) + " (" + install::kDiscIdDisplay + ")");
     {

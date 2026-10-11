@@ -98,7 +98,7 @@ std::string target_name(Target target) {
     const std::size_t n = target - input::kActions;
     if (n >= combos.size()) return {};
     const std::string buttons = input::buttons_label(combos[n].buttons);
-    return buttons.empty() ? std::string("New combination") : buttons;
+    return buttons.empty() ? std::string("New Combination") : buttons;
 }
 
 // What an action does in the game, next to its name.
@@ -263,8 +263,10 @@ void group_header(input::ActionGroup group, const Columns &c, bool first) {
     const float size = ImGui::GetStyle().FontSizeBase * 0.8f;
     const ImVec2 at = ImGui::GetCursorScreenPos();
     ImFont *f = ImGui::GetFont();
-    draw->AddText(f, size, {at.x + px(16.0f), at.y}, colors::kAccent, input::group_name(group));
-    draw->AddText(f, size, {c.keys + px(4.0f), at.y}, colors::kTextDim, "Keyboard and mouse");
+    const std::string title =
+        std::string(group == input::ActionGroup::Port ? "Port Features" : input::group_name(group)) + ":";
+    draw->AddText(f, size, {at.x + px(16.0f), at.y}, colors::kAccent, title.c_str());
+    draw->AddText(f, size, {c.keys + px(4.0f), at.y}, colors::kTextDim, "Keyboard and Mouse");
     draw->AddText(f, size, {c.pad + px(4.0f), at.y}, colors::kTextDim, "Gamepad");
     ImGui::Dummy({0.0f, size + px(4.0f)});
 }
@@ -489,7 +491,7 @@ void conflict_lines(Target action, const Columns &c, bool locked, input::PadStyl
                 break;
             }
             text = std::string(pad ? "Gamepad: " : "Keyboard: ") + text;
-            const float keep_width = chip_width("Keep both", ChipKind::Fix);
+            const float keep_width = chip_width("Keep Both", ChipKind::Fix);
             const float fix_width = chip_width(fix, ChipKind::Fix);
             const float gap = px(8.0f);
             const float buttons = keep_width + fix_width + gap;
@@ -508,7 +510,7 @@ void conflict_lines(Target action, const Columns &c, bool locked, input::PadStyl
             const float y = at.y + (height - chip_height()) * 0.5f;
             const float right = c.left + c.width - gap;
             const ChipResult keep =
-                chip("keep", {right - keep_width, y}, keep_width, "Keep both", ChipKind::Fix, false, false, locked);
+                chip("keep", {right - keep_width, y}, keep_width, "Keep Both", ChipKind::Fix, false, false, locked);
             const ChipResult remove = chip(
                 "fix", {right - keep_width - gap - fix_width, y}, fix_width, fix, ChipKind::Fix, false, false, locked);
             if (keep.focused || remove.focused) {
@@ -788,9 +790,9 @@ void combo_rows(const Columns &c, bool locked, input::PadStyle style, std::strin
     ImDrawList *draw = ImGui::GetWindowDrawList();
     const float size = ImGui::GetStyle().FontSizeBase * 0.8f;
     const ImVec2 at = ImGui::GetCursorScreenPos();
-    draw->AddText(ImGui::GetFont(), size, {at.x + px(16.0f), at.y}, colors::kAccent, "Your combinations");
+    draw->AddText(ImGui::GetFont(), size, {at.x + px(16.0f), at.y}, colors::kAccent, "Your Combinations:");
     if (!s.controls.combos.empty()) {
-        draw->AddText(ImGui::GetFont(), size, {c.keys + px(4.0f), at.y}, colors::kTextDim, "Keyboard and mouse");
+        draw->AddText(ImGui::GetFont(), size, {c.keys + px(4.0f), at.y}, colors::kTextDim, "Keyboard and Mouse");
         draw->AddText(ImGui::GetFont(), size, {c.pad + px(4.0f), at.y}, colors::kTextDim, "Gamepad");
     }
     ImGui::Dummy({0.0f, size + px(4.0f)});
@@ -798,7 +800,7 @@ void combo_rows(const Columns &c, bool locked, input::PadStyle style, std::strin
     for (std::size_t n = 0; n < s.controls.combos.size(); ++n)
         action_row(input::kActions + n, c, locked, style, notice);
     if (st.picking && *st.picking >= s.controls.combos.size()) st.picking.reset();
-    const std::string text = "+  New combination";
+    const std::string text = "+  New Combination";
     const float width = chip_width(text, ChipKind::Add);
     const ImVec2 top = ImGui::GetCursorScreenPos();
     const bool full = s.controls.combos.size() >= input::kMaxCombos;
@@ -858,7 +860,7 @@ void bindings_editor(std::string &notice) {
                 o.disabled = true;
                 o.note = std::string("Set by ") + locked_by;
             }
-            if (toggle_row("Move with the right stick", s.controls.swap_sticks, o))
+            if (toggle_row("Move with the Right Stick", s.controls.swap_sticks, o))
                 edit(notice, [](input::Layout &layout) {
                     layout.swap_sticks = !layout.swap_sticks;
                     return true;
@@ -933,7 +935,7 @@ void bindings_capture_prompt() {
     const input::Slots &slots = input::slots(s.controls, pad, c.action);
     std::string held;
     for (const input::Binding b : layer.capture_held()) held += (held.empty() ? "" : " + ") + input::label(b, style);
-    const std::string title = std::string(pad ? "Gamepad" : "Keyboard and mouse") + "   ·   " + target_name(c.action);
+    const std::string title = std::string(pad ? "Gamepad" : "Keyboard and Mouse") + "   ·   " + target_name(c.action);
     const std::string what = c.adding ? (input::count(slots) == 0u ? "New binding" : "Another binding")
                                       : "In place of " + chord_label(slots[c.slot], pad, style);
     const std::string big = !held.empty() ? held + (layer.capture_held().size() < input::kChordInputs ? "  + …" : "")

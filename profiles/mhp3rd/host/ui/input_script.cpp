@@ -63,9 +63,9 @@ State &state() {
 }
 
 std::string trim(const std::string &text) {
-    const auto first = text.find_first_not_of(" \t");
+    const auto first = text.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) return {};
-    return text.substr(first, text.find_last_not_of(" \t") - first + 1u);
+    return text.substr(first, text.find_last_not_of(" \t\r\n") - first + 1u);
 }
 
 void push_key(SDL_Keycode key, bool down) {

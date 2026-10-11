@@ -111,8 +111,9 @@ template <typename Enum> struct Names {
 const Names<PresentMode> kPresentModes{
     {{PresentMode::Fifo, "vsync"}, {PresentMode::Mailbox, "mailbox"}, {PresentMode::Immediate, "immediate"}}};
 const Names<Aspect> kAspects{{{Aspect::Original, "original"}, {Aspect::Stretch, "stretch"}, {Aspect::Fill, "fill"}}};
-const Names<PerfDisplay> kPerfDisplays{{{PerfDisplay::Off, "off"}, {PerfDisplay::Overlay, "overlay"},
-    {PerfDisplay::OverlayAndLog, "overlay+log"}, {PerfDisplay::Log, "log"}}};
+const Names<PerfDisplay> kPerfDisplays{
+    {{PerfDisplay::Off, "off"}, {PerfDisplay::Overlay, "overlay"}, {PerfDisplay::OverlayAndLog, "overlay+log"},
+        {PerfDisplay::Log, "log"}, {PerfDisplay::Compact, "compact"}, {PerfDisplay::CompactAndLog, "compact+log"}}};
 const Names<RightStick> kRightSticks{
     {{RightStick::Camera, "camera"}, {RightStick::DPad, "dpad"}, {RightStick::Off, "off"}}};
 const Names<TouchLayout> kTouchLayouts{{{TouchLayout::Psp, "psp"}, {TouchLayout::Action, "action"}}};
@@ -258,6 +259,10 @@ const std::vector<Field> &fields() {
             [](const Settings &s) { return kPerfDisplays.format(s.perf); },
             [](Settings &s, const char *t) {
                 // `1` has always meant the overlay and the log, `log` the log only.
+                if (std::strcmp(t, "compact") == 0 || std::strcmp(t, "compact+log") == 0) {
+                    kPerfDisplays.parse(t, s.perf);
+                    return;
+                }
                 if (std::strcmp(t, "log") == 0)
                     s.perf = PerfDisplay::Log;
                 else

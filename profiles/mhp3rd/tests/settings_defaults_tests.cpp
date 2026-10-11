@@ -371,7 +371,24 @@ void test_background_settings() {
     check(!disabled.background_mute && !disabled.background_gamepad, "explicit false values disable both options");
 }
 
+void test_performance_modes() {
+    const std::pair<const char *, PerfDisplay> modes[] = {{"off", PerfDisplay::Off}, {"overlay", PerfDisplay::Overlay},
+        {"overlay+log", PerfDisplay::OverlayAndLog}, {"log", PerfDisplay::Log}, {"compact", PerfDisplay::Compact},
+        {"compact+log", PerfDisplay::CompactAndLog}};
+    for (const auto &[name, mode] : modes) {
+        const auto selected = from_entries({{"video.performance", name}});
+        check(selected.perf == mode, "every performance mode loads from settings.ini");
+        const auto written = to_entries(selected);
+        check(written.at("video.performance") == name && from_entries(written).perf == mode,
+            "each performance mode survives serialization without changing its name");
+    }
+    for (const char *invalid : {"", "Compact", "compact+invalid", "unknown"})
+        check(from_entries({{"video.performance", invalid}}).perf == PerfDisplay::Off,
+            "invalid performance modes retain the default");
+}
+
 int main() {
+    test_performance_modes();
     test_background_settings();
     test_crisp_text();
     test_layered_armor();

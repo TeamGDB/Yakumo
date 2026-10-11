@@ -53,7 +53,7 @@ std::vector<Offer> offers(const Ram &ram, std::uint8_t part, bool all) {
 }
 
 std::string choice_name(const Ram *ram, std::uint8_t part, std::int32_t choice) {
-    if (choice < 0) return "Real equipment";
+    if (choice < 0) return "Real Equipment";
     if (choice == 0) return "Nothing";
     const auto id = static_cast<std::uint16_t>(choice);
     if (ram != nullptr) {

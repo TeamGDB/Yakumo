@@ -371,13 +371,13 @@ void wizard_frame(bool back) {
             colors::kTextDim);
         if (!w.message.empty()) text(w.message, colors::kAccentBright);
         if (w.phase == Wizard::Phase::Release) text("Let go…", colors::kTextDim);
-        if (button_row("Skip this one", {false, {}, "The controller has no such control, or it is not needed."}) &&
+        if (button_row("Skip This One", {false, {}, "The controller has no such control, or it is not needed."}) &&
             w.phase == Wizard::Phase::Ask)
             skip(w);
         {
             RowOptions o{false, {}, "Asks for the previous control again."};
             o.disabled = w.history.empty();
-            if (button_row("Back one step", o)) go_back(w);
+            if (button_row("Back One Step", o)) go_back(w);
         }
         if (button_row("Cancel", {false, {}, "Leaves the controller as it was. Esc does the same."})) {
             finish_wizard();
@@ -386,7 +386,7 @@ void wizard_frame(bool back) {
     } else {
         heading("Done. Check the answers, then save.");
         const std::size_t answered = mapping::count(w.answers);
-        if (button_row("Save and use this layout",
+        if (button_row("Save and Use This Layout",
                 {answered == 0u, answered == 0u ? "Nothing recorded" : "",
                     "Saves the layout to gamecontrollerdb.txt in the data folder and uses it at once: the "
                     "controller then drives the game and this menu."},
@@ -396,7 +396,7 @@ void wizard_frame(bool back) {
             finish_wizard();
             return;
         }
-        if (button_row("Start over", {false, {}, "Asks for every control again."})) {
+        if (button_row("Start Over", {false, {}, "Asks for every control again."})) {
             const devices::Info again{w.id, w.name};
             start_wizard(again);
             return;
@@ -469,7 +469,7 @@ void list_frame(bool back) {
                       "up: it takes a minute."
                     : "SDL has no layout for this device. If it is a controller, set it up.",
                 colors::kDanger);
-        if (button_row(i.gamepad ? "Set up this controller again" : "Set up this controller",
+        if (button_row(i.gamepad ? "Set Up This Controller Again" : "Set Up This Controller",
                 {false, {},
                     "Asks for each button, the D-pad and the sticks in turn, then saves the layout "
                     "for this controller."},
@@ -478,7 +478,7 @@ void list_frame(bool back) {
             return;
         }
         if (i.saved &&
-            button_row("Remove my layout",
+            button_row("Remove My Layout",
                 {false, {},
                     "Takes this controller's line out of gamecontrollerdb.txt: "
                     "it goes back to SDL's own layout, or to none at the next start."})) {
@@ -490,13 +490,13 @@ void list_frame(bool back) {
         draw_live(i.id);
         section("Details");
         info_row("Status", status_text(i));
-        info_row("USB vendor and product", usb_ids(i));
+        info_row("USB Vendor and Product", usb_ids(i));
         info_row("GUID", i.guid);
         info_row("Inputs", inputs_text(i));
         info_row("Layout", !i.gamepad ? "None" : i.saved ? "Yours, from gamecontrollerdb.txt" : "SDL's own");
         if (i.gamepad) info_row("Mapping", spaced(i.mapping));
         if (button_row(
-                "Copy these details", {false, {}, "Copies the name, USB ids, GUID and mapping, for a bug report."})) {
+                "Copy These Details", {false, {}, "Copies the name, USB ids, GUID and mapping, for a bug report."})) {
             const std::string details = "Controller: " + i.name + "\nUSB: " + usb_ids(i) + "\nGUID: " + i.guid +
                 "\nInputs: " + inputs_text(i) + "\nMapping: " + (i.gamepad ? i.mapping : std::string("none")) +
                 "\nPlatform: " + SDL_GetPlatform();
@@ -538,12 +538,12 @@ void controllers_rows() {
         std::count_if(all.begin(), all.end(), [](const devices::Info &i) { return devices::unmapped_gamepad(i); });
     std::string value = all.empty() ? std::string("None") : std::to_string(all.size()) + " connected";
     if (unknown > 0) value += ", " + std::to_string(unknown) + " not set up";
-    section("Controllers");
+    section("Controllers:");
     RowOptions o;
     o.description = "Every controller connected, what each button reports, and a setup for a controller the game "
                     "does not know.";
     o.warning = unknown > 0;
-    if (value_row("Connected controllers", value, o)) {
+    if (value_row("Connected Controllers", value, o)) {
         screen().open = true;
         screen().focus = true;
         screen().notice.clear();

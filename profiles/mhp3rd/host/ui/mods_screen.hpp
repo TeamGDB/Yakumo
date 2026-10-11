@@ -17,7 +17,7 @@ void mods_page(bool back);
 // Keep the menu open while the system picker or its folder copy is running.
 [[nodiscard]] bool mods_import_busy();
 
-// Once, after the player chose "Restart now" to apply a change.
+// Once, after the player chose "Restart Now" to apply a change.
 [[nodiscard]] bool take_mods_restart_request();
 
 } // namespace mhp3rd::ui

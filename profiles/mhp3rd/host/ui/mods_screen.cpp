@@ -79,7 +79,7 @@ struct State {
     std::map<fs::path, Preview> previews;
     // Slot targets typed on the keyboard, applied on the next frame.
     std::optional<std::pair<std::size_t, std::string>> typed_slot;
-    // What the last "Use my current armor" or "No armor" did, for the mod it
+    // What the last "Use My Current Armor" or "No Armor" did, for the mod it
     // was pressed on.
     std::string equip_mod;
     std::string equip_note;
@@ -242,7 +242,7 @@ void status_rows(ModSession &session) {
         indented(std::string(session.paths().disabled_by) + " is set: no mod applies this run.", colors::kDanger);
     if (!session.error().empty()) indented(session.error(), colors::kDanger);
     if (session.restart_pending() &&
-        button_row("Restart now",
+        button_row("Restart Now",
             {false, {},
                 "Close the game and start it again with the mods as chosen. Progress "
                 "since your last save is lost."},
@@ -271,7 +271,7 @@ void open_browser() {
     options.filter_name = "folders";
     options.listed_name = "folders";
     options.empty_note = "No folders here.";
-    options.choose_folder = "Import from this folder";
+    options.choose_folder = "Import from This Folder";
     // A mod folder is chosen as soon as it is opened.
     options.choose_on_open = [](const fs::path &folder) {
         ModSession *session = mods::session();
@@ -324,7 +324,7 @@ void browse(bool back) {
 #if defined(MHP3RD_ANDROID_APP)
 void documents_screen(bool back) {
     State &s = state();
-    section("Import mods");
+    section("Import Mods:");
     indented("Choose the unpacked mod folder (or a folder holding several mods) in Android's picker. Choose a "
              "folder inside Downloads or on the SD card, not the storage or Download root.");
     indented("Copied " + human_size(s.document_import.bytes()) + ". Installed mods stay in place until review.");
@@ -357,7 +357,7 @@ void review(ModSession &session, bool back) {
         open_browser();
         return;
     }
-    section("Import mods");
+    section("Import Mods:");
     indented("From " + utf8(s.check.chosen));
     if (s.check.mods.empty()) indented(s.check.problem, colors::kDanger);
     for (const mods::ImportCandidate &c : s.check.mods) {
@@ -374,7 +374,7 @@ void review(ModSession &session, bool back) {
         const bool replaces = std::any_of(
             s.check.mods.begin(), s.check.mods.end(), [](const mods::ImportCandidate &c) { return c.replaces; });
         focus_first();
-        if (button_row(s.check.mods.size() == 1u ? "Import this mod" : "Import these mods",
+        if (button_row(s.check.mods.size() == 1u ? "Import This Mod" : "Import These Mods",
                 {false, {},
                     "Copies them into the mods folder, turned off; turn them on in the list. " +
                         std::string(replaces ? "A mod installed under the same folder name moves to "
@@ -389,7 +389,7 @@ void review(ModSession &session, bool back) {
         }
     }
     focus_first();
-    if (button_row("Choose another folder", {false, {}, "Back to the folders."})) open_browser();
+    if (button_row("Choose Another Folder", {false, {}, "Back to the folders."})) open_browser();
     if (button_row("Cancel", {false, {}, "Import nothing."})) back_to_list();
 }
 
@@ -399,7 +399,7 @@ void result_screen(bool back) {
         back_to_list();
         return;
     }
-    section("Import mods");
+    section("Import Mods:");
     if (!s.result.imported.empty())
         info_row("Imported", count(s.result.imported.size(), "mod", "mods") + ", off for now");
     for (const fs::path &backup : s.result.backups) info_row("Kept", utf8(backup));
@@ -503,7 +503,7 @@ void equipment_buttons(ModSession &session, const Mod &mod) {
     const bool armor = std::any_of(kinds.begin(), kinds.end(), [](const auto &k) { return k && game::is_armor(*k); });
     const bool weapon = std::any_of(kinds.begin(), kinds.end(), [](const auto &k) { return k && game::is_weapon(*k); });
     if (!armor && !weapon) return;
-    if (button_row(armor ? "Use my current armor" : "Use my current weapon",
+    if (button_row(armor ? "Use My Current Armor" : "Use My Current Weapon",
             {false, {},
                 armor ? "Point each slot at the model of the armor your hunter wears in that part now, for your "
                         "hunter's sex. The hunter must be loaded (in the village, not on the title screen)."
@@ -511,7 +511,7 @@ void equipment_buttons(ModSession &session, const Mod &mod) {
                         "mod's weapon class."}))
         fill_slots(session, mod, false);
     if (armor &&
-        button_row("No armor",
+        button_row("No Armor",
             {false, {},
                 "Point each slot at what the game shows when that part is empty, for your hunter's sex and "
                 "inner wear: take the armor off in the game to see the mod."}))
@@ -540,7 +540,7 @@ void details(ModSession &session, bool back) {
         library.set_slot(mod.id, slot, text.empty() ? std::nullopt : library.format().parse_file(text));
         session.commit();
     }
-    section(mod.name.c_str());
+    section((mod.name + ":").c_str());
     status_rows(session);
     draw_preview(mod.preview, px(166.0f));
     focus_first();
@@ -581,7 +581,7 @@ void details(ModSession &session, bool back) {
                     "here or filled in by the buttons below. Empty: none."})) {
             TextInputRequest request;
             request.title = label;
-            request.prompt = "File id, four hex digits";
+            request.prompt = "File ID, Four Hex Digits";
             request.initial = target ? file_name(session, *target) : std::string();
             request.max_length = 4u;
             request.allowed = [](char32_t c) { return c < 0x80u && std::isxdigit(static_cast<int>(c)) != 0; };
@@ -592,7 +592,7 @@ void details(ModSession &session, bool back) {
     }
     equipment_buttons(session, mod);
 
-    section("About");
+    section("About:");
     if (!mod.author.empty()) info_row("Author", mod.author);
     info_row("Type", mod.type);
     if (!mod.version.empty()) info_row("Made for", mod.version);
@@ -602,7 +602,7 @@ void details(ModSession &session, bool back) {
         std::string members;
         for (const std::string &member : mod.members)
             members += (members.empty() ? "" : ", ") + mod_name(session, member);
-        info_row("Mods in the pack", members);
+        info_row("Mods in the Pack", members);
     }
     if (!mod.depends.empty()) {
         std::string needs;
@@ -617,13 +617,13 @@ void details(ModSession &session, bool back) {
     for (const std::string &note : mod.notes) indented(note, colors::kDanger);
     const auto conflicts = conflicts_of(session.wanted(), mod.id);
     if (!conflicts.empty()) {
-        section("Conflicts");
+        section("Conflicts:");
         for (const Resolution::Conflict *c : conflicts)
             info_row(file_name(session, c->file).c_str(), conflict_text(session, *c));
     }
     ImGui::Dummy({0.0f, px(12.0f)});
 #if !defined(MHP3RD_ANDROID_APP)
-    if (button_row("Open its folder", {false, {}, "Show the mod's folder in the file manager."}))
+    if (button_row("Open Its Folder", {false, {}, "Show the mod's folder in the file manager."}))
         open_folder(mod.folder);
 #endif
     if (button_row("Back", {false, {}, "Back to the mods."})) back_to_list();
@@ -636,34 +636,34 @@ void list(ModSession &session) {
         s.focus_row = false;
     }
     mods::ModLibrary &library = session.library();
-    section("Mods (experimental)");
+    section("Mods (Experimental):");
     indented("Mod support is new and has been tried with few mods. Back up your saves first: a mod that changes "
              "the game's data can end up in them.");
     status_rows(session);
-    if (toggle_row("Use mods", library.master(),
+    if (toggle_row("Use Mods", library.master(),
             {session.paths().disabled_by != nullptr,
                 session.paths().disabled_by != nullptr ? std::string("Set by ") + session.paths().disabled_by : "",
                 "Off: the game reads only its own files, whatever is turned on below, for a clean comparison."})) {
         library.set_master(!library.master());
         session.commit();
     }
-    if (button_row("Import mod…",
+    if (button_row("Import Mod…",
             {false, {},
                 "Copy a mod you downloaded into the mods folder: choose its unpacked folder, the one with its "
                 "mod.ini. Yakumo does not download mods; unpack .zip, .rar or .7z archives first."}))
         open_browser();
 #if !defined(MHP3RD_ANDROID_APP)
-    if (button_row("Open the mods folder",
+    if (button_row("Open the Mods Folder",
             {false, {},
                 "Show the mods folder in the file manager: one folder per mod, as the mhp3reload mod "
                 "manager has them."}))
         open_folder(session.paths().folder);
 #endif
-    if (button_row("Read the folder again", {false, {}, "Pick up mods added to or removed from the folder."}))
+    if (button_row("Read the Folder Again", {false, {}, "Pick up mods added to or removed from the folder."}))
         session.rescan();
 
     const auto &all = library.mods();
-    section(("Installed (" + std::to_string(all.size()) + ")").c_str());
+    section(("Installed (" + std::to_string(all.size()) + "):").c_str());
     if (all.empty())
         indented("No mods yet. Import one, or copy mod folders into " + utf8(session.paths().folder) + ".");
     const Resolution &wanted = session.wanted();
@@ -687,14 +687,14 @@ void list(ModSession &session) {
         ImGui::PopID();
     }
     if (!wanted.conflicts.empty()) {
-        section("Conflicts");
+        section("Conflicts:");
         indented("These files are changed by more than one mod that is on. The mod higher in the list wins; patches "
                  "apply on top of the winning replacement.");
         for (const Resolution::Conflict &c : wanted.conflicts)
             info_row(file_name(session, c.file).c_str(), conflict_text(session, c));
     }
     if (!mods::problems().empty()) {
-        section("Problems this run");
+        section("Problems This Run:");
         for (const std::string &problem : mods::problems()) indented(problem, colors::kDanger);
     }
 }
@@ -705,7 +705,7 @@ void mods_page(bool back) {
     State &s = state();
     ModSession *session = mods::session();
     if (session == nullptr) {
-        section("Mods");
+        section("Mods:");
         indented("Mods need the game's disc image, which is not open.");
         return;
     }

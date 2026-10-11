@@ -13,7 +13,7 @@ The translation files are plain UTF-8 text and contain no game data.
 
 | Where | What |
 | --- | --- |
-| Menu (**System → Text → Game text language**) | Cycles through Original and every translation file found. Applies at the next start, like a mod's choice |
+| Menu (**System → Text → Game Text Language**) | Cycles through Original and every translation file found. Applies at the next start, like a mod's choice |
 | `settings.ini`, key `text.language` | The same choice, by hand |
 | `MHP3RD_LANGUAGE`, for one run | Overrides the file for the run, not written back |
 
@@ -35,7 +35,7 @@ directory's `translations` folder (the menu shows that folder) and set the
 language, normally through the menu.
 
 No translation ships with Yakumo. Community translations are linked from the
-project README; download one and use **Import translation…** in
+project README; download one and use **Import Translation…** in
 **System → Text**, which copies the file into the per-user folder for you, or
 drop the `.lang` file in one of the folders above yourself.
 

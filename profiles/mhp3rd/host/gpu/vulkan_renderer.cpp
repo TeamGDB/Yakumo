@@ -3113,25 +3113,31 @@ bool VulkanRenderer::Impl::create_overlay(std::string &error) {
     return true;
 }
 
-// Draws the overlay over the top-left corner of the swapchain image, which is
+// Draws the overlay over the top-left or bottom-left corner of the swapchain image, which is
 // in TRANSFER_DST layout with the game frame already blitted into it. The
 // staging buffer is free to rewrite: the frame fence has been waited on before
 // any recording of this frame started.
 void VulkanRenderer::Impl::record_overlay(VkCommandBuffer commands, VkImage destination) {
+    const bool compact = perf::options().compact;
+    const std::uint32_t overlay_height = compact ? perf::kCompactOverlayHeight : perf::kOverlayHeight;
     const std::uint32_t scale = perf::overlay_scale(content_rect.extent.height);
     const std::uint32_t inset = 4u * scale;
     const std::uint32_t width = perf::kOverlayWidth * scale;
-    const std::uint32_t height = perf::kOverlayHeight * scale;
+    const std::uint32_t height = overlay_height * scale;
     if (inset + width > content_rect.extent.width || inset + height > content_rect.extent.height) return;
 
-    perf::draw_overlay(overlay_pixels.data());
+    if (compact)
+        perf::draw_compact_overlay(
+            overlay_pixels.data(), perf::last_second(), present_mode != VK_PRESENT_MODE_IMMEDIATE_KHR);
+    else
+        perf::draw_overlay(overlay_pixels.data());
     // Free to rewrite: this command buffer's previous use has finished.
     const Staging &staging = overlay_staging[command_index(commands)];
     std::memcpy(staging.mapped, overlay_pixels.data(), overlay_pixels.size() * sizeof(std::uint32_t));
     transition(commands, overlay_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     VkBufferImageCopy copy{};
     copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u};
-    copy.imageExtent = {perf::kOverlayWidth, perf::kOverlayHeight, 1u};
+    copy.imageExtent = {perf::kOverlayWidth, overlay_height, 1u};
     vkCmdCopyBufferToImage(commands, staging.buffer, overlay_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &copy);
     transition(commands, overlay_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
     // The game frame was blitted into the same image just before; order the
@@ -3139,11 +3145,11 @@ void VulkanRenderer::Impl::record_overlay(VkCommandBuffer commands, VkImage dest
     transition(commands, destination, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     VkImageBlit blit{};
     blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0u, 0u, 1u};
-    blit.srcOffsets[1] = {
-        static_cast<std::int32_t>(perf::kOverlayWidth), static_cast<std::int32_t>(perf::kOverlayHeight), 1};
+    blit.srcOffsets[1] = {static_cast<std::int32_t>(perf::kOverlayWidth), static_cast<std::int32_t>(overlay_height), 1};
     blit.dstSubresource = blit.srcSubresource;
     const std::int32_t left = content_rect.offset.x + static_cast<std::int32_t>(inset);
-    const std::int32_t top = content_rect.offset.y + static_cast<std::int32_t>(inset);
+    const std::uint32_t top_inset = compact ? content_rect.extent.height - inset - height : inset;
+    const std::int32_t top = content_rect.offset.y + static_cast<std::int32_t>(top_inset);
     blit.dstOffsets[0] = {left, top, 0};
     blit.dstOffsets[1] = {left + static_cast<std::int32_t>(width), top + static_cast<std::int32_t>(height), 1};
     vkCmdBlitImage(commands, overlay_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, destination,
@@ -8320,6 +8326,9 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot, 
                 const RawBlock &b = newer.raws[next.raw_block];
                 if (a.format == b.format) {
                     RawBlock blended = a;
+                    // An intermediate replay has different bones from the original CPU reference.
+                    // Write its diagnostics to the unmeasured half, preserving the original draw's check.
+                    if (check_gpu_decode) blended.extra[1] = (slot * 2u + 1u) * kCheckVertices * 3u;
                     for (std::size_t i = 0; i < blended.bones.size(); ++i)
                         blended.bones[i] += (b.bones[i] - blended.bones[i]) * t;
                     const VkDeviceSize at =
@@ -8833,11 +8842,19 @@ bool VulkanRenderer::capture_frame(const std::filesystem::path &path) {
     // The capture is the game's own target, before the window blit; draw the
     // overlay over it the same way, so captures show what the window shows.
     if (impl.overlay_visible) {
+        const bool compact = perf::options().compact;
+        const std::uint32_t overlay_height = compact ? perf::kCompactOverlayHeight : perf::kOverlayHeight;
         const std::uint32_t scale = perf::overlay_scale(height);
         const std::uint32_t inset = 4u * scale;
-        if (inset + perf::kOverlayWidth * scale <= width && inset + perf::kOverlayHeight * scale <= height) {
-            for (std::uint32_t y = 0; y < perf::kOverlayHeight * scale; ++y) {
-                std::uint8_t *row = pixels.data() + static_cast<std::size_t>(inset + y) * width * 4u;
+        if (inset + perf::kOverlayWidth * scale <= width && inset + overlay_height * scale <= height) {
+            if (compact)
+                perf::draw_compact_overlay(impl.overlay_pixels.data(), perf::last_second(),
+                    impl.present_mode != VK_PRESENT_MODE_IMMEDIATE_KHR);
+            else
+                perf::draw_overlay(impl.overlay_pixels.data());
+            const std::uint32_t top = compact ? height - inset - overlay_height * scale : inset;
+            for (std::uint32_t y = 0; y < overlay_height * scale; ++y) {
+                std::uint8_t *row = pixels.data() + static_cast<std::size_t>(top + y) * width * 4u;
                 for (std::uint32_t x = 0; x < perf::kOverlayWidth * scale; ++x) {
                     const std::uint32_t pixel = impl.overlay_pixels[(y / scale) * perf::kOverlayWidth + x / scale];
                     std::memcpy(row + (inset + x) * 4u, &pixel, 4u);

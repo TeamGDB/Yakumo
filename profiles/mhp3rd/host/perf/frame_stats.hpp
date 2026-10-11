@@ -10,11 +10,12 @@ namespace mhp3rd::perf {
 using Clock = std::chrono::steady_clock;
 
 // What the performance setting asks for (MHP3RD_PERF, or the in-game menu):
-// the log line, the overlay or both. The overlay can also be toggled at run
+// the log line, the full or compact overlay, or both. The overlay can also be toggled at run
 // time (F3).
 struct Options {
     bool log{};
     bool overlay{};
+    bool compact{};
 };
 [[nodiscard]] Options options();
 

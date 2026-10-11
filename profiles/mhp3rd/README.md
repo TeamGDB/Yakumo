@@ -101,7 +101,7 @@ The installer needs only your disc image. It runs as a few screens in the game's
 4. **Copy or use in place**: copying (the default) puts the image (about 1.3 GB) into the per-user directory, so the game keeps working after the original is moved or deleted; the screen shows the free space and refuses the copy when there is not enough. Using the image where it is saves the space; the program then checks on every start that the image is still there and says so if it is not, offering to run the setup again.
 5. **Progress**: a progress bar for the copy and for preparing the game's executable from the image, which is then checked against the hash in the table above. The work runs off the window's thread, so the window stays responsive; *Cancel* (or back) stops it and removes what it wrote.
 
-The game then starts. Later starts go straight to the game. The in-game menu's *Set up game data again…* runs the same setup: the game closes and the program starts again with `--install`.
+The game then starts. Later starts go straight to the game. The in-game menu's *Set Up Game Data Again…* runs the same setup: the game closes and the program starts again with `--install`.
 
 The per-user directory is SDL's preference path for `Yakumo/MHP3rd`:
 
@@ -245,13 +245,13 @@ The game can be played with a keyboard and a mouse alone. Every control can be r
 
 A bow aims with Left Shift held and shoots with the left button; a bowgun fires with the right one.
 
-The **Classic keyboard** preset brings back the keys of earlier versions, for play without a mouse: I / J / K / L move, X ○, Z ✕, A □, S △, Q / W L / R, Enter START, Right Shift or Backspace SELECT, and the arrow keys the D-pad. **Left-handed** has the mouse in the left hand: I / J / K / L move, H ○ (and the right button), U □, O L, Right Shift R, Enter START, Backspace SELECT, the arrow keys the D-pad and keypad 8 / 4 / 5 / 6 the camera. **Modern** is Default plus △ + ○ on the side mouse button (Mouse 4) and C. *Restore control defaults* returns to Default.
+The **Classic keyboard** preset brings back the keys of earlier versions, for play without a mouse: I / J / K / L move, X ○, Z ✕, A □, S △, Q / W L / R, Enter START, Right Shift or Backspace SELECT, and the arrow keys the D-pad. **Left-handed** has the mouse in the left hand: I / J / K / L move, H ○ (and the right button), U □, O L, Right Shift R, Enter START, Backspace SELECT, the arrow keys the D-pad and keypad 8 / 4 / 5 / 6 the camera. **Modern** is Default plus △ + ○ on the side mouse button (Mouse 4) and C. *Restore Control Defaults* returns to Default.
 
 To rebind, see [Rebinding](#rebinding). Keys are bound by their place on the keyboard, so W A S D stay under the same fingers on an AZERTY or a Dvorak layout; the menu shows their US names. They are kept in `settings.ini` as `input.bind.<control>` (for example `input.bind.circle=Mouse Right / F`, or `input.bind.triangle_circle=Left Shift + F`; controls `stick_up`, `stick_left`, `stick_down`, `stick_right`, `triangle`, `circle`, `cross`, `square`, `l`, `r`, `start`, `select`, `dpad_up`, `dpad_left`, `dpad_down`, `dpad_right`, `camera_up`, `camera_left`, `camera_down`, `camera_right`, `triangle_circle`, `item_left`, `item_right`, and `fast_forward`, `screenshot`, `frame_step`, `hide_hud` and `lock_on`, which are not PSP controls; an empty value leaves a control unbound).
 
 **The pointer.** While the game runs and the window has focus, Yakumo captures the mouse: the pointer is hidden and its motion and buttons go to the game. It is given back whenever Yakumo's menu, the on-screen keyboard or a setup screen is up, and when the window loses focus (switching to another window, Cmd+Tab or Alt+Tab, minimising). Buttons and keys still held when it is captured again reach the game only after they are released, and motion made while it was free is never replayed. *Mouse* in the menu (`input.mouse`, `MHP3RD_MOUSE=0`) turns all of this off, leaving the pointer alone.
 
-**The mouse camera** feeds the same camera layer as the right stick, so it works where the [analog camera](#analog-camera) does: in a quest's ordinary camera, moving the mouse sideways turns the camera and moving it forward and back tilts it, by *Mouse sensitivity* degrees for each count of motion (0.10 by default), and it stops where the mouse stops. While a bow or a bowgun aims, and in a bowgun's scope, the mouse moves the aim the way the right stick does, slowed as *Aim speed* is to *Camera speed*; the game still decides when the aim may move. Where the port does not drive the camera (with *Analog camera* off, in the village or in a camera mode without a driver) the game's own camera turns at one fixed speed or not at all, so the mouse can only switch that turn on: moving it sideways turns the camera for as long as it moves, like holding the right stick, and vertical motion does nothing there (the second stick's up and down are the game's recentring commands). With *Camera stick* set to D-pad or off, the mouse does not turn the game's own camera, since D-pad presses would also move cursors in the game's menus.
+**The mouse camera** feeds the same camera layer as the right stick, so it works where the [analog camera](#analog-camera) does: in a quest's ordinary camera, moving the mouse sideways turns the camera and moving it forward and back tilts it, by *Mouse Sensitivity* degrees for each count of motion (0.10 by default), and it stops where the mouse stops. While a bow or a bowgun aims, and in a bowgun's scope, the mouse moves the aim the way the right stick does, slowed as *Aim Speed* is to *Camera Speed*; the game still decides when the aim may move. Where the port does not drive the camera (with *Analog Camera* off, in the village or in a camera mode without a driver) the game's own camera turns at one fixed speed or not at all, so the mouse can only switch that turn on: moving it sideways turns the camera for as long as it moves, like holding the right stick, and vertical motion does nothing there (the second stick's up and down are the game's recentring commands). With *Camera Stick* set to D-pad or off, the mouse does not turn the game's own camera, since D-pad presses would also move cursors in the game's menus.
 
 The keyboard and a gamepad can be used together or in turns: both are read every frame and add up, so nothing is left pressed by switching.
 
@@ -275,9 +275,9 @@ Any controller SDL3 recognises works, and it can be connected before or after th
 | D-pad right, in the photo mode | [Frame step](#frame-step): the game runs on by one frame |
 | Upper back paddles, where the pad has them (P3 / P1, L4 / R4) | Item left / Item right: L + □ / L + ○ |
 
-That is the **Default** preset. Its buttons, triggers included, can be rebound like the keyboard's (Controls, [Rebinding](#rebinding)), to one button or to a combination such as LB + ○, and other presets change them: **Modern** attacks with RT (△, which also shoots a bow), does the second attack with RB (○, which also fires a bowgun) and guards and aims with LT (R), with LB as L; **Left-handed** mirrors the pad, moving with the right stick, the D-pad doing the face buttons and the face buttons the D-pad, and the shoulders and triggers changing sides. The sticks stay sticks: *Move with the right stick* swaps them, and the other one is the *Camera stick*. L3 + R3 always opens the menu.
+That is the **Default** preset. Its buttons, triggers included, can be rebound like the keyboard's (Controls, [Rebinding](#rebinding)), to one button or to a combination such as LB + ○, and other presets change them: **Modern** attacks with RT (△, which also shoots a bow), does the second attack with RB (○, which also fires a bowgun) and guards and aims with LT (R), with LB as L; **Left-handed** mirrors the pad, moving with the right stick, the D-pad doing the face buttons and the face buttons the D-pad, and the shoulders and triggers changing sides. The sticks stay sticks: *Move with the Right Stick* swaps them, and the other one is the *Camera Stick*. L3 + R3 always opens the menu.
 
-The face buttons are positional, so on a PlayStation pad circle is circle and confirms, exactly as the game's prompts say. The menu's *Confirm button* setting (or `MHP3RD_PAD_FACE=xbox`) moves confirm to the bottom button for pads labelled the other way round: it swaps the bottom and right buttons in every preset, and the menu shows the bindings as they are then pressed.
+The face buttons are positional, so on a PlayStation pad circle is circle and confirms, exactly as the game's prompts say. The menu's *Confirm Button* setting (or `MHP3RD_PAD_FACE=xbox`) moves confirm to the bottom button for pads labelled the other way round: it swaps the bottom and right buttons in every preset, and the menu shows the bindings as they are then pressed.
 
 ### Steam Deck
 
@@ -301,7 +301,7 @@ A control preset is a whole layout: every control on the keyboard and mouse and 
 
 Every preset has the same port binds on the keyboard: `` ` `` fast-forward, F12 or Print Screen a [screenshot](#screenshots), . a [frame step](#frame-step), F7 [Hide HUD](#hiding-the-hud). On a gamepad a screenshot is R3 + D-pad left and a frame step D-pad right; Left-handed mirrors both, to L3 + □ (west) and ○ (east). [Lock-on](#lock-on) is T on every keyboard preset, and also the middle mouse button in those that use the mouse (all but Classic keyboard); on a gamepad it is a tap of the camera stick's button, R3, or L3 in Left-handed.
 
-The shipped presets never change. Changing a binding while one of them is chosen makes a preset of your own from it, named *Custom* (then *Custom 2*, and so on), and chooses that; later changes go into it as you make them. *Save as a new preset* copies the current bindings into another one. Your presets can be renamed (*Name*) and deleted (*Delete this preset*, which asks first and goes back to Default); up to 32 are kept, in `settings.ini` as `input.user_preset.<n>.name`, `.bind.<control>`, `.pad.<control>`, `.move_stick` and `.base`, the shipped preset it was made from, which resetting a control goes back to (Default for presets made before it was kept). The chosen preset is `input.preset` (`default`, `modern`, `left_handed`, `classic`, or `user:` and a name of yours), and the bindings in use are also kept as `input.bind.<control>`, `input.pad.<control>` and `input.move_stick`.
+The shipped presets never change. Changing a binding while one of them is chosen makes a preset of your own from it, named *Custom* (then *Custom 2*, and so on), and chooses that; later changes go into it as you make them. *Save as a New Preset* copies the current bindings into another one. Your presets can be renamed (*Name*) and deleted (*Delete This Preset*, which asks first and goes back to Default); up to 32 are kept, in `settings.ini` as `input.user_preset.<n>.name`, `.bind.<control>`, `.pad.<control>`, `.move_stick` and `.base`, the shipped preset it was made from, which resetting a control goes back to (Default for presets made before it was kept). The chosen preset is `input.preset` (`default`, `modern`, `left_handed`, `classic`, or `user:` and a name of yours), and the bindings in use are also kept as `input.bind.<control>`, `input.pad.<control>` and `input.move_stick`.
 
 ### Rebinding
 
@@ -318,7 +318,7 @@ While Yakumo waits for the input, a box over the menu says what is being bound a
 
 - **The longest chord wins.** With A bound to one control and A + B to another, pressing A + B does only the second, and its inputs do nothing else while it is held. What is left over is matched again: holding W to move while pressing Q + E still moves.
 - **Letting go.** A chord let go of unevenly presses nothing left over (letting go of △ a moment before ○ does not press ○). A chord that grew from something held first goes back to it: hold LB for L, then B for LB + B, and letting go of B leaves L.
-- **The chord window.** An input that begins a longer chord waits a moment for the rest of it: *Chord window* under *Combinations* (50 ms by default, up to 200, `input.chord_window`, `MHP3RD_CHORD_WINDOW`; 0 turns it off). A tap shorter than the window still presses its control, when it is let go. Only such inputs wait, and only where acting at once could do harm: △ before ○ is no combined attack, and □ before L uses the item. Everything else acts in the same sample it goes down, with no time added: inputs in no chord, L, R and moving held first (LB in LB + X for Item left, which only adds □ to L), and a game button in a chord only the port reads (D-pad left in R3 + D-pad left for a screenshot, as before). L3 + R3 (the menu) and, with the free camera on, Back + R3 are chords of the port's own: they win like any chord, so an input bound alone to R3 does nothing when they are pressed.
+- **The chord window.** An input that begins a longer chord waits a moment for the rest of it: *Chord Window* under *Combinations* (50 ms by default, up to 200, `input.chord_window`, `MHP3RD_CHORD_WINDOW`; 0 turns it off). A tap shorter than the window still presses its control, when it is let go. Only such inputs wait, and only where acting at once could do harm: △ before ○ is no combined attack, and □ before L uses the item. Everything else acts in the same sample it goes down, with no time added: inputs in no chord, L, R and moving held first (LB in LB + X for Item left, which only adds □ to L), and a game button in a chord only the port reads (D-pad left in R3 + D-pad left for a screenshot, as before). L3 + R3 (the menu) and, with the free camera on, Back + R3 are chords of the port's own: they win like any chord, so an input bound alone to R3 does nothing when they are pressed.
 
 **△ + ○ (together)** is a control of its own: one key or button that presses △ and ○ in the same frame, for the combined attacks that two fingers do not always manage together. Default leaves it unbound.
 
@@ -328,7 +328,7 @@ While Yakumo waits for the input, a box over the menu says what is being bound a
 
 #### Your own combinations
 
-*Your combinations*, after the controls, holds actions of your own that press any PSP buttons together (△ ○ ✕ □, L, R, the D-pad, START, SELECT), such as ✕ + ○. *+ New combination* makes one and opens its buttons: select each to turn it on or off, then *Done*. Its name is its buttons; select the name to change them, and the × at the end of the row removes it. Bind it like any control, on both devices. Up to 8 are kept with the preset, in `settings.ini` as `input.combo.<n>.buttons` (`L + Square`), `.bind` and `.pad` (and `input.user_preset.<n>.combo.<m>.*` in a preset of yours). The game gets the buttons in the same frame, except L, which goes first as above.
+*Your Combinations*, after the controls, holds actions of your own that press any PSP buttons together (△ ○ ✕ □, L, R, the D-pad, START, SELECT), such as ✕ + ○. *+ New combination* makes one and opens its buttons: select each to turn it on or off, then *Done*. Its name is its buttons; select the name to change them, and the × at the end of the row removes it. Bind it like any control, on both devices. Up to 8 are kept with the preset, in `settings.ini` as `input.combo.<n>.buttons` (`L + Square`), `.bind` and `.pad` (and `input.user_preset.<n>.combo.<m>.*` in a preset of yours). The game gets the buttons in the same frame, except L, which goes first as above.
 
 **Conflicts.** A binding that clashes is drawn in red, with a line under its control that says with what: the same input or chord on another control (one press does both); a chord that is part of another one, so it waits the chord window and does only the longer one when that is complete (shown on both controls); or a chord that takes an input doing L, R or moving on its own, which the game reads held together with other buttons, so that control lets go while the chord is held. A chord that only adds to L (LB + X for Item left) is none. The line has the fix: *Remove from …* takes the input away from the other control, *Keep both* leaves them and hides the warning until Yakumo starts again. Conflicts are allowed, and the ones not kept are counted under the preset. *Frame step* is read only in the photo mode, when the game gets no input, so it shares an input with a game control without a clash: D-pad right is both the game's → and, in the photo mode, frame step. *Screenshot* is read during play as well and clashes like any other control.
 
@@ -350,7 +350,7 @@ Every controller is also logged when it appears, with `[pad]`: name, USB ids, GU
 
 On a touch screen (the Android app, or any screen SDL reports touches from) controls are drawn over the game once it is touched, and hidden again when a gamepad or the keyboard is used. Controls → *Touch screen* → *Layout* chooses between two:
 
-- **PSP buttons** (the default): a stick that appears where the left thumb lands, the four face buttons in the PSP's diamond on the right, L and R at the top corners, a D-pad at the left edge (*D-pad*), and Select, the menu button and Start small at the top.
+- **PSP buttons** (the default): a stick that appears where the left thumb lands, the four face buttons in the PSP's diamond on the right, L and R at the top corners, a D-pad at the left edge (*D-Pad*), and Select, the menu button and Start small at the top.
 - **Action**: large buttons named for what they do, each pressing a PSP button or two in the same frame:
 
 | Element | Where | Presses |
@@ -369,7 +369,7 @@ On a touch screen (the Android app, or any screen SDL reports touches from) cont
 
   Every finger is independent: the stick, the buttons and a camera drag work at the same time, and buttons stay pressed while held. A thumb on the right-hand cluster can slide from one button to the next. A finger anywhere free turns the camera, as on the PSP-button layout; in the swipe area a finger that does not swipe within about a quarter of a second turns the camera too, with the motion it made, so a swipe never turns the camera and a slow drag is never a swipe. The icons are drawn by Yakumo, simple shapes; each button shows what it presses beside it. Placements keep their distance from the nearer edge of the screen's safe area (the swipe area from its middle), in heights of the screen, so the layout fits phones and tablets of any shape and stays clear of a cutout.
 
-**Editing the action layout.** *Edit the action layout…* shows it over the game. Drag an element to move it; tap one to choose it, and the panel then sets what it presses (one PSP button, or two such as △ + ○ or R + △), its size, whether it is shown, or resets it. With nothing chosen the panel sets the opacity, the size of all elements, haptic feedback and where the panel sits, or resets the whole layout. Every change is saved at once, in `settings.ini` on this device (`input.touch_action.<element>`, for example `input.touch_action.combo=right 0.540 0.620 0.060 0x3000 1`: the anchor, the distance from it and from the top in heights of the safe area, the radius, the PSP buttons and whether it is shown). Pause cannot be hidden: it is the way into this menu. **Haptic feedback** (on by default) gives a short vibration when an Action button is pressed or a swipe is taken, as the system does for a key; the system's own touch feedback setting decides whether it is felt.
+**Editing the action layout.** *Edit the Action Layout…* shows it over the game. Drag an element to move it; tap one to choose it, and the panel then sets what it presses (one PSP button, or two such as △ + ○ or R + △), its size, whether it is shown, or resets it. With nothing chosen the panel sets the opacity, the size of all elements, haptic feedback and where the panel sits, or resets the whole layout. Every change is saved at once, in `settings.ini` on this device (`input.touch_action.<element>`, for example `input.touch_action.combo=right 0.540 0.620 0.060 0x3000 1`: the anchor, the distance from it and from the top in heights of the safe area, the radius, the PSP buttons and whether it is shown). Pause cannot be hidden: it is the way into this menu. **Haptic Feedback** (on by default) gives a short vibration when an Action button is pressed or a swipe is taken, as the system does for a key; the system's own touch feedback setting decides whether it is felt.
 
 ## On-screen keyboard
 
@@ -378,7 +378,7 @@ When the game asks for text (the hunter's name at character creation), Yakumo op
 | Gamepad | Keyboard | Action |
 | --- | --- | --- |
 | D-pad, left stick | | Move over the keys |
-| Confirm (○, or the bottom button with *Confirm button* set to it) | typing | Type the key |
+| Confirm (○, or the bottom button with *Confirm Button* set to it) | typing | Type the key |
 | Back | Backspace | Delete the character before the cursor |
 | □ (X) | | Shift: once, again for caps, again off |
 | △ (Y) | Space | Space |
@@ -395,9 +395,11 @@ Where SDL reports a system on-screen keyboard (such as Steam's in Big Picture or
 
 OK hands the text to the game as the PSP's keyboard would: UTF-16 in the field's output buffer, the field result *changed*, and the dialog status moving from visible to quit. Cancel leaves the buffer alone and reports *cancelled*; the game then keeps the name it had.
 
-The menu's text fields (*Hunter name*, *Server*, *Nickname*) open the same keyboard when a gamepad activates them; with a keyboard or the mouse they are edited in place.
+The menu's text fields (*Hunter Name*, *Server*, *Nickname*) open the same keyboard when a gamepad activates them; with a keyboard or the mouse they are edited in place.
 
 ## In-game menu
+
+QoL groups Lock-On, Lock-On Marker and Layered Armor under **Modern Features:**, Fast Loading under **Quality of Life:**, and Fast-Forward and Fast-Forward Speed under **Singleplayer Only Cheats:**. Free-camera options remain under **Experimental Options:**. The page ends with **Reset to Defaults:** and **Restore QoL Defaults**.
 
 Esc, or L3+R3 on a gamepad, opens Yakumo's menu over the game; the same again, back at its top level or Start closes it. Esc never quits the game: Steam's desktop controller layout on a Steam Deck sends Esc with the B button, so an Esc that arrives together with a gamepad button is ignored.
 
@@ -405,88 +407,88 @@ The menu opens where it was last closed: the same page, scrolled as it was, with
 
 By default the game is paused while the menu is open: no guest code runs, emulated time stands still, the audio device stops, and the last frame stays behind the menu, dimmed. On resume the kernel's clock picks up from real time again, so the game neither races to make up the pause nor counts it in the `[perf]` statistics.
 
-Two settings in the System section change that. With *Pause the game when the menu opens* off, the game keeps running behind the menu: it keeps drawing frames at its own pace, the sound keeps playing and its clock keeps running, and the menu is drawn over each frame. During ad hoc play (in a gathering hall, joining one, or hosting a session) the game keeps running behind the menu unless *Pause during multiplayer* is on, whatever the first setting says, because a paused game stops answering the other players and can drop a quest; this one is off by default. The menu's header says which applies: *Paused* or *Running*. Either way, input goes to the menu only, so moving through it never moves the hunter, and buttons still held when it closes reach the game only after they are released.
+Two settings in the System section change that. With *Pause the Game When the Menu Opens* off, the game keeps running behind the menu: it keeps drawing frames at its own pace, the sound keeps playing and its clock keeps running, and the menu is drawn over each frame. During ad hoc play (in a gathering hall, joining one, or hosting a session) the game keeps running behind the menu unless *Pause During Multiplayer* is on, whatever the first setting says, because a paused game stops answering the other players and can drop a quest; this one is off by default. The menu's header says which applies: *Paused* or *Running*. Either way, input goes to the menu only, so moving through it never moves the hunter, and buttons still held when it closes reach the game only after they are released.
 
-The menu follows the game's confirm convention: with the default layout the right face button (○ on a PlayStation pad, B on a Steam Deck) selects and the bottom one goes back, as in the game; with *Confirm button* set to the bottom button, both swap. The footer shows the buttons of the pad in use (PlayStation shapes or letters) or the keys, and a line explaining the focused setting. L1/R1 (LB/RB), or Q/W on the keyboard, switch between the sections. Left and right change a value; confirm steps it forward.
+The menu follows the game's confirm convention: with the default layout the right face button (○ on a PlayStation pad, B on a Steam Deck) selects and the bottom one goes back, as in the game; with *Confirm Button* set to the bottom button, both swap. The footer shows the buttons of the pad in use (PlayStation shapes or letters) or the keys, and a line explaining the focused setting. L1/R1 (LB/RB), or Q/W on the keyboard, switch between the sections. Left and right change a value; confirm steps it forward.
 
 Every change applies at once and is saved to `settings.ini` in the per-user directory, next to the installer's `disc_image`. A setting whose environment variable is set is decided by that variable for the run: the menu shows it greyed with *Set by MHP3RD_…* and leaves the file's value alone. So the order is: environment variable, then `settings.ini`, then the default.
 
-The Android app starts from other defaults where a phone differs, with the same keys and values: `video.aspect` is `fill` (a phone is wider than the PSP), `video.fullscreen` is on (there is no window) and `input.mouse` is off (a phone has no mouse to capture). Everything else starts as in the table. On Android, *Analog camera* alone decides whether a finger drag turns the camera: *Camera stick* is about a physical stick there.
+The Android app starts from other defaults where a phone differs, with the same keys and values: `video.aspect` is `fill` (a phone is wider than the PSP), `video.fullscreen` is on (there is no window) and `input.mouse` is off (a phone has no mouse to capture). Everything else starts as in the table. On Android, *Analog Camera* alone decides whether a finger drag turns the camera: *Camera Stick* is about a physical stick there.
 
 | Section | Setting | Key in `settings.ini` | Variable | Values |
 | --- | --- | --- | --- | --- |
 | Video | Resolution | `video.internal_scale` | `MHP3RD_INTERNAL_SCALE` | Auto (`auto` or `0`: the window's own size, followed as it changes, at most 1632 lines) or ×1–×6 of 480×272 (the variable allows up to ×8); default ×2. See [Picture shape and size](#picture-shape-and-size) |
-| Video | Display | `video.fullscreen` | | Window or fullscreen |
-| Video | Window size | `video.window_scale` | | ×1–×4 of 480×272; default ×2 |
-| Video | Aspect ratio | `video.aspect` | | `original` (the PSP's shape, black bars; the default), `stretch` (stretched to the window) or `fill` (the game's view takes the window's shape). Older versions wrote `video.keep_aspect`, which is still read and written |
-| Video | Scaling filter | `video.sharp_screen` | | Smooth or sharp scaling of the finished picture to the window |
-| Video | Texture filter | `video.sharp_textures` | | Smooth (bilinear) or sharp (nearest) texture sampling |
-| Video | Texture pack | `video.texture_pack` | `MHP3RD_TEXTURE_PACK` | On (default) or off: draw an installed [HD texture pack](#hd-texture-packs) instead of the game's textures. The footer shows how many textures the pack has and how many are on the GPU, or where the pack was looked for |
-| Video | Import texture pack… | `video.texture_pack_folder` | `MHP3RD_TEXTURE_PACK` (a folder) | Empty (default): the pack in `textures/NPJB40001`. A folder: the pack [imported to be used where it is](#importing-a-texture-pack). *Stop using the pack folder* empties it |
-| Video | Vsync | `video.present_mode` | | On (FIFO), or off through mailbox or immediate presentation where the driver offers them |
-| Video | Frame rate | `video.frame_rate` | `MHP3RD_FRAME_RATE` | `30` (default: the game's own frames, as they are), `45`, `60`, `90`, `120` or `display` (the display's refresh rate): frames in between the game's, with blended movement. See [Frame rate](#frame-rate) |
-| Video | Lower when behind | `video.frame_rate_auto` | `MHP3RD_FRAME_RATE_AUTO` | On (default): the frame rate steps down by itself rather than slow the game. Off: the chosen rate stays, and the game may run below full speed |
-| Video | Game speed | `video.unthrottled` | `MHP3RD_UNTHROTTLED` | Normal (held to real time) or unlimited |
-| Video | Fast loading | `video.fast_loading` | `MHP3RD_FAST_LOADING` | On (default) or off: while the game loads, and only then, it runs ahead of real time. See [Fast loading](#fast-loading) |
-| Video | Fast-forward | `video.fast_forward` | `MHP3RD_FAST_FORWARD` | `hold` (default): the game runs faster while the Fast-forward key is held; `toggle`: one press turns it on, the next off; `off`: the key does nothing. Single player only. See [Fast-forward](#fast-forward) |
-| Video | Fast-forward speed | `video.fast_forward_speed` | `MHP3RD_FAST_FORWARD_SPEED` | 2×–8× real time; default 3× |
+| Video | Window Mode | `video.fullscreen` | | Window or fullscreen |
+| Video | Window Resolution | `video.window_scale` | | ×1–×4 of 480×272; default ×2 |
+| Video | Aspect Ratio | `video.aspect` | | `original` (the PSP's shape, black bars; the default), `stretch` (stretched to the window) or `fill` (the game's view takes the window's shape). Older versions wrote `video.keep_aspect`, which is still read and written |
+| Video | Scaling Filter | `video.sharp_screen` | | Smooth or sharp scaling of the finished picture to the window |
+| Video | Texture Filter | `video.sharp_textures` | | Smooth (bilinear) or sharp (nearest) texture sampling |
+| Video | UI Textures | `video.ui_textures` | `MHP3RD_UI_TEXTURES` | Off (default), Sharp bilinear or MMPX, for the 2D interface above ×1 |
 | Video | Hide HUD | | `MHP3RD_HIDE_HUD` | Off (default) or on, for this run: the game's HUD, name tags and prompts are left out of the picture; menus and dialogs stay. Same as the Hide HUD key. See [Hiding the HUD](#hiding-the-hud) |
-| Video | Performance | `video.performance` | `MHP3RD_PERF` | Off, overlay, overlay and log, log only |
-| Video | GPU compatibility | `video.gpu_compat` | `MHP3RD_GPU_COMPAT` | Auto (default: on only when the start-up self-test fails or a pipeline is refused), on or off; applies from the next start. See [GPU compatibility mode](#gpu-compatibility-mode) |
+| Video | Texture Pack | `video.texture_pack` | `MHP3RD_TEXTURE_PACK` | On (default) or off: draw an installed [HD texture pack](#hd-texture-packs) instead of the game's textures. The footer shows how many textures the pack has and how many are on the GPU, or where the pack was looked for |
+| Video | Import Texture Pack… | `video.texture_pack_folder` | `MHP3RD_TEXTURE_PACK` (a folder) | Empty (default): the pack in `textures/NPJB40001`. A folder: the pack [imported to be used where it is](#importing-a-texture-pack). *Stop Using the Pack Folder* empties it |
+| Video | Vsync | `video.present_mode` | | On (FIFO), or off through mailbox or immediate presentation where the driver offers them |
+| Video | Frame Rate | `video.frame_rate` | `MHP3RD_FRAME_RATE` | `30` (default: the game's own frames, as they are), `45`, `60`, `90`, `120` or `display` (the display's refresh rate): frames in between the game's, with blended movement. See [Frame rate](#frame-rate) |
+| Video | Lower When Behind | `video.frame_rate_auto` | `MHP3RD_FRAME_RATE_AUTO` | On (default): the frame rate steps down by itself rather than slow the game. Off: the chosen rate stays, and the game may run below full speed |
+| Video | Game Speed | `video.unthrottled` | `MHP3RD_UNTHROTTLED` | Normal (held to real time) or unlimited |
+| Video | Performance Overlay | `video.performance` | `MHP3RD_PERF` | Off, Overlay, Overlay and Log, Log Only, Compact, Compact and Log |
+| Video | GPU Compatibility | `video.gpu_compat` | `MHP3RD_GPU_COMPAT` | Auto (default: on only when the start-up self-test fails or a pipeline is refused), on or off; applies from the next start. See [GPU compatibility mode](#gpu-compatibility-mode) |
 | Video | Font | `text.font` | `MHP3RD_FONT` | Default (a Japanese system font), or an installed font; see [Game text](#game-text) |
 | Video | Weight | `text.weight` | | Regular, bold (default) or heavy: thickens the game's text by 0–2 pixel columns |
-| Video | Sharp text | `text.crisp` | `MHP3RD_CRISP_TEXT` | Off (default) or on: above ×1 the game's text is drawn again at the internal resolution. See [Sharper text and 2D textures](#sharper-text-and-2d-textures) |
-| Video | UI textures | `video.ui_textures` | `MHP3RD_UI_TEXTURES` | Off (default), Sharp bilinear or MMPX, for the 2D interface above ×1 |
+| Video | Sharp Text | `text.crisp` | `MHP3RD_CRISP_TEXT` | Off (default) or on: above ×1 the game's text is drawn again at the internal resolution. See [Sharper text and 2D textures](#sharper-text-and-2d-textures) |
 | Audio | Volume | `audio.volume` | | 0–100% |
 | Audio | Mute | `audio.mute` | | |
-| Audio | Mute in background | `audio.background_mute` | | Off (default) or on: silence the game while it runs in the background |
-| Controls | Gamepad in background | `input.background_gamepad` | | Off (default) or on: read the controller while unfocused; other running instances may receive the same input. Keyboard and mouse stay focused |
-| Controls | Confirm button | `input.confirm` | `MHP3RD_PAD_FACE` | Right (○, Japanese) or bottom (Western) |
-| Controls | Stick dead zone | `input.dead_zone` | `MHP3RD_PAD_DEADZONE` | 0–50% |
-| Controls | Trigger point | `input.trigger` | `MHP3RD_PAD_TRIGGER` | 5–100% |
-| Controls | Chord window (under *Combinations*) | `input.chord_window` | `MHP3RD_CHORD_WINDOW` | Off, 10–200 ms (50 by default): how long an input that begins a longer chord waits for the rest; see [Rebinding](#rebinding) |
+| Audio | Mute in Background | `audio.background_mute` | | Off (default) or on: silence the game while it runs in the background |
+| Controls | Gamepad in Background | `input.background_gamepad` | | Off (default) or on: read the controller while unfocused; other running instances may receive the same input. Keyboard and mouse stay focused |
+| Controls | Confirm Button | `input.confirm` | `MHP3RD_PAD_FACE` | Right (○, Japanese) or bottom (Western) |
+| Controls | Stick Dead Zone | `input.dead_zone` | `MHP3RD_PAD_DEADZONE` | 0–50% |
+| Controls | Trigger Point | `input.trigger` | `MHP3RD_PAD_TRIGGER` | 5–100% |
+| Controls | Chord Window (under *Combinations:*) | `input.chord_window` | `MHP3RD_CHORD_WINDOW` | Off, 10–200 ms (50 by default): how long an input that begins a longer chord waits for the rest; see [Rebinding](#rebinding) |
 | Controls | Preset | `input.preset` | `MHP3RD_CONTROL_PRESET` | `default`, `modern`, `left_handed`, `classic` or `user:<name>`; see [Control presets](#control-presets). The variable takes a shipped preset's id or the name of one of yours, for the run only |
-| Controls | Camera stick | `input.right_stick` | `MHP3RD_PAD_RSTICK_DPAD` | Camera, D-pad or off, for the stick that does not move the hunter |
-| Controls | Analog camera | `input.analog_camera` | `MHP3RD_ANALOG_CAMERA` | Proportional turn and continuous tilt in the ordinary quest camera, and proportional bow and bowgun aim; on by default |
-| Controls | Lock-on | `input.lock_on` | `MHP3RD_LOCK_ON` | On (default) or off: what the [Lock on](#lock-on) bind does. Off, the bind does nothing |
-| Controls | Lock-on marker | `input.lock_on_marker` | | On (default) or off: a ring over the locked monster |
-| Controls | Aim speed | `input.aim_speed` | `MHP3RD_AIM_SPEED` | Degrees a second at full deflection while a bow or a bowgun aims, 10 to 360; default 90 |
-| Controls | Camera speed | `input.camera_speed` | `MHP3RD_CAMERA_SPEED` | 20–720 degrees per second at full deflection; default 190 |
-| Controls | Invert camera horizontally / vertically | `input.invert_camera_x`, `input.invert_camera_y` | | For the right-stick camera |
-| Controls | Camera stick D-pad point | `input.right_stick_zone` | `MHP3RD_PAD_RSTICK_ZONE` | 10–100%, for the D-pad mode |
-| Controls | Move with the right stick | `input.move_stick` | | `left` (default) or `right`; part of the preset |
+| Controls | Camera Stick | `input.right_stick` | `MHP3RD_PAD_RSTICK_DPAD` | Camera, D-pad or off, for the stick that does not move the hunter |
+| Controls | Analog Camera | `input.analog_camera` | `MHP3RD_ANALOG_CAMERA` | Proportional turn and continuous tilt in the ordinary quest camera, and proportional bow and bowgun aim; on by default |
+| Controls | Aim Speed | `input.aim_speed` | `MHP3RD_AIM_SPEED` | Degrees a second at full deflection while a bow or a bowgun aims, 10 to 360; default 90 |
+| Controls | Camera Speed | `input.camera_speed` | `MHP3RD_CAMERA_SPEED` | 20–720 degrees per second at full deflection; default 190 |
+| Controls | Invert Camera Horizontally / Vertically | `input.invert_camera_x`, `input.invert_camera_y` | | For the right-stick camera |
+| Controls | Camera Stick D-Pad Point | `input.right_stick_zone` | `MHP3RD_PAD_RSTICK_ZONE` | 10–100%, for the D-pad mode |
+| Controls | Move with the Right Stick | `input.move_stick` | | `left` (default) or `right`; part of the preset |
 | Controls | A control's *Gamepad* bindings under [Rebinding](#rebinding) | `input.pad.<control>` | | Up to four buttons, triggers or combinations, such as `Pad North / Pad LB + Pad East`; part of the preset |
 | Controls | Mouse | `input.mouse` | `MHP3RD_MOUSE` | On (default): the window captures the pointer while the game runs, and the mouse turns the camera and presses its bound buttons; off: the pointer is left alone |
-| Controls | Mouse sensitivity | `input.mouse_sensitivity` | `MHP3RD_MOUSE_SENSITIVITY` | Degrees of camera turn per count of mouse motion, 0.01 to 0.99; default 0.10 |
-| Controls | Invert mouse horizontally / vertically | `input.invert_mouse_x`, `input.invert_mouse_y` | | For the mouse camera and aim |
-| Controls | On-screen controls | `input.touch_controls` | | On (default): a touch screen shows the on-screen controls once it is touched |
+| Controls | Mouse Sensitivity | `input.mouse_sensitivity` | `MHP3RD_MOUSE_SENSITIVITY` | Degrees of camera turn per count of mouse motion, 0.01 to 0.99; default 0.10 |
+| Controls | Invert Mouse Horizontally / Vertically | `input.invert_mouse_x`, `input.invert_mouse_y` | | For the mouse camera and aim |
+| Controls | On-Screen Controls | `input.touch_controls` | | On (default): a touch screen shows the on-screen controls once it is touched |
 | Controls | Layout | `input.touch_layout` | `MHP3RD_TOUCH_LAYOUT` | `psp` (PSP buttons, the default) or `action`; see [Touch screen](#touch-screen) |
-| Controls | Edit the action layout… | `input.touch_action.<element>` | | Where each element of the Action layout is, what it presses and whether it is shown |
-| Controls | Haptic feedback | `input.touch_haptics` | | On (default): a short vibration for an Action button or swipe |
-| Controls | D-pad | `input.touch_dpad` | | On (default): the PSP-button layout has a D-pad at the left edge, for the game's menus; off gives its place to the stick |
-| Controls | Controls opacity | `input.touch_opacity` | | 10–100%; default 50% |
-| Controls | Controls size | `input.touch_size` | | 60–160% of the default size; default 100% |
-| Controls | Touch camera speed | `input.touch_camera_speed` | | Degrees the camera turns for a drag across the screen's height, 30 to 720; default 180 |
-| Controls | A control's *Keyboard and mouse* bindings under [Rebinding](#rebinding) (Move forward … △ + ○, Fast-forward, Screenshot, Frame step, Hide HUD) | `input.bind.<control>` | | Up to four keys, mouse buttons or combinations, see [Keyboard and mouse](#keyboard-and-mouse); part of the preset |
-| Controls | When the game asks for a name | `input.name_entry` | `MHP3RD_OSK_MODE` | `keyboard` (default): the on-screen keyboard; `fixed`: the name below at once |
-| Controls | Hunter name | `input.name` | `MHP3RD_OSK_TEXT` | Default `Hunter`; up to 12 characters. Setting the variable also answers at once unless `MHP3RD_OSK_MODE` says otherwise |
-| Controls (Experimental) | Free camera | `experimental.free_camera` | `MHP3RD_FREE_CAMERA` | Off (default) or on: F6, or Back + R3, detaches the view from the game's camera. See [Free camera](#free-camera-experimental) |
-| Controls (Experimental) | Hide the HUD while flying | `experimental.free_camera_hide_hud` | `MHP3RD_FREE_CAMERA_HIDE_HUD` | On (default) or off: the [HUD is hidden](#hiding-the-hud) while the free camera flies or holds a photo |
-| Controls (Experimental) | Free camera speed | `experimental.free_camera_speed` | `MHP3RD_FREE_CAMERA_SPEED` | Game units a second, 50 to 5000 in the menu (the file and the variable take 10 to 20000); default 400. The speed chosen in flight is kept here |
-| Mods (Layered armor) | Layered armor | `look.layered_armor` | `MHP3RD_LAYERED_ARMOR` | Off (default) or on: the hunter is drawn in the pieces chosen below; stats, skills and the save keep the real armor. See [Layered armor](#layered-armor) |
-| Mods (Layered armor) | Head, Chest, Arms, Waist, Legs | `look.layered_head`, `look.layered_chest`, `look.layered_arms`, `look.layered_waist`, `look.layered_legs` | | `real` (default): the piece worn; `0`: nothing; otherwise the id of the armor piece to show |
-| Mods (Layered armor) | List all armor | `look.layered_all` | | Off (default): the lists offer the pieces the hunter wears or keeps in the equipment box; on: every piece its sex can wear |
-| Mods | Use mods | `[general] enabled` in `mods.ini` | `MHP3RD_NO_MODS` | On (default) or off: every mod off, the game's own files only. See [Mods](#mods) |
+| Controls | Edit the Action Layout… | `input.touch_action.<element>` | | Where each element of the Action layout is, what it presses and whether it is shown |
+| Controls | Haptic Feedback | `input.touch_haptics` | | On (default): a short vibration for an Action button or swipe |
+| Controls | D-Pad | `input.touch_dpad` | | On (default): the PSP-button layout has a D-pad at the left edge, for the game's menus; off gives its place to the stick |
+| Controls | Controls Opacity | `input.touch_opacity` | | 10–100%; default 50% |
+| Controls | Controls Size | `input.touch_size` | | 60–160% of the default size; default 100% |
+| Controls | Touch Camera Speed | `input.touch_camera_speed` | | Degrees the camera turns for a drag across the screen's height, 30 to 720; default 180 |
+| Controls | A control's *Keyboard and Mouse* bindings under [Rebinding](#rebinding) (Move Forward … △ + ○, Fast-Forward, Screenshot, Frame Step, Hide HUD) | `input.bind.<control>` | | Up to four keys, mouse buttons or combinations, see [Keyboard and mouse](#keyboard-and-mouse); part of the preset |
+| QoL (Modern Features) | Lock-On | `input.lock_on` | `MHP3RD_LOCK_ON` | On (default) or off: what the [Lock on](#lock-on) bind does. Off, the bind does nothing |
+| QoL (Modern Features) | Lock-On Marker | `input.lock_on_marker` | | On (default) or off: a ring over the locked monster |
+| QoL (Modern Features → Layered Armor) | Layered Armor | `look.layered_armor` | `MHP3RD_LAYERED_ARMOR` | Off (default) or on: the hunter is drawn in the pieces chosen below; stats, skills and the save keep the real armor. See [Layered armor](#layered-armor) |
+| QoL (Modern Features → Layered Armor) | Head, Chest, Arms, Waist, Legs | `look.layered_head`, `look.layered_chest`, `look.layered_arms`, `look.layered_waist`, `look.layered_legs` | | `real` (default): the piece worn; `0`: nothing; otherwise the id of the armor piece to show |
+| QoL (Modern Features → Layered Armor) | List All Armor | `look.layered_all` | | Off (default): the lists offer the pieces the hunter wears or keeps in the equipment box; on: every piece its sex can wear |
+| QoL (Quality of Life) | Fast Loading | `video.fast_loading` | `MHP3RD_FAST_LOADING` | On (default) or off: while the game loads, and only then, it runs ahead of real time. Disabled in multiplayer. See [Fast loading](#fast-loading) |
+| QoL (Singleplayer Only Cheats) | Fast-Forward | `video.fast_forward` | `MHP3RD_FAST_FORWARD` | `hold` (default): the game runs faster while the Fast-forward key is held; `toggle`: one press turns it on, the next off; `off`: the key does nothing. Single player only. See [Fast-forward](#fast-forward) |
+| QoL (Singleplayer Only Cheats) | Fast-Forward Speed | `video.fast_forward_speed` | `MHP3RD_FAST_FORWARD_SPEED` | 2×–8× real time; default 3× |
+| QoL (Experimental Options) | Free Camera | `experimental.free_camera` | `MHP3RD_FREE_CAMERA` | Off (default) or on: F6, or Back + R3, detaches the view from the game's camera. See [Free camera](#free-camera-experimental) |
+| QoL (Experimental Options) | Free Camera Speed | `experimental.free_camera_speed` | `MHP3RD_FREE_CAMERA_SPEED` | Game units a second, 50 to 5000 in the menu (the file and the variable take 10 to 20000); default 400. The speed chosen in flight is kept here |
+| QoL (Experimental Options) | Hide the HUD While Flying | `experimental.free_camera_hide_hud` | `MHP3RD_FREE_CAMERA_HIDE_HUD` | On (default) or off: the [HUD is hidden](#hiding-the-hud) while the free camera flies or holds a photo |
+| Mods | Use Mods | `[general] enabled` in `mods.ini` | `MHP3RD_NO_MODS` | On (default) or off: every mod off, the game's own files only. See [Mods](#mods) |
 | Mods | A row per mod: On, Priority | `[mod <folder>] enabled`, `rank` in `mods.ini` | | Off (default) or on; a higher rank wins where two mods replace the same file |
-| System | Pause the game when the menu opens | `ui.menu_pause` | `MHP3RD_MENU_PAUSE` | On (default) or off: the game keeps running behind the menu |
-| System | Pause during multiplayer | `ui.menu_pause_multiplayer` | `MHP3RD_MENU_PAUSE_MULTIPLAYER` | Off (default): during ad hoc play the game keeps running behind the menu; on: the setting above decides |
-| System | Add a timestamp to the backup name | `saves.backup_timestamp` | | On (default): each backup from *Back up saves…* is a new folder named by its time; off: plain folder names, replaced after asking |
-| System | Remind me to back up after updates | `saves.backup_reminder` | `MHP3RD_BACKUP_REMINDER` | On (default): the first start of a new release asks you to back up your saves; see [Backups](#where-saves-live-and-how-to-back-them-up). `saves.backup_reminded` records the release that last asked |
-| Network | Ad hoc play | `network.adhoc` | `MHP3RD_ADHOC` | Off (default) or on; off, the game reports the wireless switch as off |
+| System | When the Game Asks for a Name | `input.name_entry` | `MHP3RD_OSK_MODE` | `keyboard` (default): the on-screen keyboard; `fixed`: the name below at once |
+| System | Hunter Name | `input.name` | `MHP3RD_OSK_TEXT` | Default `Hunter`; up to 12 characters. Setting the variable also answers at once unless `MHP3RD_OSK_MODE` says otherwise |
+| System | Pause the Game When the Menu Opens | `ui.menu_pause` | `MHP3RD_MENU_PAUSE` | On (default) or off: the game keeps running behind the menu |
+| System | Pause During Multiplayer | `ui.menu_pause_multiplayer` | `MHP3RD_MENU_PAUSE_MULTIPLAYER` | Off (default): during ad hoc play the game keeps running behind the menu; on: the setting above decides |
+| System | Add a timestamp to the backup name | `saves.backup_timestamp` | | On (default): each backup from *Back Up Saves…* is a new folder named by its time; off: plain folder names, replaced after asking |
+| System | Remind Me to Back Up After Updates | `saves.backup_reminder` | `MHP3RD_BACKUP_REMINDER` | On (default): the first start of a new release asks you to back up your saves; see [Backups](#where-saves-live-and-how-to-back-them-up). `saves.backup_reminded` records the release that last asked |
+| Network | Ad Hoc Play | `network.adhoc` | `MHP3RD_ADHOC` | Off (default) or on; off, the game reports the wireless switch as off |
 | Network | Server | `network.server` | `MHP3RD_ADHOC_SERVER` | Host name or address of a PSP ad hoc server, optionally `host:port`; empty by default |
 | Network | Nickname | `network.nickname` | `MHP3RD_ADHOC_NICKNAME` | The name other players see; empty uses the hunter name |
 
-Everything applies without a restart, apart from mods that change a file's size (see [Mods](#mods)); the name settings take effect the next time the game asks for a name. The System section has *Resume*, *Take a screenshot* and *Open the screenshots folder* (see [Screenshots](#screenshots)), *Open the data folder*, *Set up game data again…* and *Quit game* (both of the last two ask first), the *Saves* rows described under [Saving and loading](#importing-a-save-from-a-psp), and the build version, the data and saves folders and the GPU. Each section but Mods has a button that restores its defaults.
+Everything applies without a restart, apart from mods that change a file's size (see [Mods](#mods)); the name settings take effect the next time the game asks for a name. The System section has *Resume*, *Take a Screenshot* and *Open the Screenshots Folder* (see [Screenshots](#screenshots)), *Open the Data Folder*, *Set Up Game Data Again…* and *Quit Game* (both of the last two ask first), the *Saves* rows described under [Saving and loading](#importing-a-save-from-a-psp), and the build version, the data and saves folders and the GPU. Each section but Mods has a button that restores its defaults.
 
 The Network section also shows the connection and has the troubleshooting tools described under [Multiplayer](#multiplayer-ad-hoc). The file also keeps `network.mac`, the address other players know you by (made up the first time you go on line; `MHP3RD_ADHOC_MAC` overrides it), `ui.menu_hint_seen`, set once the menu has been opened (until then a hint at the bottom of the screen says how to open it during the first seconds of play), and `ui.last_folder`, where the setup's file browser opens.
 
@@ -494,7 +496,7 @@ The interface is drawn with [Dear ImGui](third_party/imgui/README.md). Its text 
 
 ## Game text
 
-The game draws its text with the PSP's system font, which lives in the console's flash and is not on the disc, so Yakumo draws those glyphs from a font on your computer. *Font* in the menu's Video page lists the installed fonts that have every Latin letter, digit and punctuation mark, marked *Japanese* when they also have the kana and kanji the game still shows. Characters a font lacks come from the default font: Hiragino Sans on macOS, Noto Sans CJK on Linux and the Steam Deck (the `fonts-noto-cjk` package or its equivalent; a release falls back to the copy it ships), MS Gothic or Meiryo on Windows. To use a font that is not installed, put its `.ttf`, `.otf`, `.ttc` or `.otc` file into the `fonts` folder of the per-user directory (*Open the fonts folder* in the same section); those are listed first. A preview line under the setting shows the choice the way the game draws it.
+The game draws its text with the PSP's system font, which lives in the console's flash and is not on the disc, so Yakumo draws those glyphs from a font on your computer. *Font* in the menu's Video page lists the installed fonts that have every Latin letter, digit and punctuation mark, marked *Japanese* when they also have the kana and kanji the game still shows. Characters a font lacks come from the default font: Hiragino Sans on macOS, Noto Sans CJK on Linux and the Steam Deck (the `fonts-noto-cjk` package or its equivalent; a release falls back to the copy it ships), MS Gothic or Meiryo on Windows. To use a font that is not installed, put its `.ttf`, `.otf`, `.ttc` or `.otc` file into the `fonts` folder of the per-user directory (*Open the Fonts Folder* in the same section); those are listed first. A preview line under the setting shows the choice the way the game draws it.
 
 A change applies at once: Yakumo makes the game draw every character again the next time it shows it, so text already on screen changes within a frame or two.
 
@@ -504,7 +506,7 @@ How the text is laid out, as traced with `MHP3RD_TRACE_FONT=1`: the game sizes a
 
 Above ×1 the 3D world gets sharper with the internal resolution, but the game's own interface is made of textures sized for the PSP's 480×272 screen, so it was only magnified: blurred by bilinear filtering, or blocky with *Texture filter* on Sharp. Two settings change how it is drawn; neither changes anything the game reads, so its layout stays exactly as it was (the positions, sizes and texture coordinates of every draw are the same, checked draw by draw with `MHP3RD_TRACE_SPRITES`), and at ×1 both do nothing.
 
-- **Sharp text** (Video → Font section, `text.crisp`, `MHP3RD_CRISP_TEXT`, off by default) draws the game's text again at the internal resolution, up to 4×. The game renders each glyph into a 20×20 buffer, copies it into a cell of its glyph atlas and draws text from those cells; the renderer draws the atlas pages again, cell by cell, from the same glyphs at the same pen positions, through the page's own palette. Before a page is used, every cell is drawn again at 1× and compared with the game's: a page where more than a quarter of them differ is left as it is (`[ui] glyph page ... differ` on the console).
+- **Sharp Text** (Video → Text and Fonts, `text.crisp`, `MHP3RD_CRISP_TEXT`, off by default) draws the game's text again at the internal resolution, up to 4×. The game renders each glyph into a 20×20 buffer, copies it into a cell of its glyph atlas and draws text from those cells; the renderer draws the atlas pages again, cell by cell, from the same glyphs at the same pen positions, through the page's own palette. Before a page is used, every cell is drawn again at 1× and compared with the game's: a page where more than a quarter of them differ is left as it is (`[ui] glyph page ... differ` on the console).
 - **UI textures** (Video, `video.ui_textures`, `MHP3RD_UI_TEXTURES`, `off` by default) for the rest of the 2D interface, meaning through-mode draws only; 3D is never touched:
   - *Sharp bilinear* (`sharp`): each texel keeps its colour across the pixels it covers and blends with its neighbour only over the last pixel at its edge, at any scale, whole or not. Done in the fragment shader; it costs nothing to keep.
   - *MMPX* (`mmpx`): each 2D texture is doubled once (×2, ×3) or twice (×4 and above) with [MMPX](https://jcgt.org/published/0010/02/04/), a pixel-art upscaler that keeps the exact palette, transparency and single pixels and rounds diagonals, curves and corners, then drawn with sharp bilinear. The copies are made on a separate CPU thread the first time a texture is drawn at that scale, and kept on the GPU (at most 48 of them and 64 MiB, the least recently drawn going first); until a copy is ready the original is drawn.
@@ -529,7 +531,7 @@ The steady cost is within the noise of the measurement: sharp bilinear adds a fe
 
 The text the game shows — menu options, button prompts, system messages — can be replaced with a translation, without changing the disc image. A translation file names only the entries it changes; every other entry falls back to the game's own text, so a file may cover one screen at a time. The files are plain UTF-8 text and hold no game data.
 
-*Game text language* in the menu's System page lists English and every translation found in the `translations` folder of the per-user directory (or next to the executable), and applies at the next start, like a mod's choice. No translation ships with Yakumo: download one from a community link and use *Import translation…* in System → Text (or drop the `.lang` file in that folder). [TEXT_TRANSLATION.md](../../docs/TEXT_TRANSLATION.md) describes the file format, where the files are looked for, and how to write one.
+*Game Text Language* in the menu's System page lists English and every translation found in the `translations` folder of the per-user directory (or next to the executable), and applies at the next start, like a mod's choice. No translation ships with Yakumo: download one from a community link and use *Import Translation…* in System → Text (or drop the `.lang` file in that folder). [TEXT_TRANSLATION.md](../../docs/TEXT_TRANSLATION.md) describes the file format, where the files are looked for, and how to write one.
 
 ## HD texture packs
 
@@ -541,16 +543,16 @@ Yakumo loads HD texture packs made for PPSSPP, in its `textures.ini` format, wit
 | Linux, Steam Deck | `~/.local/share/Yakumo/MHP3rd/textures/NPJB40001/` |
 | Flatpak | `~/.var/app/io.github.teamgdb.Yakumo/data/Yakumo/MHP3rd/textures/NPJB40001/` (a copy, not a link to a folder outside the sandbox) |
 | Windows | `%APPDATA%\Yakumo\MHP3rd\textures\NPJB40001\` |
-| Android | Private app storage; install with *Import texture pack…* through Android's system picker |
+| Android | Private app storage; install with *Import Texture Pack…* through Android's system picker |
 
-*Open the textures folder* in the menu's Video section opens `textures`. A pack made for the PSP release (`ULJM05800`) works only if its `textures.ini` lists `NPJB40001` under `[games]`; the import installs such a pack as `NPJB40001` by itself. *Texture pack* in the Video section turns the pack on and off while the game runs; off draws exactly the game's own textures again. The footer under that setting shows how many textures the pack lists, *No pack in …* with the folder Yakumo looked in, or *Pack folder missing: …* when a pack used in place has moved.
+*Open the Textures Folder* in the menu's Video section opens `textures`. A pack made for the PSP release (`ULJM05800`) works only if its `textures.ini` lists `NPJB40001` under `[games]`; the import installs such a pack as `NPJB40001` by itself. *Texture Pack* in the Video section turns the pack on and off while the game runs; off draws exactly the game's own textures again. The footer under that setting shows how many textures the pack lists, *No pack in …* with the folder Yakumo looked in, or *Pack folder missing: …* when a pack used in place has moved.
 
 ### Importing a texture pack
 
-The in-game menu does it (Esc, or L3+R3 on a gamepad; Video section, under *Texture pack*), with a gamepad alone or with the keyboard and mouse:
+The in-game menu does it (Esc, or L3+R3 on a gamepad; Video section, under *Texture Pack*), with a gamepad alone or with the keyboard and mouse:
 
 1. Unpack the pack if it came as a `.zip`: zipped packs are not read.
-2. Choose *Import texture pack…*. The file browser lists folders and starts in Downloads. Opening a folder that holds `textures.ini` chooses it; *Import from this folder* chooses the folder shown. Dropping the folder on the window chooses it too. The pack is found in any of these layouts:
+2. Choose *Import Texture Pack…*. The file browser lists folders and starts in Downloads. Opening a folder that holds `textures.ini` chooses it; *Import from this folder* chooses the folder shown. Dropping the folder on the window chooses it too. The pack is found in any of these layouts:
    - the pack folder itself, the one holding `textures.ini`;
    - a folder holding `textures/NPJB40001/` (a copy of another Yakumo data folder) or `NPJB40001/` (a `TEXTURES` folder);
    - PPSSPP's memory stick, or its `PSP` folder: `PSP/TEXTURES/NPJB40001/`;
@@ -560,7 +562,7 @@ The in-game menu does it (Esc, or L3+R3 on a gamepad; Video section, under *Text
 3. The pack is checked, then shown beside the pack in use now. Nothing is copied until you choose. The review shows the pack's folder, its number of texture keys and hash, the number of image files and the size of the whole folder, and how many images `textures.ini` names that are not in the folder (those textures keep the game's own look). A pack is refused, with the reason, when its `textures.ini` cannot be read, names no hash or uses the old `quick` hash, when it is `textures.zip`, or when it is named for another release and does not list `NPJB40001`.
 4. Choose how to install it:
    - **Copy into Yakumo's data folder** (*Copy and replace* when a pack is installed): copies the pack to `textures/NPJB40001`, leaving hidden files such as `.DS_Store` out. It needs the pack's size plus 64 MB free in the data folder and is refused otherwise. The copy runs in the background with a progress bar; the game keeps running (or stays paused) and the menu stays open until it ends. *Cancel* stops it at once.
-   - **Use it where it is**: copies nothing and reads the pack from its folder from then on (`video.texture_pack_folder` in `settings.ini`), which saves the space of a large pack. The folder must stay where it is; if it moves, the Texture pack row says *Pack folder missing* and no pack is drawn. *Stop using the pack folder* goes back to the pack in the data folder.
+   - **Use it where it is**: copies nothing and reads the pack from its folder from then on (`video.texture_pack_folder` in `settings.ini`), which saves the space of a large pack. The folder must stay where it is; if it moves, the Texture pack row says *Pack folder missing* and no pack is drawn. *Stop Using the Pack Folder* goes back to the pack in the data folder.
 5. The pack is turned on and applies at once: textures already on screen change within a frame or two, and the Texture pack row shows the new count.
 
 **Nothing is deleted.** A copy goes to a hidden `textures/.incomplete-<date>_<time>` folder first; the pack in use stays in place until the copy is complete, so a cancelled or failed copy leaves it as it was (and removes only its own partial copy). Once the copy is complete, the pack it replaces is moved to `textures/.backup/<date>_<time>/NPJB40001/`, for example `.backup/2026-09-23_19-05-12/NPJB40001/`; import that folder to go back to it. A pack used in place is never moved or changed. `MHP3RD_TEXTURE_PACK` set to a folder still decides which pack is read for the run; the review says so.
@@ -618,13 +620,13 @@ A **file id** is the index of a file in the game's `DATA.BIN`, in four hex digit
 
 **Several mods on one file.** Where two mods that are on replace the same file, the one higher in the list wins. Patches apply on top of the file the game gets, the winning replacement included, lowest priority first. The mod loader refuses a file that is both replaced and patched; Yakumo applies both, because patches are small edits at known places and a replacement usually keeps them where they were, and it lists the combination under *Conflicts* so it is easy to see which mod to turn off if it is not.
 
-**The Mods page** of the menu lists the mods, highest priority first, with whether each is on. A mod's own screen shows its preview, author, type, the release it was made for, what it changes and its description, and has its switch, its place in the list (left and right move it) and, for equipment mods, the file id each file replaces, with what the game draws from that file in the game's own words (the piece's name and the hunter's sex). *Use my current armor* fills those ids with the models of the armor your hunter wears now, for the hunter's sex, and turns the mod on; *No armor* fills them with what the game shows when a part is empty. Your hunter must be loaded (in the village, not on the title screen); a weapon mod takes the weapon your hunter carries, if it is of the mod's class. The hunter shows the mod once the game loads those models again: at the item box, change to other armor and back, or restart. Typing an id works as before. [EQUIPMENT_MODS.md](../../docs/EQUIPMENT_MODS.md) says how the ids are worked out. *Import mod…* copies a mod you downloaded and unpacked into the mods folder, turned off: choose its folder, the one with `mod.ini`, or a folder that holds several mods, in the file browser, or drop the folder on the window. A mod already installed under the same folder name moves to `mods/.backup` first; nothing is deleted. Unpack `.zip`, `.rar` and `.7z` archives before importing. *Open the mods folder*, *Read the folder again* (after adding or removing folders by hand) and *Use mods*, which turns every mod off for a clean comparison, are on the same page.
+**The Mods page** of the menu lists the mods, highest priority first, with whether each is on. A mod's own screen shows its preview, author, type, the release it was made for, what it changes and its description, and has its switch, its place in the list (left and right move it) and, for equipment mods, the file id each file replaces, with what the game draws from that file in the game's own words (the piece's name and the hunter's sex). *Use My Current Armor* fills those ids with the models of the armor your hunter wears now, for the hunter's sex, and turns the mod on; *No Armor* fills them with what the game shows when a part is empty. Your hunter must be loaded (in the village, not on the title screen); a weapon mod takes the weapon your hunter carries, if it is of the mod's class. The hunter shows the mod once the game loads those models again: at the item box, change to other armor and back, or restart. Typing an id works as before. [EQUIPMENT_MODS.md](../../docs/EQUIPMENT_MODS.md) says how the ids are worked out. *Import Mod…* copies a mod you downloaded and unpacked into the mods folder, turned off: choose its folder, the one with `mod.ini`, or a folder that holds several mods, in the file browser, or drop the folder on the window. A mod already installed under the same folder name moves to `mods/.backup` first; nothing is deleted. Unpack `.zip`, `.rar` and `.7z` archives before importing. *Open the Mods Folder*, *Read the Folder Again* (after adding or removing folders by hand) and *Use Mods*, which turns every mod off for a clean comparison, are on the same page.
 
-**Android:** *Import mod…* opens the system folder picker. Choose an unpacked mod folder, or a folder holding several mods, inside Downloads or on an SD card. The selected files are copied to temporary private storage for the same review and backup process; imported mods stay off until selected. No root or broad storage permission is needed. Android does not let the picker access `Android/data` or `Android/obb`, or select the Download/storage root.
+**Android:** *Import Mod…* opens the system folder picker. Choose an unpacked mod folder, or a folder holding several mods, inside Downloads or on an SD card. The selected files are copied to temporary private storage for the same review and backup process; imported mods stay off until selected. No root or broad storage permission is needed. Android does not let the picker access `Android/data` or `Android/obb`, or select the Download/storage root.
 
-Texture/mod folder transfers run in the background and show copied bytes. Cancel removes the temporary copy after an outstanding provider read or picker closes. Transfers are limited to 8 GiB, 100,000 entries and 32 nested directories; select only the content being imported. Existing private app data, saves and settings are kept where they are, so an update needs no data migration. For other files use *Import translation…*, the save import/export/backup actions, and *Save the log…*. Android does not expose the private data folder to other apps. See [Android's document access guide](https://developer.android.com/training/data-storage/shared/documents-files) for the system restrictions.
+Texture/mod folder transfers run in the background and show copied bytes. Cancel removes the temporary copy after an outstanding provider read or picker closes. Transfers are limited to 8 GiB, 100,000 entries and 32 nested directories; select only the content being imported. Existing private app data, saves and settings are kept where they are, so an update needs no data migration. For other files use *Import Translation…*, the save import/export/backup actions, and *Save the Log…*. Android does not expose the private data folder to other apps. See [Android's document access guide](https://developer.android.com/training/data-storage/shared/documents-files) for the system restrictions.
 
-**When a change applies.** The game reads `DATA.BIN`'s directory once, at start. A change that keeps every file's size as the directory has it applies the next time the game loads each file: usually the next area, menu or piece of equipment shown; files the game loads once at start, such as the menus' textures, need a restart. A change that makes a file larger, or smaller where the directory has its exact size, applies at the next start; the page says so and offers *Restart now*.
+**When a change applies.** The game reads `DATA.BIN`'s directory once, at start. A change that keeps every file's size as the directory has it applies the next time the game loads each file: usually the next area, menu or piece of equipment shown; files the game loads once at start, such as the menus' textures, need a restart. A change that makes a file larger, or smaller where the directory has its exact size, applies at the next start; the page says so and offers *Restart Now*.
 
 The choices are kept in `mods.ini` next to `settings.ini`: `[general] enabled`, and per mod `enabled`, `rank` (higher wins) and the chosen targets of an equipment mod.
 
@@ -634,9 +636,9 @@ How it works: every file of the game comes from `DATA.BIN`, and the file I/O rea
 
 ### Layered armor
 
-**Layered armor** (Mods → Layered armor, `look.layered_armor`) draws your hunter in other armor than it wears, part by part, while everything else keeps the real armor: defense, resistances, skills, the Equipment screen, the save and what the game sends to other players. It is off by default, and off it changes nothing at all.
+**Layered Armor** (QoL → Modern Features → Layered Armor, `look.layered_armor`) draws your hunter in other armor than it wears, part by part, while everything else keeps the real armor: defense, resistances, skills, the Equipment screen, the save and what the game sends to other players. It is off by default, and off it changes nothing at all.
 
-The page has the switch and a row per part (head, chest, arms, waist, legs). Each row opens a list: *Real equipment*, *Nothing* (the bare part, or the inner wear where the game shows it), then the pieces your hunter wears or keeps in the equipment box, with the game's own names; *List all armor* offers every piece a hunter of that sex can wear. A piece the hunter's sex cannot wear shows the real one. The choices are kept in `settings.ini`, not in the game's save, so the save stays exactly what a PSP or another emulator expects. They apply to whichever character is loaded.
+The page has the switch and a row per part (head, chest, arms, waist, legs). Each row opens a list: *Real Equipment*, *Nothing* (the bare part, or the inner wear where the game shows it), then the pieces your hunter wears or keeps in the equipment box, with the game's own names; *List All Armor* offers every piece a hunter of that sex can wear. A piece the hunter's sex cannot wear shows the real one. The choices are kept in `settings.ini`, not in the game's save, so the save stays exactly what a PSP or another emulator expects. They apply to whichever character is loaded.
 
 A change shows the next time the game loads the hunter: entering another area, starting or leaving a quest, or changing equipment at the item box. Only the parts that changed are read again.
 
@@ -663,7 +665,7 @@ Nothing is drawn for the save-data or message dialogs yet ([#33](https://github.
 The in-game menu does it (Esc, or L3+R3 on a gamepad; System section, *Saves*):
 
 1. Copy the save to this machine, or connect the memory stick: on a PSP's memory stick the folder of *Monster Hunter Portable 3rd* is `PSP/SAVEDATA/ULJM05800`, with downloaded quests in `ULJM05800QST`. PPSSPP keeps the same folders in its `memstick/PSP/SAVEDATA`.
-2. Choose *Import save…*. The file browser lists folders. Opening a save folder chooses it; *Import from this folder* chooses the folder shown, and every save in it, in its `SAVEDATA` or in its `PSP/SAVEDATA` is found, so a memory stick's root or a `SAVEDATA` folder holding several games works too.
+2. Choose *Import Save…*. The file browser lists folders. Opening a save folder chooses it; *Import from this folder* chooses the folder shown, and every save in it, in its `SAVEDATA` or in its `PSP/SAVEDATA` is found, so a memory stick's root or a `SAVEDATA` folder holding several games works too.
 3. Each save found is checked, then shown with its date and size beside the save it would replace. Nothing is copied until you choose *Import* (or *Replace and import*).
 4. The game reads its saves at the title screen. *Restart now* closes the game and starts it again there; progress since your last save is lost. If you keep playing instead, do not save before restarting, or the game writes its own data over the imported save.
 
@@ -671,13 +673,13 @@ The in-game menu does it (Esc, or L3+R3 on a gamepad; System section, *Saves*):
 
 **Nothing is deleted.** A save that an import replaces is moved to `ms0/PSP/SAVEDATA/.backup/<date>_<time>/<folder>/`, for example `.backup/2026-09-19_19-05-12/ULJM05800/`; import that folder to go back to it. `.zip` files are not read: unpack them first.
 
-By hand, the same works with the game closed: copy the folder into `ms0/PSP/SAVEDATA/` in the directory above (for example `~/.local/share/Yakumo/MHP3rd/ms0/PSP/SAVEDATA/`), after keeping a copy of any folder of the same name, which holds all three character slots. *Open the saves folder* in the menu shows that folder.
+By hand, the same works with the game closed: copy the folder into `ms0/PSP/SAVEDATA/` in the directory above (for example `~/.local/share/Yakumo/MHP3rd/ms0/PSP/SAVEDATA/`), after keeping a copy of any folder of the same name, which holds all three character slots. *Open the Saves Folder* in the menu shows that folder.
 
 ### Exporting and backing up
 
-- **Export save…** copies the game data and the downloaded quests to a folder you choose, as `MHP3rd saves <date>_<time>/PSP/SAVEDATA/ULJM05800…`, the layout of a memory stick: copy its `PSP` folder to the root of a PSP's memory stick, or import it on another machine. It always makes a new folder.
-- **Back up saves…** copies every save folder of the game, the install data included, to the backups folder, `save-backups` in the [per-user data directory](#installer), or to a folder you choose. With *Add a timestamp to the backup name* (on by default; `saves.backup_timestamp` in `settings.ini`) each backup is a new folder named by its time, holding the save folders: `save-backups/2026-09-19_19-05-12/ULJM05800/`. With it off, the save folders go straight into the chosen folder (`save-backups/ULJM05800/`), and an earlier backup there is replaced only after you confirm. *Open the backups folder* shows it. To restore a backup, import it.
-- **The reminder.** The first time a new release starts and finds saves, it pauses the game for a moment and asks you to back them up. *Back up now* makes a new timestamped folder in `save-backups` (on Android, in a folder you pick), whatever the timestamp setting says, so it never replaces an earlier backup; the next screen says where the backup went and offers to open that folder. *Continue without a backup* starts the game. Either way the reminder does not come back until the next release. The import's review asks the same before it writes anything, with its own *Back up now*. Turn the reminder off with *Remind me to back up after updates*.
+- **Export Save…** copies the game data and the downloaded quests to a folder you choose, as `MHP3rd saves <date>_<time>/PSP/SAVEDATA/ULJM05800…`, the layout of a memory stick: copy its `PSP` folder to the root of a PSP's memory stick, or import it on another machine. It always makes a new folder.
+- **Back Up Saves…** copies every save folder of the game, the install data included, to the backups folder, `save-backups` in the [per-user data directory](#installer), or to a folder you choose. With *Add a timestamp to the backup name* (on by default; `saves.backup_timestamp` in `settings.ini`) each backup is a new folder named by its time, holding the save folders: `save-backups/2026-09-19_19-05-12/ULJM05800/`. With it off, the save folders go straight into the chosen folder (`save-backups/ULJM05800/`), and an earlier backup there is replaced only after you confirm. *Open the Backups Folder* shows it. To restore a backup, import it.
+- **The reminder.** The first time a new release starts and finds saves, it pauses the game for a moment and asks you to back them up. *Back up now* makes a new timestamped folder in `save-backups` (on Android, in a folder you pick), whatever the timestamp setting says, so it never replaces an earlier backup; the next screen says where the backup went and offers to open that folder. *Continue without a backup* starts the game. Either way the reminder does not come back until the next release. The import's review asks the same before it writes anything, with its own *Back up now*. Turn the reminder off with *Remind Me to Back Up After Updates*.
 
 ### Where saves live and how to back them up
 
@@ -689,14 +691,14 @@ The saves are the folders in `ms0/PSP/SAVEDATA/` of the data directory: `ULJM058
 | macOS | `~/Library/Application Support/Yakumo/MHP3rd/ms0/PSP/SAVEDATA/` |
 | Linux and Steam Deck, release tarball | `~/.local/share/Yakumo/MHP3rd/ms0/PSP/SAVEDATA/` (under `$XDG_DATA_HOME` when it is set) |
 | Linux and Steam Deck, Flatpak | `~/.var/app/io.github.teamgdb.Yakumo/data/Yakumo/MHP3rd/ms0/PSP/SAVEDATA/` |
-| Android | The app's private storage, which other apps and a computer cannot reach: use *Back up saves…* or *Export save…*, which copy to a folder you pick in Android's picker |
+| Android | The app's private storage, which other apps and a computer cannot reach: use *Back Up Saves…* or *Export Save…*, which copy to a folder you pick in Android's picker |
 | A developer build | `ms0/` of `MHP3RD_DATA_DIR`, `MHP3RD_GAME_DIR` or `profiles/mhp3rd/game`, whichever the game runs from; the menu's *About* shows it as *Saves folder* |
 
 To back up:
 
-- **From the game:** *System → Back up saves…*, or *Back up now* when the reminder asks. Backups go to `save-backups/` beside `ms0/` (Android: a folder you pick). *Open the backups folder* shows them.
+- **From the game:** *System → Back Up Saves…*, or *Back up now* when the reminder asks. Backups go to `save-backups/` beside `ms0/` (Android: a folder you pick). *Open the Backups Folder* shows them.
 - **By hand:** with the game closed, copy the whole `SAVEDATA` folder somewhere else. Copying while the game runs can catch a save half written.
-- **To restore:** *Import save…* from the backup's folder: the save it replaces is itself kept in `ms0/PSP/SAVEDATA/.backup/`. By hand, with the game closed, copy the save folders back into `ms0/PSP/SAVEDATA/`.
+- **To restore:** *Import Save…* from the backup's folder: the save it replaces is itself kept in `ms0/PSP/SAVEDATA/.backup/`. By hand, with the game closed, copy the save folders back into `ms0/PSP/SAVEDATA/`.
 
 Yakumo never deletes a save: an import moves the save it replaces to `ms0/PSP/SAVEDATA/.backup/<date>_<time>/`, and a backup only adds folders. The game's own *Delete previously saved character?* question, when a new character goes into a used slot, is the game's and replaces that slot as it would on a PSP.
 
@@ -722,11 +724,11 @@ The PSP game plays together through ad hoc wireless: up to four consoles in the 
 
 On one home network, or over a VPN such as Tailscale or ZeroTier, one player hosts and the others join; nothing else needs to be installed and nothing needs to be forwarded.
 
-1. **Host.** Open the menu (Esc, or L3+R3), go to **Network** and choose **Host a session**. The server starts inside the game, and the screen lists the addresses the others can use, one per network (for example `192.168.1.20  Local network (en0)` and `100.101.102.103  Tailscale`). Selecting one copies it. Below them are the players connected to your session and the hall each is in; **Stop hosting** ends the session for everyone.
-2. **Join.** The others open **Network** too. Under **Join a session** they see the sessions hosted on their network, with the host's name and player count, and choose **Join**. On a VPN that carries no broadcast, such as Tailscale or most WireGuard setups, the host's session is not listed by itself: type the host's VPN address into **Address** and press Enter. Joined addresses are remembered under the same heading.
+1. **Host.** Open the menu (Esc, or L3+R3), go to **Network** and choose **Host a Session**. The server starts inside the game, and the screen lists the addresses the others can use, one per network (for example `192.168.1.20  Local network (en0)` and `100.101.102.103  Tailscale`). Selecting one copies it. Below them are the players connected to your session and the hall each is in; **Stop Hosting** ends the session for everyone.
+2. **Join.** The others open **Network** too. Under **Join a Session** they see the sessions hosted on their network, with the host's name and player count, and choose **Join**. On a VPN that carries no broadcast, such as Tailscale or most WireGuard setups, the host's session is not listed by itself: type the host's VPN address into **Address** and press Enter. Joined addresses are remembered under the same heading.
 3. **Play.** Everyone closes the menu, goes up the stairs in the village to the gathering hall entrance, chooses **Online Guild Hall** and picks the same hall, as with any server.
 
-Hosting and joining turn **Ad hoc play** on and fill in **Server** (the host's own game uses its server on `127.0.0.1`). Joining another session, or hosting, while you are in a hall takes you out of it, as a dropped connection would. While you play together, opening the menu does not pause the game unless *Pause during multiplayer* is on (System section), so the others keep hearing from you.
+Hosting and joining turn **Ad Hoc Play** on and fill in **Server** (the host's own game uses its server on `127.0.0.1`). Joining another session, or hosting, while you are in a hall takes you out of it, as a dropped connection would. While you play together, opening the menu does not pause the game unless *Pause During Multiplayer* is on (System section), so the others keep hearing from you.
 
 **Ports.** The built-in server listens on every network interface on TCP **27312** (matchmaking) and **27313** (relay); a host answers address checks on UDP 27312 and announces itself to UDP **27314** on the local network, by broadcast and on the multicast group 239.255.27.14. On a LAN or a VPN nothing needs to be forwarded, though a firewall on the host may ask to let Yakumo accept connections: allow it (on Windows, for private networks). To host over the plain internet, forward TCP 27312 and 27313 on the host's router to the host, and give the others your public address; a VPN is usually simpler. `network.host_port` in `settings.ini` (or `MHP3RD_ADHOC_HOST_PORT`) moves the server to another port pair, for example when another server already uses 27312; others then join `address:port`.
 
@@ -739,7 +741,7 @@ A server has two parts, both over TCP: the matchmaking service on port **27312**
 ### Setting it up
 
 1. Open the menu (Esc, or L3+R3) and go to **Network**.
-2. Turn **Ad hoc play** on.
+2. Turn **Ad Hoc Play** on.
 3. Enter the **Server**: a host name or IP address, `host:port` if its matchmaking port is not 27312. There is no default; see [Choosing a server](#choosing-a-server).
 4. Optionally set a **Nickname**; otherwise the other players see your hunter name.
 5. Close the menu. In the village, go up the stairs to the gathering hall entrance and choose **Online Guild Hall** (✕), then a hall. Everyone who picks the same hall number on the same server meets there.
@@ -756,7 +758,7 @@ Public servers are run by volunteers. Yakumo keeps one connection to the matchma
 
 ### Running your own server
 
-The simplest is **Host a session** in the game, or `Yakumo --adhoc-server` (see [Play together locally](#play-together-locally)). You can also run [aemu_postoffice](https://github.com/Kethen/aemu_postoffice), the server most public servers use. It is a separate program under its own licence; nothing of it is part of Yakumo.
+The simplest is **Host a Session** in the game, or `Yakumo --adhoc-server` (see [Play together locally](#play-together-locally)). You can also run [aemu_postoffice](https://github.com/Kethen/aemu_postoffice), the server most public servers use. It is a separate program under its own licence; nothing of it is part of Yakumo.
 
 Natively, on macOS or Linux (a C++20 compiler is all it needs):
 
@@ -817,16 +819,18 @@ The menu's **Network** section shows what the connection is doing, updated live:
 
 Below it:
 
-- **Network overlay** shows the connection, the group, its players and the traffic in the top-right corner while you play. `MHP3RD_ADHOC_OVERLAY=1` turns it on at start.
-- **Log every call and packet** is the same as `MHP3RD_TRACE_ADHOC=1`: every ad hoc call the game makes, with its arguments and result, and every packet header goes to the console and to the network log.
-- **Save network log** writes the recent network log and the section's state to `logs/adhoc-<date>-<time>.log` in the data folder (menu: System, *Open the data folder*). Attach it to a problem report, ideally with the log turned on before the problem happens.
-- **Reconnect now** drops the server connection and connects again; the hall is joined again. **Disconnect** leaves the hall as if the other players were lost. The game reacts to both as to a real dropped connection.
+- **Network Overlay** shows the connection, the group, its players and the traffic in the top-right corner while you play. `MHP3RD_ADHOC_OVERLAY=1` turns it on at start.
+- **Log Every Call and Packet** is the same as `MHP3RD_TRACE_ADHOC=1`: every ad hoc call the game makes, with its arguments and result, and every packet header goes to the console and to the network log.
+- **Save Network Log** writes the recent network log and the section's state to `logs/adhoc-<date>-<time>.log` in the data folder (menu: System, *Open the Data Folder*). Attach it to a problem report, ideally with the log turned on before the problem happens.
+- **Reconnect Now** drops the server connection and connects again; the hall is joined again. **Disconnect** leaves the hall as if the other players were lost. The game reacts to both as to a real dropped connection.
+
+At the bottom, **Reset to Defaults:** contains **Restore Network Defaults**, which restores the ad hoc play, server and nickname settings. Environment overrides remain in effect.
 
 Common problems:
 
 - *The game says the wireless switch is off*: ad hoc play is off in the menu.
-- *Join a session lists nothing*: the host is on a VPN without broadcast (type its address), on another network, or a firewall blocks UDP 27314 on your side. **Discovery** says whether this instance listens.
-- *Host a session says the port is in use*: another server runs on this machine; stop it, or set `network.host_port`.
+- *Join a Session lists nothing*: the host is on a VPN without broadcast (type its address), on another network, or a firewall blocks UDP 27314 on your side. **Discovery** says whether this instance listens.
+- *Host a Session says the port is in use*: another server runs on this machine; stop it, or set `network.host_port`.
 - *Connecting never finishes*: the server name is wrong, the server is down, or a firewall blocks TCP 27312. The console says `cannot reach the ad hoc server` or `cannot resolve`.
 - *You are in a hall but see nobody*: the other player is on another server, in another hall, or playing a game the server does not group with this one. The server's status page shows where everyone is.
 - *Players see each other but a quest cannot be joined or the hall drops*: the server has no relay (TCP 27313), or it is blocked. **Relay links** stays below its total.
@@ -856,7 +860,7 @@ The settings a player needs are in the [in-game menu](#in-game-menu). Environmen
 | `MHP3RD_BACKUP_REMINDER` | unset | `0`: never ask to back up the saves this run; `1`: ask at every start, even in a scripted run or with the setting off. Unset, the reminder follows the menu setting and skips runs driven by `MHP3RD_INPUT_SCRIPT`, `MHP3RD_INPUT_LIVE` or `MHP3RD_AUTO_CONFIRM` |
 | `MHP3RD_FONT` | a system CJK font | Font to draw the game's text with: a `.ttf`, `.otf`, `.ttc` or `.otc` file, with `#N` after the path for the Nth face of a collection. Glyphs it lacks come from the default, a Japanese system font (Hiragino on macOS, Noto Sans CJK on Linux, MS Gothic or Meiryo on Windows; inside a Flatpak, the host's Noto Sans CJK under `/run/host/fonts`), and last the font a release ships in `fonts/` next to the executable |
 | `MHP3RD_UI_FONT` | a system font | TrueType font for Yakumo's menu and setup screens |
-| `MHP3RD_LANGUAGE` | `en` | Language of the game's own text, from a file in the [translations folder](#translating-the-games-text); `en` keeps the disc's own text (menu: System → Game text language) |
+| `MHP3RD_LANGUAGE` | `en` | Language of the game's own text, from a file in the [translations folder](#translating-the-games-text); `en` keeps the disc's own text (menu: System → Game Text Language) |
 | `MHP3RD_TRANSLATIONS_DIR` | unset | Look for translation files in this folder first, ahead of the data directory's `translations/` and the one next to the executable |
 
 ### Video
@@ -867,9 +871,9 @@ The settings a player needs are in the [in-game menu](#in-game-menu). Environmen
 | `MHP3RD_NO_RENDER` | off | Run without a window; the installer shows no dialogs either. Emulated time is not held to real time |
 | `MHP3RD_WINDOW_TITLE` | `Yakumo` | Title of the game window, to tell instances apart |
 | `MHP3RD_UNTHROTTLED` | off | Let emulated time run ahead of real time, so the game runs as fast as it can be drawn (menu: Game speed) |
-| `MHP3RD_FAST_LOADING` | on | `0` keeps loads at the PSP's pace (menu: Fast loading). See [Fast loading](#fast-loading) |
-| `MHP3RD_FAST_FORWARD` | `hold` | `toggle` makes the Fast-forward key a switch; `off` (or `0`) makes it do nothing (menu: Fast-forward). See [Fast-forward](#fast-forward) |
-| `MHP3RD_FAST_FORWARD_SPEED` | `3` | Times real time while fast-forwarding, 2 to 8 (menu: Fast-forward speed) |
+| `MHP3RD_FAST_LOADING` | on | `0` keeps loads at the PSP's pace (menu: Fast Loading). See [Fast loading](#fast-loading) |
+| `MHP3RD_FAST_FORWARD` | `hold` | `toggle` makes the Fast-forward key a switch; `off` (or `0`) makes it do nothing (menu: Fast-Forward). See [Fast-forward](#fast-forward) |
+| `MHP3RD_FAST_FORWARD_SPEED` | `3` | Times real time while fast-forwarding, 2 to 8 (menu: Fast-Forward Speed) |
 | `MHP3RD_FRAME_RATE` | `30` | `45`, `60`, `90`, `120` or `display`: present frames in between the game's 30 (menu: Frame rate). See [Frame rate](#frame-rate) |
 | `MHP3RD_FRAME_RATE_AUTO` | on | `0` keeps the chosen frame rate even when the game falls behind (menu: Lower when behind) |
 | `MHP3RD_NO_MATERIAL_COLOR` | off | Leave unlit geometry without vertex colours white instead of taking the material colour |
@@ -880,12 +884,12 @@ The settings a player needs are in the [in-game menu](#in-game-menu). Environmen
 | `MHP3RD_TEXTURE_PACK_MEMORY` | `1024` | Megabytes of GPU memory for texture pack images; the least recently drawn are dropped above it |
 | `MHP3RD_TEXTURE_DUMP` | unset | Write every texture the game uploads, once, as a PNG named by its texture pack key into this folder, to start a pack from |
 | `MHP3RD_PICTURE_BESIDE_CUTOUT` | off | Put the picture beside a display cutout, moved off the cutout's side, as before [#170](https://github.com/TeamGDB/Yakumo/issues/170), instead of centring it. On Android, where the app has no environment, `adb shell setprop debug.yakumo.picture_beside_cutout 1` does the same for the next start. Nothing changes on a screen without a cutout |
-| `MHP3RD_CRISP_TEXT` | on | `0` draws the game's text as before, magnified from its 20-pixel glyphs (menu: Sharp text). See [Sharper text and 2D textures](#sharper-text-and-2d-textures) |
+| `MHP3RD_CRISP_TEXT` | on | `0` draws the game's text as before, magnified from its 20-pixel glyphs (menu: Sharp Text). See [Sharper text and 2D textures](#sharper-text-and-2d-textures) |
 | `MHP3RD_UI_TEXTURES` | `off` | `sharp` or `mmpx`: how the 2D interface's textures are drawn above ×1 (menu: UI textures) |
 | `MHP3RD_NO_SPRITE_CLAMP` | off | Let 2D tiles sample outside their own texels, as before; above ×1 this shows faint lines along the tile edges of 2D screens |
 | `MHP3RD_SCREENSHOT_DIR` | unset | Write BMP frames into this directory |
 | `MHP3RD_SCREENSHOT_EVERY` | `60` | Frames between screenshots |
-| `MHP3RD_PERF` | off | `1` shows the performance overlay and logs frame statistics once per second; `log` only logs them (menu: Performance). See [Performance statistics](#performance-statistics) |
+| `MHP3RD_PERF` | off | `1` shows the full performance overlay and logs frame statistics once per second; `log` only logs them; `compact` shows the compact overlay; `compact+log` adds the same log (menu: Performance Overlay). See [Performance statistics](#performance-statistics) |
 | `MHP3RD_NO_CACHED_READBACK` | off | Keep the frame written back to guest memory in the first host-visible memory type, as before, instead of a host-cached one; on a Steam Deck the CPU copy out of it then takes ~3 ms a frame instead of a fraction of one |
 | `MHP3RD_NO_DIRECT_VERTICES` | off | Expand every draw into a plain triangle list on the CPU, as before, instead of writing a transformed draw's decoded vertices once with an index list |
 | `MHP3RD_NO_LOOKUP_CACHE` | off | Look every draw's pipeline and texture up in the renderer's caches, as before, instead of reusing the previous draw's and what the display list already resolved |
@@ -930,7 +934,7 @@ Phones with MediaTek Helio chips and older Mali or PowerVR drivers showed a blac
   - **On** leaves everything out from the start, robust buffer access included; **Off** never turns it on (a wrong self-test picture still switches to the plain fragment shader).
 - If the picture is still known to be wrong, a note over the game says so and where to send the log, until the menu is opened. A lost GPU on Android is reported in a message box before the app closes.
 - Descriptor pools are counted exactly as declared, the way phone drivers count them, and a full one makes the next instead of failing: a texture that still gets no descriptor set is drawn without it (white, or the original instead of a sharper copy) rather than stopping the game. Only the sets the renderer cannot draw anything without (the lighting set, the white texture, pre-rotation) stop it, with the pools and the driver's answer in the error. v0.6.0-alpha.5 stopped at start on a Mali phone with `vkAllocateDescriptorSets failed with VkResult -1000069000` (VK_ERROR_OUT_OF_POOL_MEMORY).
-- When the Android app cannot go on (the renderer cannot start, the GPU is lost), its message box names the error, the GPU and driver (`Mali-G57 MC2, driver r32p1, Vulkan 1.1.177`), the phone and Android version, and the Yakumo version, so a screenshot is a report. Its *Save the log…* button saves the logs through the document picker, as the menu's does, before the app closes. The log is flushed first and also kept as `yakumo-fatal.log`, which later starts leave alone (`yakumo.log` becomes `yakumo-previous.log` at the next start and is gone at the one after); the menu's *Save the log…* includes it.
+- When the Android app cannot go on (the renderer cannot start, the GPU is lost), its message box names the error, the GPU and driver (`Mali-G57 MC2, driver r32p1, Vulkan 1.1.177`), the phone and Android version, and the Yakumo version, so a screenshot is a report. Its *Save the log…* button saves the logs through the document picker, as the menu's does, before the app closes. The log is flushed first and also kept as `yakumo-fatal.log`, which later starts leave alone (`yakumo.log` becomes `yakumo-previous.log` at the next start and is gone at the one after); the menu's *Save the Log…* includes it.
 
 ### Picture shape and size
 
@@ -995,7 +999,7 @@ A game-side 60 fps patch was not used. The one community code for this game (Sar
 
 ### Fast loading
 
-Reading the disc costs nothing here, yet a load takes as long as on a PSP: the game's loader threads read, check and unpack its data a piece at a time and wait on the emulated clock in between, and the kernel holds that clock to real time. Measured with `MHP3RD_TRACE_LOAD`, the host sits idle for 80–95% of a load. **Fast loading** (Video, on by default) lets the clock run ahead while the game loads, up to 16 times real time, so a load takes as long as the work itself.
+Reading the disc costs nothing here, yet a load takes as long as on a PSP: the game's loader threads read, check and unpack its data a piece at a time and wait on the emulated clock in between, and the kernel holds that clock to real time. Measured with `MHP3RD_TRACE_LOAD`, the host sits idle for 80–95% of a load. **Fast Loading** (QoL, on by default) lets the clock run ahead while the game loads, up to 16 times real time, so a load takes as long as the work itself.
 
 A load is recognised from what the game does rather than from a timer: it has read from the disc within the last half second of game time, and for a quarter of a second everything it has handed to `sceAudio` has been exact silence once the channel's volume is applied (a loading screen's sound is nothing but zeros). Anything else keeps real time, and ends a fast stretch at once:
 
@@ -1020,7 +1024,7 @@ What is left is the game's own music fading out and its animations, which play a
 
 ### Fast-forward
 
-Holding the **Fast-forward** key (by default `` ` ``, the key under Esc; Controls → *Keyboard and mouse*) runs the whole game faster than real time, 3× by default: long walks, gathering, cutscenes drawn by the game. Release it and the game is back at 100% at once. *Fast-forward* (Video) makes the key a switch instead (`toggle`), or turns it off; *Fast-forward speed* sets 2× to 8×. Nothing changes until the key is pressed.
+Holding the **Fast-Forward** key (by default `` ` ``, the key under Esc; Controls → *Keyboard and mouse*) runs the whole game faster than real time, 3× by default: long walks, gathering, cutscenes drawn by the game. Release it and the game is back at 100% at once. *Fast-Forward* (QoL) makes the key a switch instead (`toggle`), or turns it off; *Fast-Forward Speed* sets 2× to 8×. Nothing changes until the key is pressed.
 
 It is the same clock as always, let go further. The kernel holds emulated time to real time; while fast-forwarding it lets emulated time run the chosen number of times as fast, the way [fast loading](#fast-loading) does during a load. Every vblank still comes one PSP vblank period (16.68 ms) of emulated time after the one before, so the game runs every one of its frames, its timers and its sound thread exactly as on a PSP; they only come sooner. Each stretch logs one line, with the vblanks the game saw: `[fast-forward] off (released): 20020 ms of game time, 1200 vblanks, in 6681 ms real (3.00x)`. `MHP3RD_PERF=log` reads `speed 300%` and three times the display lists while it runs. If the computer cannot keep up, the game runs as fast as it can instead, never skipping a frame.
 
@@ -1034,9 +1038,9 @@ It is the same clock as always, let go further. The kernel holds emulated time t
 
 ### Hiding the HUD
 
-**Hide HUD** (Video, or its key, F7 by default: Controls, under *Port features*) leaves the game's HUD out of the picture, for screenshots and videos: the health and stamina bars, sharpness, the clock, the item bar, the map, the name plate, the name tags over hunters and the icons beside them, and the prompts in the corners (*Select Target*, *Hide List*, *Depart on your Quest*). Menus, dialogs, fades, cutscenes and loading screens stay, so the game can be played with it on. The same again brings the HUD back. It is off at every start (`MHP3RD_HIDE_HUD=1` starts with it on); no gamepad preset binds it, but a pad binding a player makes works. A short line at the top says *HUD hidden* or *HUD shown* for a moment; it is left out of window captures (`shot`), and the game's frames (`MHP3RD_SCREENSHOT_DIR`) never have it.
+**Hide HUD** (Video, or its key, F7 by default: Controls, under *Port Features*) leaves the game's HUD out of the picture, for screenshots and videos: the health and stamina bars, sharpness, the clock, the item bar, the map, the name plate, the name tags over hunters and the icons beside them, and the prompts in the corners (*Select Target*, *Hide List*, *Depart on your Quest*). Menus, dialogs, fades, cutscenes and loading screens stay, so the game can be played with it on. The same again brings the HUD back. It is off at every start (`MHP3RD_HIDE_HUD=1` starts with it on); no gamepad preset binds it, but a pad binding a player makes works. A short line at the top says *HUD hidden* or *HUD shown* for a moment; it is left out of window captures (`shot`), and the game's frames (`MHP3RD_SCREENSHOT_DIR`) never have it.
 
-With the [free camera](#free-camera-experimental) the HUD is hidden while it flies and while it holds a photo, since name tags and the rest belong to the game's own view and would hang in the wrong place (*Hide the HUD while flying*, Controls → Experimental, on by default). The key works while flying and in the photo mode too: it shows the HUD for the rest of the flight, and hides it again. The HUD packets of the frame the photo mode holds were sorted out when the game drew it, so the key shows and hides them there as well.
+With the [free camera](#free-camera-experimental) the HUD is hidden while it flies and while it holds a photo, since name tags and the rest belong to the game's own view and would hang in the wrong place (*Hide the HUD While Flying*, QoL → Experimental Options, on by default). The key works while flying and in the photo mode too: it shows the HUD for the rest of the flight, and hides it again. The HUD packets of the frame the photo mode holds were sorted out when the game drew it, so the key shows and hides them there as well.
 
 What stays: the menus' own hints, such as *Map Zoom In* under the quest menu, which the menu draws; and what the game draws in 3D, such as the red arrow over the person the hunter faces, which is part of the scene.
 
@@ -1059,32 +1063,32 @@ The renderer then leaves out the HUD packets' draws, and nothing else: their oth
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `MHP3RD_PAD_FACE` | positional | `xbox` puts confirm (○) on the south button (menu: Confirm button) |
-| `MHP3RD_PAD_DEADZONE` | `0.15` | Left-stick dead zone, as a fraction of travel (menu: Stick dead zone) |
-| `MHP3RD_PAD_TRIGGER` | `0.25` | How far LT/RT travel before they press anything (menu: Trigger point) |
-| `MHP3RD_CHORD_WINDOW` | `50` | Milliseconds an input that begins a longer chord waits for the rest, 0 to 200; `0` or `off` acts at once (menu: Chord window) |
+| `MHP3RD_PAD_FACE` | positional | `xbox` puts confirm (○) on the south button (menu: Confirm Button) |
+| `MHP3RD_PAD_DEADZONE` | `0.15` | Left-stick dead zone, as a fraction of travel (menu: Stick Dead Zone) |
+| `MHP3RD_PAD_TRIGGER` | `0.25` | How far LT/RT travel before they press anything (menu: Trigger Point) |
+| `MHP3RD_CHORD_WINDOW` | `50` | Milliseconds an input that begins a longer chord waits for the rest, 0 to 200; `0` or `off` acts at once (menu: Chord Window) |
 | `MHP3RD_TOUCH_LAYOUT` | unset | The touch layout for this run: `psp` or `action` (menu: Layout) |
 | `MHP3RD_CONTROL_PRESET` | unset | The control preset for this run: `default`, `modern`, `left_handed`, `classic`, or the name of one of the player's (menu: Preset). `MHP3RD_PAD_TRIGGERS`, which chose a trigger profile, is retired: its profiles are presets now |
-| `MHP3RD_ANALOG_CAMERA` | on | Proportional yaw and continuous tilt in the ordinary quest camera, the tilt limited to −60°…70° before collision correction. Stick deflection controls speed; release holds the angle. The physical D-pad and recentre return control to the game. Uses the camera update directly, without memory searches or renderer tracing. Off restores stock input and stops camera writes immediately (menu: Analog camera) |
-| `MHP3RD_LOCK_ON` | on | `0` makes the [Lock on](#lock-on) bind do nothing (menu: Lock-on) |
-| `MHP3RD_CAMERA_SPEED` | `190` | Degrees a second at full deflection, 20 to 720 (menu: Camera speed) |
-| `MHP3RD_AIM_SPEED` | `90` | Degrees a second at full deflection while a bow or a bowgun aims, 10 to 360 (menu: Aim speed) |
+| `MHP3RD_ANALOG_CAMERA` | on | Proportional yaw and continuous tilt in the ordinary quest camera, the tilt limited to −60°…70° before collision correction. Stick deflection controls speed; release holds the angle. The physical D-pad and recentre return control to the game. Uses the camera update directly, without memory searches or renderer tracing. Off restores stock input and stops camera writes immediately (menu: Analog Camera) |
+| `MHP3RD_LOCK_ON` | on | `0` makes the [Lock on](#lock-on) bind do nothing (menu: Lock-On) |
+| `MHP3RD_CAMERA_SPEED` | `190` | Degrees a second at full deflection, 20 to 720 (menu: Camera Speed) |
+| `MHP3RD_AIM_SPEED` | `90` | Degrees a second at full deflection while a bow or a bowgun aims, 10 to 360 (menu: Aim Speed) |
 | `MHP3RD_MOUSE` | on | `0` leaves the pointer alone: no capture, no mouse camera and no mouse buttons (menu: Mouse) |
-| `MHP3RD_MOUSE_SENSITIVITY` | `0.10` | Degrees of camera turn per count of mouse motion, 0.01 to 0.99 (menu: Mouse sensitivity) |
-| `MHP3RD_PAD_RSTICK_DPAD` | off | Press D-pad bits from the right stick instead of feeding the HD release's second stick; enabling both would turn the camera twice (menu: Camera stick) |
-| `MHP3RD_PAD_RSTICK_ZONE` | `0.5` | Right-stick threshold for that (menu: Camera stick D-pad point) |
+| `MHP3RD_MOUSE_SENSITIVITY` | `0.10` | Degrees of camera turn per count of mouse motion, 0.01 to 0.99 (menu: Mouse Sensitivity) |
+| `MHP3RD_PAD_RSTICK_DPAD` | off | Press D-pad bits from the right stick instead of feeding the HD release's second stick; enabling both would turn the camera twice (menu: Camera Stick) |
+| `MHP3RD_PAD_RSTICK_ZONE` | `0.5` | Right-stick threshold for that (menu: Camera Stick D-Pad Point) |
 | `MHP3RD_OSK_TEXT` | `Hunter` | Fixed name given when the game asks for one, at once and without the on-screen keyboard unless `MHP3RD_OSK_MODE=keyboard` (menu: Hunter name) |
-| `MHP3RD_OSK_MODE` | `keyboard` | `keyboard` opens the on-screen keyboard; `fixed` gives the fixed name at once (menu: When the game asks for a name) |
+| `MHP3RD_OSK_MODE` | `keyboard` | `keyboard` opens the on-screen keyboard; `fixed` gives the fixed name at once (menu: When the Game Asks for a Name) |
 | `MHP3RD_AUTO_CONFIRM` | off | Press ○ every N frames, to walk through menus unattended |
-| `MHP3RD_FREE_CAMERA` | off | `1` turns the [free camera](#free-camera-experimental) on for the run: F6 or Back + R3 then detaches the view (menu: Free camera) |
-| `MHP3RD_FREE_CAMERA_SPEED` | `400` | The free camera's speed in game units a second, 10 to 20000 (menu: Free camera speed) |
+| `MHP3RD_FREE_CAMERA` | off | `1` turns the [free camera](#free-camera-experimental) on for the run: F6 or Back + R3 then detaches the view (menu: Free Camera) |
+| `MHP3RD_FREE_CAMERA_SPEED` | `400` | The free camera's speed in game units a second, 10 to 20000 (menu: Free Camera Speed) |
 | `MHP3RD_FREE_CAMERA_POSE` | none | `x,y,z,yaw,pitch`: where the free camera starts instead of the game camera's place, so two runs look from exactly the same spot. Yaw 0 looks along +z and grows towards +x; pitch is up, in degrees |
 
 ### Network
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `MHP3RD_ADHOC` | off | `1` turns ad hoc play on (menu: Ad hoc play) |
+| `MHP3RD_ADHOC` | off | `1` turns ad hoc play on (menu: Ad Hoc Play) |
 | `MHP3RD_ADHOC_SERVER` | none | PSP ad hoc server, `host` or `host:port` (menu: Server) |
 | `MHP3RD_ADHOC_NICKNAME` | the hunter name | Name other players see (menu: Nickname) |
 | `MHP3RD_ADHOC_MAC` | made up once | The address other players know you by, `xx:xx:xx:xx:xx:xx` |
@@ -1093,7 +1097,7 @@ The renderer then leaves out the HUD packets' draws, and nothing else: their oth
 
 ### Analog camera
 
-**Analog camera** (Controls) is on by default and drives both axes in a quest. Small right-stick deflections turn and tilt slowly; full deflection uses **Camera speed**. The input dead zone and inversion settings apply to both axes. The game retains terrain and wall collision handling. While a bow or a bowgun aims, the right stick moves the aim in proportion to how far it is pushed, at **Aim speed** (the game's own aim moves at one speed of about 100° a second, and only past half the stick's travel), and the game's camera follows the aim as it always does; the analog camera takes over again when the aim ends. A bowgun's scope (a short press of R) counts as an aim: the right stick and the mouse move the scope instead of turning the camera behind it. The game still decides whether the aim may move and which way: nothing moves while rolling, an axis the game locks (vertical aim while walking) stays locked, the scope's left-stick aim is untouched, and the game's Quick Aim Controls option applies. The game's own **Quick Aim Camera** option (START → Options) decides whether the camera turns behind the hunter while aiming: with Type 2 it stays where it is. Fixed village cameras and other special camera modes remain stock; this feature does not unlock them.
+**Analog Camera** (Controls) is on by default and drives both axes in a quest. Small right-stick deflections turn and tilt slowly; full deflection uses **Camera Speed**. The input dead zone and inversion settings apply to both axes. The game retains terrain and wall collision handling. While a bow or a bowgun aims, the right stick moves the aim in proportion to how far it is pushed, at **Aim Speed** (the game's own aim moves at one speed of about 100° a second, and only past half the stick's travel), and the game's camera follows the aim as it always does; the analog camera takes over again when the aim ends. A bowgun's scope (a short press of R) counts as an aim: the right stick and the mouse move the scope instead of turning the camera behind it. The game still decides whether the aim may move and which way: nothing moves while rolling, an axis the game locks (vertical aim while walking) stays locked, the scope's left-stick aim is untouched, and the game's Quick Aim Controls option applies. The game's own **Quick Aim Camera** option (START → Options) decides whether the camera turns behind the hunter while aiming: with Type 2 it stays where it is. Fixed village cameras and other special camera modes remain stock; this feature does not unlock them.
 
 The option takes effect at run time, with no regeneration or rebuild. Turning it off stops all analog-camera writes, restores the game's vertical presets and passes the right stick through unchanged. Camera speed is in degrees per second of real time, measured between the game's flips, so it does not change when the game slows down.
 
@@ -1113,11 +1117,11 @@ Safeguards: CMake finds the generated unit that holds the rotation helper and fa
 - **It lets go by itself** when the monster dies or is captured, leaves the hunter's area (or the hunter leaves it), gets more than 6,000 units away, or the quest ends; a note says why. It also lets go when the player takes the camera back: turning it by hand (the right stick, the mouse or the camera keys, past about 6° so a nudge does not count), the D-pad's camera commands, or recentring with L. Holding L for the item bar does not.
 - **While it holds**, the camera's yaw eases towards the monster by a fifth of the rest each camera update, at most 11.25° an update, so it follows a charge without jumping. When the monster stands on top of the hunter (within 300 units of the camera's look-at point) its direction means little and the yaw holds, coming back in over the next 400 units; with nearly half a turn to go, the turn keeps the way it was going instead of flipping between the two. The camera also tilts by half the monster's elevation as seen from the hunter, at most 10° up or 20° down from where it was, unless the player tilts it with the [analog camera](#analog-camera), which then keeps the tilt for the rest of the lock. The second stick is kept from the game meanwhile, so its own turn and presets do not fight the lock.
 - **The free camera** suspends it: the lock is kept, and resumes when the free camera ends. While a bow or a bowgun aims, the camera follows the aim as usual, and the lock resumes when the aim ends.
-- **The marker** (*Lock-on marker*, on by default) is a small ring the interface draws over the locked monster, placed with the game's own view and projection. It is left out of the game's own frames and screenshots, like the rest of the interface.
+- **The marker** (*Lock-On Marker*, on by default) is a small ring the interface draws over the locked monster, placed with the game's own view and projection. It is left out of the game's own frames and screenshots, like the rest of the interface.
 
-A tap is a press of the bind on its own: it acts when the input is let go, and only if no other button of the same device was held meanwhile. R3 is also part of L3 + R3 (the menu), Back + R3 (the free camera) and R3 + D-pad left (a screenshot); those never lock on, and the controls page shows no conflict for them. *Lock-on* (Controls) turns it off: the bind then does nothing.
+A tap is a press of the bind on its own: it acts when the input is let go, and only if no other button of the same device was held meanwhile. R3 is also part of L3 + R3 (the menu), Back + R3 (the free camera) and R3 + D-pad left (a screenshot); those never lock on, and the controls page shows no conflict for them. *Lock-On* (QoL) turns it off: the bind then does nothing.
 
-It is not a second camera. The [analog camera](#analog-camera)'s driver asks lock-on, on each update of the ordinary follow camera, for the yaw and pitch, and writes them where it writes its own, before the game's collision checks. The driver's hook is installed on the first tap, so with *Analog camera* off and lock-on never used, the game's camera code runs exactly as before. The code is `host/camera/lock_on.{hpp,cpp}`.
+It is not a second camera. The [analog camera](#analog-camera)'s driver asks lock-on, on each update of the ordinary follow camera, for the yaw and pitch, and writes them where it writes its own, before the game's collision checks. The driver's hook is installed on the first tap, so with *Analog Camera* off and lock-on never used, the game's camera code runs exactly as before. The code is `host/camera/lock_on.{hpp,cpp}`.
 
 What it reads, traced in quests from the full test save with the developer tools' memory dumps (`dump`, `peek`; see [docs/DEBUG_MENU.md](../../docs/DEBUG_MENU.md)):
 
@@ -1134,11 +1138,11 @@ What it reads, traced in quests from the full test save with the developer tools
 
 ### Screenshots
 
-**Screenshot** (F12 or Print Screen; R3 + D-pad left on a gamepad; *Take a screenshot* in the menu's System section) saves the game's picture as a PNG in `screenshots/` in the [data directory](#installer), or in the portable folder's `data/screenshots/` for a [portable copy](#portable-copy), named by the time, such as `Yakumo_2026-09-27_14-03-22.png` (`_2`, `_3` for more in one second). It is the frame the game last drew, at the size it is drawn at: *Resolution* ×2 gives 960×544, ×4 1920×1088, and Auto the window's size, whatever the window shows it at. The picture is the game's own render target, so the port's interface is never in it: not the menu, the free camera's line, the performance overlay or the note that says where the file went, which shows at the bottom of the window for three seconds. What the game draws itself, its HUD and the names over hunters, is in it, unless the [HUD is hidden](#hiding-the-hud). It works in play, in the [free camera](#free-camera-experimental) (the picture is the free camera's view) and in its photo mode, and from the menu (the game's picture behind the menu). The file is written on a background thread; the log says `[screenshot] <path> (<width>x<height>)` once it is.
+**Screenshot** (F12 or Print Screen; R3 + D-pad left on a gamepad; *Take a Screenshot* in the menu's System section) saves the game's picture as a PNG in `screenshots/` in the [data directory](#installer), or in the portable folder's `data/screenshots/` for a [portable copy](#portable-copy), named by the time, such as `Yakumo_2026-09-27_14-03-22.png` (`_2`, `_3` for more in one second). It is the frame the game last drew, at the size it is drawn at: *Resolution* ×2 gives 960×544, ×4 1920×1088, and Auto the window's size, whatever the window shows it at. The picture is the game's own render target, so the port's interface is never in it: not the menu, the free camera's line, the performance overlay or the note that says where the file went, which shows at the bottom of the window for three seconds. What the game draws itself, its HUD and the names over hunters, is in it, unless the [HUD is hidden](#hiding-the-hud). It works in play, in the [free camera](#free-camera-experimental) (the picture is the free camera's view) and in its photo mode, and from the menu (the game's picture behind the menu). The file is written on a background thread; the log says `[screenshot] <path> (<width>x<height>)` once it is.
 
 ### Free camera (experimental)
 
-**Free camera** (Controls → Experimental, `experimental.free_camera`, `MHP3RD_FREE_CAMERA=1`) is off by default. It is experimental: it may break, and it may change. With it on, F6, or Back + R3 on a gamepad, detaches the view from the game's camera, and the same again gives the game's camera back exactly as it was. It is for pictures, for looking at models and levels, and for debugging the renderer.
+**Free Camera** (QoL → Experimental Options, `experimental.free_camera`, `MHP3RD_FREE_CAMERA=1`) is off by default. It is experimental: it may break, and it may change. With it on, F6, or Back + R3 on a gamepad, detaches the view from the game's camera, and the same again gives the game's camera back exactly as it was. It is for pictures, for looking at models and levels, and for debugging the renderer.
 
 | Keyboard and mouse | Gamepad | While flying |
 | --- | --- | --- |
@@ -1146,7 +1150,7 @@ What it reads, traced in quests from the full test save with the developer tools
 | E / Q | RB / LB | Straight up / down |
 | Mouse | Right stick | Look; Mouse sensitivity and Camera speed, and their invert settings, apply |
 | Left Shift / Left Ctrl, held | RT / LT, held | Four times faster / four times slower |
-| Mouse wheel, + / - | D-pad up / down | Speed times or divided by 1.25; kept as *Free camera speed* |
+| Mouse wheel, + / - | D-pad up / down | Speed times or divided by 1.25; kept as *Free Camera Speed* |
 | P | Start | Photo mode on or off |
 | . | D-pad right | In the photo mode, the game runs on by one frame; held, about ten a second ([Frame step](#frame-step)) |
 | F12, Print Screen | R3 + D-pad left | [Screenshot](#screenshots), as the free camera sees it |
@@ -1159,7 +1163,7 @@ The game keeps running underneath, and it reads a neutral pad the whole time, so
 
 #### Frame step
 
-In the photo mode, **Frame step** (. on the keyboard, D-pad right on a gamepad; Controls, *Frame step (photo mode)*) runs the game on by exactly one frame and holds it still again, so the moment an attack lands can be caught; held, it steps again after 0.4 s and then about ten times a second. The camera stays where it is. A step lets the photo mode's hold go at the game's flip and takes it again at the next flip: the game runs one whole frame as in play, its code, its threads and its two vblanks (it starts a frame every other vblank, 30 a second), and draws it, and the photo mode then shows that frame from the free camera's place. Each step logs the vblanks it took, `[freecam] frame step: vblank 8720 to 8722 (2)`; in the village and in a quest every step took two, and consecutive screenshots differ by one frame of animation. The sound stays paused through the steps, and a stepped frame is shown at once like the photo mode's own, never blended with the one before by frame interpolation. P (Start) ends the photo mode as before.
+In the photo mode, **Frame step** (. on the keyboard, D-pad right on a gamepad; Controls, *Frame Step (Photo Mode)*) runs the game on by exactly one frame and holds it still again, so the moment an attack lands can be caught; held, it steps again after 0.4 s and then about ten times a second. The camera stays where it is. A step lets the photo mode's hold go at the game's flip and takes it again at the next flip: the game runs one whole frame as in play, its code, its threads and its two vblanks (it starts a frame every other vblank, 30 a second), and draws it, and the photo mode then shows that frame from the free camera's place. Each step logs the vblanks it took, `[freecam] frame step: vblank 8720 to 8722 (2)`; in the village and in a quest every step took two, and consecutive screenshots differ by one frame of animation. The sound stays paused through the steps, and a stepped frame is shown at once like the photo mode's own, never blended with the one before by frame interpolation. P (Start) ends the photo mode as before.
 
 What the picture has, and what it lacks:
 
@@ -1233,10 +1237,10 @@ With the setting off nothing is hooked into the display lists, no input is read 
 | `MHP3RD_TRACE_PAD=1` | Log the pad state whenever it changes (`[pad]`), and each chord pressed, waiting, tapped and let go, with when its last input went down (`[chord] <ms> pad pressed Pad LB + Pad West (last input down 0 ms before)`) |
 | `MHP3RD_TRACE_PAD_READS=1` | Log every read the game makes of the pad, with the emulated time and the buttons (`[pad-read]`); the game reads it once a frame |
 | `MHP3RD_TRACE_OSK=1` | Every keyboard utility call with the status it returns, and the words of the parameter block, its first field and the strings they point to |
-| `MHP3RD_TRACE_ADHOC=1` | Every ad hoc, network dialog and wireless call with its arguments and result, and every packet header sent to or received from the ad hoc server (menu: Network, *Log every call and packet*) |
+| `MHP3RD_TRACE_ADHOC=1` | Every ad hoc, network dialog and wireless call with its arguments and result, and every packet header sent to or received from the ad hoc server (menu: Network, *Log Every Call and Packet*) |
 | `MHP3RD_INPUT_SCRIPT` | Scripted keys, mouse motion and buttons, virtual-gamepad buttons and axes, dropped files and window captures, for testing the menu, the setup, the on-screen keyboard and the game's controls without a person at the controls; the syntax is in `host/ui/input_script.hpp`. Its virtual gamepad also becomes the game's pad, in place of a real one that is connected; its keys reach the game through the bindings as well as the interface; with mouse steps the pointer counts as captured without taking the real one; its finger steps are a virtual touch screen, and `drag` moves the interface's pointer as a touch does; `joy` steps attach test joysticks SDL has no mapping for, like a controller it does not know (12 buttons, 4 axes and a hat), and press their buttons, hat and axes. Example: `300:key Escape;330:shot menu;360:pad leftstick+rightstick;400:key W 30;430:mouse 50 0` |
 | `MHP3RD_CAPTURE_PRESENTS=N` | Each window capture (`shot NAME` in the input script) goes on for N presents in a row, written as `NAME.bmp`, `NAME_1.bmp` and so on: with a [frame rate](#frame-rate) above 30 it shows the frames in between the game's as well, which one capture per game frame never does. With `MHP3RD_TRACE_INTERPOLATION=presents`, the `[render] window` line of each capture comes just before the `[interp] present` line that says whether it was blended. Each capture waits for its frame, so the run is slower while it lasts |
-| `MHP3RD_INPUT_LIVE` | A file read while the game runs; each line appended to it is an input-script step timed from when it is read, to drive two instances side by side |
+| `MHP3RD_INPUT_LIVE` | A file read while the game runs; each complete line appended to it is an input-script step timed from when it is read, to drive two instances side by side. Both LF and Windows CRLF line endings work; an incomplete final line waits for its newline |
 | `MHP3RD_DUMP_OVERLAYS` | Directory to dump an overlay that has no library into |
 | `PSPRECOMP_NO_INTERPRETER=1` | Stop at uncompiled code instead of interpreting it |
 | `PSPRECOMP_MAX_DISPATCHES` | Stop after this many dispatches |
@@ -1250,7 +1254,11 @@ With `MHP3RD_PERF=1` the game draws a small overlay into the top-left corner of 
 [perf] fps 30.0 game 30.0 speed 100% | frame avg 33.4 max 34.7 ms | guest 4.1 render 9.8 wait 19.5 ms | lists 60/s draws 7712/2310 | FIFO 1440x816 90Hz | gpu 7.6 max 10.6 ms | overlay 0.05 ms
 ```
 
-`MHP3RD_PERF=log` prints the line without the overlay. F3 shows or hides the overlay at any time, with or without the variable; there is deliberately no gamepad combination for it. The menu's *Performance* setting chooses the same modes, plus the overlay without the log. The statistics are collected all the time, so turning them on changes nothing else.
+`MHP3RD_PERF=log` prints the line without the overlay. F3 shows or hides the selected overlay at any time, with or without the variable; there is deliberately no gamepad combination for it. The menu's *Performance Overlay* setting offers *Off*, *Overlay*, *Overlay and Log*, *Log Only*, *Compact* and *Compact and Log*. The statistics are collected all the time, so turning them on changes nothing else.
+
+*Compact* draws one line in the bottom-left corner of the game's picture: `FPS: 30.0 SPD: 100% VSYNC: ON`. It uses the full overlay's font, integer scale, background and inset, with no graph or extra rows. FPS counts presented frames and SPD is emulated time as a percentage of real time. VSYNC reports the actual presentation mode: ON for FIFO or mailbox, OFF for immediate, including a driver's fallback to FIFO. Until the first measured second, FPS and SPD show `--`. *Compact and Log* adds the same full console summary once per second; F3 hides or shows the compact line without changing logging. Both styles appear in window and frame captures.
+
+In `settings.ini`, `video.performance` accepts `off`, `overlay`, `overlay+log`, `log`, `compact` and `compact+log`. `MHP3RD_PERF=compact` and `MHP3RD_PERF=compact+log` select the new modes for one run.
 
 A frame runs from one guest flip (`sceDisplaySetFrameBuf`, where the renderer presents) to the next. With a [frame rate](#frame-rate) above 30 the renderer presents between flips instead: `fps`, `frame avg` and `max` and the overlay's graph then follow the presents, while `game`, `guest`, `render`, `wait` and `gpu` stay per game frame and include the in-between frames' work.
 
@@ -1287,7 +1295,7 @@ The renderer changes made for speed each have an off switch (see [Video](#video)
 [slow-frame] 714 152.0 ms | guest 2.5 render 81.6 wait 67.9 ms | gpu(prev) 2.0 ms | fence 2.02 x1 acquire 0.09 x1 submit 6.88 x1 present 0.03 x1 upload 43.93 x80 pacing 14.91 x4 copy 0.02 x1 store 0.51 x1
 ```
 
-On Android, where no variable can be set, the `[stalls]` line comes with the `[perf]` line whenever Performance logs, so a log saved from the menu has it. Each kind that happened is listed with its time per frame averaged over the second, its longest single stall and how many there were; a `[slow-frame]` line gives that frame's totals and the GPU time of the frame before it, which is what a fence wait at the start of the frame waits for.
+On Android, where no variable can be set, the `[stalls]` line comes with the `[perf]` line whenever Performance Overlay logs, so a log saved from the menu has it. Each kind that happened is listed with its time per frame averaged over the second, its longest single stall and how many there were; a `[slow-frame]` line gives that frame's totals and the GPU time of the frame before it, which is what a fence wait at the start of the frame waits for.
 
 | Kind | Where |
 | --- | --- |
@@ -1307,7 +1315,7 @@ On Android, where no variable can be set, the `[stalls]` line comes with the `[p
 
 #### A report from a phone
 
-On Android, set Performance to *Log* in the menu, play to the place that is slow for a minute, then use *Save the log…*. The start of the log names the Vulkan driver (`[render] Vulkan …, driver …`), the memory the vertex buffer lives in, the swapchain's images and present mode, the internal resolution (`Renderer: … target WxH`) and how many frames are in flight. Each second then has a `[perf]` and a `[stalls]` line. Where to look:
+On Android, set Performance Overlay to *Log* in the menu, play to the place that is slow for a minute, then use *Save the Log…*. The start of the log names the Vulkan driver (`[render] Vulkan …, driver …`), the memory the vertex buffer lives in, the swapchain's images and present mode, the internal resolution (`Renderer: … target WxH`) and how many frames are in flight. Each second then has a `[perf]` and a `[stalls]` line. Where to look:
 
 - `gpu` close to or above the frame time (33 ms at 30 fps, 16.7 ms at 60): the GPU is the limit. Lower Resolution first, then Frame rate.
 - `render` plus `guest` close to the frame time: the CPU is the limit; Frame rate's in-between frames add to `render`.

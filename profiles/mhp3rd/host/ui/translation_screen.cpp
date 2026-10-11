@@ -192,13 +192,13 @@ void translation_rows() {
         focus_next_row();
         s.focus_row = false;
     }
-    if (button_row("Import translation…",
+    if (button_row("Import Translation…",
             {false, {},
-                "Copy a translation file (.lang) you downloaded into Yakumo. It appears under Game text "
-                "language; a restart loads it."}))
+                "Copy a translation file (.lang) you downloaded into Yakumo. It appears under Game Text "
+                "Language; a restart loads it."}))
         open_browser();
 #if !defined(MHP3RD_ANDROID_APP)
-    if (button_row("Open the translations folder", {false, {}, "Show where imported translations are kept."}))
+    if (button_row("Open the Translations Folder", {false, {}, "Show where imported translations are kept."}))
         open_folder(translations_folder());
 #endif
 }

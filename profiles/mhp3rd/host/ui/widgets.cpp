@@ -371,14 +371,35 @@ bool tab_bar(const char *const *labels, int count, int &selected) {
 
     const float inner_left = start.x + cap_left + px(14.0f);
     const float inner_width = width - cap_left - std::max(font() * 1.15f, cap_right_width) - px(28.0f);
-    const float tab_width = inner_width / static_cast<float>(count);
+    float label_width = 0.0f;
+    for (int i = 0; i < count; ++i) label_width = std::max(label_width, ImGui::CalcTextSize(labels[i]).x);
+    const float tab_width = std::max(inner_width / static_cast<float>(std::min(count, 6)), label_width + px(24.0f));
+    const float total_width = tab_width * static_cast<float>(count);
+    const bool scrollable = total_width > inner_width;
+    const float strip_height = height + (scrollable ? ImGui::GetStyle().ScrollbarSize : 0.0f);
+    ImGui::SetCursorScreenPos({inner_left, start.y});
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{});
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2{});
+    ImGui::SetNextWindowContentSize({total_width, 0.0f});
+    ImGui::BeginChild("tab_strip", {inner_width, strip_height}, ImGuiChildFlags_None,
+        ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleVar(2);
+    if (scrollable) {
+        const float left = tab_width * static_cast<float>(selected);
+        const float scroll = ImGui::GetScrollX();
+        if (left < scroll)
+            ImGui::SetScrollX(left);
+        else if (left + tab_width > scroll + inner_width)
+            ImGui::SetScrollX(left + tab_width - inner_width);
+    }
+    draw = ImGui::GetWindowDrawList();
     ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
     for (int i = 0; i < count; ++i) {
-        const ImVec2 min{inner_left + tab_width * static_cast<float>(i), start.y};
-        const ImVec2 max{min.x + tab_width, start.y + height};
-        ImGui::SetCursorScreenPos(min);
+        ImGui::SetCursorPos({tab_width * static_cast<float>(i), 0.0f});
         ImGui::PushID(i);
         if (ImGui::InvisibleButton("tab", {tab_width, height})) selected = i;
+        const ImVec2 min = ImGui::GetItemRectMin();
+        const ImVec2 max = ImGui::GetItemRectMax();
         const bool hovered = ImGui::IsItemHovered();
         ImGui::PopID();
         const bool active = i == selected;
@@ -391,7 +412,8 @@ bool tab_bar(const char *const *labels, int count, int &selected) {
                 colors::kAccent, px(2.0f));
     }
     ImGui::PopItemFlag();
-    ImGui::SetCursorScreenPos({start.x, start.y + height + px(8.0f)});
+    ImGui::EndChild();
+    ImGui::SetCursorScreenPos({start.x, start.y + strip_height + px(8.0f)});
     ImGui::Dummy({0.0f, 0.0f});
     return selected != before;
 }

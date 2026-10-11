@@ -28,6 +28,7 @@
 #include "input/touch_action.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <sstream>
 #include "hle/hle_common.hpp"
 #include "audio/audio_sink.hpp"
@@ -36,6 +37,8 @@
 #include "adhoc/session.hpp"
 #include "kernel/fast_forward.hpp"
 #include "settings/settings.hpp"
+#include "perf/frame_stats.hpp"
+#include "perf/perf_overlay.hpp"
 #include "ui/layer.hpp"
 #include "ui/input_script.hpp"
 #include "ui/text_input.hpp"
@@ -70,6 +73,34 @@ void expect(bool ok, const char *what) {
         std::cerr << "FAIL: " << what << '\n';
     }
 }
+void set_environment(const char *name, const char *value) {
+    // SDL's DLL and the test executable can have separate CRT environments on Windows.
+#if defined(_WIN32)
+    expect(_putenv_s(name, value) == 0, "test environment updates the executable CRT");
+#endif
+    expect(SDL_setenv_unsafe(name, value, 1) == 0, "test environment updates SDL");
+    const char *actual = std::getenv(name);
+    expect(actual && std::string_view(actual) == value, "host diagnostics see the configured test environment");
+}
+void clear_environment(const char *name) {
+#if defined(_WIN32)
+    expect(_putenv_s(name, "") == 0, "test environment clears the executable CRT override");
+#endif
+    expect(SDL_unsetenv_unsafe(name) == 0, "test environment clears the SDL override");
+}
+class ScriptedUiMouse {
+public:
+    explicit ScriptedUiMouse(SDL_Window *window) : window_(window), relative_(SDL_GetWindowRelativeMouseMode(window)) {}
+    ~ScriptedUiMouse() { SDL_SetWindowRelativeMouseMode(window_, relative_); }
+    void prepare_frame() {
+        // Suppress the backend's global-cursor fallback while supplying exact synthetic mouse coordinates.
+        expect(SDL_SetWindowRelativeMouseMode(window_, true), "synthetic UI mouse uses relative SDL mode");
+    }
+
+private:
+    SDL_Window *window_;
+    bool relative_;
+};
 void unavailable_renderer_contracts(const std::filesystem::path &sandbox) {
     gpu::VulkanRenderer unavailable;
     expect(!unavailable.available() && unavailable.window() == nullptr && !unavailable.pump_events(),
@@ -690,7 +721,8 @@ void primitive_contracts(gpu::VulkanRenderer &renderer) {
         renderer.submit(clear, memory);
         renderer.submit(draw, memory);
         if (!renderer.present(0x04000000, moment)) ++weighted_deferred;
-        renderer.present_until(moment + std::chrono::milliseconds(33));
+        // Allow several 60 Hz presents so animated bones also exercise an intermediate replay.
+        renderer.present_until(moment + std::chrono::milliseconds(50));
     }
     expect(weighted_deferred == 8 && pixel() == 0xff2255cc,
         "single-weight raw skinning and animated bone replay preserve lit interior color");
@@ -921,39 +953,126 @@ void screenshot_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::
     }
     expect(!renderer.window_capture_pending() && !std::filesystem::exists(sandbox / "missing-directory" / "window.bmp"),
         "failed window capture is consumed once without creating an invalid destination");
-    renderer.set_perf_overlay(true);
-    const auto overlay_window = sandbox / "public-overlay-window.bmp";
-    renderer.capture_window(overlay_window);
-    for (int i = 0; i < 3 && renderer.window_capture_pending(); ++i) {
-        layer.begin_frame();
-        layer.end_frame();
-        expect(renderer.present(0x04110000), "performance overlay is drawn during actual game presentation");
+    const auto original_perf = settings::current().perf;
+    const auto original_present = settings::current().present_mode;
+    for (const auto mode :
+        {settings::PerfDisplay::Overlay, settings::PerfDisplay::Compact, settings::PerfDisplay::CompactAndLog}) {
+        settings::current().perf = mode;
+        const bool compact = perf::options().compact;
+        const bool immediate = mode == settings::PerfDisplay::CompactAndLog &&
+            renderer.supports_present_mode(settings::PresentMode::Immediate);
+        renderer.set_present_mode(immediate ? settings::PresentMode::Immediate : settings::PresentMode::Fifo);
+        const std::string name = mode == settings::PerfDisplay::Overlay ? "public-overlay"
+            : mode == settings::PerfDisplay::Compact                    ? "public-compact"
+                                                                        : "public-compact-log";
+        renderer.set_perf_overlay(true);
+        const auto overlay_window = sandbox / (name + "-window.bmp");
+        renderer.capture_window(overlay_window);
+        for (int i = 0; i < 3 && renderer.window_capture_pending(); ++i) {
+            layer.begin_frame();
+            layer.end_frame();
+            expect(renderer.present(0x04110000), "performance overlay is drawn during actual game presentation");
+        }
+        const auto overlay_frame = sandbox / (name + "-frame.bmp");
+        expect(renderer.capture_frame(overlay_frame), "frame capture includes the enabled performance overlay");
+        for (const auto &overlay_path : {overlay_frame, overlay_window}) {
+            std::ifstream overlay_in(overlay_path, std::ios::binary);
+            const std::vector<std::uint8_t> overlay{
+                std::istreambuf_iterator<char>(overlay_in), std::istreambuf_iterator<char>()};
+            expect(overlay.size() >= 54, "performance overlay capture exists for both framebuffer and swapchain");
+            if (overlay.size() < 54) continue;
+            auto dimension = [&](std::size_t at) {
+                return static_cast<std::uint32_t>(overlay[at]) | (static_cast<std::uint32_t>(overlay[at + 1]) << 8) |
+                    (static_cast<std::uint32_t>(overlay[at + 2]) << 16) |
+                    (static_cast<std::uint32_t>(overlay[at + 3]) << 24);
+            };
+            const auto w = dimension(18), h = dimension(22);
+            const auto row = (w * 3 + 3) & ~3u;
+            const auto scale = std::max(1u, h / 360);
+            const auto inset = 4 * scale;
+            const auto overlay_height = compact ? perf::kCompactOverlayHeight : perf::kOverlayHeight;
+            const auto top = compact ? h - inset - overlay_height * scale : inset;
+            const auto corner = 54 + static_cast<std::size_t>(h - 1 - top) * row + inset * 3;
+            const auto outside = 54 + static_cast<std::size_t>(h / 2) * row + (w / 2) * 3;
+            expect(corner + 2 < overlay.size() && overlay[corner] == 16 && overlay[corner + 1] == 16 &&
+                    overlay[corner + 2] == 16,
+                "performance overlay paints its documented dark background in captured GPU/frame corner");
+            expect(outside + 2 < overlay.size() && overlay[outside] == 255 && overlay[outside + 1] == 0 &&
+                    overlay[outside + 2] == 255,
+                "performance overlay leaves the scene outside its rectangle unchanged");
+            if (!compact) continue;
+            const auto old_corner = 54 + static_cast<std::size_t>(h - 1 - inset) * row + inset * 3;
+            expect(old_corner + 2 < overlay.size() && overlay[old_corner] == 0 && overlay[old_corner + 1] == 0 &&
+                    overlay[old_corner + 2] == 0,
+                "compact leaves the former top-left overlay area untouched");
+            const auto below = 54 + static_cast<std::size_t>(inset - 1u) * row + inset * 3;
+            expect(
+                below + 2 < overlay.size() && overlay[below] == 0 && overlay[below + 1] == 0 && overlay[below + 2] == 0,
+                "compact leaves the standard inset below its single text line");
+            std::vector<std::uint32_t> expected(perf::kOverlayWidth * perf::kCompactOverlayHeight);
+            perf::draw_compact_overlay(expected.data(), perf::last_second(), !immediate);
+            bool same = true;
+            for (std::uint32_t y = 0; y < overlay_height * scale; ++y) {
+                for (std::uint32_t x = 0; x < perf::kOverlayWidth * scale; ++x) {
+                    const auto at = 54 + static_cast<std::size_t>(h - 1 - top - y) * row + (inset + x) * 3u;
+                    const auto pixel = expected[(y / scale) * perf::kOverlayWidth + x / scale];
+                    same = same && at + 2 < overlay.size() && overlay[at] == ((pixel >> 16u) & 255u) &&
+                        overlay[at + 1] == ((pixel >> 8u) & 255u) && overlay[at + 2] == (pixel & 255u);
+                }
+            }
+            expect(same, "compact captures preserve every glyph, integer scale and actual Vsync state");
+        }
+        if (compact) {
+            auto f3 = [&] {
+                SDL_Event event{};
+                event.type = SDL_EVENT_KEY_DOWN;
+                event.key.windowID = SDL_GetWindowID(renderer.window());
+                event.key.key = SDLK_F3;
+                event.key.scancode = SDL_SCANCODE_F3;
+                expect(SDL_PushEvent(&event), "F3 toggle event queues");
+                renderer.pump_events();
+                event.type = SDL_EVENT_KEY_UP;
+                expect(SDL_PushEvent(&event), "F3 release event queues");
+                renderer.pump_events();
+            };
+            auto capture_visible = [&](const char *suffix, bool visible) {
+                const auto path = sandbox / (name + suffix);
+                expect(renderer.capture_frame(path), "F3 state is captured in the game frame");
+                std::ifstream in(path, std::ios::binary);
+                const std::vector<std::uint8_t> bmp{
+                    std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+                if (bmp.size() < 54) {
+                    expect(false, "F3 capture contains a BMP header");
+                    return;
+                }
+                auto dimension = [&](std::size_t at) {
+                    return static_cast<std::uint32_t>(bmp[at]) | (static_cast<std::uint32_t>(bmp[at + 1]) << 8) |
+                        (static_cast<std::uint32_t>(bmp[at + 2]) << 16) |
+                        (static_cast<std::uint32_t>(bmp[at + 3]) << 24);
+                };
+                const auto w = dimension(18), h = dimension(22);
+                const auto row = (w * 3 + 3) & ~3u;
+                const auto scale = std::max(1u, h / 360);
+                const auto inset = 4u * scale;
+                const auto at =
+                    54 + static_cast<std::size_t>(inset + perf::kCompactOverlayHeight * scale - 1u) * row + inset * 3u;
+                expect(at + 2 < bmp.size() &&
+                        (visible ? bmp[at] == 16 && bmp[at + 1] == 16 && bmp[at + 2] == 16
+                                 : bmp[at] == 0 && bmp[at + 1] == 0 && bmp[at + 2] == 0),
+                    "F3 hides and restores the compact rectangle at the bottom-left inset");
+            };
+            f3();
+            capture_visible("-hidden.bmp", false);
+            expect(settings::current().perf == mode, "F3 preserves the selected compact style and logging mode");
+            f3();
+            layer.begin_frame();
+            layer.end_frame();
+            expect(renderer.present(0x04110000), "F3 restores compact during actual presentation");
+            capture_visible("-restored.bmp", true);
+        }
     }
-    const auto overlay_frame = sandbox / "public-overlay-frame.bmp";
-    expect(renderer.capture_frame(overlay_frame), "frame capture includes the enabled performance overlay");
-    for (const auto &overlay_path : {overlay_frame, overlay_window}) {
-        std::ifstream overlay_in(overlay_path, std::ios::binary);
-        const std::vector<std::uint8_t> overlay{
-            std::istreambuf_iterator<char>(overlay_in), std::istreambuf_iterator<char>()};
-        expect(overlay.size() >= 54, "performance overlay capture exists for both framebuffer and swapchain");
-        if (overlay.size() < 54) continue;
-        auto dimension = [&](std::size_t at) {
-            return static_cast<std::uint32_t>(overlay[at]) | (static_cast<std::uint32_t>(overlay[at + 1]) << 8) |
-                (static_cast<std::uint32_t>(overlay[at + 2]) << 16) |
-                (static_cast<std::uint32_t>(overlay[at + 3]) << 24);
-        };
-        const auto w = dimension(18), h = dimension(22);
-        const auto row = (w * 3 + 3) & ~3u;
-        const auto inset = 4 * std::max(1u, h / 360);
-        const auto corner = 54 + static_cast<std::size_t>(h - 1 - inset) * row + inset * 3;
-        const auto outside = 54 + static_cast<std::size_t>(h / 2) * row + (w / 2) * 3;
-        expect(corner + 2 < overlay.size() && overlay[corner] == 16 && overlay[corner + 1] == 16 &&
-                overlay[corner + 2] == 16,
-            "performance overlay paints its documented dark background in captured GPU/frame corner");
-        expect(outside + 2 < overlay.size() && overlay[outside] == 255 && overlay[outside + 1] == 0 &&
-                overlay[outside + 2] == 255,
-            "performance overlay leaves the scene outside its rectangle unchanged");
-    }
+    settings::current().perf = original_perf;
+    renderer.set_present_mode(original_present);
     renderer.set_perf_overlay(false);
     layer.begin_frame();
     layer.end_frame();
@@ -1193,7 +1312,9 @@ void widget_and_browser_contracts(gpu::VulkanRenderer &renderer, const std::file
     int selected = 0, value = 5;
     bool activated = false;
     ImVec2 click{};
+    ScriptedUiMouse mouse(renderer.window());
     auto frame = [&](bool disabled) {
+        mouse.prepare_frame();
         layer.begin_frame();
         ui::begin_panel("##contract", "Public widget contracts", "", true);
         const char *labels[] = {"One", "Two", "Three"};
@@ -1461,7 +1582,7 @@ void translation_screen_contracts(gpu::VulkanRenderer &renderer, const std::file
         frame();
     };
     frame();
-    activate("Import translation…");
+    activate("Import Translation…");
     expect(ui::translation_screen_open(), "translation import opens browser");
     for (unsigned i = 0; i < 32 && ui::translation_screen_open(); ++i) frame(nullptr, true);
     expect(!ui::translation_screen_open(), "back at the root cancels the browser");
@@ -1470,7 +1591,7 @@ void translation_screen_contracts(gpu::VulkanRenderer &renderer, const std::file
         std::ofstream out(source);
         out << "language = ui-test\nname = Synthetic UI\n2:1 = Text\n";
     }
-    activate("Import translation…");
+    activate("Import Translation…");
     drop(source);
     expect(std::filesystem::is_regular_file(folder / "ui-test.lang"), "UI imports the validated synthetic file");
     const auto &languages = ui::text_languages();
@@ -1483,7 +1604,7 @@ void translation_screen_contracts(gpu::VulkanRenderer &renderer, const std::file
         std::ofstream out(invalid);
         out << "not a translation";
     }
-    activate("Import translation…");
+    activate("Import Translation…");
     drop(invalid);
     expect(ui::translation_screen_open() && !std::filesystem::exists(folder / "invalid.lang"),
         "invalid UI imports show a result without creating a translation");
@@ -1552,7 +1673,7 @@ void save_screen_contracts(gpu::VulkanRenderer &renderer, const std::filesystem:
         frame();
     };
     frame();
-    activate("Import save…");
+    activate("Import Save…");
     expect(ui::save_screen_open(), "save import opens folder browser");
     drop(source);
     activate("Import this save");
@@ -1563,7 +1684,7 @@ void save_screen_contracts(gpu::VulkanRenderer &renderer, const std::filesystem:
     expect(!ui::save_screen_open() && !ui::take_restart_request(), "Later closes without restart request");
     content.data.assign(2048, 0xa5);
     expect(sd::write_save(source, files, content, error), "replacement public save writes");
-    activate("Import save…");
+    activate("Import Save…");
     drop(source);
     activate("Back up now");
     activate("Replace and import");
@@ -1578,7 +1699,7 @@ void save_screen_contracts(gpu::VulkanRenderer &renderer, const std::filesystem:
     expect(ui::take_restart_request() && !ui::take_restart_request(), "restart request is delivered exactly once");
     const auto destination = sandbox / "PublicSaveExport";
     std::filesystem::create_directories(destination);
-    activate("Export save…");
+    activate("Export Save…");
     drop(destination);
     bool exported{};
     for (const auto &entry : std::filesystem::recursive_directory_iterator(destination)) {
@@ -1587,7 +1708,7 @@ void save_screen_contracts(gpu::VulkanRenderer &renderer, const std::filesystem:
     expect(exported, "real export UI creates portable encrypted save");
     frame(nullptr, true);
     expect(!ui::save_screen_open(), "Back closes save export result");
-    activate("Back up saves…");
+    activate("Back Up Saves…");
     activate("Back up to the backups folder");
     activate("Done");
     expect(!ui::save_screen_open(), "backup UI completes and returns to menu");
@@ -1595,13 +1716,13 @@ void save_screen_contracts(gpu::VulkanRenderer &renderer, const std::filesystem:
     settings::current().backup_timestamp = false;
     const auto backup_target = sandbox / "PublicExplicitBackup";
     std::filesystem::create_directories(backup_target);
-    activate("Back up saves…");
+    activate("Back Up Saves…");
     activate("Back up to another folder…");
     drop(backup_target);
     activate("Done");
     expect(std::filesystem::is_regular_file(backup_target / "ULJM05800" / "MHP3RD.BIN"),
         "explicit backup contains encrypted save without timestamp");
-    activate("Back up saves…");
+    activate("Back Up Saves…");
     activate("Back up to another folder…");
     drop(backup_target);
     activate("Cancel");
@@ -1616,7 +1737,7 @@ void save_screen_contracts(gpu::VulkanRenderer &renderer, const std::filesystem:
     const auto invalid = sandbox / "PublicInvalidSave";
     std::filesystem::create_directories(invalid);
     std::ofstream(invalid / "PARAM.SFO") << "public invalid metadata";
-    activate("Import save…");
+    activate("Import Save…");
     drop(invalid);
     activate("Cancel");
     expect(!ui::save_screen_open() && sd::load_save(target, files).contents.data == content.data,
@@ -1774,7 +1895,7 @@ void texture_pack_screen_contracts(gpu::VulkanRenderer &renderer, const std::fil
         frame();
     };
     frame();
-    frame(false, "Import texture pack…");
+    frame(false, "Import Texture Pack…");
     press(ImGuiKey_Space);
     expect(ui::texture_pack_screen_open(), "texture import row opens actual folder browser");
     const std::string path = pack.string();
@@ -1805,7 +1926,7 @@ void texture_pack_screen_contracts(gpu::VulkanRenderer &renderer, const std::fil
     frame(true);
     expect(!ui::texture_pack_screen_open(), "back closes texture import result");
     auto choose = [&](const std::filesystem::path &source, const char *action) {
-        frame(false, "Import texture pack…");
+        frame(false, "Import Texture Pack…");
         press(ImGuiKey_Space);
         const std::string chosen = source.string();
         drop.drop.data = chosen.c_str();
@@ -1989,7 +2110,9 @@ void mods_screen_contracts(
     auto &layer = ui::Layer::get();
     layer.set_interactive(true);
     ImVec2 click{};
+    ScriptedUiMouse mouse(renderer.window());
     auto frame = [&](bool back = false, bool scroll = false, const char *focused_row = nullptr) {
+        mouse.prepare_frame();
         layer.begin_frame();
         ui::begin_panel("##mods-contract", "Mod contract", "", false);
         ui::begin_content();
@@ -2052,7 +2175,7 @@ void mods_screen_contracts(
     };
     frame();
     frame();
-    frame(false, false, "Import mod…");
+    frame(false, false, "Import Mod…");
     press(ImGuiKey_Space);
     for (int settle = 0; settle < 4 && !ui::mods_screen_open(); ++settle) frame();
     expect(ui::mods_screen_open(), "import row opens mod folder browser");
@@ -2066,7 +2189,7 @@ void mods_screen_contracts(
     frame();
     frame();
     frame();
-    frame(false, false, "Import this mod");
+    frame(false, false, "Import This Mod");
     press(ImGuiKey_Space);
     for (int settle = 0; settle < 5 && session->library().mods().size() != 2; ++settle) frame();
     frame();
@@ -2078,16 +2201,16 @@ void mods_screen_contracts(
         "imported mods stay disabled");
     frame(true);
     expect(!ui::mods_screen_open(), "back closes import result");
-    frame(false, false, "Import mod…");
-    frame(false, false, "Import mod…");
+    frame(false, false, "Import Mod…");
+    frame(false, false, "Import Mod…");
     press(ImGuiKey_Space);
     std::ofstream(incoming / "replacement.bin", std::ios::binary) << "SECOND!!";
     expect(SDL_PushEvent(&drop), "replacement mod drop queues");
     renderer.pump_events();
     frame();
     frame();
-    frame(false, false, "Import this mod");
-    frame(false, false, "Import this mod");
+    frame(false, false, "Import This Mod");
+    frame(false, false, "Import This Mod");
     press(ImGuiKey_Space);
     frame();
     bool mod_backup{};
@@ -2101,11 +2224,11 @@ void mods_screen_contracts(
     session->commit();
     frame();
     expect(!session->wanted().conflicts.empty(), "two enabled public file mods expose actual same-file conflict");
-    frame(false, false, "Use mods");
+    frame(false, false, "Use Mods");
     press(ImGuiKey_Space);
     expect(!session->library().master() && !mods::serving(),
         "master off restores unmodified archive despite enabled mods");
-    frame(false, false, "Use mods");
+    frame(false, false, "Use Mods");
     press(ImGuiKey_Space);
     expect(session->library().master(), "master toggle restores enabled mod policy");
     for (const auto &mod : session->library().mods()) session->library().set_enabled(mod.id, false);
@@ -2142,11 +2265,11 @@ void mods_screen_contracts(
         const auto chosen = session->library().choice(gear_id);
         expect(chosen.slots.size() == 1 && chosen.slots[0] == mods::FileId{0},
             "equipment hex editor stores exact public file id");
-        frame(false, false, "Use my current armor");
+        frame(false, false, "Use My Current Armor");
         press(ImGuiKey_Space);
         expect(session->library().choice(gear_id).slots[0] == mods::FileId{0},
             "absent game hunter leaves configured armor slot unchanged");
-        frame(false, false, "No armor");
+        frame(false, false, "No Armor");
         press(ImGuiKey_Space);
         auto &ram = runtime.memory();
         ram.store16(game::kCharacter, 0xff34); // Public one-letter hunter.
@@ -2160,11 +2283,11 @@ void mods_screen_contracts(
         ram.store16(game::kArmorFileBase + 10, 20);
         ram.store16(game::kHeadData + game::kArmorRecord, 3);
         ram.store8(game::kHeadData + game::kArmorRecord + 4, 0x0f);
-        frame(false, false, "Use my current armor");
+        frame(false, false, "Use My Current Armor");
         press(ImGuiKey_Space);
         expect(session->library().choice(gear_id).slots[0] == mods::FileId{13} && session->library().enabled(gear_id),
             "loaded synthetic hunter selects exact worn head model and enables mod");
-        frame(false, false, "No armor");
+        frame(false, false, "No Armor");
         press(ImGuiKey_Space);
         expect(session->library().choice(gear_id).slots[0] == mods::FileId{10},
             "No armor selects synthetic bare head base model");
@@ -2405,7 +2528,9 @@ void touch_editor_contracts(gpu::VulkanRenderer &renderer) {
     auto &layer = ui::Layer::get();
     layer.set_interactive(true);
     ui::open_touch_editor();
+    ScriptedUiMouse mouse(renderer.window());
     auto frame = [&](const char *focused = nullptr) {
+        mouse.prepare_frame();
         layer.begin_frame();
         if (focused) {
             if (auto *window = ImGui::FindWindowByName("##touch_editor")) {
@@ -2746,7 +2871,7 @@ void virtual_gamepad_contracts(gpu::VulkanRenderer &renderer) {
         controller_frame();
     };
     controller_frame();
-    activate("Connected controllers");
+    activate("Connected Controllers");
     expect(ui::controllers_screen_open(), "controller row opens actual connected device screen");
     expect(SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_LEFTX, 24000), "live controller axis changes");
     expect(SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_SOUTH, true), "live controller button changes");
@@ -2756,7 +2881,7 @@ void virtual_gamepad_contracts(gpu::VulkanRenderer &renderer) {
     SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_LEFTX, 0);
     SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_SOUTH, false);
     controller_frame();
-    activate("Set up this controller again");
+    activate("Set Up This Controller Again");
     controller_frame();
     SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_SOUTH, true);
     controller_frame();
@@ -2767,14 +2892,14 @@ void virtual_gamepad_contracts(gpu::VulkanRenderer &renderer) {
     controller_frame();
     SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_SOUTH, false);
     controller_frame();
-    activate("Back one step");
+    activate("Back One Step");
     SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_SOUTH, true);
     controller_frame();
     SDL_SetJoystickVirtualButton(joystick, SDL_GAMEPAD_BUTTON_SOUTH, false);
     controller_frame();
     // One real answer, then deliberately skip controls absent from this fixture.
-    for (int step = 1; step < 20; ++step) activate("Skip this one");
-    activate("Save and use this layout");
+    for (int step = 1; step < 20; ++step) activate("Skip This One");
+    activate("Save and Use This Layout");
     const auto info = input::devices::info(id);
     expect(info && info->saved, "controller wizard saves actual first button answer for virtual device");
     const auto file = input::devices::mappings_file();
@@ -2782,17 +2907,19 @@ void virtual_gamepad_contracts(gpu::VulkanRenderer &renderer) {
     const std::string saved{std::istreambuf_iterator<char>(mappings), std::istreambuf_iterator<char>()};
     expect(saved.find("a:b0") != std::string::npos && saved.find("Yakumo synthetic test gamepad") != std::string::npos,
         "saved SDL mapping contains exact virtual device name and recorded bottom button");
-    activate("Set up this controller again");
+    mappings.close(); // Windows needs readers closed before the mapping file is replaced.
+    activate("Set Up This Controller Again");
     controller_frame(nullptr, true); // Back cancels the wizard, leaving its list open.
     expect(ui::controllers_screen_open() && input::devices::info(id)->saved,
         "cancelled setup keeps controller screen and previous mapping");
-    activate("Remove my layout");
+    activate("Remove My Layout");
     expect(input::devices::info(id) && !input::devices::info(id)->saved,
         "removing virtual controller layout clears saved mapping");
     std::ifstream removed(file);
     const std::string remaining{std::istreambuf_iterator<char>(removed), std::istreambuf_iterator<char>()};
     expect(remaining.find("Yakumo synthetic test gamepad") == std::string::npos,
         "removed mapping no longer appears in sandbox database");
+    removed.close();
     controller_frame(nullptr, true);
     expect(!ui::controllers_screen_open(), "back closes controller screen after successful wizard");
     const auto saved_settings = settings::current();
@@ -3199,22 +3326,49 @@ void setup_screen_contracts(gpu::VulkanRenderer &renderer, const std::filesystem
 }
 
 void menu_contracts(gpu::VulkanRenderer &renderer) {
+    // These contracts navigate with keys and virtual pads; unrelated desktop cursor motion must not steal focus.
+    auto &menu_io = ImGui::GetIO();
+    const auto saved_config_flags = menu_io.ConfigFlags;
+    menu_io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
     const auto volume = settings::current().volume;
     ui::open_menu_over_game();
     expect(ui::menu_over_game(), "menu opens over game");
+    ScriptedUiMouse mouse(renderer.window());
     auto frame = [&]() {
+        // NoMouse disables interaction, but cursor events still delay trickled keyboard/text input.
+        mouse.prepare_frame();
         ui::draw_over_game();
         renderer.present_ui(true);
     };
+    const auto consume_input = [&]() {
+        for (unsigned pending_frame = 0; pending_frame < 16; ++pending_frame) {
+            frame();
+            if (ImGui::GetCurrentContext()->InputEventsQueue.empty()) return;
+        }
+        expect(false, "scripted menu input is consumed within sixteen frames");
+    };
     frame();
     frame();
-    for (int tab = 0; tab < 6; ++tab) {
+    auto find_tab_strip = []() -> ImGuiWindow * {
+        for (auto *window : ImGui::GetCurrentContext()->Windows) {
+            if (std::string_view(window->Name).find("##menu/tab_strip") != std::string_view::npos) return window;
+        }
+        return nullptr;
+    };
+    auto *tab_strip = find_tab_strip();
+    expect(tab_strip && tab_strip->ScrollMax.x > 0.0f, "seven menu tabs overflow into a horizontally scrollable strip");
+    for (int tab = 0; tab < 7; ++tab) {
         ImGui::GetIO().AddKeyEvent(ImGuiKey_W, true);
         frame();
         ImGui::GetIO().AddKeyEvent(ImGuiKey_W, false);
         frame();
         expect(ui::menu_over_game() && !ui::take_quit_request(),
             "visiting each page retains menu without requesting quit");
+        if (tab == 5) {
+            tab_strip = find_tab_strip();
+            expect(
+                tab_strip && tab_strip->Scroll.x > 0.0f, "keyboard navigation scrolls the selected last tab into view");
+        }
     }
     expect(settings::current().volume == volume, "rendering all settings pages leaves volume unchanged");
     auto change_video = [&](const char *label, ImGuiKey key) {
@@ -3259,17 +3413,17 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
     const auto initial_sharp_screen = settings::current().sharp_screen;
     const auto initial_sharp_textures = settings::current().sharp_textures;
     const auto initial_aspect = settings::current().aspect;
-    change_video("Scaling filter", ImGuiKey_RightArrow);
+    change_video("Scaling Filter", ImGuiKey_RightArrow);
     expect(settings::current().sharp_screen != initial_sharp_screen, "video menu changes actual scaling filter");
-    change_video("Scaling filter", ImGuiKey_LeftArrow);
+    change_video("Scaling Filter", ImGuiKey_LeftArrow);
     expect(settings::current().sharp_screen == initial_sharp_screen, "scaling filter round trip restores setting");
-    change_video("Texture filter", ImGuiKey_RightArrow);
+    change_video("Texture Filter", ImGuiKey_RightArrow);
     expect(settings::current().sharp_textures != initial_sharp_textures, "video menu changes actual texture filter");
-    change_video("Texture filter", ImGuiKey_LeftArrow);
+    change_video("Texture Filter", ImGuiKey_LeftArrow);
     expect(settings::current().sharp_textures == initial_sharp_textures, "texture filter round trip restores setting");
-    change_video("Aspect ratio", ImGuiKey_RightArrow);
+    change_video("Aspect Ratio", ImGuiKey_RightArrow);
     expect(settings::current().aspect != initial_aspect, "video menu cycles renderer aspect ratio");
-    change_video("Aspect ratio", ImGuiKey_LeftArrow);
+    change_video("Aspect Ratio", ImGuiKey_LeftArrow);
     expect(settings::current().aspect == initial_aspect, "aspect ratio round trip restores renderer setting");
     auto cycle_setting = [&](const char *label, auto field, bool toggle = false) {
         const auto original = settings::current().*field;
@@ -3280,29 +3434,33 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
         expect(
             settings::current().*field == original, (std::string(label) + " menu restores its selected mode").c_str());
     };
-    cycle_setting("UI textures", &settings::Settings::ui_textures);
-    cycle_setting("Game speed", &settings::Settings::unthrottled);
-    cycle_setting("Fast loading", &settings::Settings::fast_loading, true);
-    cycle_setting("Fast-forward", &settings::Settings::fast_forward);
-    cycle_setting("Performance", &settings::Settings::perf);
+    cycle_setting("UI Textures", &settings::Settings::ui_textures);
+    cycle_setting("Game Speed", &settings::Settings::unthrottled);
+    cycle_setting("Performance Overlay", &settings::Settings::perf);
+    const auto initial_perf = settings::current().perf;
+    for (int step = 1; step <= 6; ++step) {
+        change_video("Performance Overlay", ImGuiKey_RightArrow);
+        expect(static_cast<int>(settings::current().perf) == (static_cast<int>(initial_perf) + step) % 6,
+            "Performance Overlay cycles through all six modes, including both compact modes");
+    }
     if (settings::overridden_by("video.gpu_compat")) {
         const auto locked_compat = settings::current().gpu_compat;
-        change_video("GPU compatibility", ImGuiKey_RightArrow);
+        change_video("GPU Compatibility", ImGuiKey_RightArrow);
         expect(settings::current().gpu_compat == locked_compat,
             "explicit compatibility environment override locks its menu selector");
     } else {
-        cycle_setting("GPU compatibility", &settings::Settings::gpu_compat);
+        cycle_setting("GPU Compatibility", &settings::Settings::gpu_compat);
     }
     const auto original_window_scale = settings::current().window_scale;
-    change_video("Window size", ImGuiKey_RightArrow);
+    change_video("Window Resolution", ImGuiKey_RightArrow);
     expect(settings::current().window_scale == original_window_scale + 1,
         "window-size selector increases the actual reversible host window scale");
-    change_video("Window size", ImGuiKey_LeftArrow);
+    change_video("Window Resolution", ImGuiKey_LeftArrow);
     expect(settings::current().window_scale == original_window_scale, "window-size selector restores its scale");
     const auto original_pack = settings::current().texture_pack;
-    change_video("Texture pack", ImGuiKey_RightArrow);
+    change_video("Texture Pack", ImGuiKey_RightArrow);
     expect(settings::current().texture_pack != original_pack, "video texture-pack row toggles actual pack policy");
-    change_video("Texture pack", ImGuiKey_LeftArrow);
+    change_video("Texture Pack", ImGuiKey_LeftArrow);
     expect(settings::current().texture_pack == original_pack, "texture-pack policy round trip restores its state");
     if (renderer.supports_present_mode(settings::PresentMode::Immediate) ||
         renderer.supports_present_mode(settings::PresentMode::Mailbox)) {
@@ -3313,36 +3471,17 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
         expect(settings::current().present_mode == original_mode, "Vsync selector restores FIFO policy");
     }
     const auto original_rate = settings::current().frame_rate;
-    change_video("Frame rate", ImGuiKey_RightArrow);
+    change_video("Frame Rate", ImGuiKey_RightArrow);
     expect(settings::current().frame_rate == settings::FrameRate::Fps45,
         "frame-rate menu advances from thirty to forty-five");
-    cycle_setting("Lower when behind", &settings::Settings::frame_rate_auto);
-    change_video("Frame rate", ImGuiKey_LeftArrow);
+    cycle_setting("Lower When Behind", &settings::Settings::frame_rate_auto);
+    change_video("Frame Rate", ImGuiKey_LeftArrow);
     expect(settings::current().frame_rate == original_rate, "frame-rate menu restores thirty fps");
-    for (int step = 0; step < 5; ++step) change_video("Frame rate", ImGuiKey_RightArrow);
+    for (int step = 0; step < 5; ++step) change_video("Frame Rate", ImGuiKey_RightArrow);
     expect(settings::current().frame_rate == settings::FrameRate::Display,
         "frame-rate selector reaches actual display-refresh mode");
-    change_video("Frame rate", ImGuiKey_RightArrow);
+    change_video("Frame Rate", ImGuiKey_RightArrow);
     expect(settings::current().frame_rate == original_rate, "all six frame-rate choices wrap back to thirty");
-    const auto original_fast_mode = settings::current().fast_forward;
-    const auto original_fast_speed = settings::current().fast_forward_speed;
-    change_video("Fast-forward speed", ImGuiKey_RightArrow);
-    expect(settings::current().fast_forward_speed == original_fast_speed + 1,
-        "fast-forward speed increments by exactly one multiplier");
-    change_video("Fast-forward speed", ImGuiKey_LeftArrow);
-    change_video("Fast-forward", ImGuiKey_LeftArrow);
-    expect(settings::current().fast_forward == fast_forward::Mode::Off, "reverse mode step selects fast-forward Off");
-    change_video("Fast-forward speed", ImGuiKey_RightArrow);
-    expect(settings::current().fast_forward_speed == original_fast_speed,
-        "disabled speed row cannot change a multiplier while fast-forward is Off");
-    change_video("Fast-forward", ImGuiKey_RightArrow);
-    expect(settings::current().fast_forward == original_fast_mode, "fast-forward mode round trip restores Hold");
-    change_video("Game speed", ImGuiKey_RightArrow);
-    const auto unlimited = settings::current().unthrottled;
-    change_video("Fast-forward", ImGuiKey_RightArrow);
-    expect(unlimited && settings::current().fast_forward == original_fast_mode,
-        "Unlimited game speed disables independent fast-forward mode selection");
-    change_video("Game speed", ImGuiKey_LeftArrow);
     const auto original_resolution = settings::current().internal_scale;
     change_video("Resolution", ImGuiKey_RightArrow);
     expect(settings::current().internal_scale == original_resolution + 1 &&
@@ -3356,7 +3495,7 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
     settings::current().sharp_screen = !settings::defaults().sharp_screen;
     settings::current().sharp_textures = !settings::defaults().sharp_textures;
     settings::current().aspect = settings::Aspect::Stretch;
-    change_video("Restore video defaults", ImGuiKey_Space);
+    change_video("Restore Video Defaults", ImGuiKey_Space);
     const auto &video_defaults = settings::defaults();
     const auto &reset_video = settings::current();
     expect(reset_video.internal_scale == video_defaults.internal_scale &&
@@ -3364,8 +3503,7 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
             reset_video.fullscreen == video_defaults.fullscreen && reset_video.aspect == video_defaults.aspect &&
             reset_video.sharp_screen == video_defaults.sharp_screen &&
             reset_video.sharp_textures == video_defaults.sharp_textures &&
-            reset_video.frame_rate == video_defaults.frame_rate &&
-            reset_video.fast_forward == video_defaults.fast_forward && reset_video.perf == video_defaults.perf,
+            reset_video.frame_rate == video_defaults.frame_rate && reset_video.perf == video_defaults.perf,
         "video defaults restore resolution, dimensions, filters, timing and performance settings");
     expect(renderer.target_size() == std::array<std::uint32_t, 2>{960, 544},
         "restoring video defaults applies their real double-resolution target");
@@ -3407,12 +3545,12 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
     expect(settings::current().mute, "audio menu mute enables zero gain");
     change_video("Mute", ImGuiKey_LeftArrow);
     expect(!settings::current().mute, "audio menu mute restores gain without losing volume");
-    change_video("Mute in background", ImGuiKey_RightArrow);
+    change_video("Mute in Background", ImGuiKey_RightArrow);
     expect(settings::current().background_mute, "audio menu enables background mute");
-    change_video("Mute in background", ImGuiKey_LeftArrow);
+    change_video("Mute in Background", ImGuiKey_LeftArrow);
     expect(!settings::current().background_mute, "audio menu disables background mute");
     settings::current().background_mute = true;
-    change_video("Restore audio defaults", ImGuiKey_Space);
+    change_video("Restore Audio Defaults", ImGuiKey_Space);
     expect(settings::current().volume == settings::defaults().volume &&
             settings::current().mute == settings::defaults().mute &&
             settings::current().background_mute == settings::defaults().background_mute,
@@ -3421,9 +3559,9 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
     settings::current().mute = saved_mute;
     page();
     settings::current().background_gamepad = false;
-    change_video("Gamepad in background", ImGuiKey_RightArrow);
+    change_video("Gamepad in Background", ImGuiKey_RightArrow);
     expect(settings::current().background_gamepad, "controls menu enables background gamepad input");
-    change_video("Gamepad in background", ImGuiKey_LeftArrow);
+    change_video("Gamepad in Background", ImGuiKey_LeftArrow);
     expect(!settings::current().background_gamepad, "controls menu disables background gamepad input");
     settings::current().background_gamepad = true;
     const auto initial_preset = settings::current().control_preset;
@@ -3434,7 +3572,7 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
     change_video("Preset", ImGuiKey_LeftArrow);
     expect(settings::current().control_preset == initial_preset && settings::current().controls == initial_controls,
         "preset selector round trip restores the original bindings");
-    change_video("Save as a new preset", ImGuiKey_Space);
+    change_video("Save as a New Preset", ImGuiKey_Space);
     auto custom_preset = settings::current().control_preset;
     expect(!custom_preset.shipped && settings::current().user_presets.size() == initial_user_presets.size() + 1 &&
             settings::current().controls == initial_controls,
@@ -3454,23 +3592,38 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
     SDL_PushEvent(&editing_device);
     renderer.pump_events();
     auto edit_menu_text = [&](const char *id, const char *text) {
+        // Every edit selects keyboard mode even when the previous contract used a gamepad.
+        editing_device.type = SDL_EVENT_KEY_DOWN;
+        editing_device.key.down = true;
+        SDL_PushEvent(&editing_device);
+        renderer.pump_events();
+        editing_device.type = SDL_EVENT_KEY_UP;
+        editing_device.key.down = false;
+        SDL_PushEvent(&editing_device);
+        renderer.pump_events();
+        expect(ui::Layer::get().input_device() == ui::InputDevice::Keyboard,
+            "keyboard text edit selects the physical keyboard input path");
+        consume_input();
         change_video(id, ImGuiKey_Enter);
-        expect(ImGui::GetCurrentContext()->ActiveId != 0 && !ui::text_input_open(),
+        consume_input();
+        auto &context = *ImGui::GetCurrentContext();
+        expect(context.ActiveId == context.NavId && ImGui::GetInputTextState(context.ActiveId) != nullptr &&
+                !ui::text_input_open(),
             "keyboard activation edits the actual menu text field in place");
         auto &io = ImGui::GetIO();
         const auto shortcut = io.ConfigMacOSXBehaviors ? ImGuiMod_Super : ImGuiMod_Ctrl;
         io.AddKeyEvent(shortcut, true);
         io.AddKeyEvent(ImGuiKey_A, true);
-        frame();
+        consume_input();
         io.AddKeyEvent(ImGuiKey_A, false);
         io.AddKeyEvent(shortcut, false);
-        frame();
+        consume_input();
         io.AddInputCharactersUTF8(text);
-        frame();
+        consume_input();
         io.AddKeyEvent(ImGuiKey_Enter, true);
-        frame();
+        consume_input();
         io.AddKeyEvent(ImGuiKey_Enter, false);
-        frame();
+        consume_input();
     };
     edit_menu_text("##preset_name", "Public#=Name");
     expect(settings::current().control_preset.user == "PublicName" &&
@@ -3540,12 +3693,12 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
         renderer.pump_events();
     }
     renderer.set_window_scale(menu_original_scale);
-    change_video("Delete this preset", ImGuiKey_Space);
+    change_video("Delete This Preset", ImGuiKey_Space);
     activate_confirmation("Cancel");
     expect(settings::current().control_preset == custom_preset &&
             settings::current().user_presets.size() == initial_user_presets.size() + 1,
         "cancelling preset deletion preserves its selection and saved layout");
-    change_video("Delete this preset", ImGuiKey_Space);
+    change_video("Delete This Preset", ImGuiKey_Space);
     activate_confirmation("Delete");
     expect(settings::current().control_preset.shipped == input::Preset::Default &&
             settings::current().user_presets.size() == initial_user_presets.size(),
@@ -3554,15 +3707,15 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
     settings::current().controls = initial_controls;
     settings::current().user_presets = initial_user_presets;
     const auto initial_chord_window = settings::current().chord_window;
-    change_video("Chord window", ImGuiKey_RightArrow);
+    change_video("Chord Window", ImGuiKey_RightArrow);
     expect(settings::current().chord_window == initial_chord_window + 10,
         "combination timing advances by exactly ten milliseconds");
-    change_video("Chord window", ImGuiKey_LeftArrow);
+    change_video("Chord Window", ImGuiKey_LeftArrow);
     expect(settings::current().chord_window == initial_chord_window, "combination timing round trip restores latency");
     const auto original_confirm = settings::current().confirm_south;
-    change_video("Confirm button", ImGuiKey_RightArrow);
+    change_video("Confirm Button", ImGuiKey_RightArrow);
     expect(settings::current().confirm_south != original_confirm, "controls menu switches confirm convention");
-    change_video("Confirm button", ImGuiKey_LeftArrow);
+    change_video("Confirm Button", ImGuiKey_LeftArrow);
     expect(settings::current().confirm_south == original_confirm, "confirm convention round trip restores setting");
     auto toggle_setting = [&](const char *label, bool settings::Settings::*field) {
         const bool original = settings::current().*field;
@@ -3573,16 +3726,13 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
         expect(settings::current().*field == original,
             (std::string(label) + " control menu toggle round trip restores its own setting").c_str());
     };
-    toggle_setting("Analog camera", &settings::Settings::analog_camera);
-    toggle_setting("Lock-on", &settings::Settings::lock_on);
-    toggle_setting("Lock-on marker", &settings::Settings::lock_on_marker);
-    toggle_setting("Invert camera horizontally", &settings::Settings::invert_camera_x);
-    toggle_setting("Invert camera vertically", &settings::Settings::invert_camera_y);
+    toggle_setting("Analog Camera", &settings::Settings::analog_camera);
+    toggle_setting("Invert Camera Horizontally", &settings::Settings::invert_camera_x);
+    toggle_setting("Invert Camera Vertically", &settings::Settings::invert_camera_y);
     toggle_setting("Mouse", &settings::Settings::mouse);
-    toggle_setting("Invert mouse horizontally", &settings::Settings::invert_mouse_x);
-    toggle_setting("Invert mouse vertically", &settings::Settings::invert_mouse_y);
-    toggle_setting("On-screen controls", &settings::Settings::touch_controls);
-    toggle_setting("Free camera", &settings::Settings::free_camera);
+    toggle_setting("Invert Mouse Horizontally", &settings::Settings::invert_mouse_x);
+    toggle_setting("Invert Mouse Vertically", &settings::Settings::invert_mouse_y);
+    toggle_setting("On-Screen Controls", &settings::Settings::touch_controls);
     auto slider_setting = [&](const char *label, float settings::Settings::*field, float step) {
         const float original = settings::current().*field;
         change_video(label, ImGuiKey_RightArrow);
@@ -3592,34 +3742,27 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
         expect(std::abs(settings::current().*field - original) < 0.0001f,
             (std::string(label) + " menu slider round trip restores its exact setting").c_str());
     };
-    slider_setting("Stick dead zone", &settings::Settings::dead_zone, 0.01f);
-    slider_setting("Trigger point", &settings::Settings::trigger, 0.05f);
-    slider_setting("Camera speed", &settings::Settings::camera_speed, 10);
-    slider_setting("Aim speed", &settings::Settings::aim_speed, 5);
-    slider_setting("Mouse sensitivity", &settings::Settings::mouse_sensitivity, 0.01f);
-    slider_setting("Controls opacity", &settings::Settings::touch_opacity, 0.05f);
-    slider_setting("Controls size", &settings::Settings::touch_size, 0.05f);
-    slider_setting("Touch camera speed", &settings::Settings::touch_camera_speed, 10);
+    slider_setting("Stick Dead Zone", &settings::Settings::dead_zone, 0.01f);
+    slider_setting("Trigger Point", &settings::Settings::trigger, 0.05f);
+    slider_setting("Camera Speed", &settings::Settings::camera_speed, 10);
+    slider_setting("Aim Speed", &settings::Settings::aim_speed, 5);
+    slider_setting("Mouse Sensitivity", &settings::Settings::mouse_sensitivity, 0.01f);
+    slider_setting("Controls Opacity", &settings::Settings::touch_opacity, 0.05f);
+    slider_setting("Controls Size", &settings::Settings::touch_size, 0.05f);
+    slider_setting("Touch Camera Speed", &settings::Settings::touch_camera_speed, 10);
     const auto original_camera = settings::current().right_stick;
-    change_video("Camera stick", ImGuiKey_RightArrow);
+    change_video("Camera Stick", ImGuiKey_RightArrow);
     expect(settings::current().right_stick == settings::RightStick::DPad, "camera selector advances to D-pad mode");
-    slider_setting("Camera stick D-pad point", &settings::Settings::right_stick_zone, 0.05f);
-    change_video("Camera stick", ImGuiKey_LeftArrow);
+    slider_setting("Camera Stick D-Pad Point", &settings::Settings::right_stick_zone, 0.05f);
+    change_video("Camera Stick", ImGuiKey_LeftArrow);
     expect(settings::current().right_stick == original_camera, "camera selector round trip restores camera mode");
-    toggle_setting("D-pad", &settings::Settings::touch_dpad);
+    toggle_setting("D-Pad", &settings::Settings::touch_dpad);
     const auto original_layout = settings::current().touch_layout;
     change_video("Layout", ImGuiKey_RightArrow);
     expect(settings::current().touch_layout == settings::TouchLayout::Action, "touch selector activates Action layout");
-    toggle_setting("Haptic feedback", &settings::Settings::touch_haptics);
+    toggle_setting("Haptic Feedback", &settings::Settings::touch_haptics);
     change_video("Layout", ImGuiKey_LeftArrow);
     expect(settings::current().touch_layout == original_layout, "touch layout round trip restores PSP controls");
-    change_video("Free camera", ImGuiKey_Space);
-    expect(settings::current().free_camera, "experimental free-camera settings enable dependent rows");
-    slider_setting("Free camera speed", &settings::Settings::free_camera_speed, 50);
-    toggle_setting("Hide the HUD while flying", &settings::Settings::free_camera_hide_hud);
-    change_video("Free camera", ImGuiKey_Space);
-    expect(!settings::current().free_camera, "experimental free-camera setting restores disabled mode");
-
     const auto before_control_reset = settings::current();
     settings::current().dead_zone = 0.4f;
     settings::current().trigger = 0.9f;
@@ -3630,9 +3773,9 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
     settings::current().touch_opacity = 0.4f;
     settings::current().free_camera_speed = 450;
     settings::current().name = "Public test hunter";
-    change_video("Save as a new preset", ImGuiKey_Space);
+    change_video("Save as a New Preset", ImGuiKey_Space);
     const auto retained_preset = settings::current().control_preset.user;
-    change_video("Restore control defaults", ImGuiKey_Space);
+    change_video("Restore Control Defaults", ImGuiKey_Space);
     const auto &defaults = settings::defaults();
     const auto &reset_controls = settings::current();
     expect(reset_controls.dead_zone == defaults.dead_zone && reset_controls.trigger == defaults.trigger &&
@@ -3658,7 +3801,7 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
     expect(settings::current().adhoc_nickname == "Nick",
         "nickname field accepts printable ASCII while filtering non-ASCII input");
     const auto retained_mac = settings::current().adhoc_mac;
-    change_video("Restore network defaults", ImGuiKey_Space);
+    change_video("Restore Network Defaults", ImGuiKey_Space);
     expect(settings::current().adhoc == settings::defaults().adhoc &&
             settings::current().adhoc_server == settings::defaults().adhoc_server &&
             settings::current().adhoc_nickname == settings::defaults().adhoc_nickname &&
@@ -3667,9 +3810,9 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
     settings::current() = before_network_edit;
     renderer.set_window_scale(menu_original_scale);
     const bool original_tracing = adhoc::Client::tracing();
-    change_video("Log every call and packet", ImGuiKey_Space);
+    change_video("Log Every Call and Packet", ImGuiKey_Space);
     expect(adhoc::Client::tracing() != original_tracing, "network menu enables actual diagnostic tracing");
-    change_video("Log every call and packet", ImGuiKey_Space);
+    change_video("Log Every Call and Packet", ImGuiKey_Space);
     expect(adhoc::Client::tracing() == original_tracing, "network menu restores diagnostic tracing");
     const auto log_directory = install::user_data_directory() / "logs";
     std::filesystem::remove_all(log_directory);
@@ -3677,11 +3820,11 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
         std::ofstream blocked(log_directory);
         blocked << "Not a directory";
     }
-    change_video("Save network log", ImGuiKey_Space);
+    change_video("Save Network Log", ImGuiKey_Space);
     expect(std::filesystem::is_regular_file(log_directory), "network log failure preserves the blocking file");
     std::filesystem::remove(log_directory);
     adhoc::Client::log("Public synthetic diagnostic marker", false);
-    for (int attempt = 0; attempt < 2; ++attempt) change_video("Save network log", ImGuiKey_Space);
+    for (int attempt = 0; attempt < 2; ++attempt) change_video("Save Network Log", ImGuiKey_Space);
     std::size_t logs = 0;
     if (std::filesystem::is_directory(log_directory)) {
         for (const auto &entry : std::filesystem::directory_iterator(log_directory)) {
@@ -3735,7 +3878,7 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
                 network_client.ptp_exists(ptp_socket),
             "network page renders diagnostics without consuming or closing sockets");
         const auto reconnects = network_client.diagnostics().reconnects;
-        change_video("Reconnect now", ImGuiKey_Space);
+        change_video("Reconnect Now", ImGuiKey_Space);
         expect(wait_network(
                    [&] { return network_client.diagnostics().reconnects > reconnects && network_client.in_group(); }),
             "network menu reconnects and rejoins the active synthetic group");
@@ -3750,7 +3893,7 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
         settings::current().adhoc = false;
         settings::current().adhoc_nickname = "Public UI fixture";
         settings::current().adhoc_host_port = session_port;
-        change_video("Host a session###hosting", ImGuiKey_Space);
+        change_video("Host a Session###hosting", ImGuiKey_Space);
         expect(adhoc_hosting() && adhoc_host_status().adhocctl_port == session_port && settings::current().adhoc,
             "host menu starts the owned server on its configured port and enables ad hoc play");
         if (adhoc_hosting()) {
@@ -3768,7 +3911,7 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
             expect(adhoc_session_active() && hosted_state.players.size() == 1 &&
                     hosted_state.players[0].nickname == "Public UI fixture",
                 "hosted status page keeps the real active session and player identity intact");
-            change_video("Stop hosting###hosting", ImGuiKey_Space);
+            change_video("Stop Hosting###hosting", ImGuiKey_Space);
             expect(!adhoc_hosting() && !adhoc_host_status().running, "stop-hosting menu shuts down its owned server");
         }
         adhoc_host_stop();
@@ -3776,19 +3919,109 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
     }
     settings::current() = before_network;
 
-    change_video("Network overlay", ImGuiKey_Space);
+    change_video("Network Overlay", ImGuiKey_Space);
+    page();
+    const bool layered_before_open = settings::current().layered_armor;
+    change_video("Layered Armor", ImGuiKey_Space);
+    expect(ui::layered_armor_screen_open() && ui::menu_over_game(),
+        "QoL Layered Armor row opens its editor inside the actual menu");
+    expect(settings::current().layered_armor == layered_before_open,
+        "opening the layered editor leaves the armor setting unchanged");
+    // Feed a real SDL virtual pad: the backend replaces synthetic ImGui gamepad keys each frame.
+    SDL_VirtualJoystickDesc back_desc{};
+    SDL_INIT_INTERFACE(&back_desc);
+    back_desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+    back_desc.naxes = SDL_GAMEPAD_AXIS_COUNT;
+    back_desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+    back_desc.axis_mask = (1u << SDL_GAMEPAD_AXIS_COUNT) - 1;
+    back_desc.button_mask = (1u << SDL_GAMEPAD_BUTTON_COUNT) - 1;
+    back_desc.name = "Public layered menu controller";
+    const auto back_id = SDL_AttachVirtualJoystick(&back_desc);
+    auto *back_pad = back_id ? SDL_OpenGamepad(back_id) : nullptr;
+    expect(back_pad != nullptr, "layered menu Back fixture opens a real SDL virtual gamepad");
+    if (back_pad) {
+        ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_Manual, &back_pad, 1);
+        renderer.pump_events();
+        frame();
+        frame();
+        auto *back_joystick = SDL_GetGamepadJoystick(back_pad);
+        const auto back_button = ui::Layer::get().confirm_south() ? SDL_GAMEPAD_BUTTON_EAST : SDL_GAMEPAD_BUTTON_SOUTH;
+        expect(SDL_SetJoystickVirtualButton(back_joystick, back_button, true), "layered menu Back button presses");
+        SDL_UpdateJoysticks();
+        renderer.pump_events();
+        frame();
+        expect(SDL_SetJoystickVirtualButton(back_joystick, back_button, false), "layered menu Back button releases");
+        SDL_UpdateJoysticks();
+        renderer.pump_events();
+        frame();
+        ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_AutoAll);
+        SDL_CloseGamepad(back_pad);
+    }
+    if (back_id) SDL_DetachVirtualJoystick(back_id);
+    renderer.pump_events();
+    frame();
+    expect(!ui::layered_armor_screen_open() && ui::menu_over_game() && !ui::take_quit_request(),
+        "back closes the layered editor and returns to QoL without closing the menu");
+    cycle_setting("Fast Loading", &settings::Settings::fast_loading, true);
+    cycle_setting("Fast-Forward", &settings::Settings::fast_forward);
+    const auto original_fast_mode = settings::current().fast_forward;
+    const auto original_fast_speed = settings::current().fast_forward_speed;
+    change_video("Fast-Forward Speed", ImGuiKey_RightArrow);
+    expect(settings::current().fast_forward_speed == original_fast_speed + 1,
+        "QoL fast-forward speed increments by exactly one multiplier");
+    change_video("Fast-Forward Speed", ImGuiKey_LeftArrow);
+    change_video("Fast-Forward", ImGuiKey_LeftArrow);
+    expect(settings::current().fast_forward == fast_forward::Mode::Off, "QoL mode selector reaches Off");
+    change_video("Fast-Forward Speed", ImGuiKey_RightArrow);
+    expect(settings::current().fast_forward_speed == original_fast_speed,
+        "disabled QoL speed row cannot change a multiplier while fast-forward is Off");
+    change_video("Fast-Forward", ImGuiKey_RightArrow);
+    expect(settings::current().fast_forward == original_fast_mode, "QoL mode selector restores Hold");
+    settings::current().unthrottled = true;
+    change_video("Fast-Forward", ImGuiKey_RightArrow);
+    expect(settings::current().fast_forward == original_fast_mode,
+        "Unlimited game speed disables independent QoL fast-forward mode selection");
+    settings::current().unthrottled = false;
+    toggle_setting("Lock-On", &settings::Settings::lock_on);
+    toggle_setting("Lock-On Marker", &settings::Settings::lock_on_marker);
+    toggle_setting("Free Camera", &settings::Settings::free_camera);
+    change_video("Free Camera", ImGuiKey_Space);
+    expect(settings::current().free_camera, "experimental free-camera settings enable dependent rows");
+    slider_setting("Free Camera Speed", &settings::Settings::free_camera_speed, 50);
+    toggle_setting("Hide the HUD While Flying", &settings::Settings::free_camera_hide_hud);
+    change_video("Free Camera", ImGuiKey_Space);
+    expect(!settings::current().free_camera, "experimental free-camera setting restores disabled mode");
+    const auto before_qol_reset = settings::current();
+    settings::current().fast_loading = !settings::defaults().fast_loading;
+    settings::current().fast_forward = fast_forward::Mode::Toggle;
+    settings::current().fast_forward_speed = original_fast_speed + 1;
+    settings::current().lock_on = !settings::defaults().lock_on;
+    settings::current().lock_on_marker = !settings::defaults().lock_on_marker;
+    change_video("Restore QoL Defaults", ImGuiKey_Space);
+    const auto &qol_defaults = settings::defaults();
+    const auto &reset_qol = settings::current();
+    expect(reset_qol.fast_loading == qol_defaults.fast_loading && reset_qol.fast_forward == qol_defaults.fast_forward &&
+            reset_qol.fast_forward_speed == qol_defaults.fast_forward_speed &&
+            reset_qol.lock_on == qol_defaults.lock_on && reset_qol.lock_on_marker == qol_defaults.lock_on_marker,
+        "QoL defaults restore only the moved settings");
+    settings::current() = before_qol_reset;
     page();
     page();
-    change_video("Take a screenshot", ImGuiKey_Space);
+    cycle_setting("When the Game Asks for a Name", &settings::Settings::name_entry);
+    const auto saved_hunter_name = settings::current().name;
+    edit_menu_text("##name", "Public Hunter");
+    expect(settings::current().name == "Public Hunte", "System hunter-name row retains the twelve-character limit");
+    settings::current().name = saved_hunter_name;
+    change_video("Take a Screenshot", ImGuiKey_Space);
     screenshot::finish_writes();
     unsigned menu_screenshots = 0;
     if (std::filesystem::is_directory(screenshot::folder()))
         for (const auto &entry : std::filesystem::directory_iterator(screenshot::folder()))
             if (entry.path().extension() == ".png") ++menu_screenshots;
     expect(menu_screenshots == 1, "System screenshot action saves exactly one real PNG in the isolated folder");
-    toggle_setting("Pause the game when the menu opens", &settings::Settings::menu_pause);
-    toggle_setting("Pause during multiplayer", &settings::Settings::menu_pause_multiplayer);
-    for (const char *action : {"Quit game", "Set up game data again…"}) {
+    toggle_setting("Pause the Game When the Menu Opens", &settings::Settings::menu_pause);
+    toggle_setting("Pause During Multiplayer", &settings::Settings::menu_pause_multiplayer);
+    for (const char *action : {"Quit Game", "Set Up Game Data Again…"}) {
         change_video(action, ImGuiKey_Space);
         frame();
         expect(ImGui::IsPopupOpen("##confirm", ImGuiPopupFlags_AnyPopupId),
@@ -3868,7 +4101,7 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
         frame();
         frame();
         expect(settings::current().menu_tab == "system", "reopened menu restores its previous System page");
-        change_video(setup ? "Set up game data again…" : "Quit game", ImGuiKey_Space);
+        change_video(setup ? "Set Up Game Data Again…" : "Quit Game", ImGuiKey_Space);
         activate_confirmation(setup ? "Close and set up" : "Quit");
         expect(!ui::menu_over_game() && ui::take_quit_request() && !ui::take_quit_request(),
             "confirmed system action closes menu and publishes exactly one quit request");
@@ -3893,6 +4126,8 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
     close_paused_menu.join();
     renderer.pump_events();
     layer.set_interactive(false);
+    menu_io.ConfigFlags =
+        (menu_io.ConfigFlags & ~ImGuiConfigFlags_NoMouse) | (saved_config_flags & ImGuiConfigFlags_NoMouse);
 }
 
 void layered_armor_ui_contracts(gpu::VulkanRenderer &renderer, psprecomp::Runtime &runtime) {
@@ -3931,14 +4166,14 @@ void layered_armor_ui_contracts(gpu::VulkanRenderer &renderer, psprecomp::Runtim
         ImGui::GetIO().AddKeyEvent(ImGuiKey_Space, false);
         frame();
     };
-    select("Layered armor");
+    select("Layered Armor");
     expect(ui::layered_armor_screen_open(), "layered menu opens before any hunter frame is attached");
     frame();
     frame(nullptr, true);
     expect(!ui::layered_armor_screen_open(), "back closes unloaded layered page");
     auto &memory = runtime.memory();
     game::attach(runtime);
-    select("Layered armor");
+    select("Layered Armor");
     select("Head##layered4");
     expect(settings::current().layered_pieces[4] == game::layered::kReal,
         "unloaded hunter cannot choose a disabled armor part");
@@ -3971,8 +4206,8 @@ void layered_armor_ui_contracts(gpu::VulkanRenderer &renderer, psprecomp::Runtim
     std::vector<std::uint8_t> before;
     for (std::uint32_t at = game::kCharacter; at < game::kEquipmentBox + game::kEquipmentRecord; ++at)
         before.push_back(memory.load8(at));
-    select("Layered armor");
-    select("Layered armor");
+    select("Layered Armor");
+    select("Layered Armor");
     expect(settings::current().layered_armor, "page toggles the real layered-armor setting");
     select("Head##layered4");
     select("##nothing");
@@ -3984,13 +4219,13 @@ void layered_armor_ui_contracts(gpu::VulkanRenderer &renderer, psprecomp::Runtim
     select("##real");
     expect(settings::current().layered_pieces[4] == game::layered::kReal,
         "Real equipment restores the sentinel rather than copying worn armor");
-    select("List all armor");
+    select("List All Armor");
     expect(settings::current().layered_all, "all-armor toggle changes the list policy");
     select("Head##layered4");
     frame();
     select("##piece3");
     expect(settings::current().layered_pieces[4] == 3, "all-armor list allows a wearable unowned piece");
-    select("Show the real equipment everywhere");
+    select("Show the Real Equipment Everywhere");
     expect(std::all_of(settings::current().layered_pieces.begin(), settings::current().layered_pieces.end(),
                [](auto p) { return p == game::layered::kReal; }),
         "reset restores every part to its real equipment independently");
@@ -4088,9 +4323,9 @@ void font_menu_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::p
         expect(settings::current().font_weight == settings::kMaxFontWeight,
             "reverse font weight wraps regular back to maximum");
         const auto crisp = settings::current().crisp_text;
-        select("Sharp text");
+        select("Sharp Text");
         expect(settings::current().crisp_text != crisp, "sharp-text row changes actual crisp glyph policy");
-        select("Sharp text");
+        select("Sharp Text");
         expect(settings::current().crisp_text == crisp, "sharp-text round trip restores its policy");
     }
     settings::current() = saved;
@@ -4334,26 +4569,26 @@ void input_script_contracts(
     if (live_input) {
         const auto live = sandbox / "live.txt";
         {
-            std::ofstream append(live, std::ios::app);
-            append << "0:text Live complete\n0:text Partial";
+            std::ofstream append(live, std::ios::binary | std::ios::app);
+            append << "0:text Live complete\r\n0:text Partial";
         }
         for (int i = 16; i <= 20; ++i) tick();
         expect(events.text == 2 && events.typed == "Live complete", "live reader ignores an incomplete trailing line");
         {
-            std::ofstream append(live, std::ios::app);
-            append << " finished\n";
+            std::ofstream append(live, std::ios::binary | std::ios::app);
+            append << " finished\r\n";
         }
         for (int i = 21; i <= 30; ++i) tick();
         expect(events.text == 3 && events.typed == "Partial finished", "live reader consumes the completed line once");
         {
-            std::ofstream replace(live);
+            std::ofstream replace(live, std::ios::binary);
             replace << "0:text Reset\n";
         }
         for (int i = 31; i <= 40; ++i) tick();
         expect(events.text == 4 && events.typed == "Reset", "truncating the live file resets its byte offset");
         {
-            std::ofstream append(live, std::ios::app);
-            append << "0:quit\n";
+            std::ofstream append(live, std::ios::binary | std::ios::app);
+            append << "0:quit\r\n";
         }
         for (int i = 41; i < 50; ++i) tick();
         ui::script::tick();
@@ -4382,17 +4617,17 @@ int run_contracts(int scripts) {
         ("yakumo-renderer-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(sandbox);
     install::set_data_directory_override(sandbox);
-    SDL_setenv_unsafe("MHP3RD_FIND_CAMERA", "1", 1);
-    SDL_setenv_unsafe("MHP3RD_ADHOC_OVERLAY", "0", 1);
-    SDL_setenv_unsafe("MHP3RD_POKE_FLOAT", "0x08000120:1.25,0x08000124:-2.5,broken", 1);
-    SDL_setenv_unsafe("MHP3RD_FIND_FLOAT", "6.25", 1);
-    SDL_setenv_unsafe("MHP3RD_POKE_FOUND", "6.5", 1);
-    SDL_setenv_unsafe("MHP3RD_FIND_INT32", "1150", 1);
-    SDL_setenv_unsafe("MHP3RD_POKE_INT32", "-7", 1);
-    SDL_setenv_unsafe("MHP3RD_POKE_WHICH", "all", 1);
-    SDL_setenv_unsafe("MHP3RD_FIND_STEP", "1150", 1);
+    set_environment("MHP3RD_FIND_CAMERA", "1");
+    set_environment("MHP3RD_ADHOC_OVERLAY", "0");
+    set_environment("MHP3RD_POKE_FLOAT", "0x08000120:1.25,0x08000124:-2.5,broken");
+    set_environment("MHP3RD_FIND_FLOAT", "6.25");
+    set_environment("MHP3RD_POKE_FOUND", "6.5");
+    set_environment("MHP3RD_FIND_INT32", "1150");
+    set_environment("MHP3RD_POKE_INT32", "-7");
+    set_environment("MHP3RD_POKE_WHICH", "all");
+    set_environment("MHP3RD_FIND_STEP", "1150");
 
-    SDL_setenv_unsafe("MHP3RD_FIND_CAMERA_OUT", (sandbox / "camera-candidates.txt").string().c_str(), 1);
+    set_environment("MHP3RD_FIND_CAMERA_OUT", (sandbox / "camera-candidates.txt").string().c_str());
     auto &settings = settings::current();
     settings.internal_scale = 1;
     settings.window_scale = 1;
@@ -4410,10 +4645,10 @@ int run_contracts(int scripts) {
             initial << "0:text startup ignored\n";
         }
         if (scripts == 1)
-            SDL_setenv_unsafe("MHP3RD_INPUT_LIVE", live.string().c_str(), 1);
+            set_environment("MHP3RD_INPUT_LIVE", live.string().c_str());
         else
-            SDL_unsetenv_unsafe("MHP3RD_INPUT_LIVE");
-        SDL_setenv_unsafe("MHP3RD_SCREENSHOT_DIR", sandbox.string().c_str(), 1);
+            clear_environment("MHP3RD_INPUT_LIVE");
+        set_environment("MHP3RD_SCREENSHOT_DIR", sandbox.string().c_str());
         const auto script = std::string("bad; ;1:key F13 2;1:mouse 7 -3;1:click left 2;1:pad a+invalid 2;") +
             "1:axis leftx 2;2:joy 4 attach Public script joystick;2:joy 4 attach;"
             "3:joy 4 button 2 2;3:joy 4 hat 3 2;3:joy 4 axis 1 -2;6:joy 4 nonsense;7:joy 4 detach;"
@@ -4423,11 +4658,11 @@ int run_contracts(int scripts) {
             (sandbox / "synthetic.zip").string() +
             ";8:shot script-window;9:shot;10:key NoSuchKey;10:click invalid;10:axis invalid 1;"
             "10:joy 99 button 0;10:hold 1;10:swipe 1;10:drag 1;10:pointer malformed;10:unknown;";
-        SDL_setenv_unsafe("MHP3RD_INPUT_SCRIPT", script.c_str(), 1);
+        set_environment("MHP3RD_INPUT_SCRIPT", script.c_str());
     }
     SDL_Joystick *competitor = nullptr;
     if (scripts == 1 || scripts == 2) {
-        SDL_setenv_unsafe("MHP3RD_PAD_FOLLOW", "1", 1);
+        set_environment("MHP3RD_PAD_FOLLOW", "1");
         expect(SDL_InitSubSystem(SDL_INIT_GAMEPAD), "competing controller initializes its real SDL subsystem");
         SDL_VirtualJoystickDesc competitor_desc{};
         SDL_INIT_INTERFACE(&competitor_desc);
@@ -4463,7 +4698,7 @@ int run_contracts(int scripts) {
         std::cout << (failures ? "FAIL" : "PASS") << ": UI lifecycle (" << failures << " failures)\n";
         return failures ? 1 : 0;
     }
-    if (scripts) {
+    if (scripts == 1 || scripts == 2) {
         input_script_contracts(renderer, sandbox, scripts == 1, competitor);
         renderer.shutdown();
         std::filesystem::remove_all(sandbox);
@@ -4478,6 +4713,15 @@ int run_contracts(int scripts) {
     diagnostic_memory.store32(0x08000144, std::bit_cast<std::uint32_t>(6.25f));
     diagnostic_memory.store32(0x08000160, 1150);
     diagnostic_memory.store32(0x08000164, 1150);
+    if (scripts == 5) {
+        render_contracts(renderer);
+        primitive_contracts(renderer);
+        screenshot_contracts(renderer, sandbox);
+        renderer.shutdown();
+        std::cout << "Performance overlay captures: " << sandbox.string() << '\n';
+        std::cout << (failures ? "FAIL" : "PASS") << ": performance renderer (" << failures << " failures)\n";
+        return failures ? 1 : 0;
+    }
     expect(ui::take_screenshot().empty(), "UI screenshot without a presented game target reports no picture");
     unavailable_renderer_contracts(sandbox);
     layered_armor_ui_contracts(renderer, fixture.runtime);
@@ -4490,6 +4734,7 @@ int run_contracts(int scripts) {
     screenshot::finish_writes();
     std::ifstream png_input(screenshot_path, std::ios::binary);
     const std::vector<unsigned char> png{std::istreambuf_iterator<char>(png_input), std::istreambuf_iterator<char>()};
+    png_input.close();
     expect(!screenshot_path.empty() && png.size() > 24 && png[0] == 137 && png[1] == 'P' && png[2] == 'N' &&
             png[3] == 'G' && png[16] == 0 && png[17] == 0 && png[18] == 1 && png[19] == 224 && png[20] == 0 &&
             png[21] == 0 && png[22] == 1 && png[23] == 16,
@@ -4559,6 +4804,8 @@ int main(int argc, char **argv) {
                 mode = 3;
             else if (std::string_view(argv[1]) == "--texture-cache")
                 mode = 4;
+            else if (std::string_view(argv[1]) == "--perf-overlay")
+                mode = 5;
             else {
                 std::cerr << "FAIL: unknown test mode\n";
                 return 2;

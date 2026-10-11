@@ -199,7 +199,7 @@ void test_layered_armor() {
     check(!all.empty() && all[0].name == "Plain Mail", "offers carry the game's names");
     check(layered::choice_name(&ram, 4, 1) == "Cap", "a choice named by the game");
     check(layered::choice_name(nullptr, 4, 1) == "Piece 1", "a choice by id without the game");
-    check(layered::choice_name(&ram, 4, layered::kReal) == "Real equipment", "the real piece");
+    check(layered::choice_name(&ram, 4, layered::kReal) == "Real Equipment", "the real piece");
 
     // The hunter's load: only the hunter played here, drawn from its record.
     const std::uint32_t hunter = 0x09100000u;

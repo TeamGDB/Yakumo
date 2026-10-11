@@ -64,7 +64,7 @@ void read_snapshot() {
         Snapshot &n = s.snap;
         const std::optional<game::Look> look = game::hunter_look(ram);
         n.loaded = look.has_value();
-        if (look) n.sex = game::sex_name(look->sex);
+        if (look) n.sex = look->sex == game::Sex::Female ? "Female" : "Male";
         for (std::uint8_t part = 0; part < layered::kParts; ++part) {
             n.chosen[part] = layered::choice_name(&ram, part, settings.layered_pieces[part]);
             if (!n.loaded) continue;
@@ -101,9 +101,9 @@ void page(bool back) {
     }
     settings::Settings &settings = settings::current();
     const Snapshot &n = s.snap;
-    section("Layered armor");
+    section("Layered Armor:");
     focus_once();
-    if (toggle_row("Layered armor", settings.layered_armor,
+    if (toggle_row("Layered Armor", settings.layered_armor,
             {false, {},
                 "Draws the hunter in the pieces chosen below instead of the armor it wears. Defense, "
                 "resistances and skills stay those of the real armor, and the save keeps the real armor. "
@@ -115,14 +115,14 @@ void page(bool back) {
               "leave a quest, or change equipment at the item box.",
         colors::kTextDim);
 
-    section("Look");
+    section("Look:");
     if (!n.loaded) paragraph("Load a character to choose from its armor and see the names.", colors::kTextDim);
     for (const std::uint8_t part : kShownParts) {
         RowOptions o;
         o.disabled = !n.loaded;
         o.note = n.loaded && !n.worn[part].empty() ? "Wearing " + n.worn[part] : std::string();
         o.description = std::string("What the hunter's ") + layered::part_label(part) +
-            " looks like. Real equipment shows the piece worn; Nothing shows the bare part, or the "
+            " looks like. Real Equipment shows the piece worn; Nothing shows the bare part, or the "
             "inner wear where the game shows it.";
         const std::string label = std::string(layered::part_label(part)) + "##layered" + std::to_string(part);
         if (value_row(label.c_str(), n.chosen[part], o)) {
@@ -131,20 +131,20 @@ void page(bool back) {
             s.focus = true;
         }
     }
-    if (toggle_row("List all armor", settings.layered_all,
+    if (toggle_row("List All Armor", settings.layered_all,
             {false, {},
                 "The lists offer every armor piece a hunter of this sex can wear. Off, only the pieces the "
                 "hunter wears or keeps in the equipment box."})) {
         settings.layered_all = !settings.layered_all;
         settings::save();
     }
-    if (button_row("Show the real equipment everywhere",
-            {!any_chosen(settings), {}, "Sets every part back to Real equipment."})) {
+    if (button_row("Show the Real Equipment Everywhere",
+            {!any_chosen(settings), {}, "Sets every part back to Real Equipment."})) {
         settings.layered_pieces.fill(layered::kReal);
         settings::save();
     }
 
-    section("Other players");
+    section("Other Players:");
     paragraph("Other players see your real armor. The game sends them the equipment you wear, and layered armor "
               "only changes what this game draws for your own hunter; other hunters are drawn as they are.",
         colors::kTextDim);
@@ -163,9 +163,9 @@ void pieces(bool back) {
     const settings::Settings &settings = settings::current();
     const Snapshot &n = s.snap;
     const std::int32_t current = settings.layered_pieces[s.part];
-    section((std::string(layered::part_label(s.part)) + ": what it looks like").c_str());
+    section((std::string(layered::part_label(s.part)) + " - What It Looks Like:").c_str());
     focus_once();
-    if (list_row("##real", "Real equipment", n.worn[s.part].empty() ? std::string() : n.worn[s.part], ListIcon::None,
+    if (list_row("##real", "Real Equipment", n.worn[s.part].empty() ? std::string() : n.worn[s.part], ListIcon::None,
             current == layered::kReal)) {
         choose(s.part, layered::kReal);
         s.screen = Screen::Page;
@@ -178,7 +178,7 @@ void pieces(bool back) {
         s.focus = true;
         return;
     }
-    section(settings.layered_all ? ("All armor for a " + n.sex + " hunter").c_str() : "Armor you own");
+    section(settings.layered_all ? ("All Armor for a " + n.sex + " Hunter:").c_str() : "Armor You Own:");
     for (const layered::Offer &offer : n.offers) {
         const std::string id = "##piece" + std::to_string(offer.id);
         const std::string detail = std::string(offer.worn                        ? "worn   "
@@ -193,7 +193,7 @@ void pieces(bool back) {
         }
     }
     if (n.offers.empty())
-        paragraph(n.loaded ? "No piece to offer. Turn on List all armor to choose from every piece."
+        paragraph(n.loaded ? "No piece to offer. Turn on List All Armor to choose from every piece."
                            : "Load a character first.",
             colors::kTextDim);
 }
@@ -202,11 +202,10 @@ void pieces(bool back) {
 
 void layered_armor_row() {
     const settings::Settings &settings = settings::current();
-    section("Look");
-    if (value_row("Layered armor", settings.layered_armor ? "On" : "Off",
+    if (value_row("Layered Armor", settings.layered_armor ? "On" : "Off",
             {false, {},
                 "Draw the hunter in other armor than it wears, part by part. The stats and skills stay those of "
-                "the real armor."})) {
+                "the real armor.\nOnly visible to you as of now."})) {
         state().screen = Screen::Page;
         state().focus = true;
     }

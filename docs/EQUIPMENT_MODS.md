@@ -5,11 +5,11 @@ without a fixed target: the player says which file of `DATA.BIN` it replaces,
 and the pieces that use that file then look like the mod. The Mods page can
 fill the targets in from the running game:
 
-- **Use my current armor** points each slot at the model file of the armor the
+- **Use My Current Armor** points each slot at the model file of the armor the
   loaded hunter wears in that part, for the hunter's sex. A weapon mod's button
-  reads *Use my current weapon* and takes the carried weapon, if it is of the
+  reads *Use My Current Weapon* and takes the carried weapon, if it is of the
   mod's class.
-- **No armor** points each armor slot at the file the game shows when that part
+- **No Armor** points each armor slot at the file the game shows when that part
   is empty, for the hunter's sex and inner wear.
 - Each slot shows, next to its file id, what the game draws from that file,
   with the game's own names read from the running game ("*name*, female",
@@ -37,7 +37,7 @@ equipment changes at the item box; it keeps them otherwise. Measured with
 
 So after pressing a button: at the item box change to other armor and back,
 or restart. When a mod's file is larger than the file it replaces, the Mods
-page says that a restart is needed and offers *Restart now*, as for any other
+page says that a restart is needed and offers *Restart Now*, as for any other
 mod.
 
 Not measured: whether starting a quest or returning from one reloads them.

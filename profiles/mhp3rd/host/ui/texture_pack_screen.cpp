@@ -561,19 +561,19 @@ void texture_pack_rows() {
         s.focus_row = false;
     }
     settings::Settings &settings = settings::current();
-    if (button_row("Import texture pack…",
+    if (button_row("Import Texture Pack…",
             {false, {},
                 "Install an HD texture pack from a folder: the one that holds textures.ini, or one that holds it "
                 "in textures/NPJB40001 or PSP/TEXTURES. It is checked first; the pack it replaces is kept."}))
         open_browser();
 #if !defined(MHP3RD_ANDROID_APP)
-    if (button_row("Open the textures folder",
+    if (button_row("Open the Textures Folder",
             {false, {}, "Show the textures folder in the data folder, where imported packs go."}))
         open_folder(textures_root());
 #endif
-    if (!settings.texture_pack_folder.empty()) info_row("Pack used from", settings.texture_pack_folder);
+    if (!settings.texture_pack_folder.empty()) info_row("Pack used from:", settings.texture_pack_folder);
     if (!settings.texture_pack_folder.empty() &&
-        button_row("Stop using the pack folder",
+        button_row("Stop Using the Pack Folder",
             {false, {},
                 "Go back to the pack installed in the data folder, if any. The pack's own folder is left "
                 "alone."})) {

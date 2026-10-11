@@ -31,7 +31,7 @@ enum class PresentMode { Fifo, Mailbox, Immediate };
 // game the window's shape: its view widens or narrows to match (the vertical
 // field of view stays), and the 2D interface keeps the PSP's proportions.
 enum class Aspect { Original, Stretch, Fill };
-enum class PerfDisplay { Off, Overlay, OverlayAndLog, Log };
+enum class PerfDisplay { Off, Overlay, OverlayAndLog, Log, Compact, CompactAndLog };
 // How the game's 2D textures are drawn at a high internal resolution
 // (gpu/ui_textures.hpp): as they are, sharp bilinear, or doubled with MMPX.
 enum class UiTextures { Off, Sharp, Mmpx };

@@ -186,7 +186,7 @@ bool font_list_open() {
 void font_rows() {
     settings::Settings &s = settings::current();
     fonts::start_catalog();
-    section("Text");
+    section("Text and Fonts:");
     {
         RowOptions o = options_for("text.font",
             "The font the game's text is drawn with. Characters it lacks, such "
@@ -215,7 +215,7 @@ void font_rows() {
             fonts::reload();
         }
     }
-    if (toggle_row("Sharp text", s.crisp_text,
+    if (toggle_row("Sharp Text", s.crisp_text,
             options_for("text.crisp",
                 "Above x1, draws the game's text again at the internal resolution "
                 "instead of magnifying its 20-pixel glyphs. The game lays the text out "
@@ -224,7 +224,7 @@ void font_rows() {
         settings::save();
     }
     draw_preview();
-    if (button_row("Open the fonts folder",
+    if (button_row("Open the Fonts Folder",
             {false, {},
                 "Fonts put in this folder (.ttf, .otf, .ttc) are listed first under Font: " +
                     fonts::user_font_folder()})) {

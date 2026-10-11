@@ -2,6 +2,12 @@
 
 ## Automated
 
+- **Renderer and UI fixtures** (`mhp3rd_renderer_ui_tests` and its compatibility, legacy and checked variants) use public synthetic frames, guest memory and SDL virtual controllers. Tests select keyboard/gamepad input through SDL events, isolate scripted UI mouse coordinates from the desktop cursor, close mapping-file readers before replacing files on Windows, and configure both SDL and the executable's CRT environment so diagnostic flags reach the real host code. Menu text entry waits at most sixteen frames for queued input to be consumed between editing steps; disabling mouse interaction alone does not prevent cursor events from delaying ImGui's keyboard/text queue. The menu checks include returning from Layered Armor to QoL without closing the menu, changing the moved settings and editing the hunter name after gamepad navigation. Input-script, UI lifecycle and bounded texture-cache modes share this executable and have separate CTest timeouts. The live-input checks use explicit CRLF and LF bytes to verify complete lines, pending partial input, truncation and quitting on every platform. No game data is required.
+
+- **GPU decode diagnostics** in the checked renderer/UI variant compare original draws with independently specified CPU vertices, including animated raw skinning. Intermediate replay writes its diagnostic output to a reserved region so blended bones cannot overwrite the original draw's result. The fixture allows several 60 Hz presents per animated bone update, retaining strict mismatch detection and framebuffer assertions.
+
+- **Performance overlays** (`mhp3rd_perf_overlay_tests`) checks mode flags, compact text/padding and buffer boundaries, shared integer scaling and logging with synthetic statistics. `mhp3rd_settings_tests` checks settings serialization for all six modes; `mhp3rd_perf_compact_env_tests` and `mhp3rd_perf_compact_log_env_tests` check environment selection. No GPU or game data is needed. With renderer tests enabled, `mhp3rd_perf_renderer_tests` checks full/compact window and framebuffer captures, their corner placement, actual Vsync state and F3 hiding/restoring using public buffers. Its `--perf-overlay` mode retains synthetic BMP captures in the temporary fixture directory printed at the end for visual review; the default renderer/UI suite runs the same capture contracts and removes its fixture.
+
 - **Kernel and HLE contracts** (`mhp3rd_kernel_hle_tests`) link the actual headless host through `mhp3rd_test_host`. Synthetic guest memory, a tiny public ISO, an independently written square font and temporary save files exercise allocation/coalescing, scheduling, synchronization/deadlines, interrupts/timers, I/O, system calls, utility dialogs, savedata and font dispatch. Real loopback TCP peers check PDP/PTP waits, cancellation, malformed relay records and host/join/stop behavior. User-data paths stay in the temporary fixture; CTest enables bounded OSK diagnostics and applies a 60-second timeout. These checks need no game data, generated game corpus, overlays, graphics or audio device.
 
 - **PNG sizes and allocation failures** (`mhp3rd_png_size_tests`) checks rejection before allocation of invalid dimensions, overflowing filtered images and buffer capacities, padded and negative strides, every PNG filter, grayscale/RGB/RGBA round trips, and cleanup when each writer allocation fails. Tests use small synthetic pixels and a one-MiB allocator limit, with no game data.
@@ -256,11 +262,11 @@ For the manual check, never use downloaded mods for a regression you cannot undo
 
 - With no mods folder, the log has no `[mods]` lines beyond the count, and the game is unchanged.
 - Turn the mod on in **Mods** and restart: the log lists `0FEE <- …` and `[mods] read 0FEE …` lines, and the game menu (after the title) shows the change. Turn it off: *Applied* and, after a restart, the original textures. `MHP3RD_NO_MODS=1` gives the original too, with the mod still on in the menu.
-- A copy of the same file 300 KiB larger (zeros appended): *Restart to apply* and *Restart now*; after the restart the log says `DATA.BIN grows from 1208858624 to …` and the title screen, its music and the intro movie, all read from entries after the grown one, are as before.
+- A copy of the same file 300 KiB larger (zeros appended): *Restart to apply* and *Restart Now*; after the restart the log says `DATA.BIN grows from 1208858624 to …` and the title screen, its music and the intro movie, all read from entries after the grown one, are as before.
 - A patch mod (`Type="Patch"`) for `0FEF` with blocks of `(offset, length, bytes)` into its textures and `FFFFFFFF00000000` at the end: stripes on the title screen. Together with the grown `0FEE`, which moves `0FEF`, the same.
 - Two mods on the same file: *Conflicts* names the winner; *Priority* left and right changes it (after the next load or a restart).
 - A `mod.ini` without `Version`, a `Type="Code"` mod and one with a missing file show as *Cannot be used* with the reason.
-- *Import mod…* with the gamepad only, then with the mouse and by dropping a folder on the window: a single mod folder, a folder holding two, and a mod already installed (it moves to `mods/.backup/<name>-<time>`). The imported mods are off. A preview.png shows on the mod's screen.
+- *Import Mod…* with the gamepad only, then with the mouse and by dropping a folder on the window: a single mod folder, a folder holding two, and a mod already installed (it moves to `mods/.backup/<name>-<time>`). The imported mods are off. A preview.png shows on the mod's screen.
 - An equipment mod: type the target file id on the on-screen keyboard; the row shows it and `mods.ini` has `slot1=`.
 
 ### Folder names outside ASCII (#129)
@@ -273,13 +279,13 @@ The manual check matters most on Windows, where the standard library's narrow pa
 - Put the disc image in a folder like `C:\Образы\モンハン` and run the setup (`Yakumo --install`, or delete `settings.ini` to get the screens): the file browser shows the folder names correctly, the checks pass, and both *Copy* and *Use in place* finish. `settings.ini` in the data folder, opened in Notepad as UTF-8, shows `disc_image=` with the full name.
 - Also from the terminal: `Yakumo --install "C:\Образы\モンハン\MHP3rd HD.iso" --in-place`, then `Yakumo` alone starts the game.
 - Save in game, quit, start again: the save loads. The console's `[savedata] saved … bytes to …` line names the folder (as `?` where the console font has no glyph, which is fine) and the game does not stop there.
-- In the menu's *Saves*: *Export save…* to a folder with such a name, *Import save…* back from it (the check passes, *Restart now* restarts Yakumo and the save loads), *Back up saves…* to such a folder; *Open the data folder* and *Open the backups folder* open Explorer in the right place.
+- In the menu's *Saves*: *Export Save…* to a folder with such a name, *Import Save…* back from it (the check passes, *Restart now* restarts Yakumo and the save loads), *Back Up Saves…* to such a folder; *Open the Data Folder* and *Open the Backups Folder* open Explorer in the right place.
 - *Import texture pack…* from a folder with such a name, both copied and *Use it where it is*; restart and check the pack still loads.
 - Put a `.ttf` with a Cyrillic file name into the data folder's `fonts` folder (*Open the fonts folder* under **Video → Font**) and pick it under *Font*: it is listed and used, and still used after a restart.
-- *Set up game data again…* in the menu restarts Yakumo into the setup.
+- *Set Up Game Data Again…* in the menu restarts Yakumo into the setup.
 - *Save network log* under **Network** writes a file into `logs` in the data folder.
 - `MHP3RD_SCREENSHOT_DIR` set to a folder with such a name gets the screenshots.
-- F12 in the game writes a screenshot into `screenshots` in the data folder, and *Open the screenshots folder* opens it.
+- F12 in the game writes a screenshot into `screenshots` in the data folder, and *Open the Screenshots Folder* opens it.
 - A portable copy: Yakumo unpacked into a folder with such a name, with `portable.txt` beside `Yakumo.exe`, keeps settings and saves in its `data` folder.
 - **Controls → Controllers**: set up a controller; `gamecontrollerdb.txt` is written into the data folder and read again at the next start (the log's `[pad] … mapping(s) … from` line).
 
@@ -325,7 +331,7 @@ For the manual check use a throwaway data folder (`MHP3RD_DATA_DIR`, with a copy
 - **Load after a restart.** Close and start again: `[savedata] loaded … (decrypted)`, and *Continue* lists the character.
 - **Overwrite.** *New game*, make another character and pick the used slot. *Character already exists. Delete previously saved character?* answered *No* leaves `MHP3RD.BIN` unchanged; *Yes* saves the new character over it.
 - **The reminder.** With a save present, set `saves.backup_reminded=` to an older release (or empty) in `settings.ini` and start without `MHP3RD_INPUT_SCRIPT`: the game pauses on *Back up your saves*. *Back up now* makes `save-backups/<date>_<time>/ULJM05800` identical to the save, and the next screen shows where, with *Open the folder* and *Continue*. The next start with the same build does not ask; `saves.backup_reminder=0` or `MHP3RD_BACKUP_REMINDER=0` never asks; `MHP3RD_BACKUP_REMINDER=1` asks every time, and lets a scripted run drive it.
-- **Back up saves….** In *System*, a timed backup makes a new folder each time. With the timestamp off, the second backup to the same folder asks *Replace the earlier backup?*: *Cancel* keeps it, *Replace the backup* replaces it.
+- **Back Up Saves….** In *System*, a timed backup makes a new folder each time. With the timestamp off, the second backup to the same folder asks *Replace the earlier backup?*: *Cancel* keeps it, *Replace the backup* replaces it.
 - **Import.** Import a copy of a PSP save (the 100% test save, `ULJM05800/MHP3RD.BIN` encrypted), by browsing or by dropping its folder on the window: the review shows both saves, asks for a backup before anything is written, and *Back up now* reports the folder. *Replace and import* moves the old save to `ms0/PSP/SAVEDATA/.backup/<date>_<time>/`, the imported `MHP3RD.BIN` is byte for byte the source, and *Restart now* reaches character select with the imported characters.
 
 ## Reporting

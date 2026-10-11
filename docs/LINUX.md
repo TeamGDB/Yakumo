@@ -39,7 +39,7 @@ Start Yakumo from the application menu, or with `flatpak run io.github.teamgdb.Y
 4. Choose whether to **copy** the image (the default, about 1.3 GB in your home folder) or **use it where it is**. Copying keeps the game working if the original is moved or its SD card is removed; using it in place saves the space, but the image has to be there every time you play.
 5. Yakumo copies the image and prepares the game from it, then starts the game.
 
-Later starts go straight to the game. Esc, or L3+R3 (both sticks pressed in), opens Yakumo's menu with the settings; *Set up game data again…* there repeats the setup.
+Later starts go straight to the game. Esc, or L3+R3 (both sticks pressed in), opens Yakumo's menu with the settings; *Set Up Game Data Again…* there repeats the setup.
 
 ### Game Mode
 
@@ -66,19 +66,19 @@ Everything Yakumo keeps is in the Flatpak's own data directory:
         PSP/SAVEDATA/ULJM05800/   your saves
 ```
 
-It survives updates and is removed only if you ask for it (see [Uninstall](#uninstall)). To keep your saves safe, use *Back up saves…* in Yakumo's menu (System section), which copies them to `save-backups` in this directory or to a folder you choose, or back up `ms0` yourself.
+It survives updates and is removed only if you ask for it (see [Uninstall](#uninstall)). To keep your saves safe, use *Back Up Saves…* in Yakumo's menu (System section), which copies them to `save-backups` in this directory or to a folder you choose, or back up `ms0` yourself.
 
 ### Import a save from a PSP
 
 Saves use the PSP's own format, so a save from a PSP's memory stick or from PPSSPP works unchanged. Yakumo's menu imports it, with a gamepad:
 
 1. Put the save where Yakumo can see it: connect the memory stick or SD card, or copy the folder into your home folder. On a PSP's memory stick the folder of *Monster Hunter Portable 3rd* is `PSP/SAVEDATA/ULJM05800`, with downloaded quests in `ULJM05800QST`.
-2. In the game, open the menu (L3+R3, or Esc) and go to **System → Import save…**.
+2. In the game, open the menu (L3+R3, or Esc) and go to **System → Import Save…**.
 3. Open the save folder, or choose *Import from this folder* on a folder that holds several, such as the memory stick's `PSP/SAVEDATA`. Removable drives are in the row of places at the top.
 4. Check what is shown, with the save it replaces, and confirm. The replaced save is kept in `ms0/PSP/SAVEDATA/.backup/`, not deleted.
 5. Choose **Restart now**: the game reads saves at the title screen, which then leads to character select with the imported characters.
 
-**System → Back up saves…** copies your saves to `save-backups` in the data directory above, and **Open the saves folder** and **Open the backups folder** show where they are. The Flatpak reads your home folder and removable drives, but it writes only to its own data directory and to your **Downloads** folder. So *Export save…* and backups work when you pick Downloads or the backups folder; any other folder fails. The [profile README](../profiles/mhp3rd/README.md#importing-a-save-from-a-psp) describes the checks and the backups.
+**System → Back Up Saves…** copies your saves to `save-backups` in the data directory above, and **Open the Saves Folder** and **Open the Backups Folder** show where they are. The Flatpak reads your home folder and removable drives, but it writes only to its own data directory and to your **Downloads** folder. So *Export Save…* and backups work when you pick Downloads or the backups folder; any other folder fails. The [profile README](../profiles/mhp3rd/README.md#importing-a-save-from-a-psp) describes the checks and the backups.
 
 By hand, with Yakumo closed, copy the folder into `~/.var/app/io.github.teamgdb.Yakumo/data/Yakumo/MHP3rd/ms0/PSP/SAVEDATA/`, keeping a copy of any `ULJM05800` folder already there first: it holds all three character slots.
 
@@ -124,7 +124,7 @@ The Flatpak asks for as little as the game needs:
 | Network | Ad hoc multiplayer: joining a server, hosting a session with the built-in server, and finding sessions on the local network |
 | Home folder, read-only | Finding your disc image with the gamepad file browser. The desktop's file dialog needs no permission, but it is not available in Game Mode. |
 | `/run/media` and `/media`, read-only | Disc images on SD cards and USB drives |
-| Downloads folder, read and write | Where *Export save…* and *Back up saves…* can write outside the app's own data directory |
+| Downloads folder, read and write | Where *Export Save…* and *Back Up Saves…* can write outside the app's own data directory |
 
 Yakumo writes only to its own data directory. It uses the network only for multiplayer, when you host or join a session. If your image is somewhere else, for example on a second drive mounted under `/mnt`, give Yakumo read access to it:
 
