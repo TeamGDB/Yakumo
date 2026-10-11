@@ -571,6 +571,26 @@ elif args[0] == 'logcat':
         self.assertEqual((self.adb_root / 'pid').read_text(), '12344')
         self.assertIn('already running', self.report()['automatic']['reason'])
 
+    def test_official_installer_uses_selected_device_no_metrics_and_verified_copy(self):
+        device = self.make_adb()
+        installer = self.root / 'installer.py'
+        marker = self.root / 'install-call.json'
+        installer.write_text("""import json,sys,zipfile
+from pathlib import Path
+assert '--no-metrics' in sys.argv and 'install' in sys.argv
+assert '--device=synthetic-usb' in sys.argv and '--install-options=-r' in sys.argv
+apk=next(x.split('=',1)[1] for x in sys.argv if x.startswith('--apks='))
+with zipfile.ZipFile(apk) as z: assert 'assets/device-testing.json' in z.namelist()
+Path(""" + repr(str(marker)) + ").write_text(json.dumps(sys.argv))\n")
+        adapter = dt.Adb({**device, 'android_cli_install': True, 'android': [sys.executable, str(installer)]},
+                         self.run_dir, time.monotonic() + 20)
+        with patch.dict(os.environ, {'FAKE_ADB_ROOT': str(self.adb_root)}):
+            report = {}
+            adapter.prepare(report)
+        self.assertTrue(marker.exists())
+        self.assertEqual(report['artifact_sha256'], dt.fingerprint(self.run_dir / 'artifact.apk'))
+        self.assertFalse((self.adb_root / 'pid').exists())
+
     def test_adb_replacement_pid_and_capture_failure(self):
         device = self.make_adb()
         with patch.dict(os.environ, {'FAKE_ADB_ROOT': str(self.adb_root)}):

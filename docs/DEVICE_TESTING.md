@@ -218,6 +218,10 @@ No game input is staged in shared device storage. The device needs `base64` and
 On POSIX hosts, an explicitly selected `raw_adb_upload: true` streams the file
 directly without an encoded temporary copy, retaining source/destination SHA-256
 checks. Windows rejects that option and keeps its verified Base64 path.
+`android_cli_install: true` optionally uses the installed official Android CLI's
+`install` command, with `--no-metrics` and the selected device serial. It installs
+the verified owned APK copy without activating it; the same operation and total
+deadlines apply. Neither installer path retries a failed installation.
 
 For the first large ADB upload, optionally set `"setup_seconds": 600` alongside
 `"seconds": 60`. Preparation has its own deadline, then gameplay receives at

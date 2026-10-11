@@ -1092,6 +1092,8 @@ def run_device(device, name, suite, root, seconds):
         report['interrupted'] = isinstance(error, KeyboardInterrupt)
     finally:
         if session:
+            # Preserve verified artifact/capability evidence even if setup failed.
+            report.update(session.identity)
             try:
                 session.deadline = session.adapter.deadline = deadline
                 session.close()

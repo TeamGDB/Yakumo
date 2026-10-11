@@ -154,6 +154,8 @@ def validate_device(value):
         raise ValueError('Streaming exceeds its explicit inclusive cap or requests a setup extension')
     if type(value.get('raw_adb_upload', False)) is not bool or value.get('raw_adb_upload') and os.name == 'nt':
         raise ValueError('Raw ADB upload is an explicit POSIX-only option; Windows requires Base64')
+    if type(value.get('android_cli_install', False)) is not bool:
+        raise ValueError('Android CLI installation must be an explicit boolean option')
     if set(value.get('env', {})) - ENV_KEYS:
         raise ValueError('Unsupported environment override; isolation controls cannot be replaced')
     if value.get('performance', 'log') not in ('log', 'settings'):
@@ -562,7 +564,12 @@ class Adb:
         (self.root / 'vulkan.json').write_bytes(vulkan)
         report['hardware']['vulkan_evidence'] = 'vulkan.json'
         verify_android_capabilities(report['hardware'], vulkan)
-        command(self.prefix + ['install', '-r', str(apk)], self.deadline, maximum=180)
+        if self.device.get('android_cli_install'):
+            command(self.device.get('android', ['android']) + ['--no-metrics', 'install',
+                    '--device=' + self.device['serial'], '--apks=' + str(apk), '--install-options=-r'],
+                    self.deadline, maximum=180)
+        else:
+            command(self.prefix + ['install', '-r', str(apk)], self.deadline, maximum=180)
         # Remove only this dedicated test package's fixed harness directory.
         self.app('rm -rf files/device-testing && mkdir -p files/device-testing/data files/device-testing/shots')
         staging = self.root / 'data'
