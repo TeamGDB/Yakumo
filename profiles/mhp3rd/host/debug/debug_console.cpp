@@ -152,7 +152,7 @@ std::vector<std::string> run_command(Ram &ram, const std::string &line) {
             ",\"audio_gain\":" + std::to_string(audio::AudioSink::instance().output_gain());
         json += ",\"text_blocks\":[";
         bool first_block = true;
-        for (const auto &block : text::applied_blocks()) {
+        for (const auto &block : text::observed_blocks()) {
             if (!first_block) json += ',';
             first_block = false;
             json += "{\"entry\":" + std::to_string(block.entry) + ",\"address\":" + std::to_string(block.address) + '}';

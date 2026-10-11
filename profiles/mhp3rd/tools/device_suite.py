@@ -817,7 +817,10 @@ def execute(session, steps, context, parameters, device, deadline):
                         loaded = session.snapshot()
                         block = next((item for item in loaded.get('text_blocks', []) if item['entry'] == probe['entry'] and item['address']), None)
                         if block:
-                            probe = {'base': block['address'], 'ref': probe['ref']}
+                            base_offset = probe.get('base_offset', 0)
+                            if type(base_offset) is not int or not 0 <= base_offset < 1024 * 1024:
+                                raise ValueError('Text block base offset must come from a bounded source layout')
+                            probe = {'base': block['address'] + base_offset, 'ref': probe['ref']}
                             break
                         runner.remaining(limit)
                         time.sleep(.1)

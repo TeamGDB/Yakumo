@@ -359,6 +359,23 @@ dev regression/quest scenarios separately, then test the final packages through
 normal player setup, counters and gates. Debug quest starts cannot certify a
 release artifact and must never be used during multiplayer.
 
+Run the ten automatic categories with the command in
+[DEVICE_SUITE.md](DEVICE_SUITE.md#running-the-implementation), retaining the
+aggregate and per-subcheck reasons. Presence of ten definitions is not evidence
+that all their required outcomes passed. Developer structured readbacks and quest
+shortcuts have separate prerequisites and reports from exact packaged-artifact
+setup, normal counter/gate routes and multiplayer. Keep the existing reviewed
+matrix and human sign-offs alongside these automatic results. An incomplete
+route, unsupported capability or failed check cannot be turned green to satisfy
+a release checklist.
+
+Performance baselines use the same physical device, GPU/driver, resolution,
+execution mode, scene/route and settings, with warm-up and repeated measurements.
+Record guest speed, timing tails and first-use/load differences as well as
+presented FPS; calibrate noise before choosing a regression budget. Follow the
+scoped cloud allowance and inclusive session limits in the testing guide; transfer
+time that consumes the cap leaves an incomplete pilot.
+
 Include our available physical platforms, controller/touch/audio checks, saves,
 representative hunts, installation/update, suspend/resume and a coordinated
 multiplayer pair. Cloud/emulator evidence complements physical tests; it does

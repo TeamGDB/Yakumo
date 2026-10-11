@@ -285,6 +285,8 @@ struct AppliedBlock {
     std::uint32_t applied{};
 };
 [[nodiscard]] std::vector<AppliedBlock> applied_blocks();
+// Developer-only loader observations include original/fallback blocks with no translations.
+[[nodiscard]] std::vector<AppliedBlock> observed_blocks();
 // Forgets what was applied, when the game reloads its text.
 void forget_blocks();
 

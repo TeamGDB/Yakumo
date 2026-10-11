@@ -6,6 +6,21 @@ local developer tool, not a public game-data CI job. Human play and agent visual
 review complement automatic observations; neither screenshots nor a successful
 process launch establish gameplay correctness.
 
+The ten automatic pre-release categories use a separate aggregate command:
+
+```sh
+python3 profiles/mhp3rd/tools/device_suite.py --config device-testing.local.json \
+  --devices mac windows deck android --seconds 1800 --output-parent out
+```
+
+See [DEVICE_SUITE.md](DEVICE_SUITE.md) for the private fixture/observation contract,
+focused reruns and current implementation boundaries. Each subcheck determines
+its own assertions without a person reviewing a capture. Required missing routes
+or capabilities remain NOT TESTED, and any failure makes the aggregate fail.
+The command prepares compatible inputs once per device, then resets only owned
+copies between checks. Its report is separate from the shared reviewed-scenario
+matrix and complementary physical-control/audio/long-hunt sign-offs.
+
 ## Trust boundary
 
 This CLI runs with the tester's permissions. Its private configuration deliberately
@@ -67,7 +82,7 @@ make device-run DEVICE=mac DEVICE_SCENARIO=quest-village
 The evidence directory is printed before the bounded session. Exit status `0`
 means all required observations and reviews passed; `1` means a failure; `2`
 means incomplete or unavailable checks, including visual review pending. A
-successful automatic run normally exits `2` until its captures are reviewed.
+successful run of this reviewed-scenario runner normally exits `2` until its captures are reviewed.
 Keep evidence under this checkout's `out/` or the OS temporary directory.
 Original saves/settings are read-only inputs. Every run copies `ms0` and settings
 and redirects **both** game and data directories to its own session. Save links

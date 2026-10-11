@@ -128,6 +128,15 @@ void test_observation() {
     ram.store32(game::kTaskSlot + 8u, game::kTaskSlot);
     const std::string task = "game_task.ovl";
     for (std::size_t i = 0; i < task.size(); ++i) ram.store8(game::kTaskSlot + 32u + i, task[i]);
+    const auto scene = 0x09652000u;
+    ram.store32(quests::kNextScenePointer, scene);
+    ram.store32(scene, 7u);
+    ram.store16(game::kHunterName, 0u);
+    check(observe().find("\"scene\":7") != std::string::npos, "validated task exposes pre-character navigation state");
+    ram.store32(game::kTaskSlot + 8u, 0u);
+    check(observe().find("\"scene\":null") != std::string::npos, "an invalid overlay cannot supply navigation state");
+    ram.store32(game::kTaskSlot + 8u, game::kTaskSlot);
+    ram.store16(game::kHunterName, 'A');
     ram.store32(0x08A3A630u, 4u);
     ram.store16(0x08A3A630u + 4u + 0x1Cu, 309u);
     ram.store32(game::kQuestTimeLeft, 12345u);

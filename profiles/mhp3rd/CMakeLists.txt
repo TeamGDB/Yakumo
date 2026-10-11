@@ -577,6 +577,7 @@ add_executable(mhp3rd_text_runtime_tests
     host/mods/file_overlay.cpp
     host/mods/mod_ini.cpp)
 target_include_directories(mhp3rd_text_runtime_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+target_compile_definitions(mhp3rd_text_runtime_tests PRIVATE MHP3RD_DEBUG_MENU=1)
 target_link_libraries(mhp3rd_text_runtime_tests PRIVATE psprecomp_core)
 set_target_properties(mhp3rd_text_runtime_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 if(PSPRECOMP_BUILD_TESTS)

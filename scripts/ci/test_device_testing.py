@@ -423,11 +423,15 @@ class DeviceTests(unittest.TestCase):
                 dt.validate_device({**device, **change})
         class SlowPrepare(dt.Local):
             def prepare(adapter, report):
+                adapter.total_deadline = adapter.deadline + 1
                 time.sleep(.6)
                 super().prepare(report)
+                adapter.prepared_at = time.monotonic()
             def launch(adapter):
-                self.assertLessEqual(adapter.deadline - time.monotonic(), 1.01)
-                self.assertGreater(adapter.deadline - time.monotonic(), .8)
+                # Report writes and process scheduling consume the budget too.
+                # Test the deadline assignment, not a minimum time left at launch.
+                self.assertAlmostEqual(adapter.deadline, min(adapter.total_deadline, adapter.prepared_at + 1), delta=.05)
+                self.assertLessEqual(adapter.deadline, adapter.total_deadline)
                 super().launch()
         with patch.object(dt, 'Adb', SlowPrepare):
             self.assertEqual(dt.run(dt.scenario('performance-overlay'), device, 'fixture', self.run_dir, True),

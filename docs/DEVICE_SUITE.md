@@ -82,6 +82,11 @@ expectations from private source archives and language inputs. Active quest
 references relocate the source catalog's offset words; do not assume the inline
 title is an offset table. The checker reads the resulting guest strings, rather
 than accepting an application count or language-selection acknowledgement.
+Developer loader observations also expose completed original/fallback text
+blocks, independently of whether any language key was applied. Nested dialogue
+tables use their source-derived `base_offset` within the observed block; invalid
+or partial loader ranges supply no address. These byte readbacks complement the
+synthetic renderer contracts; they do not certify all real-world text layout.
 
 Performance profiles declare finite preparation and route programs, scene state
 and execution mode, with a distinct pinned baseline artifact. Collection runs

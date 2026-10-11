@@ -281,3 +281,29 @@ navigation, audible output, representative hunts, multiplayer, long sessions,
 final player-package updates, other Android GPUs and fresh emulator variants
 remain unverified. Runs used copied saves/settings and bounded owned processes;
 player/release installations, original saves and launchers were preserved.
+
+## Automatic device-suite implementation checkpoint (2026-10-11)
+
+Draft [PR #311](https://github.com/TeamGDB/Yakumo/pull/311), tracked by
+[#310](https://github.com/TeamGDB/Yakumo/issues/310), adds automatic assertions
+alongside the reviewed scenarios above. At `acec3ac`, fresh macOS native/coverage
+tests passed 68/68; the application C++ was unchanged from `2aa40eb`. Local
+changed-line coverage was 89.35% (1477/1653). Windows 58/58 and Deck 64/64 native
+results were collected at the earlier `2f1d617`, with interactive renderer reruns;
+they do not certify a current-head device suite.
+
+Bounded macOS developer probes independently observed copied-save boot and update
+preservation, quest identity/timer, a small-monster health decrease through normal
+attacks, photo freeze/frame step and Japanese text coverage versus original
+fallback. Exploratory binaries include source patches recorded privately; these
+are qualified development evidence, not exact release-artifact results.
+
+First HUD hiding while already paused in photo mode did not activate before a
+guest flip. Quest-retire confirmation did not return to village within the bound,
+also on an earlier baseline and with audio enabled. Desktop activation did not
+produce observed SDL focus on macOS. These remain failed/unverified outcomes.
+Normal counter/gate, patched-image translation, complete photo/lifecycle checks,
+save/backup, real replacement textures, two-peer hunts and repeated performance
+workloads remain in progress. Physical Android and cloud validation are pending;
+no cloud reservations have been consumed at this checkpoint. The suite does not
+complete any exact-candidate release or human playtesting sign-off.

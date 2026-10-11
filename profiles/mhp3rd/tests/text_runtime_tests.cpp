@@ -27,6 +27,75 @@ void word(std::vector<std::uint8_t> &bytes, std::size_t at, std::uint32_t value)
     for (unsigned i = 0; i < 4; ++i) bytes.at(at + i) = static_cast<std::uint8_t>(value >> (i * 8));
 }
 
+void test_original_loader_observations() {
+    using namespace mhp3rd;
+    psprecomp::GuestMemory memory(64u * 1024u * 1024u);
+    const auto request = ram + 4096u, destination = ram + 8192u;
+    const auto mode = [](const char *value) {
+#ifdef _WIN32
+        _putenv_s("MHP3RD_DEVICE_TEST", value);
+#else
+        if (*value)
+            setenv("MHP3RD_DEVICE_TEST", value, 1);
+        else
+            unsetenv("MHP3RD_DEVICE_TEST");
+#endif
+    };
+    text::set_language("original", {});
+    memory.store16(request + 2u, 4289u);
+    memory.store32(request + 4u, destination);
+    memory.store32(request + 8u, 128u);
+    memory.store32(request + 12u, 0u);
+    memory.store32(destination, 0x12345678u);
+    for (const auto *value : {"", "0", "true"}) {
+        mode(value);
+        text::note_loader_completion(memory, 0x08865840u, request);
+        require(text::observed_blocks().empty(), "ordinary modes do not record loader metadata");
+    }
+    mode("1");
+    text::note_loader_completion(memory, 0x08865840u, request);
+    const auto blocks = text::observed_blocks();
+    require(blocks.size() == 1u && blocks.front().entry == 4289u && blocks.front().address == destination &&
+            blocks.front().applied == 0u && text::applied_blocks().empty(),
+        "original dialogue load is observable without claiming a translated field");
+    require(memory.load32(destination) == 0x12345678u && memory.load32(request + 4u) == destination,
+        "metadata readback leaves loader request and source bytes unchanged");
+    text::forget_blocks();
+    require(text::observed_blocks().empty(), "reload forgets stale observed addresses");
+    for (const auto caller : {0u, 0x08865844u}) {
+        text::note_loader_completion(memory, caller, request);
+        require(text::observed_blocks().empty(), "unrecognized completion cannot supply an address");
+    }
+    for (const auto pointer : {0u, 0xFFFFFFFFu}) {
+        text::note_loader_completion(memory, 0x08865840u, pointer);
+        require(text::observed_blocks().empty(), "out-of-range requests cannot supply metadata");
+    }
+    for (const auto pointer : {0u, destination + 1u, 0x0A800000u, 0xFFFFFFFFu}) {
+        memory.store32(request + 4u, pointer);
+        text::note_loader_completion(memory, 0x08865840u, request);
+        require(text::observed_blocks().empty(), "invalid, unaligned and overflowing destinations are refused");
+    }
+    memory.store32(request + 4u, destination);
+    for (const auto bytes : {0u, 3u, 0xFFFFFFFFu}) {
+        memory.store32(request + 8u, bytes);
+        text::note_loader_completion(memory, 0x08865840u, request);
+        require(text::observed_blocks().empty(), "incomplete or overflowing ranges are refused");
+    }
+    memory.store32(request + 8u, 128u);
+    memory.store32(request + 12u, 4u);
+    text::note_loader_completion(memory, 0x08865840u, request);
+    require(text::observed_blocks().empty(), "a partial load cannot identify the block base");
+    memory.store32(request + 12u, 0u);
+    memory.store16(request + 2u, 100u);
+    text::note_loader_completion(memory, 0x08865840u, request);
+    require(text::observed_blocks().empty(), "non-text files cannot become text observations");
+    memory.store16(request + 2u, 4289u);
+    text::note_loader_completion(memory, 0x08865840u, request);
+    text::set_language("original", {});
+    require(text::observed_blocks().empty(), "changing language invalidates old block identities");
+    mode("");
+}
+
 void test_quest_source_versions(const std::filesystem::path &dir) {
     using namespace mhp3rd;
     {
@@ -83,6 +152,9 @@ void test_quest_source_versions(const std::filesystem::path &dir) {
             memory.store32(request + 12, 0);
             text::note_loader_completion(memory, 0x08865840u, request);
             text::frame(memory, allocate);
+            const auto observed = text::observed_blocks();
+            require(!observed.empty() && observed.front().entry == entry && observed.front().applied > 0u,
+                "applied translations retain their actual address and counts in combined observations");
             for (const auto root : {destination, text::kActiveQuestBlock}) {
                 require(matches(root, 64, "Portable title"), "UTF-8 quest title uses a portable key");
                 require(matches(root, 68, "Portable objective"), "a changed or empty source field is translated");
@@ -151,6 +223,7 @@ int main(int argc, char **argv) {
     } cleanup{dir};
     try {
         fs::create_directories(dir);
+        test_original_loader_observations();
         test_quest_source_versions(dir);
         {
             std::ofstream out(dir / "test.lang");

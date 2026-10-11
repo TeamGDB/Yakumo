@@ -277,7 +277,7 @@ bool game_command(Ram &ram, const std::string &command, const std::vector<std::s
             json << "null";
         json << ",\"scene\":";
         const auto scene_at = ram.contains(quests::kNextScenePointer, 4u) ? ram.load32(quests::kNextScenePointer) : 0u;
-        if (loaded && scene_at >= 0x08800000u && ram.contains(scene_at, 4u))
+        if (!overlay(kTaskSlot).empty() && scene_at >= 0x08800000u && ram.contains(scene_at, 4u))
             json << ram.load32(scene_at);
         else
             json << "null";

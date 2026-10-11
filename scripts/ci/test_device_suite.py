@@ -683,11 +683,16 @@ class ExtendedSuiteTests(unittest.TestCase):
             session = self.session(Path(temp), adapter)
             rows = [{'coverage': 'covered', 'probe': [0x08A40640, 3, 3], 'expected_hex': '4f7265'},
                     {'coverage': 'original-fallback', 'probe': {'active_ref_delta': 200}, 'expected_hex': '4f7265'},
-                    {'coverage': 'covered', 'probe': {'entry': 4060, 'ref': 44}, 'expected_hex': '4f7265'}]
+                    {'coverage': 'covered', 'probe': {'entry': 4060, 'base_offset': 128, 'ref': 44}, 'expected_hex': '4f7265'}]
             program = [{'action': 'text_fields', 'name': 'fields', 'as': 'text', 'timeout': 1}]
             context = {}
             self.assertEqual(suite.execute(session, program, context, {'fields': rows}, {}, session.deadline), 3)
             self.assertEqual(context['text'][1]['probe']['ref'], 204)
+            self.assertEqual(context['text'][2]['probe']['base'], 0x08A406C0)
+            for offset in (True, -1, 1024 * 1024):
+                changed = [{**rows[2], 'probe': {**rows[2]['probe'], 'base_offset': offset}}]
+                with self.assertRaises(ValueError):
+                    suite.execute(session, program, {}, {'fields': changed}, {}, session.deadline)
             program[0]['timeout'] = .02
             adapter.sample['text_hex'] = '77726f6e67'
             with self.assertRaises(TimeoutError):

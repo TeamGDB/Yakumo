@@ -14,6 +14,7 @@
 #include <cstring>
 #include <iostream>
 #include <map>
+#include <string_view>
 #include <vector>
 
 namespace mhp3rd::text {
@@ -117,6 +118,7 @@ struct State {
     std::optional<Arena> arena;
     std::map<std::uint32_t, Pending> pending; // entry -> what is known about it
     std::map<std::uint32_t, AppliedBlock> applied;
+    std::map<std::uint32_t, AppliedBlock> observed;
     bool warned_arena{};
     std::size_t arena_used{};
     std::uint64_t frames{}; // for the timed quest-structure searches
@@ -471,6 +473,7 @@ void set_language(const std::string &code, const std::vector<std::filesystem::pa
     s.arena.reset();
     s.pending.clear();
     s.applied.clear();
+    s.observed.clear();
     s.arena_used = 0u;
     s.warned_arena = false;
     s.quests_prepared = false;
@@ -525,10 +528,19 @@ std::vector<AppliedBlock> applied_blocks() {
     return blocks;
 }
 
+std::vector<AppliedBlock> observed_blocks() {
+    auto blocks = state().observed;
+    for (const auto &[entry, block] : state().applied) blocks[entry] = block;
+    std::vector<AppliedBlock> result;
+    for (const auto &[entry, block] : blocks) result.push_back(block);
+    return result;
+}
+
 void forget_blocks() {
     State &s = state();
     s.pending.clear();
     s.applied.clear();
+    s.observed.clear();
     s.arena.reset();
     s.arena_used = 0u;
     s.warned_arena = false;
@@ -553,6 +565,20 @@ const std::vector<std::filesystem::path> &search_directories() noexcept {
 }
 
 void note_loader_completion(const psprecomp::GuestMemory &memory, std::uint32_t caller, std::uint32_t request) {
+#if defined(MHP3RD_DEBUG_MENU)
+    const char *mode = std::getenv("MHP3RD_DEVICE_TEST");
+    if (mode && std::string_view(mode) == "1" && caller == 0x08865840u && memory.contains(request, 24u)) {
+        const auto entry = memory.load16(request + 2u);
+        const auto destination = memory.load32(request + 4u);
+        const auto size = memory.load32(request + 8u), into = memory.load32(request + 12u);
+        // Metadata only: no guest writes, scans or dependency on language-key coverage.
+        if (is_target(entry) && into == 0u && size >= 4u && destination >= kRamBegin && destination < kRamEnd &&
+            size <= kRamEnd - destination && (destination & 3u) == 0u && memory.contains(destination, size)) {
+            auto &observed = state().observed;
+            observed[entry] = AppliedBlock{entry, destination, 0u};
+        }
+    }
+#endif
     if (std::getenv("MHP3RD_TEXT_NO_QUEST_DIRECT") != nullptr || caller != 0x08865840u ||
         !memory.contains(request, 24u))
         return;
