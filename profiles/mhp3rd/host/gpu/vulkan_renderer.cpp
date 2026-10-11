@@ -6,6 +6,7 @@
 #include "game_hud.hpp"
 #include "replacement_textures.hpp"
 #include "mmpx.hpp"
+#include "opaque_alpha.hpp"
 #include "ui_textures.hpp"
 #include "texture_decode.hpp"
 #include "triangle_indices.hpp"
@@ -652,7 +653,11 @@ private:
 } // namespace
 
 struct VulkanRenderer::Impl {
+    bool opaque_draws{true}; // NO_OPAQUE_DRAWS restores discard and blending.
     struct Texture {
+        // True only for the actual uploaded original pixels. Unknown, failed,
+        // replacement and in-flight decoded images keep the conservative path.
+        bool opaque{};
         VkImage image{};
         VkDeviceMemory memory{};
         VkImageView view{};
@@ -1857,7 +1862,7 @@ struct VulkanRenderer::Impl {
     std::string pack_status;
     std::uint64_t replaced_draws{}; // this second, for MHP3RD_TRACE_TEXTURE_PACK
     void apply_texture_pack();
-    [[nodiscard]] VkDescriptorSet texture_descriptor(const GuestMemory &memory, const DrawCall &call);
+    [[nodiscard]] VkDescriptorSet texture_descriptor(const GuestMemory &memory, const DrawCall &call, bool &opaque);
     std::uint64_t texture_clock{};
     // texture_key results for the display list being walked, by the state that
     // feeds the key; cleared by begin_display_list().
@@ -1943,6 +1948,7 @@ struct VulkanRenderer::Impl {
         VkImage image{};
         std::uint32_t width{};
         std::uint32_t height{};
+        std::uint64_t key{};
     };
     std::vector<PendingTexture> pending_textures;
     [[nodiscard]] static bool background_decode() {
@@ -2397,6 +2403,7 @@ std::uint64_t VulkanRenderer::draws_submitted() const noexcept {
 bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error) {
     Impl &impl = *impl_;
     impl.config = config;
+    impl.opaque_draws = std::getenv("MHP3RD_NO_OPAQUE_DRAWS") == nullptr;
     const settings::Settings &player = settings::current();
     impl.requested_scale = std::min(player.internal_scale, settings::kMaxInternalScale);
     // Until the window's size is known, which Auto and Fill need.
@@ -4011,6 +4018,7 @@ void VulkanRenderer::Impl::end_pass() {
 VulkanRenderer::Impl::Texture VulkanRenderer::Impl::create_texture(
     std::uint32_t width, std::uint32_t height, const std::uint32_t *pixels) {
     Texture texture = create_texture_image(width, height);
+    texture.opaque = opaque_draws && opaque_pixels(pixels, static_cast<std::size_t>(width) * height);
     if (texture.image != VK_NULL_HANDLE && pixels != nullptr) upload_texture(texture.image, width, height, pixels);
     return texture;
 }
@@ -4214,6 +4222,11 @@ void VulkanRenderer::Impl::finish_pending_textures() {
     for (PendingTexture &pending : pending_textures) {
         decode_pool->wait(*pending.job);
         if (!pending.job->ok) pending.job->pixels.assign(static_cast<std::size_t>(pending.width) * pending.height, 0u);
+        // A cache entry may have been evicted while this image decoded. Its
+        // in-flight upload is still valid, but must not label a replacement entry.
+        const auto cached = textures.find(pending.key);
+        if (opaque_draws && cached != textures.end() && cached->second.image == pending.image)
+            cached->second.opaque = opaque_pixels(pending.job->pixels.data(), pending.job->pixels.size());
         upload_texture(pending.image, pending.width, pending.height, pending.job->pixels.data());
     }
     pending_textures.clear();
@@ -4388,7 +4401,7 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
             decode_pool = std::make_unique<DecodePool>(std::clamp(cores / 2u, 1u, 3u));
         }
         decode_pool->submit(job);
-        pending_textures.push_back({std::move(job), texture.image, state.width, state.height});
+        pending_textures.push_back({std::move(job), texture.image, state.width, state.height, key});
     }
     texture.max_seen_v = max_seen_v;
     texture.key = key;
@@ -4401,7 +4414,9 @@ VulkanRenderer::Impl::Texture &VulkanRenderer::Impl::texture_for(const GuestMemo
     return cached;
 }
 
-VkDescriptorSet VulkanRenderer::Impl::texture_descriptor(const GuestMemory &memory, const DrawCall &call) {
+VkDescriptorSet VulkanRenderer::Impl::texture_descriptor(
+    const GuestMemory &memory, const DrawCall &call, bool &opaque) {
+    opaque = false;
     const perf::SplitScope split(perf::Split::Texture);
     Texture &texture = texture_for(memory, call);
     if (texture.replacement && pack) {
@@ -4418,6 +4433,7 @@ VkDescriptorSet VulkanRenderer::Impl::texture_descriptor(const GuestMemory &memo
         if (const VkDescriptorSet sharper = ui_copy(memory, call, texture)) return sharper;
     if (texture.descriptor == VK_NULL_HANDLE && texture.image != VK_NULL_HANDLE && frames >= texture.set_retry)
         attach_descriptor(texture);
+    opaque = texture.descriptor != VK_NULL_HANDLE ? texture.opaque : white_texture.opaque;
     return texture.descriptor != VK_NULL_HANDLE ? texture.descriptor : white_texture.descriptor;
 }
 
@@ -6804,6 +6820,10 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
     static const bool no_fog = no_lighting || std::getenv("MHP3RD_NO_FOG") != nullptr;
     const bool lit = call.lighting_enabled && !no_lighting && !call.through && !call.clear_mode;
     const bool use_material_color = !no_material_color && !call.has_vertex_color && !call.lighting_enabled;
+    // Replay and raw decoding keep their original pipelines until separately
+    // covered. For CPU vertices, check alpha as they are already converted.
+    const bool track_opaque = impl.opaque_draws && !raw && !impl.interpolating;
+    bool vertices_opaque = track_opaque;
     const auto to_gpu = [&](const Vertex &vertex) {
         GpuVertex out{};
         out.x = vertex.position[0];
@@ -6812,6 +6832,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
         out.u = vertex.texcoord[0];
         out.v = vertex.texcoord[1];
         out.color = use_material_color ? call.material_color : vertex.color;
+        if ((out.color >> 24u) != 255u) vertices_opaque = false;
         out.nx = vertex.normal[0];
         out.ny = vertex.normal[1];
         out.nz = vertex.normal[2];
@@ -7378,9 +7399,6 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
     static const bool no_depth = std::getenv("MHP3RD_NO_DEPTH") != nullptr;
     if (no_cull) key.cull = false;
     if (no_depth && !call.clear_mode) key.depth_test = false;
-    VkPipeline pipeline = impl.pipeline_for(key);
-    if (pipeline == VK_NULL_HANDLE) return;
-
     PushConstants push{};
     push.transform = multiply(call.projection, view_world);
     push.viewport = {static_cast<float>(kPspWidth), static_cast<float>(kPspHeight), call.through ? 1.0f : 0.0f,
@@ -7401,6 +7419,7 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
     static const bool trace_fb = std::getenv("MHP3RD_TRACE_FB_TEXTURES") != nullptr;
     if (trace_fb && call.texture.enabled && !call.clear_mode) impl.trace_framebuffer_texture(call);
 
+    bool texture_opaque = impl.white_texture.opaque;
     VkDescriptorSet texture_descriptor = impl.white_texture.descriptor;
     if (call.texture.enabled && !call.clear_mode) {
         const Impl::FramebufferTexture &source = framebuffer_source;
@@ -7412,6 +7431,8 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
             // is pixel (x, y) of a target that holds 480x272 guest pixels at
             // any internal scale.
             texture_descriptor = copy;
+            // The RGB565 view explicitly supplies ONE for sampled alpha.
+            texture_opaque = call.texture.format == TextureFormat::Rgba5650;
             const float width = static_cast<float>(call.texture.width);
             const float height = static_cast<float>(call.texture.height);
             const std::array<float, 4> uv = push.uv_transform;
@@ -7420,13 +7441,27 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
                 (uv[2] * width + static_cast<float>(source.x)) / static_cast<float>(kPspWidth),
                 (uv[3] * height + static_cast<float>(source.y)) / static_cast<float>(kPspHeight)};
         } else {
-            texture_descriptor = impl.texture_descriptor(memory, call);
+            texture_descriptor = impl.texture_descriptor(memory, call, texture_opaque);
             // The 2D interface's textures sampled sharp bilinear (ge.frag),
             // with either UI texture mode, above x1 (#164).
             if (call.through && settings::current().ui_textures != settings::UiTextures::Off && impl.ui_scale() >= 2u)
                 push.texture_params[0] = 2.0f;
         }
     }
+
+    const bool vertex_opaque = opaque_vertex_alpha(lit, vertices_opaque, call.has_vertex_color,
+        call.lighting.material_update, call.lighting.ambient_alpha, call.material_color);
+    if (track_opaque && !call.clear_mode && !perf::alternate_off(perf::NewPath::Opaque) &&
+        opaque_fragment_alpha(call.texture.enabled, call.texture.function, vertex_opaque, texture_opaque)) {
+        if (redundant_opaque_blend(key.blend, key.source_factor, key.destination_factor, key.equation))
+            key.blend = false;
+        if (!no_alpha_variants && !perf::alternate_off(perf::NewPath::Alpha) &&
+            opaque_alpha_test_passes(
+                call.alpha_test.enabled, call.alpha_test.function, call.alpha_test.reference, call.alpha_test.mask))
+            key.alpha_test = false;
+    }
+    VkPipeline pipeline = impl.pipeline_for(key);
+    if (pipeline == VK_NULL_HANDLE) return;
 
     if (!impl.pass_active || impl.current_target != call.target.color_address) {
         impl.end_pass();

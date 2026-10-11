@@ -378,6 +378,152 @@ void keyboard_contracts(gpu::VulkanRenderer &renderer) {
     layer.set_interactive(false);
 }
 
+void opaque_alpha_contracts(gpu::VulkanRenderer &renderer) {
+    renderer.set_frame_rate_auto(false);
+    renderer.set_frame_rate(settings::FrameRate::Fps30);
+    psprecomp::GuestMemory memory;
+    gpu::DrawCall clear{};
+    clear.primitive = gpu::PrimitiveType::Sprites;
+    clear.through = clear.clear_mode = clear.has_vertex_color = true;
+    clear.clear_flags = 7u;
+    clear.target.color_address = 0x04000000u;
+    clear.target.color_stride = clear.target.depth_stride = 512u;
+    clear.target.color_format = 3u;
+    clear.target.depth_address = 0x04088000u;
+    clear.viewport.scissor_x2 = 479u;
+    clear.viewport.scissor_y2 = 271u;
+    gpu::Vertex lo{}, hi{};
+    lo.position = {0, 0, 0, 1};
+    hi.position = {480, 272, 65535, 1};
+    constexpr std::uint32_t background = 0x7147391du;
+    lo.color = hi.color = background;
+    clear.vertices = {lo, hi};
+    auto draw = clear;
+    draw.clear_mode = draw.through = false;
+    draw.primitive = gpu::PrimitiveType::Triangles;
+    draw.vertices.resize(3u);
+    const std::array<std::array<float, 3>, 3> positions{
+        {{-0.75f, -0.75f, -1.0f}, {1.5f, -1.5f, -2.0f}, {0.0f, 3.0f, -4.0f}}};
+    const std::array<std::array<float, 2>, 3> uv{{{0.1f, 0.1f}, {0.9f, 0.1f}, {0.5f, 0.9f}}};
+    for (std::size_t i = 0; i < draw.vertices.size(); ++i) {
+        draw.vertices[i].position = {positions[i][0], positions[i][1], positions[i][2], 1};
+        draw.vertices[i].texcoord = uv[i];
+        draw.vertices[i].color = 0xffcf5b92u;
+    }
+    for (auto matrix : {&draw.world, &draw.view, &draw.projection, &draw.texture_matrix}) {
+        matrix->fill(0.0f);
+        (*matrix)[0] = (*matrix)[5] = (*matrix)[10] = (*matrix)[15] = 1.0f;
+    }
+    draw.projection[10] = -1.020202f;
+    draw.projection[11] = -1.0f;
+    draw.projection[14] = -0.2020202f;
+    draw.projection[15] = 0.0f;
+    draw.viewport.x_scale = draw.viewport.x_offset = 240.0f;
+    draw.viewport.y_scale = -136.0f;
+    draw.viewport.y_offset = 136.0f;
+    draw.texture.enabled = true;
+    draw.texture.address = 0x08070000u;
+    draw.texture.width = draw.texture.height = draw.texture.buffer_width = 2u;
+    draw.texture.format = gpu::TextureFormat::Rgba8888;
+    const std::array<std::uint32_t, 4> texture{0xff204080u, 0xffc04020u, 0xff70b030u, 0xffd07090u};
+    const auto put_texture = [&](std::uint32_t alpha) {
+        for (std::uint32_t i = 0; i < texture.size(); ++i)
+            memory.store32(draw.texture.address + 4u * i, (texture[i] & 0x00ffffffu) | (alpha << 24u));
+    };
+    const auto capture = [&](const gpu::DrawCall &submitted) {
+        renderer.begin_frame();
+        renderer.begin_display_list();
+        renderer.submit(clear, memory);
+        renderer.submit(submitted, memory);
+        expect(renderer.present(clear.target.color_address), "opacity contract presents its synthetic target");
+        std::vector<std::uint8_t> pixels;
+        std::uint32_t width{}, height{};
+        expect(renderer.read_frame(pixels, width, height) && width == 480u && height == 272u,
+            "opacity contract reads the complete native target");
+        return pixels;
+    };
+    put_texture(255u);
+    // Unequal clip-W and linear filtering must preserve constant opaque alpha.
+    // The oracle draws the identical colors directly, with no comparison or blend.
+    for (std::uint32_t function = 0u; function <= 4u; ++function) {
+        draw.texture.function = function;
+        draw.alpha_test.enabled = draw.blend.enabled = false;
+        const auto expected = capture(draw);
+        draw.blend.enabled = true;
+        draw.blend.source_factor = 2u;
+        draw.blend.destination_factor = 3u;
+        draw.blend.equation = 0u;
+        draw.alpha_test.enabled = true;
+        for (const auto comparison : {std::array<std::uint32_t, 2>{7u, 128u}, {7u, 192u}, {7u, 255u}, {2u, 255u}}) {
+            draw.alpha_test.function = comparison[0];
+            draw.alpha_test.reference = comparison[1];
+            expect(capture(draw) == expected,
+                "opaque filtered/perspective fragment preserves full RGBA across passing alpha tests and blending");
+        }
+    }
+    draw.texture.function = 3u;
+    draw.alpha_test.function = 7u;
+    draw.alpha_test.reference = 192u;
+    put_texture(0u);
+    const auto transparent = capture(draw);
+    bool retained = !transparent.empty();
+    for (std::size_t i = 0; i < transparent.size(); ++i)
+        retained &= transparent[i] == static_cast<std::uint8_t>(background >> (8u * (i % 4u)));
+    expect(retained, "opaque-to-transparent texture recreation retains destination after alpha rejection");
+    put_texture(255u);
+    auto oracle = draw;
+    oracle.alpha_test.enabled = oracle.blend.enabled = false;
+    expect(capture(draw) == capture(oracle), "returning to a cached opaque image restores the correct alpha proof");
+
+    draw.texture.enabled = false;
+    draw.alpha_test.enabled = false;
+    draw.texture.function = 0u;
+    draw.lighting_enabled = false;
+    // A single nonopaque vertex prevents the proof. Perspective interpolation
+    // produces partial alpha, so compare RGB to independently evaluated blending.
+    draw.vertices[0].color &= 0x80ffffffu;
+    draw.blend.enabled = false;
+    const auto source = capture(draw);
+    draw.blend.enabled = true;
+    const auto blended = capture(draw);
+    const std::size_t centre = (150u * 480u + 240u) * 4u;
+    expect(source.size() > centre + 3u && blended.size() > centre + 3u,
+        "translucent vertex contract has an interior sample");
+    if (source.size() > centre + 3u && blended.size() > centre + 3u) {
+        const double alpha = static_cast<double>(source[centre + 3u]) / 255.0;
+        expect(alpha > 0.5 && alpha < 1.0, "unequal-W triangle interpolates a genuinely partial vertex alpha");
+        for (std::size_t channel = 0u; channel < 3u; ++channel) {
+            const double destination = (background >> (8u * channel)) & 255u;
+            const int expected =
+                static_cast<int>(std::lround(source[centre + channel] * alpha + destination * (1.0 - alpha)));
+            expect(std::abs(static_cast<int>(blended[centre + channel]) - expected) <= 1,
+                "partial vertex alpha preserves source-alpha RGB blending over a nonblack destination");
+        }
+        expect(blended[centre + 3u] == source[centre + 3u], "blend alpha remains the source alpha");
+    }
+    // Lit alpha chooses material or vertex ambient, and multiplies global ambient.
+    for (const std::uint32_t global_alpha : {254u, 255u}) {
+        for (const std::uint32_t material_alpha : {128u, 255u}) {
+            for (const std::uint32_t update : {0u, 1u}) {
+                draw.lighting_enabled = true;
+                ++draw.environment_version;
+                ++draw.material_version;
+                draw.lighting.ambient_color = 0x00ffffffu;
+                draw.lighting.ambient_alpha = global_alpha;
+                draw.lighting.material_update = update;
+                draw.material_color = (material_alpha << 24u) | 0x00cf5b92u;
+                for (auto &v : draw.vertices) v.color = 0xffcf5b92u;
+                const auto pixels = capture(draw);
+                const auto selected_alpha = update == 1u ? 255u : material_alpha;
+                const int expected = static_cast<int>(std::lround(global_alpha * selected_alpha / 255.0));
+                if (pixels.size() > centre + 3u)
+                    expect(std::abs(static_cast<int>(pixels[centre + 3u]) - expected) <= 1,
+                        "lit alpha preserves ambient multiplication and material-update selection boundaries");
+            }
+        }
+    }
+}
+
 void primitive_contracts(gpu::VulkanRenderer &renderer) {
     const bool trace_fb = std::getenv("MHP3RD_TRACE_FB_TEXTURES") != nullptr;
     const bool trace_3d = std::getenv("MHP3RD_TRACE_3D") != nullptr;
@@ -4862,6 +5008,7 @@ int run_contracts(int scripts) {
         return failures ? 1 : 0;
     }
     if (scripts == 4) {
+        opaque_alpha_contracts(renderer);
         primitive_contracts(renderer);
         renderer.shutdown();
         std::filesystem::remove_all(sandbox);
@@ -4904,6 +5051,7 @@ int run_contracts(int scripts) {
     layered_armor_ui_contracts(renderer, fixture.runtime);
     media_renderer_contracts(fixture, renderer);
     render_contracts(renderer);
+    opaque_alpha_contracts(renderer);
     primitive_contracts(renderer);
     screenshot_contracts(renderer, sandbox);
     held_frame_contracts(renderer, sandbox);
