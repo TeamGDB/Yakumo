@@ -466,8 +466,9 @@ delivery. The unused attempt is not being spent in this stage; all original
 FAIL/NOT TESTED reports and private reservation history remain preserved.
 ## Opaque-draw renderer checks (2026-10-11)
 
-A bounded stationary-village comparison on `5e1fa00` used a Redmi 12C,
-Android 14/API 34, and Mali-G52 MC2 (r32p1). The isolated ARM64/API29 build
+A bounded stationary-village comparison on `5e1fa00` used a physical Android
+device, with hardware and driver details kept in local testing records. The
+isolated ARM64/API29 build
 reused compatible AOT objects and all 355 overlays. Resolution remained
 1650×720 with explicit 30 FPS, GPU compatibility Auto (self-test passed, Off),
 GPU vertex decode Off, sharp textures Off and no replacement texture pack.
@@ -481,7 +482,7 @@ render medians increased by 0.2 ms in both runs. GPU frequency varied, so
 these adjacent comparisons show reduced cost in this scene, not a fixed
 performance guarantee.
 
-Synthetic offscreen comparisons of the production shaders on the same Mali
+Synthetic offscreen comparisons of the production shaders on the same Android
 GPU covered 1,400 filtered, unequal-perspective-W, lit/unlit and alpha-test
 cases: zero differing images, with a forced-unsafe control changing pixels.
 EQUAL255 and GEQUAL255 checks drew pixels rather than passing vacuously.
