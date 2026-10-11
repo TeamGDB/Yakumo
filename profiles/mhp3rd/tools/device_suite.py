@@ -225,7 +225,8 @@ class Session:
                     marker = '[debug] observation '
                     if marker in line:
                         sample = json.loads(line.split(marker, 1)[1])
-                        if sample.get('schema') == 1 and sample.get('request') == request:
+                        if type(sample.get('schema')) is int and sample['schema'] == 1 and \
+                                type(sample.get('request')) is int and sample['request'] == request:
                             sample['_wall_seconds'] = time.monotonic()
                             self.samples.append({key: value for key, value in sample.items() if key != 'frame_ms'})
                             self.samples = self.samples[-128:]
@@ -559,12 +560,11 @@ def approach(session, deadline, kind=None, maximum_steps=24, stop_distance=180):
 def attack(session, target, deadline, strikes=3):
     if not 1 <= strikes <= 3:
         raise ValueError('Combat uses at most three finite strikes')
-    for strike in range(strikes):
-        session.adapter.send('input', f'{strike * 90}:pad y 4')
     limit = min(deadline, time.monotonic() + 10)
+    sent, next_strike = 0, 0
     while True:
         sample = session.snapshot()
-        if sample.get('quest_cheats') or sample.get('free_camera'):
+        if not sample.get('on_quest') or sample.get('quest_cheats') or sample.get('free_camera'):
             raise checks.CheckFailed('Combat verification cannot use quest cheats or free camera')
         current = next((item for item in sample['monsters'] if item['address'] == target['address']), None)
         if current is None or not current.get('same_area'):
@@ -572,6 +572,12 @@ def attack(session, target, deadline, strikes=3):
         if current['health'] < target['health']:
             return {'before_health': target['health'], 'after_health': current['health'], 'address': target['address']}
         runner.remaining(limit)
+        # Send the next finite strike only after the previous one had time to land.
+        # An early successful hit must not leave future attacks queued for the next check.
+        if sent < strikes and sample['vblanks'] >= next_strike:
+            session.adapter.send('input', '0:pad y 4')
+            next_strike = sample['vblanks'] + 180
+            sent += 1
         time.sleep(.1)
 
 

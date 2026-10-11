@@ -110,6 +110,18 @@ class SuiteTests(unittest.TestCase):
             with self.assertRaises(checks.CheckFailed):
                 session.snapshot()
 
+    def test_readback_rejects_stale_and_boolean_request_identity(self):
+        with tempfile.TemporaryDirectory() as temp:
+            for schema, request in ((True, 1), (1, True), (1, 0)):
+                adapter = Adapter()
+                session = self.session(Path(temp), adapter)
+                session.observation_ready = True
+                adapter.send = lambda *args: setattr(adapter, 'output', adapter.output + '[debug] observation ' +
+                    json.dumps({'schema': schema, 'request': request, 'loaded': True}) + '\n')
+                with self.assertRaises(TimeoutError):
+                    session.snapshot(timeout=.02)
+                self.assertEqual(session.samples, [])
+
     def test_program_actions_and_mutations(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
@@ -182,6 +194,130 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual(report['verdict'], 'FAIL')
 
 class RealSessionTests(unittest.TestCase):
+    def fixture(self, base):
+        source, root = base / 'fixture', base / 'session'
+        source.mkdir(); root.mkdir()
+        (source / 'ms0').mkdir()
+        (source / 'ms0/save').write_bytes(b'public copied-save fixture')
+        (source / 'EBOOT.ELF').write_bytes(b'public synthetic executable input')
+        (source / 'disc.iso').write_bytes(b'public synthetic disc input')
+        (source / 'settings.ini').write_text('video.scale=1\n')
+        game = base / 'game.py'
+        game.write_text('''import json,os,time
+from pathlib import Path
+path=Path(os.environ['MHP3RD_DEBUG_COMMANDS'])
+print('[debug] reading commands from fixture',flush=True)
+offset=0
+end=time.monotonic()+12
+while time.monotonic()<end:
+ lines=path.read_text().splitlines()
+ for line in lines[offset:]:
+  if line.startswith('observe '):
+   print('[debug] observation '+json.dumps({'schema':1,'request':int(line.split()[1]),'quest_cheats':False}),flush=True)
+ offset=len(lines)
+ time.sleep(.01)
+''')
+        device = {'adapter': 'local', 'build': 'dev', 'commit': 'a' * 40, 'observations': True,
+                  'binary': sys.executable, 'args': [str(game)], 'saves': str(source / 'ms0'),
+                  'settings': str(source / 'settings.ini'), 'game_dir': str(source)}
+        return source, root, device
+
+    def test_verified_language_variant_restores_original_inputs_and_owned_save(self):
+        with tempfile.TemporaryDirectory() as temp:
+            source, root, device = self.fixture(Path(temp).resolve())
+            alternate = root.parent / 'alternate'; alternate.mkdir()
+            (alternate / 'EBOOT.ELF').write_bytes(b'independent variant executable')
+            (alternate / 'disc.iso').write_bytes(b'independent variant disc')
+            language = root.parent / 'selected.lang'; language.write_text('1:2 = public translation\n')
+            device['translation'] = str(language)
+            device['env'] = {'MHP3RD_LANGUAGE': 'original'}
+            variant = {'game_dir': str(alternate), 'game_sha256': runner.fingerprint(alternate / 'disc.iso'),
+                       'language': 'fixture', 'translation': str(language), 'translation_sha256': runner.fingerprint(language)}
+            device['game_variants'] = {'alternate': variant}
+            session = suite.Session(device, root, time.monotonic() + 12)
+            try:
+                session.prepare()
+                original = session.tree('data/ms0')
+                result = session.variant('alternate')
+                self.assertEqual(result['eboot_sha256'], runner.fingerprint(alternate / 'EBOOT.ELF'))
+                self.assertEqual((root / 'data/disc.iso').read_bytes(), b'independent variant disc')
+                with self.assertRaises(ValueError):
+                    session.file('data/disc.iso')
+                self.assertEqual(session.adapter.env['MHP3RD_LANGUAGE'], 'fixture')
+                (root / 'data/ms0/save').write_bytes(b'changed owned save')
+                session.restart(reset=True)
+                self.assertEqual(session.tree('data/ms0'), original)
+                self.assertEqual((root / 'data/disc.iso').read_bytes(), b'public synthetic disc input')
+                self.assertEqual(session.adapter.env['MHP3RD_LANGUAGE'], 'original')
+                self.assertNotIn('MHP3RD_TRACE_TEXT', session.adapter.env)
+                self.assertEqual((root / 'translations/selected.lang').read_bytes(), language.read_bytes())
+                self.assertFalse(session.variant_active)
+                with self.assertRaises(runner.NotTested):
+                    session.variant('missing')
+                (alternate / 'disc.iso').write_bytes(b'wrong image')
+                with self.assertRaises(ValueError):
+                    session.variant('alternate')
+                self.assertTrue(session.adapter.alive())
+                (alternate / 'disc.iso').write_bytes(b'independent variant disc')
+                language.write_text('wrong translation')
+                with self.assertRaises(ValueError):
+                    session.variant('alternate')
+            finally:
+                session.close()
+            self.assertEqual((source / 'ms0/save').read_bytes(), b'public copied-save fixture')
+
+    def test_two_owned_peers_have_distinct_settings_and_cleanup_after_check_failure(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as temp:
+            source, root, device = self.fixture(Path(temp).resolve())
+            session = suite.Session(device, root, time.monotonic() + 12)
+            real_popen = subprocess.Popen
+            launched = []
+            def spawn(args, **kwargs):
+                if '--adhoc-server' in args:
+                    self.assertEqual(args[0], sys.executable)
+                    self.assertGreater(float(args[3]), 0)
+                    self.assertLessEqual(float(args[3]), 12)
+                    self.assertIs(kwargs['stdin'], subprocess.DEVNULL)
+                    # A real bounded process substitutes only the unavailable native server.
+                    args = [sys.executable, '-c', 'import time; time.sleep(12)']
+                process = real_popen(args, **kwargs)
+                launched.append(process)
+                return process
+            try:
+                session.prepare()
+                with mock.patch.object(suite.subprocess, 'Popen', side_effect=spawn):
+                    identity = session.open_peer()
+                self.assertEqual(identity['peer_artifact_sha256'], runner.fingerprint(sys.executable))
+                self.assertEqual(identity['peer_fixture_sha256'], session.identity['fixture_sha256'])
+                primary = checks.settings(session.file('data/settings.ini'))
+                secondary = checks.settings(session.peer.file('data/settings.ini'))
+                self.assertEqual(primary['network.server'], secondary['network.server'])
+                self.assertNotEqual(primary['network.mac'], secondary['network.mac'])
+                self.assertEqual(session.peer.snapshot()['quest_cheats'], False)
+                program = [{'action': 'snapshot', 'as': 'peer-state'},
+                           {'action': 'assert', 'actual': 'peer-state.quest_cheats', 'op': 'eq', 'expected': False}]
+                session.peer.device['suite_fixtures'] = {'ordinary': program,
+                    'cheat': [{'action': 'debug', 'value': 'quest start 204'}]}
+                context = {}
+                self.assertEqual(suite.execute(session, [{'action': 'peer_fixture', 'name': 'ordinary', 'as': 'peer'}],
+                    context, {}, device, session.deadline), 1)
+                self.assertFalse(context['peer']['peer-state']['quest_cheats'])
+                with self.assertRaises(ValueError):
+                    suite.execute(session, [{'action': 'peer_fixture', 'name': 'cheat'}], {}, {}, device, session.deadline)
+                with self.assertRaises(ValueError):
+                    session.open_peer()
+                with self.assertRaises(runner.NotTested):
+                    suite.execute(session, [{'action': 'peer_fixture', 'name': 'missing'}], {}, {}, device, session.deadline)
+                session.restart(reset=True)
+                self.assertIsNone(session.peer)
+                self.assertIsNone(session.server)
+                self.assertNotIn('network.mac', checks.settings(session.file('data/settings.ini')))
+            finally:
+                session.close()
+            self.assertTrue(all(process.poll() is not None for process in launched))
+            self.assertEqual((source / 'settings.ini').read_text(), 'video.scale=1\n')
+
     def test_real_local_copy_restart_files_and_cleanup(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp).resolve()
@@ -321,7 +457,7 @@ class SshSuiteTests(unittest.TestCase):
 
 class CombatOracleTests(unittest.TestCase):
     def sample(self, point=(1000, 0, 0), health=45, same_area=True, cheats=False):
-        return {'schema': 1, 'on_quest': True, 'free_camera': False, 'quest_cheats': cheats,
+        return {'schema': 1, 'on_quest': True, 'free_camera': False, 'quest_cheats': cheats, 'vblanks': 2,
                 'camera_target': list(point), 'camera_yaw': 0,
                 'monsters': [{'address': 7, 'kind': 50, 'health': health, 'maximum': 45,
                               'same_area': same_area, 'position': [0, 0, 0]}]}
@@ -340,6 +476,8 @@ class CombatOracleTests(unittest.TestCase):
             hit = suite.attack(actor, target, time.monotonic() + 5)
         self.assertEqual(hit['before_health'], 45)
         self.assertEqual(hit['after_health'], 30)
+        attacks = [value for kind, value in actor.adapter.sent if 'pad y' in value]
+        self.assertEqual(attacks, ['0:pad y 4'])
 
     def test_mutations_reject_no_hit_other_area_cheats_and_nonconvergence(self):
         actor = mock.Mock()
@@ -428,6 +566,116 @@ sys.exit(0 if 'list' in sys.argv else 1)
 
 class ExtendedSuiteTests(unittest.TestCase):
     session = SuiteTests.session
+
+    def test_photo_pixels_screenshot_file_and_mutated_frozen_frame(self):
+        from test_device_checks import png
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            (root / 'shots').mkdir()
+            (root / 'data/screenshots').mkdir(parents=True)
+            visible = png(8, 8, bytes(range(192)))
+            hidden = png(8, 8, bytes(reversed(range(192))))
+            (root / 'shots/visible.png').write_bytes(visible)
+            (root / 'shots/hidden.png').write_bytes(hidden)
+            adapter = object.__new__(runner.Local)
+            adapter.output = ''
+            adapter.text = lambda: adapter.output
+            def shutter(kind, value):
+                self.assertEqual((kind, value), ('input', '0:scan F12 4'))
+                (root / 'data/screenshots/new.png').write_bytes(hidden)
+                adapter.output += '[screenshot] new.png (8x8)\n'
+            adapter.send = shutter
+            session = self.session(root, adapter)
+            program = [{'action': 'game_png', 'as': 'png'},
+                       {'action': 'image', 'image': 'png', 'dimensions': [8, 8], 'as': 'content'},
+                       {'action': 'difference', 'before': 'visible', 'after': 'png', 'op': 'gt', 'expected': .1}]
+            context = {'visible': 'shots/visible.png'}
+            self.assertEqual(suite.execute(session, program, context, {}, {}, session.deadline), 2)
+            self.assertEqual((root / context['png']).read_bytes(), hidden)
+            (root / context['png']).write_bytes(visible)
+            with self.assertRaises(checks.CheckFailed):
+                suite.execute(session, [program[-1]], context, {}, {}, session.deadline)
+            adapter = Adapter({'schema': 1, 'clock_us': 100, 'vblanks': 200})
+            session = self.session(root, adapter)
+            context = {}
+            program = [{'action': 'hold', 'fields': ['clock_us', 'vblanks'], 'seconds': .1}]
+            self.assertEqual(suite.execute(session, program, context, {}, {}, session.deadline), 1)
+            original_send = adapter.send
+            def advancing(kind, value):
+                adapter.sample['vblanks'] += 1
+                original_send(kind, value)
+            adapter.send = advancing
+            with self.assertRaises(checks.CheckFailed):
+                suite.execute(session, program, context, {}, {}, session.deadline)
+
+    def test_navigation_reference_is_hardware_pinned_and_cannot_replace_assertions(self):
+        from test_device_checks import png
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            reference = root / 'expected.png'
+            reference.write_bytes(png(8, 8, bytes(range(192))))
+            (root / 'captured.png').write_bytes(reference.read_bytes())
+            session = self.session(root, Adapter())
+            session.capture = lambda name: 'captured.png'
+            device = {'hardware': {'device': 'public synthetic hardware'}, 'navigation_references': {
+                'menu': {'reviewed': True, 'hardware': {'device': 'public synthetic hardware'},
+                         'path': str(reference), 'sha256': runner.fingerprint(reference), 'region': [0, 0, 8, 8]}}}
+            context = {}
+            program = [{'action': 'reference', 'name': 'menu'}]
+            self.assertEqual(suite.execute(session, program, context, {}, device, session.deadline), 0)
+            self.assertIn('_navigation_menu', context)
+            device['hardware'] = {'device': 'different GPU'}
+            with self.assertRaises(runner.NotTested):
+                suite.execute(session, program, {}, {}, device, session.deadline)
+            device['hardware'] = {'device': 'public synthetic hardware'}
+            reference.write_bytes(b'changed reference')
+            with self.assertRaises(ValueError):
+                suite.execute(session, program, {}, {}, device, session.deadline)
+
+    def test_lifecycle_requires_actual_focus_clock_and_neutral_release(self):
+        with tempfile.TemporaryDirectory() as temp:
+            session = self.session(Path(temp), Adapter())
+            before = {'focus': True, 'clock_us': 100, 'pad_buttons': 0}
+            returned = {'focus': True, 'clock_us': 200, 'pad_buttons': 0}
+            session.activate = mock.Mock(side_effect=[before, returned])
+            session.snapshot = mock.Mock(return_value={'focus': False, 'clock_us': 110})
+            context = {}
+            program = [{'action': 'focus_cycle', 'as': 'cycle'}]
+            self.assertEqual(suite.execute(session, program, context, {}, {}, session.deadline), 4)
+            self.assertEqual(session.snapshot.call_args.kwargs['until'], {'focus': False})
+            self.assertEqual(session.adapter.sent, [('input', '0:window minimize'), ('input', '0:window restore')])
+            for mutation in ({**returned, 'clock_us': 100}, {**returned, 'pad_buttons': 1}):
+                session.activate.side_effect = [before, mutation]
+                with self.assertRaises(checks.CheckFailed):
+                    suite.execute(session, program, {}, {}, {}, session.deadline)
+
+    @unittest.skipIf(sys.platform == 'win32', 'POSIX parent-process and desktop API variants')
+    def test_activation_uses_only_proven_owned_pid_and_observed_focus(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            adapter = object.__new__(runner.Local)
+            adapter.process = mock.Mock(pid=123)
+            adapter.alive = lambda: True
+            session = self.session(root, adapter)
+            session.snapshot = mock.Mock(return_value={'host_pid': 456, 'focus': True})
+            for platform in ('darwin', 'linux'):
+                results = [b'123\n', b'789\n', b''] if platform == 'linux' else [b'123\n', b'']
+                with mock.patch.object(suite.sys, 'platform', platform), mock.patch.object(suite.shutil, 'which', return_value='xdotool'), \
+                        mock.patch.object(runner, 'command', side_effect=results) as command:
+                    self.assertTrue(session.activate()['focus'])
+                    self.assertEqual(command.call_args_list[0].args[0], ['ps', '-o', 'ppid=', '-p', '456'])
+                    self.assertEqual(session.snapshot.call_args.kwargs['until'], {'focus': True})
+            with mock.patch.object(runner, 'command', return_value=b'999\n'):
+                with self.assertRaises(ValueError):
+                    session.activate()
+            with mock.patch.object(suite.sys, 'platform', 'linux'), mock.patch.object(suite.shutil, 'which', return_value=None), \
+                    mock.patch.object(runner, 'command', return_value=b'123\n'):
+                with self.assertRaises(runner.NotTested):
+                    session.activate()
+            session.snapshot.return_value = {'host_pid': True}
+            with self.assertRaises(ValueError):
+                session.activate()
+
     def test_text_readbacks_cover_translation_and_original_fallback(self):
         with tempfile.TemporaryDirectory() as temp:
             adapter = Adapter({'schema': 1, 'text_hex': '4f7265', 'on_quest': True, 'active_record_offset': 4,
