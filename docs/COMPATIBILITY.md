@@ -336,8 +336,23 @@ cleanup passing, using the `751424a` application artifact
 `65b4089b34975fffdff3c695a915f9d7c6a63b3aae7f9a269a5b3b884dcc1c2a`.
 The lifecycle contract group was NOT TESTED because that build does not register
 all required Android-specific contracts; the aggregate correctly remained NOT
-TESTED. The current Steam Deck preflight timed out over SSH, so no QUICK device
-result is claimed. Earlier native results retain their earlier source qualifier.
+TESTED. The initial Steam Deck preflight timed out over SSH; that evidence remains
+separate from the resumed result below. Earlier native results retain their earlier
+source qualifier.
+
+After the device was powered on, Steam Deck QUICK ran on application/harness
+source `325e28d`, with compatible AOT and all 355 overlays reused. It passed
+11/12 subchecks in 97.9 seconds (1.44 seconds preparation), with cleanup passing
+and no owned game left running. The lifecycle group remained NOT TESTED because
+the build does not register every required contract, so the aggregate remained
+NOT TESTED. Artifact SHA-256:
+`b654f43e1ccb62befd9d8ba1f26fbe44729d68504d280a7a22c284201f7e317d`.
+Short telemetry recorded RADV VANGOGH/Mesa 25.0.7 at 480 by 272, ordinary guest
+speed and frame-time tails; it makes no calibrated comparison or improvement claim.
+Player/release data and launchers were unchanged.
+The freshly rebuilt Deck native suite also passed 67/67 in 168.71 seconds on
+`325e28d`, including the available renderer/backend lifecycle regressions. This
+separate full-suite result does not fill the aggregate's missing contract row.
 
 On physical Android (Mali-G52 MC2, driver r32p1), QUICK harness `738ed74` passed
 all six real-game subchecks: copied-character boot, pad/settings, offline quest/
