@@ -6,6 +6,7 @@ import struct
 import tempfile
 import unittest
 import zlib
+import wave
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('device_checks', ROOT / 'profiles/mhp3rd/tools/device_checks.py')
@@ -153,6 +154,32 @@ class OracleTests(unittest.TestCase):
         for invalid in ([], [float('nan')], [-1], [True]):
             with self.assertRaises(checks.CheckFailed):
                 checks.percentile(invalid, .95)
+
+
+class ExtendedOracles(unittest.TestCase):
+    def test_nested_boolean_and_nonfinite_mutations(self):
+        checks.compare({'armor': [171, 165]}, 'eq', {'armor': [171, 165]})
+        for actual in ({'armor': [171, True]}, {'armor': [171, float('nan')]}, {'armor': [171, float('inf')]}):
+            with self.assertRaises(checks.CheckFailed):
+                checks.compare(actual, 'eq', {'armor': [171, 165]})
+
+    def test_pcm_accepts_signal_and_rejects_silence_clipping_and_wrong_format(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'audio.wav'
+            def write(samples, channels=2, rate=44100):
+                with wave.open(str(path), 'wb') as stream:
+                    stream.setnchannels(channels)
+                    stream.setsampwidth(2)
+                    stream.setframerate(rate)
+                    stream.writeframes(struct.pack('<' + 'h' * len(samples), *samples))
+            write([1000, -1000] * 44100)
+            self.assertEqual(checks.audio_content(path)['nonzero_samples'], 88200)
+            for samples, channels, rate in (([0] * 88200, 2, 44100), ([32767] * 88200, 2, 44100),
+                                             ([1000] * 88200, 1, 44100), ([1000] * 88200, 2, 22050),
+                                             ([1000] * 100, 2, 44100)):
+                write(samples, channels, rate)
+                with self.assertRaises(checks.CheckFailed):
+                    checks.audio_content(path)
 
 
 if __name__ == '__main__':

@@ -39,3 +39,58 @@ Cloud pilot: validate locally first; at most two sequential owned reservations,
 300 seconds each including activation, transfers and cleanup. Keep a private
 ledger across resumed sessions. An incomplete upload is an incomplete pilot,
 not permission to extend the deadline or retry.
+
+## Running the implementation
+
+```sh
+python3 profiles/mhp3rd/tools/device_suite.py --list
+python3 profiles/mhp3rd/tools/device_suite.py --config device-testing.local.json \
+  --devices mac windows deck android --seconds 1800 --output-parent out
+# Focused reruns use the same public definitions:
+python3 profiles/mhp3rd/tools/device_suite.py --config device-testing.local.json \
+  --devices mac --scenarios 01 03 07 --seconds 600 --output-parent out
+```
+
+`make device-suite DEVICE_CONFIG=device-testing.local.json` accepts additional
+arguments through `DEVICE_ARGS`. The private configuration extends the shared
+runner's local/SSH/ADB artifact contract. `observations: true` requires a
+developer artifact compiled with the debug menu; the runner enables both debug
+commands and the explicit device-test gate. Exact release artifacts keep separate
+rows and prerequisites. A successful developer run does not certify their UI or
+installation packaging.
+
+Each session creates `report.json` and `suite.md` in a new ignored evidence
+directory. Exit codes are 0 for all required outcomes passing, 1 for a failure,
+and 2 for incomplete coverage. The aggregate lists devices and subchecks that
+were never reached. Keep the configuration, expected text, game/save inputs,
+navigation captures and reservation ledger private. Do not attach their contents
+to a pull request.
+
+## Private fixture contract
+
+`suite_fixtures` contains finite navigation programs using the same actions as
+the public scenarios. Fixtures cannot invoke other fixtures. Navigation references
+require a reviewed crop, file hash and matching device identity; they guide input
+and never constitute the result oracle. Assertions use fresh guest observations,
+file/settings inventories and bounded image/audio decoders. Missing fixture
+navigation or independent expectations produces NOT TESTED.
+
+`game_variants` pins each Japanese/patched image and selected language file by
+SHA-256. Text expectations contain the actual source field reference, expected
+UTF-8 bytes and `covered` or `original-fallback` classification. Derive those
+expectations from private source archives and language inputs. Active quest
+references relocate the source catalog's offset words; do not assume the inline
+title is an offset table. The checker reads the resulting guest strings, rather
+than accepting an application count or language-selection acknowledgement.
+
+Performance profiles declare finite preparation and route programs, scene state
+and execution mode, with a distinct pinned baseline artifact. Collection runs
+three repetitions of each artifact on the same host, warms up, and retains guest
+speed, raw steady-state frame times and startup/load intervals. Regression budgets
+derive from measured baseline spread; unstable baselines remain incomplete.
+Resolution or settings differences invalidate the comparison. No optimization
+claim follows from presented FPS alone.
+
+The implementation is incremental. Fixture discovery and remaining device
+capabilities are tracked in #310; a definition's presence does not mean its
+required outcomes have been validated. The aggregate is the record of what ran.

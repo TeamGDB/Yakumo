@@ -72,21 +72,31 @@
         },
         {
           "action": "assert",
-          "actual": "reconnected.audio_nonzero_samples",
-          "op": "gt",
-          "expected": 0
-        },
-        {
-          "action": "assert",
-          "actual": "reconnected.audio_clipped_fraction",
-          "op": "lt",
-          "expected": 0.01
+          "actual": "reconnected.audio_device",
+          "op": "eq",
+          "expected": true
         },
         {
           "action": "assert",
           "actual": "reconnected.pad_buttons",
           "op": "eq",
           "expected": 0
+        },
+        {
+          "action": "audio",
+          "as": "pcm"
+        },
+        {
+          "action": "assert",
+          "actual": "pcm.nonzero_samples",
+          "op": "gt",
+          "expected": 0
+        },
+        {
+          "action": "assert",
+          "actual": "pcm.clipped_fraction",
+          "op": "lt",
+          "expected": 0.01
         }
       ]
     },
@@ -95,27 +105,27 @@
       "seconds": 90,
       "steps": [
         {
+          "action": "snapshot",
+          "as": "before"
+        },
+        {
           "action": "fixture",
           "name": "android-rotation-surface-display"
         },
         {
+          "action": "log",
+          "pattern": "\\[render\\] surface made again after the app returned"
+        },
+        {
           "action": "snapshot",
-          "as": "recreated"
+          "as": "after"
         },
         {
           "action": "assert",
-          "actual": "recreated.surface_generation",
+          "actual": "after.clock_us",
           "op": "gt",
           "expected": {
-            "parameter": "previous-surface-generation"
-          }
-        },
-        {
-          "action": "assert",
-          "actual": "recreated.clock_us",
-          "op": "gt",
-          "expected": {
-            "parameter": "previous-clock-us"
+            "from": "before.clock_us"
           }
         },
         {

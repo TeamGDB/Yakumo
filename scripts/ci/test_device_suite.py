@@ -426,5 +426,66 @@ sys.exit(0 if 'list' in sys.argv else 1)
             self.assertEqual(rows[0]['state'], 'unconfirmed')
 
 
+class ExtendedSuiteTests(unittest.TestCase):
+    session = SuiteTests.session
+    def test_text_readbacks_cover_translation_and_original_fallback(self):
+        with tempfile.TemporaryDirectory() as temp:
+            adapter = Adapter({'schema': 1, 'text_hex': '4f7265', 'on_quest': True, 'active_record_offset': 4,
+                               'text_blocks': [{'entry': 4060, 'address': 0x08A40640}]})
+            session = self.session(Path(temp), adapter)
+            rows = [{'coverage': 'covered', 'probe': [0x08A40640, 3, 3], 'expected_hex': '4f7265'},
+                    {'coverage': 'original-fallback', 'probe': {'active_ref_delta': 200}, 'expected_hex': '4f7265'},
+                    {'coverage': 'covered', 'probe': {'entry': 4060, 'ref': 44}, 'expected_hex': '4f7265'}]
+            program = [{'action': 'text_fields', 'name': 'fields', 'as': 'text', 'timeout': 1}]
+            context = {}
+            self.assertEqual(suite.execute(session, program, context, {'fields': rows}, {}, session.deadline), 3)
+            self.assertEqual(context['text'][1]['probe']['ref'], 204)
+            program[0]['timeout'] = .02
+            adapter.sample['text_hex'] = '77726f6e67'
+            with self.assertRaises(TimeoutError):
+                suite.execute(session, program, {}, {'fields': rows}, {}, session.deadline)
+            adapter.sample.pop('text_hex')
+            with self.assertRaises(runner.NotTested):
+                session.snapshot(until={'text_hex': '4f7265'})
+            with self.assertRaises(runner.NotTested):
+                suite.execute(session, program, {}, {}, {}, session.deadline)
+            rows[0]['coverage'] = 'unknown'
+            with self.assertRaises(ValueError):
+                suite.execute(session, program, {}, {'fields': rows}, {}, session.deadline)
+
+    def test_tree_relocation_and_adb_fingerprint_mutation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            session = self.session(root, Adapter())
+            session.data_root = root / 'installed/data'
+            (session.data_root / 'ms0').mkdir(parents=True)
+            (session.data_root / 'ms0/save').write_text('copied save')
+            self.assertEqual(session.tree('data/ms0'), checks.inventory(session.data_root / 'ms0'))
+            adapter = object.__new__(runner.Adb)
+            adapter.app = lambda value: (b'files/device-testing/data/ms0/save\n' if value.startswith('find') else b'a' * 64 + b'  save\n')
+            session.adapter = adapter
+            self.assertEqual(session.tree('data/ms0'), {'save': 'a' * 64})
+            adapter.app = lambda value: b'../outside\n'
+            with self.assertRaises(ValueError):
+                session.tree('data/ms0')
+            for name in ('../outside', 'shots'):
+                with self.assertRaises(ValueError):
+                    session.tree(name)
+
+    def test_developer_epoch_and_multiplayer_mutation_guards(self):
+        device = {'adapter': 'local', 'build': 'dev', 'observations': True, 'commit': 'a' * 40}
+        runner.validate_device({**device, 'rtc_epoch_us': 1609459200000000})
+        for epoch in (True, 0, None, 4102444800000001):
+            with self.assertRaises(ValueError):
+                runner.validate_device({**device, 'rtc_epoch_us': epoch})
+        with tempfile.TemporaryDirectory() as temp:
+            session = self.session(Path(temp), Adapter())
+            for command in ('quest start 204', 'quest one_hit on', 'quest health on'):
+                with self.assertRaises(ValueError):
+                    suite.execute(session, [{'action': 'debug', 'value': command}], {}, {'multiplayer': True}, device, session.deadline)
+            with self.assertRaises(runner.NotTested):
+                suite.execute(session, [{'action': 'audio', 'as': 'audio'}], {}, {}, device, session.deadline)
+
+
 if __name__ == '__main__':
     unittest.main()

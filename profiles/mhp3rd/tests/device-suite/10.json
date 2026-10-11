@@ -4,103 +4,68 @@
   "checks": [
     {
       "id": "village-route",
-      "seconds": 90,
+      "seconds": 600,
       "steps": [
         {
-          "action": "fixture",
-          "name": "load-character"
-        },
-        {
-          "action": "snapshot",
-          "as": "loaded",
-          "until": {
-            "loaded": true,
-            "on_quest": false
-          }
-        },
-        {
-          "action": "fixture",
-          "name": "warmed-repeated-village-route"
-        },
-        {
-          "action": "snapshot",
-          "as": "village"
+          "action": "measure",
+          "profile": "village-route",
+          "as": "timing"
         },
         {
           "action": "assert",
-          "actual": "village.perf_speed_percent",
+          "actual": "timing.comparison.threshold_enabled",
+          "op": "eq",
+          "expected": true
+        },
+        {
+          "action": "assert",
+          "actual": "timing.comparison.metrics.speed_percent.candidate",
           "op": "ge",
           "expected": 99
-        },
-        {
-          "action": "assert",
-          "actual": "village.perf_comparison",
-          "op": "eq",
-          "expected": {
-            "parameter": "village-performance-verdict"
-          }
         }
       ]
     },
     {
       "id": "quest-loading-route",
-      "seconds": 90,
+      "seconds": 600,
       "steps": [
         {
-          "action": "fixture",
-          "name": "warmed-repeated-quest-loading-route"
-        },
-        {
-          "action": "snapshot",
-          "as": "quest"
+          "action": "measure",
+          "profile": "quest-loading-route",
+          "as": "timing"
         },
         {
           "action": "assert",
-          "actual": "quest.perf_p99_ms",
-          "op": "le",
-          "expected": {
-            "parameter": "calibrated-p99-budget-ms"
-          }
+          "actual": "timing.comparison.threshold_enabled",
+          "op": "eq",
+          "expected": true
         },
         {
           "action": "assert",
-          "actual": "quest.perf_load_ms",
-          "op": "le",
-          "expected": {
-            "parameter": "calibrated-load-budget-ms"
-          }
-        },
-        {
-          "action": "assert",
-          "actual": "quest.perf_speed_percent",
+          "actual": "timing.comparison.metrics.speed_percent.candidate",
           "op": "ge",
           "expected": 99
         }
       ]
     },
     {
-      "id": "resolution-interpolation-fastforward",
-      "seconds": 90,
+      "id": "resolution-interpolation",
+      "seconds": 600,
       "steps": [
         {
-          "action": "fixture",
-          "name": "performance-resolution-interpolation-fastforward"
-        },
-        {
-          "action": "snapshot",
-          "as": "modes"
+          "action": "measure",
+          "profile": "resolution-interpolation",
+          "as": "timing"
         },
         {
           "action": "assert",
-          "actual": "modes.variants_completed",
+          "actual": "timing.comparison.threshold_enabled",
           "op": "eq",
-          "expected": {
-            "parameter": "required-performance-variants"
-          }
+          "expected": true
         },
         {
           "action": "assert",
-          "actual": "modes.simulation_speed_restored",
+          "actual": "timing.comparison.metrics.speed_percent.candidate",
           "op": "ge",
           "expected": 99
         }

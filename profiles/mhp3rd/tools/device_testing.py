@@ -132,6 +132,9 @@ def load_device(config, name):
 
 
 def validate_device(value):
+    if 'rtc_epoch_us' in value and (type(value['rtc_epoch_us']) is not int or
+            not 946684800000000 <= value['rtc_epoch_us'] <= 4102444800000000 or not value.get('observations')):
+        raise ValueError('A pinned RTC epoch requires explicit developer observations and a year from 2000 to 2100')
     if type(value.get('observations', False)) is not bool or value.get('observations') and value.get('build') != 'dev':
         raise ValueError('Structured observations require an explicit developer artifact')
     if value.get('adapter') not in ('local', 'ssh', 'adb', 'streaming'):
@@ -174,10 +177,14 @@ def validate_device(value):
 
 
 def output_directory(parent):
-    parent = Path(parent).resolve()
-    allowed = (Path(tempfile.gettempdir()).resolve(), (ROOT / 'out').resolve())
-    if not parent.is_dir() or not any(parent == item or item in parent.parents for item in allowed):
+    parent = os.path.normcase(os.path.realpath(parent))
+    allowed = (os.path.normcase(os.path.realpath(tempfile.gettempdir())),
+               os.path.normcase(os.path.realpath(ROOT / 'out')))
+    if not (parent == allowed[0] or parent.startswith(allowed[0].rstrip(os.sep) + os.sep) or
+            parent == allowed[1] or parent.startswith(allowed[1].rstrip(os.sep) + os.sep)):
         raise ValueError('Output parent must exist under repository out/ or the OS temporary directory')
+    if not os.path.isdir(parent):
+        raise ValueError('Output parent must be an existing directory')
     return Path(tempfile.mkdtemp(prefix='yakumo-device-', dir=parent))
 
 
@@ -407,6 +414,8 @@ class Local:
         if self.device.get('observations'):
             env['MHP3RD_DEVICE_TEST'] = '1'
             env['MHP3RD_TRACE_CAMERA'] = '1'
+            if 'rtc_epoch_us' in self.device:
+                env['MHP3RD_DEVICE_TEST_RTC_US'] = str(self.device['rtc_epoch_us'])
         if self.device.get('translation'):
             env['MHP3RD_TRANSLATIONS_DIR'] = str(self.root / 'translations')
         self.env, self.binary = env, binary
@@ -419,6 +428,7 @@ class Local:
         self.process = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '_supervise',
                                          str(remaining(self.deadline, 1800)), str(self.binary), *self.device.get('args', [])],
                                         cwd=self.binary.parent, env=self.env,
+                                        stdin=subprocess.DEVNULL,
                                         stdout=self.log, stderr=subprocess.STDOUT)
         self.owned = True
 
@@ -430,7 +440,10 @@ class Local:
         return self.process is not None and self.process.poll() is None
 
     def send(self, kind, value):
-        with (self.root / ('debug.txt' if kind == 'debug' else 'input-live.txt')).open('a', encoding='utf-8') as output:
+        if kind not in ('debug', 'input'):
+            raise ValueError('Unsupported command channel')
+        destination = owned_evidence_path(self.root, 'debug.txt' if kind == 'debug' else 'input-live.txt', control=True)
+        with destination.open('a', encoding='utf-8') as output:
             output.write(value + '\n')
 
     def capture(self, name):
@@ -1090,8 +1103,10 @@ def evidence_name(name):
     raise ValueError('Unexpected evidence file: ' + name)
 
 
-def owned_evidence_path(root, name):
-    path = Path(root).resolve() / evidence_name(name)
+def owned_evidence_path(root, name, control=False):
+    if control and name not in ('debug.txt', 'input-live.txt'):
+        raise ValueError('Unsupported control file')
+    path = Path(root).resolve() / (name if control else evidence_name(name))
     if path.resolve() != path or Path(root).resolve() not in path.parents:
         raise ValueError('Evidence path contains a symlink or escapes its session')
     return path

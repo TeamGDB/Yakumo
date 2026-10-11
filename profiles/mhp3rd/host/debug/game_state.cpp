@@ -4,6 +4,7 @@
 #include "debug/quest_start.hpp"
 #include "camera/lock_on.hpp"
 #include "game/guest_ram.hpp"
+#include "game/layered_armor.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -224,8 +225,8 @@ std::uint32_t number(const std::string &text) {
 }
 } // namespace
 
-bool game_command(
-    Ram &ram, const std::string &command, const std::vector<std::string> &args, std::vector<std::string> &out) {
+bool game_command(Ram &ram, const std::string &command, const std::vector<std::string> &args,
+    std::vector<std::string> &out, std::uint32_t observed_hunter) {
     using namespace p3rd;
     const auto arg = [&](std::size_t i, std::uint32_t fallback = 0u) {
         return i < args.size() ? number(args[i]) : fallback;
@@ -269,6 +270,49 @@ bool game_command(
             json << ram.load32(kQuestTimeLeft);
         else
             json << "null";
+        json << ",\"active_record_offset\":";
+        if (valid_active)
+            json << offset;
+        else
+            json << "null";
+        json << ",\"scene\":";
+        const auto scene_at = ram.contains(quests::kNextScenePointer, 4u) ? ram.load32(quests::kNextScenePointer) : 0u;
+        if (loaded && scene_at >= 0x08800000u && ram.contains(scene_at, 4u))
+            json << ram.load32(scene_at);
+        else
+            json << "null";
+        json << ",\"hunter_position\":";
+        const std::uint32_t hunter_object = observed_hunter;
+        const std::uint32_t hunter_position = hunter_object + camera::lock_on_layout::kPosition;
+        const auto vtable = ram.contains(hunter_object, 4u) ? ram.load32(hunter_object) : 0u;
+        const bool own_hunter = loaded && hunter_object >= 0x08800000u && vtable >= 0x08800000u &&
+            ram.contains(vtable + game::layered::kFileFunctionSlot, 4u) &&
+            ram.load32(vtable + game::layered::kFileFunctionSlot) == game::layered::kRecordFileFunction &&
+            ram.contains(hunter_object + game::layered::kObjectIndex, 2u) &&
+            ram.load16(hunter_object + game::layered::kObjectIndex) == 0u;
+        std::array<float, 3> point{};
+        bool finite = own_hunter && ram.contains(hunter_position, 12u);
+        for (std::size_t i = 0; finite && i < point.size(); ++i) {
+            point[i] = std::bit_cast<float>(ram.load32(hunter_position + static_cast<std::uint32_t>(i) * 4u));
+            finite = std::isfinite(point[i]);
+        }
+        if (finite)
+            json << '[' << point[0] << ',' << point[1] << ',' << point[2] << ']';
+        else
+            json << "null";
+        json << ",\"hunter_files\":";
+        if (own_hunter && ram.contains(hunter_object + game::layered::kLoadState, 4u) &&
+            ram.load32(hunter_object + game::layered::kLoadState) >= game::layered::kLoadDone &&
+            ram.contains(hunter_object + 0xB8Cu, 20u)) {
+            json << '[';
+            for (std::uint32_t i = 0; i < 5u; ++i) {
+                if (i) json << ',';
+                json << ram.load32(hunter_object + 0xB8Cu + i * 4u);
+            }
+            json << ']';
+        } else {
+            json << "null";
+        }
         json << ",\"equipment\":\"";
         if (loaded && ram.contains(kCharacter + 0x38u, 84u))
             for (std::uint32_t i = 0; i < 84u; ++i) {
@@ -276,7 +320,41 @@ bool game_command(
                 std::snprintf(byte, sizeof(byte), "%02x", ram.load8(kCharacter + 0x38u + i));
                 json << byte;
             }
-        json << "\",\"monsters\":[";
+        json << "\",\"hunter_records\":[";
+        for (std::uint32_t record = 0; record < game::layered::kHunters; ++record) {
+            if (record) json << ',';
+            const std::uint32_t at =
+                character + game::layered::kHunterRecords + 8u + record * game::layered::kHunterRecordBytes;
+            if (!loaded || !valid_character || !ram.contains(at, 84u)) {
+                json << "null";
+                continue;
+            }
+            json << '"';
+            for (std::uint32_t i = 0; i < 84u; ++i) {
+                char byte[3];
+                std::snprintf(byte, sizeof(byte), "%02x", ram.load8(at + i));
+                json << byte;
+            }
+            json << '"';
+        }
+        json << "],\"hunter_armor\":[";
+        constexpr std::array<std::uint32_t, 5> armor_offsets = {0x1Cu, 0x26u, 0x30u, 0x3Au, 0x44u};
+        for (std::uint32_t record = 0; record < game::layered::kHunters; ++record) {
+            if (record) json << ',';
+            const std::uint32_t at =
+                character + game::layered::kHunterRecords + record * game::layered::kHunterRecordBytes;
+            if (!loaded || !valid_character || !ram.contains(at, 0x46u)) {
+                json << "null";
+                continue;
+            }
+            json << '[';
+            for (std::size_t part = 0; part < armor_offsets.size(); ++part) {
+                if (part) json << ',';
+                json << ram.load16(at + armor_offsets[part]);
+            }
+            json << ']';
+        }
+        json << "],\"monsters\":[";
         bool first = true;
         for (const Monster &m : monsters(ram)) {
             if (!first) json << ',';
@@ -317,6 +395,38 @@ bool game_command(
                 json << byte;
             }
             json << '"';
+        }
+        if (args.size() == 4u && args[1] == "field") {
+            const std::uint32_t base = arg(2), ref = arg(3);
+            std::string bytes;
+            bool terminated = false;
+            if (base >= 0x08800000u && ref < 0x200000u && ref % 4u == 0u && base + ref >= base &&
+                ram.contains(base + ref, 4u)) {
+                const std::uint32_t offset = ram.load32(base + ref);
+                if (base + offset >= base) {
+                    const std::uint32_t start = base + offset;
+                    for (std::uint32_t i = 0; i < 8192u && start + i >= start && ram.contains(start + i, 1u); ++i) {
+                        const auto byte = ram.load8(start + i);
+                        if (byte == 0u) {
+                            terminated = true;
+                            break;
+                        }
+                        bytes += static_cast<char>(byte);
+                    }
+                }
+            }
+            json << ",\"text_hex\":";
+            if (terminated) {
+                json << '"';
+                for (unsigned char value : bytes) {
+                    char byte[3];
+                    std::snprintf(byte, sizeof(byte), "%02x", value);
+                    json << byte;
+                }
+                json << '"';
+            } else {
+                json << "null";
+            }
         }
         json << '}';
         out.push_back("observation " + json.str());

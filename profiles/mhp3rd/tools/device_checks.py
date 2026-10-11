@@ -1,14 +1,39 @@
 """Independent, bounded oracles for private device evidence (no game fixtures)."""
 import hashlib
 import math
+import os
 from pathlib import Path
 import statistics
 import struct
+import wave
 import zlib
 
 
 class CheckFailed(ValueError):
     pass
+
+
+def audio_content(path, minimum_seconds=.5):
+    """Check decoded guest PCM; acoustic quality remains a human sign-off."""
+    if Path(path).stat().st_size > 64 * 1024 * 1024:
+        raise CheckFailed('Oversized audio evidence')
+    with wave.open(str(path), 'rb') as stream:
+        if stream.getnchannels() != 2 or stream.getsampwidth() != 2 or stream.getframerate() != 44100:
+            raise CheckFailed('Expected 44100 Hz stereo signed 16-bit PCM')
+        count = stream.getnframes()
+        if count < minimum_seconds * 44100:
+            raise CheckFailed('Insufficient audio samples')
+        data = stream.readframes(count)
+    if len(data) != count * 4:
+        raise CheckFailed('Truncated PCM evidence')
+    samples = [item[0] for item in struct.iter_unpack('<h', data)]
+    nonzero = sum(value != 0 for value in samples)
+    clipped = sum(abs(value) >= 32767 for value in samples) / len(samples)
+    rms = math.sqrt(sum(value * value for value in samples) / len(samples))
+    if not nonzero or rms < 1 or clipped >= .01:
+        raise CheckFailed('Silent or excessively clipped guest PCM')
+    return {'frames': count, 'seconds': count / 44100, 'nonzero_samples': nonzero,
+            'clipped_fraction': clipped, 'rms': rms, 'sha256': hashlib.sha256(data).hexdigest()}
 
 
 def field(value, path):
@@ -19,15 +44,31 @@ def field(value, path):
     return field(value, rest) if separator else value
 
 
+def strict_equal(actual, expected):
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(actual, dict):
+        return actual.keys() == expected.keys() and all(strict_equal(actual[key], expected[key]) for key in actual)
+    if isinstance(actual, list):
+        return len(actual) == len(expected) and all(strict_equal(a, b) for a, b in zip(actual, expected))
+    return actual == expected
+
+
+def finite_evidence(value):
+    if isinstance(value, float) and not math.isfinite(value):
+        raise CheckFailed('Nonfinite observation or expectation')
+    if isinstance(value, (dict, list)):
+        for item in value.values() if isinstance(value, dict) else value:
+            finite_evidence(item)
+
+
 def compare(actual, operator, expected):
-    if isinstance(actual, float) and not math.isfinite(actual):
-        raise CheckFailed('Nonfinite observation')
-    if isinstance(expected, float) and not math.isfinite(expected):
-        raise CheckFailed('Nonfinite expectation')
+    finite_evidence(actual)
+    finite_evidence(expected)
     if operator == 'eq':
-        ok = type(actual) is type(expected) and actual == expected
+        ok = strict_equal(actual, expected)
     elif operator == 'ne':
-        ok = type(actual) is type(expected) and actual != expected
+        ok = type(actual) is type(expected) and not strict_equal(actual, expected)
     elif operator in ('gt', 'ge', 'lt', 'le'):
         if type(actual) not in (int, float) or type(expected) not in (int, float):
             raise CheckFailed('Numeric comparison requires numbers, not unknown/bool values')
@@ -50,13 +91,14 @@ def compare(actual, operator, expected):
 
 
 def confined(root, name):
-    root = Path(root).resolve()
-    path = root / name
-    if not isinstance(name, str) or '\\' in name or path.is_absolute() and Path(name).is_absolute():
+    if not isinstance(name, str) or '\\' in name or os.path.isabs(name) or '..' in Path(name).parts:
         raise ValueError('Evidence names must be relative')
-    if path.resolve() != path or root not in path.parents or '..' in Path(name).parts:
+    root = os.path.normcase(os.path.realpath(root))
+    lexical = os.path.normcase(os.path.abspath(os.path.join(root, name)))
+    path = os.path.normcase(os.path.realpath(lexical))
+    if path != lexical or not path.startswith(root.rstrip(os.sep) + os.sep):
         raise ValueError('Evidence path escapes or contains a link')
-    return path
+    return Path(path)
 
 
 def inventory(root):

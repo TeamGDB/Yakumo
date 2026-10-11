@@ -6,8 +6,10 @@
 #include "debug/game_state.hpp"
 #include "debug/quest_start.hpp"
 #include "game/guest_ram.hpp"
+#include "game/layered_armor.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -89,6 +91,20 @@ void test_text() {
     game_command(ram, "observe", {"1", "text", "0", "99999", "3"}, observation);
     check(observation.front().find("\"text_hex\":\"\"") != std::string::npos,
         "out-of-range text probe is unknown rather than an arbitrary memory read");
+    const std::uint32_t base = game::kTextBlock + 0x1000u;
+    observation.clear();
+    game_command(ram, "observe", {"2", "field", std::to_string(base), "12"}, observation);
+    check(observation.front().find("\"text_hex\":\"4f7265\"") != std::string::npos,
+        "field readback resolves relative source and arena offsets without writes");
+    for (const std::string &ref : {"3", "2097152", "4294967295"}) {
+        observation.clear();
+        game_command(ram, "observe", {"3", "field", std::to_string(base), ref}, observation);
+        check(observation.front().find("\"text_hex\":null") != std::string::npos, "invalid field reference is unknown");
+    }
+    ram.store32(base + 12u, 0xFFFFFFF0u);
+    observation.clear();
+    game_command(ram, "observe", {"4", "field", std::to_string(base), "12"}, observation);
+    check(observation.front().find("\"text_hex\":null") != std::string::npos, "overflowed text pointer is unknown");
     // A broken end marker means it is not a table.
     ram.store32(game::kTextBlock + 0x1000u + 6u * 4u, 0u);
     check(game::text_table(ram, game::kTextBlock, 3).empty(), "a table without its end marker is refused");
@@ -127,6 +143,24 @@ void test_observation() {
         "observation reads actual active record independently of accepted ID");
     check(ram.load16(monster + game::kMonsterHealth) == 800u && ram.load32(game::kQuestTimeLeft) == 12345u,
         "readback leaves quest and monster state unchanged");
+    const std::uint32_t actor = 0x09678000u, vtable = 0x08900000u;
+    ram.store32(actor, vtable);
+    ram.store32(vtable + game::layered::kFileFunctionSlot, game::layered::kRecordFileFunction);
+    ram.store32(actor + game::layered::kLoadState, game::layered::kLoadDone);
+    ram.store32(actor + 0x80u, std::bit_cast<std::uint32_t>(1.5f));
+    ram.store32(actor + 0x84u, std::bit_cast<std::uint32_t>(2.0f));
+    ram.store32(actor + 0x88u, std::bit_cast<std::uint32_t>(3.0f));
+    for (std::uint32_t i = 0; i < 5u; ++i) ram.store32(actor + 0xB8Cu + 4u * i, 100u + i);
+    std::vector<std::string> actor_readback;
+    game_command(ram, "observe", {"18"}, actor_readback, actor);
+    check(actor_readback.front().find("\"hunter_position\":[1.5,2,3]") != std::string::npos &&
+            actor_readback.front().find("\"hunter_files\":[100,101,102,103,104]") != std::string::npos,
+        "validated dynamic actor exposes actual coordinates and loaded files");
+    ram.store16(actor + game::layered::kObjectIndex, 1u);
+    actor_readback.clear();
+    game_command(ram, "observe", {"19"}, actor_readback, actor);
+    check(actor_readback.front().find("\"hunter_files\":null") != std::string::npos,
+        "another hunter cannot supply own appearance evidence");
     ram.store32(0x08A3A630u, 0xFFFFFFFFu);
     check(observe().find("\"active_id\":null") != std::string::npos, "invalid active record is unknown");
     ram.store32(game::kTaskSlot + 8u, 0u);

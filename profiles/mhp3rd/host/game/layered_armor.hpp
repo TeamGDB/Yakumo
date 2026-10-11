@@ -39,6 +39,7 @@
 
 namespace psprecomp {
 class Runtime;
+class GuestMemory;
 }
 
 namespace mhp3rd::game {
@@ -126,6 +127,9 @@ void frame(psprecomp::Runtime &runtime);
 
 // Whether the replacement is in place, for the menu.
 [[nodiscard]] bool installed();
+// A validated own hunter seen by the real loader, only in developer device-test mode.
+// No address is assumed: allocations differ between the village, Hall and quests.
+[[nodiscard]] std::uint32_t observed_hunter(const psprecomp::GuestMemory &memory);
 
 } // namespace layered
 } // namespace mhp3rd::game

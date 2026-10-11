@@ -84,6 +84,9 @@ struct State {
     const Compiled *original{};
     const Compiled *step{};
     bool step_installed{};
+    std::uint32_t observed_object{};
+    const psprecomp::GuestMemory *observed_memory{};
+    std::array<std::uint32_t, 16> observed_map{};
     // The settings as of the last flip; the menu changes them between frames.
     bool on{};
     Pieces pieces{kReal, kReal, kReal, kReal, kReal};
@@ -95,6 +98,24 @@ struct State {
 State &state() {
     static State s;
     return s;
+}
+
+std::array<std::uint32_t, 16> map_header(const psprecomp::GuestMemory &memory) {
+    constexpr std::uint32_t slot = 0x0A055E80u;
+    std::array<std::uint32_t, 16> result{};
+    if (memory.contains(slot, 64u))
+        for (std::size_t i = 0; i < result.size(); ++i)
+            result[i] = memory.load32(slot + static_cast<std::uint32_t>(i) * 4u);
+    return result;
+}
+
+bool device_observations() {
+#if defined(MHP3RD_DEBUG_MENU)
+    const char *mode = std::getenv("MHP3RD_DEVICE_TEST");
+    return mode && std::string(mode) == "1";
+#else
+    return false;
+#endif
 }
 
 void model_of_part(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &ctx) {
@@ -125,6 +146,11 @@ void load_step(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &ctx) {
     GuestRam ram(runtime.memory());
     const std::uint32_t object = ctx.gpr[4];
     if (own_hunter(ram, object)) {
+        if (device_observations()) {
+            s.observed_object = object;
+            s.observed_memory = &runtime.memory();
+            s.observed_map = map_header(runtime.memory());
+        }
         const Pieces look = wanted(s);
         if (!load_done(ram, object)) {
             // A load the game started: it asks for the files with the look as
@@ -176,7 +202,8 @@ void frame(psprecomp::Runtime &runtime) {
     }
     // Off from the start: nothing is registered, and the game runs exactly as
     // it was built.
-    if (!s.on && !s.installed) return;
+    const bool observe = device_observations();
+    if (!s.on && !s.installed && !observe) return;
     if (!s.checked) {
         s.checked = true;
         const char *text = std::getenv("MHP3RD_TRACE_LAYERED_ARMOR");
@@ -184,6 +211,10 @@ void frame(psprecomp::Runtime &runtime) {
         s.usable = check(runtime);
     }
     if (!s.usable) return;
+    if (observe && !s.step_installed && s.step != nullptr) {
+        runtime.register_function(kLoadStep, &load_step, "mhp3rd_device_hunter_observation");
+        s.step_installed = true;
+    }
     // Only ever at the flip, from an import: no generated code is running, so
     // the dispatch tables can change here.
     if (s.on && !s.installed) {
@@ -204,5 +235,12 @@ void frame(psprecomp::Runtime &runtime) {
 }
 
 bool installed() { return state().installed; }
+
+std::uint32_t observed_hunter(const psprecomp::GuestMemory &memory) {
+    const State &s = state();
+    if (!device_observations() || s.observed_memory != &memory || s.observed_map != map_header(memory)) return 0u;
+    const GuestRam ram(const_cast<psprecomp::GuestMemory &>(memory));
+    return s.observed_object && own_hunter(ram, s.observed_object) ? s.observed_object : 0u;
+}
 
 } // namespace mhp3rd::game::layered

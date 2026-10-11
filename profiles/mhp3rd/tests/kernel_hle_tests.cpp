@@ -8,6 +8,7 @@
 #include "install/user_data.hpp"
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include "hle/utility_dialog.hpp"
 #include <thread>
 #include "kernel/kernel.hpp"
@@ -1571,8 +1572,28 @@ void font_contracts() {
 }
 
 }
-int main() {
+int main(int argc, char **argv) {
     try {
+        if (argc == 2) {
+            Fixture f;
+            if (std::string(argv[1]) == "--rtc-invalid") {
+                try {
+                    f.call("UtilsForUser", "sceKernelLibcTime");
+                } catch (const std::invalid_argument &) {
+                    return 0;
+                }
+                throw std::runtime_error("invalid explicit RTC seed was accepted");
+            }
+            const auto seconds = f.call("UtilsForUser", "sceKernelLibcTime");
+            if (std::string(argv[1]) == "--rtc-fixed") {
+                check(seconds == 1609459200u, "explicit developer clock uses the pinned epoch");
+            } else {
+                const auto real = static_cast<std::uint64_t>(std::time(nullptr));
+                check(seconds >= real - 10u && seconds <= real + 10u,
+                    "normal clock ignores a developer seed outside exact test mode");
+            }
+            return 0;
+        }
         PublicFiles environment;
         mhp3rd::install::set_data_directory_override(environment.root / "data");
         memory_contracts();

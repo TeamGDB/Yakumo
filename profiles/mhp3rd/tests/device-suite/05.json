@@ -3,122 +3,288 @@
   "title": "Japanese and patched translation inputs",
   "checks": [
     {
-      "id": "menu-dialogue",
-      "seconds": 90,
+      "id": "japanese-main-menu-fields",
+      "seconds": 120,
       "steps": [
+        {
+          "action": "variant",
+          "name": "japanese-translated",
+          "as": "variant"
+        },
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "text_fields",
+          "name": "japanese-main-menu-fields",
+          "as": "first"
+        },
+        {
+          "action": "assert",
+          "actual": "variant.variant",
+          "op": "eq",
+          "expected": "japanese-translated"
+        }
+      ]
+    },
+    {
+      "id": "japanese-dialogue",
+      "seconds": 120,
+      "steps": [
+        {
+          "action": "variant",
+          "name": "japanese-translated",
+          "as": "variant"
+        },
         {
           "action": "fixture",
           "name": "load-character"
         },
         {
           "action": "fixture",
-          "name": "translated-menu-dialogue"
+          "name": "normal-village-dialogue"
         },
         {
-          "action": "snapshot",
-          "as": "menu",
-          "text_probe": {
-            "parameter": "menu-probe"
-          }
-        },
-        {
-          "action": "assert",
-          "actual": "menu.text_hex",
-          "op": "eq",
-          "expected": {
-            "parameter": "menu-expected-hex"
-          }
-        },
-        {
-          "action": "snapshot",
-          "as": "dialogue",
-          "text_probe": {
-            "parameter": "dialogue-probe"
-          }
-        },
-        {
-          "action": "assert",
-          "actual": "dialogue.text_hex",
-          "op": "eq",
-          "expected": {
-            "parameter": "dialogue-expected-hex"
-          }
-        }
-      ]
-    },
-    {
-      "id": "catalog-reopen",
-      "seconds": 90,
-      "steps": [
-        {
-          "action": "fixture",
-          "name": "translated-catalog-open"
-        },
-        {
-          "action": "snapshot",
+          "action": "text_fields",
+          "name": "japanese-dialogue",
           "as": "first"
         },
         {
           "action": "assert",
-          "actual": "first.catalog_text",
+          "actual": "variant.variant",
           "op": "eq",
-          "expected": {
-            "parameter": "catalog-text"
-          }
-        },
-        {
-          "action": "fixture",
-          "name": "catalog-change-star-reopen"
-        },
-        {
-          "action": "snapshot",
-          "as": "reopened"
-        },
-        {
-          "action": "assert",
-          "actual": "reopened.catalog_text",
-          "op": "eq",
-          "expected": {
-            "parameter": "catalog-text"
-          }
+          "expected": "japanese-translated"
         }
       ]
     },
     {
-      "id": "active-quest-fallback",
-      "seconds": 90,
+      "id": "japanese-catalog-reopen",
+      "seconds": 120,
       "steps": [
         {
-          "action": "fixture",
-          "name": "translated-normal-quest"
+          "action": "variant",
+          "name": "japanese-translated",
+          "as": "variant"
         },
         {
-          "action": "snapshot",
-          "as": "quest"
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "fixture",
+          "name": "normal-village-counter-open"
+        },
+        {
+          "action": "text_fields",
+          "name": "japanese-catalog-reopen",
+          "as": "first"
+        },
+        {
+          "action": "fixture",
+          "name": "normal-counter-change-star-reopen"
+        },
+        {
+          "action": "text_fields",
+          "name": "japanese-catalog-reopen",
+          "as": "reopened"
         },
         {
           "action": "assert",
-          "actual": "quest.active_text",
+          "actual": "variant.variant",
           "op": "eq",
-          "expected": {
-            "parameter": "active-text"
-          }
+          "expected": "japanese-translated"
+        }
+      ]
+    },
+    {
+      "id": "japanese-active-original-fallback",
+      "seconds": 180,
+      "steps": [
+        {
+          "action": "variant",
+          "name": "japanese-translated",
+          "as": "variant"
         },
         {
           "action": "fixture",
-          "name": "restart-original-language"
+          "name": "load-character"
         },
         {
-          "action": "snapshot",
+          "action": "fixture",
+          "name": "normal-counter-gate-quest"
+        },
+        {
+          "action": "text_fields",
+          "name": "japanese-active-quest",
+          "as": "translated"
+        },
+        {
+          "action": "variant",
+          "name": "japanese-original",
+          "as": "original-variant"
+        },
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "fixture",
+          "name": "normal-counter-gate-quest"
+        },
+        {
+          "action": "text_fields",
+          "name": "japanese-original-quest",
           "as": "original"
         },
         {
           "action": "assert",
-          "actual": "original.active_text",
+          "actual": "original-variant.language",
           "op": "eq",
-          "expected": {
-            "parameter": "original-active-text"
-          }
+          "expected": "original"
+        }
+      ]
+    },
+    {
+      "id": "patched-main-menu-fields",
+      "seconds": 120,
+      "steps": [
+        {
+          "action": "variant",
+          "name": "patched-translated",
+          "as": "variant"
+        },
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "text_fields",
+          "name": "patched-main-menu-fields",
+          "as": "first"
+        },
+        {
+          "action": "assert",
+          "actual": "variant.variant",
+          "op": "eq",
+          "expected": "patched-translated"
+        }
+      ]
+    },
+    {
+      "id": "patched-dialogue",
+      "seconds": 120,
+      "steps": [
+        {
+          "action": "variant",
+          "name": "patched-translated",
+          "as": "variant"
+        },
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "fixture",
+          "name": "normal-village-dialogue"
+        },
+        {
+          "action": "text_fields",
+          "name": "patched-dialogue",
+          "as": "first"
+        },
+        {
+          "action": "assert",
+          "actual": "variant.variant",
+          "op": "eq",
+          "expected": "patched-translated"
+        }
+      ]
+    },
+    {
+      "id": "patched-catalog-reopen",
+      "seconds": 120,
+      "steps": [
+        {
+          "action": "variant",
+          "name": "patched-translated",
+          "as": "variant"
+        },
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "fixture",
+          "name": "normal-village-counter-open"
+        },
+        {
+          "action": "text_fields",
+          "name": "patched-catalog-reopen",
+          "as": "first"
+        },
+        {
+          "action": "fixture",
+          "name": "normal-counter-change-star-reopen"
+        },
+        {
+          "action": "text_fields",
+          "name": "patched-catalog-reopen",
+          "as": "reopened"
+        },
+        {
+          "action": "assert",
+          "actual": "variant.variant",
+          "op": "eq",
+          "expected": "patched-translated"
+        }
+      ]
+    },
+    {
+      "id": "patched-active-original-fallback",
+      "seconds": 180,
+      "steps": [
+        {
+          "action": "variant",
+          "name": "patched-translated",
+          "as": "variant"
+        },
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "fixture",
+          "name": "normal-counter-gate-quest"
+        },
+        {
+          "action": "text_fields",
+          "name": "patched-active-quest",
+          "as": "translated"
+        },
+        {
+          "action": "variant",
+          "name": "patched-original",
+          "as": "original-variant"
+        },
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "fixture",
+          "name": "normal-counter-gate-quest"
+        },
+        {
+          "action": "text_fields",
+          "name": "patched-original-quest",
+          "as": "original"
+        },
+        {
+          "action": "assert",
+          "actual": "original-variant.language",
+          "op": "eq",
+          "expected": "original"
         }
       ]
     }

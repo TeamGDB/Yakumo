@@ -104,10 +104,10 @@
         },
         {
           "action": "assert",
-          "actual": "after.layered_models",
+          "actual": "after.hunter_files",
           "op": "ne",
           "expected": {
-            "from": "before.layered_models"
+            "from": "before.hunter_files"
           }
         },
         {

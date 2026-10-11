@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,11 @@ DEFINITIONS = runner.ROOT / 'profiles/mhp3rd/tests/device-suite'
 ACTIONS = {'fixture', 'input', 'debug', 'snapshot', 'assert', 'settings', 'tree',
            'capture', 'image', 'difference', 'restart', 'hold', 'log', 'parameter', 'reference', 'approach', 'attack',
            'installation', 'game_png'}
+ACTIONS.add('measure')
+ACTIONS.update(('audio', 'text_fields'))
+ACTIONS.add('variant')
+ACTIONS.update(('peer_start', 'peer_fixture', 'peer_snapshot', 'peer_close'))
+ACTIONS.add('focus_cycle')
 
 
 def definitions():
@@ -109,9 +115,19 @@ class Session:
         self.logs = []
         self.started = False
         self.observation_ready = False
+        self.peer = None
+        self.server = None
+        self.server_log = None
+        self.cap_deadline = deadline
 
     def prepare(self, launch=True):
         self.adapter.prepare(self.identity)
+        if isinstance(self.adapter, runner.Local):
+            self.language_env = {key: self.adapter.env.get(key) for key in
+                                 ('MHP3RD_LANGUAGE', 'MHP3RD_TRANSLATIONS_DIR', 'MHP3RD_TRACE_TEXT')}
+        if self.device.get('audio_capture') and isinstance(self.adapter, runner.Local):
+            self.adapter.env.pop('MHP3RD_NO_AUDIO', None)
+            self.adapter.env['MHP3RD_AUDIO_DUMP'] = str(self.root / 'audio.wav')
         runner.copy_fixture(self.root / 'data/ms0', self.root / 'initial-ms0')
         if (self.root / 'data/settings.ini').exists():
             runner.copy_regular_file(self.root / 'data/settings.ini', self.root / 'initial-settings.ini')
@@ -134,9 +150,23 @@ class Session:
             self.adapter.close()
             self.started = False
 
-    def restart(self, reset=False):
+    def restart(self, reset=False, retain_variant=False):
+        if reset and (getattr(self, 'peer', None) or getattr(self, 'server', None)):
+            self.close()
         self.stop()
         if reset:
+            if getattr(self, 'variant_active', False) and not retain_variant:
+                self.stage_game(Path(self.device['game_dir']))
+                for key, value in self.language_env.items():
+                    if value is None:
+                        self.adapter.env.pop(key, None)
+                    else:
+                        self.adapter.env[key] = value
+                if self.device.get('translation'):
+                    target = checks.confined(self.root, 'translations/selected.lang')
+                    target.unlink()
+                    runner.copy_regular_file(self.device['translation'], target)
+                self.variant_active = False
             target = self.data_root / 'ms0'
             if target.is_symlink():
                 raise ValueError('Owned save tree became a link')
@@ -180,9 +210,11 @@ class Session:
             if performance:
                 suffix = ' perf'
             if probe:
-                if len(probe) != 3 or any(type(value) is not int or not 0 <= value <= 0xFFFFFFFF for value in probe):
+                kind = 'field' if isinstance(probe, dict) else 'text'
+                values = [probe['base'], probe['ref']] if kind == 'field' else probe
+                if len(values) != (2 if kind == 'field' else 3) or any(type(value) is not int or not 0 <= value <= 0xFFFFFFFF for value in values):
                     raise ValueError('Text probe needs numeric block/table/index')
-                suffix = ' text ' + ' '.join(map(str, probe))
+                suffix = ' ' + kind + ' ' + ' '.join(map(str, values))
             self.adapter.send('debug', 'observe ' + str(request) + suffix)
             while True:
                 complete = self.adapter.text()
@@ -197,6 +229,8 @@ class Session:
                             sample['_wall_seconds'] = time.monotonic()
                             self.samples.append({key: value for key, value in sample.items() if key != 'frame_ms'})
                             self.samples = self.samples[-128:]
+                            if until and set(until) - set(sample):
+                                raise runner.NotTested('Required observation fields are unavailable: ' + ', '.join(sorted(set(until) - set(sample))))
                             if until is None or condition(sample, until):
                                 return sample
                             break
@@ -253,13 +287,38 @@ class Session:
             path.write_bytes(data)
         return path
 
+    def tree(self, name):
+        if name != 'data' and not name.startswith('data/'):
+            raise ValueError('File inventories require an owned app data path')
+        if not isinstance(self.adapter, runner.Adb):
+            target = checks.confined(self.root, (self.data_root / name[5:]).relative_to(self.root).as_posix())
+            return checks.inventory(target)
+        remote = 'files/device-testing/' + name
+        listed = self.adapter.app('find ' + runner.shlex.quote(remote) + ' -type f -print').decode('utf-8').splitlines()
+        if not 1 <= len(listed) <= 4096:
+            raise checks.CheckFailed('Missing or oversized owned app file tree')
+        result = {}
+        for entry in listed:
+            if not entry.startswith(remote + '/'):
+                raise ValueError('App file inventory escaped its root')
+            relative = entry[len(remote) + 1:]
+            checks.confined(self.root, name + '/' + relative)
+            if relative in result:
+                raise ValueError('Duplicate inventory file')
+            output = self.adapter.app('sha256sum ' + runner.shlex.quote(entry)).decode('utf-8')
+            digest = output.split()[0]
+            if not re.fullmatch('[a-f0-9]{64}', digest):
+                raise ValueError('Invalid remote file fingerprint')
+            result[relative] = digest
+        return result
+
     def installation(self, unicode=False, update=False):
         if not isinstance(self.adapter, runner.Local):
             raise runner.NotTested('Desktop installer/portable variant requires a local host artifact')
         if update and not self.device.get('baseline_binary'):
             raise runner.NotTested('Update needs a distinct pinned baseline artifact')
         self.stop()
-        directory = self.root / ('portable-ユニコード' if unicode else 'installation')
+        directory = self.root / ('portable-unicode-\u03a9' if unicode else 'installation')
         directory.mkdir()
         data = directory / 'data'
         data.mkdir()
@@ -315,9 +374,123 @@ class Session:
                 'baseline_sha256': baseline_hash, 'eboot_sha256': eboot_hash,
                 'settings_preserved': True, 'portable': unicode}
 
-    def close(self):
+    def variant(self, name):
+        variant = self.device.get('game_variants', {}).get(name)
+        if not variant:
+            raise runner.NotTested('Verified private image/language variant is unavailable: ' + name)
+        if not isinstance(self.adapter, runner.Local):
+            raise runner.NotTested('Image/language variant staging requires a native local/SSH session')
+        directory = Path(variant['game_dir'])
+        if runner.fingerprint(directory / 'disc.iso') != variant['game_sha256']:
+            raise ValueError('Variant game image differs from its verified fingerprint')
         self.stop()
-        (self.root / 'run.log').write_text('\n'.join(self.logs), encoding='utf-8')
+        self.stage_game(directory)
+        language_hash = None
+        if variant.get('translation'):
+            source = variant['translation']
+            language_hash = runner.fingerprint(source)
+            if language_hash != variant['translation_sha256']:
+                raise ValueError('Variant language fixture changed')
+            translations = self.root / 'translations'
+            translations.mkdir(exist_ok=True)
+            target = translations / 'selected.lang'
+            target.unlink(missing_ok=True)
+            runner.copy_regular_file(source, target)
+            self.adapter.env['MHP3RD_TRANSLATIONS_DIR'] = str(translations)
+        self.adapter.env['MHP3RD_LANGUAGE'] = variant['language']
+        self.adapter.env['MHP3RD_TRACE_TEXT'] = '1'
+        self.variant_active = True
+        self.restart(reset=True, retain_variant=True)
+        return {'variant': name, 'game_sha256': variant['game_sha256'], 'language': variant['language'],
+                'translation_sha256': language_hash, 'eboot_sha256': runner.fingerprint(self.data_root / 'EBOOT.ELF')}
+
+    def stage_game(self, directory):
+        checks.confined(self.root, self.data_root.relative_to(self.root).as_posix())
+        for filename in ('EBOOT.ELF', 'disc.iso'):
+            target = self.data_root / filename
+            target.unlink()
+            source = (directory / filename).resolve()
+            if filename == 'EBOOT.ELF':
+                runner.copy_regular_file(source, target)
+            else:
+                try:
+                    target.symlink_to(source)
+                except OSError:
+                    os.link(source, target)
+
+    def close(self):
+        try:
+            if getattr(self, 'peer', None):
+                self.peer.close()
+                self.logs.extend(self.peer.logs)
+                self.peer = None
+        finally:
+            try:
+                runner.stop_process(getattr(self, 'server', None))
+                self.server = None
+                if getattr(self, 'server_log', None):
+                    self.server_log.close()
+            finally:
+                self.stop()
+                (self.root / 'run.log').write_text('\n'.join(self.logs), encoding='utf-8')
+
+    def open_peer(self):
+        if not isinstance(self.adapter, runner.Local):
+            raise runner.NotTested('Two-peer coordinator currently requires a native local/SSH host')
+        if self.peer is not None or self.server is not None:
+            raise ValueError('Owned peer/server already exists')
+        self.stop()
+        # Claim two adjacent loopback ports without taking over an existing server.
+        with socket.socket() as match, socket.socket() as relay:
+            match.bind(('127.0.0.1', 0))
+            port = match.getsockname()[1]
+            if port >= 65535:
+                raise runner.NotTested('No usable bounded loopback port pair')
+            relay.bind(('127.0.0.1', port + 1))
+        root = self.root / 'peer'
+        root.mkdir()
+        config = copy.deepcopy(self.device)
+        config.pop('audio_capture', None)
+        self.peer = Session(config, root, self.deadline)
+        self.peer.prepare(launch=False)
+        for index, participant in enumerate((self, self.peer)):
+            path = participant.file('data/settings.ini')
+            with path.open('a', encoding='utf-8') as output:
+                output.write(f'\nnetwork.adhoc=1\nnetwork.server=127.0.0.1:{port}\n'
+                             f'network.mac=02:31:00:00:00:{index + 1:02x}\nnetwork.nickname=suite-peer-{index}\n')
+        self.server_log = (self.root / 'server.log').open('wb')
+        self.server = subprocess.Popen([sys.executable, str(Path(runner.__file__).resolve()), '_supervise',
+            str(runner.remaining(self.cap_deadline, 1800)), str(self.adapter.binary), '--adhoc-server', str(port)],
+            stdin=subprocess.DEVNULL, stdout=self.server_log, stderr=subprocess.STDOUT)
+        self.start()
+        self.peer.start()
+        return {'peer_artifact_sha256': self.peer.identity['artifact_sha256'],
+                'peer_fixture_sha256': self.peer.identity['fixture_sha256'], 'port': port}
+
+    def activate(self):
+        if not isinstance(self.adapter, runner.Local):
+            raise runner.NotTested('Native desktop activation is unavailable on this adapter')
+        pid = self.snapshot()['host_pid']
+        if type(pid) is not int or pid <= 1 or not self.adapter.alive():
+            raise ValueError('No live owned game PID')
+        if os.name != 'nt':
+            parent = runner.command(['ps', '-o', 'ppid=', '-p', str(pid)], self.deadline).decode().strip()
+            if parent != str(self.adapter.process.pid):
+                raise ValueError('Activation PID is not the supervised game child')
+        if sys.platform == 'darwin':
+            code = "ObjC.import('AppKit'); var app=$.NSRunningApplication.runningApplicationWithProcessIdentifier(" + str(pid) + "); app.activateWithOptions(3);"
+            runner.command(['osascript', '-l', 'JavaScript', '-e', code], self.deadline)
+        elif os.name == 'nt':
+            code = "$p=Get-CimInstance Win32_Process -Filter 'ProcessId=" + str(pid) + "'; if ($p.ParentProcessId -ne " + str(self.adapter.process.pid) + ") { throw 'Not the supervised child' }; (New-Object -ComObject WScript.Shell).AppActivate(" + str(pid) + ")"
+            runner.command(['powershell', '-NoProfile', '-Command', code], self.deadline)
+        elif shutil.which('xdotool'):
+            windows = runner.command(['xdotool', 'search', '--pid', str(pid)], self.deadline).decode().splitlines()
+            if len(windows) != 1 or not windows[0].isdecimal():
+                raise runner.NotTested('Desktop cannot identify exactly one owned game window')
+            runner.command(['xdotool', 'windowactivate', '--sync', windows[0]], self.deadline)
+        else:
+            raise runner.NotTested('Desktop activation needs xdotool on this host')
+        return self.snapshot(until={'focus': True})
 
 
 def resolve(value, context, parameters):
@@ -402,6 +575,91 @@ def attack(session, target, deadline, strikes=3):
         time.sleep(.1)
 
 
+def measure(session, profile_name, device, deadline, scenario_hash):
+    """Collect six real runs before deriving a noise-aware non-regression budget."""
+    profile = device.get('performance_profiles', {}).get(profile_name)
+    if not profile or not device.get('baseline_commit') or not device.get('baseline_sha256'):
+        raise runner.NotTested('Performance needs a pinned observable baseline and finite workload profile')
+    if device['adapter'] != 'local':
+        raise runner.NotTested('Repeated performance collection currently requires a native local/SSH session')
+    for key in ('prepare', 'route'):
+        validate_program(profile[key], fixture=True)
+    if profile.get('execution_mode') not in ('aot', 'interpreter'):
+        raise ValueError('Declare one execution mode per comparison')
+    session.stop()
+    results, identity = {'baseline': [], 'candidate': []}, None
+    try:
+        for artifact in results:
+            for repetition in range(3):
+                runner.remaining(deadline)
+                config = copy.deepcopy(device)
+                config.pop('audio_capture', None)
+                if artifact == 'baseline':
+                    config.update(binary=device['baseline_binary'], commit=device['baseline_commit'],
+                                  artifact_sha256=device['baseline_sha256'])
+                root = session.root / f'perf-{runner.safe_name(profile_name)}-{artifact}-{repetition}'
+                root.mkdir()
+                child = Session(config, root, deadline)
+                started = time.monotonic()
+                try:
+                    child.prepare()
+                    child.snapshot(until={'task': 'demo_task.ovl'})
+                    startup_ms = (time.monotonic() - started) * 1000
+                    loading = time.monotonic()
+                    execute(child, profile['prepare'], {}, {}, config, deadline)
+                    loaded = child.snapshot(until=profile['state'])
+                    load_ms = [(time.monotonic() - loading) * 1000]
+                    settings_hash = runner.fingerprint(child.file('data/settings.ini'))
+                    execute(child, profile['route'], {}, {}, config, deadline)
+                    child.snapshot(timeout=10, until={'vblanks': {'op': 'ge', 'value': loaded['vblanks'] + 120}})
+                    speeds, seconds_seen = [], set()
+                    steady = time.monotonic() + 7
+                    while time.monotonic() < steady or len(speeds) < 3:
+                        sample = child.snapshot(performance=True)
+                        if sample['fast_forward'] or sample['fast_loading'] or sample['quest_cheats'] or sample['photo']:
+                            raise checks.CheckFailed('Timing route is accelerated, paused or uses quest cheats')
+                        perf_lines = re.findall(r'\[perf\] fps [^\n]+', child.adapter.text())
+                        # A new logged second is independent of observation polling frequency.
+                        if len(perf_lines) not in seconds_seen and sample.get('perf_valid'):
+                            seconds_seen.add(len(perf_lines))
+                            speeds.append(sample['speed_percent'])
+                        time.sleep(min(.2, runner.remaining(deadline)))
+                    path = child.capture('timing-resolution')
+                    width, height, _ = checks.pixels(checks.confined(root, path))
+                    gpu = re.findall(r'^\[gpu\] (.+driver .+)$', child.adapter.text(), re.M)
+                    if len(gpu) != 1:
+                        raise runner.NotTested('Actual GPU/driver identity is unavailable or changed')
+                    current = {'device': device.get('hardware', {}).get('device', device.get('name', 'local')),
+                               'gpu': gpu[0], 'driver': gpu[0], 'resolution': [width, height],
+                               'execution_mode': profile['execution_mode'],
+                               'route_sha256': runner.object_hash(profile),
+                               'fixture_sha256': child.identity['fixture_sha256'],
+                               'settings_sha256': settings_hash, 'scenario_sha256': scenario_hash}
+                    identity = identity or current
+                    checks.compare(current, 'eq', identity)
+                    results[artifact].append({'identity': current, 'artifact_sha256': child.identity['artifact_sha256'],
+                        'source_commit': config['commit'], 'game_sha256': child.identity['game_sha256'],
+                        'warmup_frames': (sample['vblanks'] - loaded['vblanks']) // 2,
+                        'frame_ms': sample['frame_ms'], 'speed_percent': speeds,
+                        'startup_ms': startup_ms, 'load_ms': load_ms, 'presented_fps': sample['presented_fps']})
+                finally:
+                    child.close()
+                    session.logs.extend(child.logs)
+        calibration = checks.performance_comparison(results['baseline'], results['candidate'], identity)
+        budget = {}
+        for metric, value in calibration['metrics'].items():
+            if value['baseline_spread'] > max(1, value['baseline'] * .2):
+                raise runner.NotTested('Baseline noise is too large for a regression decision: ' + metric)
+            budget[metric] = max(value['baseline_spread'] * 2,
+                                 1 if metric == 'speed_percent' else value['baseline'] * .05)
+        comparison = checks.performance_comparison(results['baseline'], results['candidate'], identity, budget)
+        checks.compare(comparison['metrics']['speed_percent']['candidate'], 'ge', 99)
+        return {'runs': results, 'calibration': calibration, 'budget': budget, 'comparison': comparison}
+    finally:
+        session.deadline = session.adapter.deadline = deadline
+        session.start()
+
+
 def execute(session, steps, context, parameters, device, deadline):
     assertions = 0
     for step in steps:
@@ -418,8 +676,8 @@ def execute(session, steps, context, parameters, device, deadline):
             if action == 'debug':
                 if device['build'] != 'dev' or step['value'].split()[0] not in ('quest', 'state', 'peek', 'table'):
                     raise runner.NotTested('Only declared developer navigation/read commands are supported')
-                if step['value'].startswith('quest start') and parameters.get('multiplayer'):
-                    raise ValueError('Quest shortcuts are forbidden in multiplayer')
+                if step['value'].startswith('quest ') and parameters.get('multiplayer'):
+                    raise ValueError('Quest mutations and shortcuts are forbidden in multiplayer')
             context['_log_offset'] = len(session.adapter.text())
             session.adapter.send(action, step['value'])
         elif action == 'snapshot':
@@ -452,9 +710,7 @@ def execute(session, steps, context, parameters, device, deadline):
                 runner.remaining(limit)
                 time.sleep(.1)
         elif action == 'tree':
-            if isinstance(session.adapter, runner.Adb):
-                raise runner.NotTested('Remote tree inventory transport is not implemented')
-            context[name] = checks.inventory(checks.confined(session.root, step['path']))
+            context[name] = session.tree(step['path'])
         elif action == 'capture':
             context[name] = session.capture(name)
         elif action == 'reference':
@@ -517,6 +773,87 @@ def execute(session, steps, context, parameters, device, deadline):
             context[name] = session.installation(step.get('unicode', False), step.get('update', False))
         elif action == 'game_png':
             context[name] = session.game_png()
+        elif action == 'measure':
+            context[name] = measure(session, step['profile'], device, deadline, runner.object_hash(steps))
+        elif action == 'audio':
+            if not device.get('audio_capture'):
+                raise runner.NotTested('Guest PCM capture is unavailable in this artifact/session contract')
+            limit = min(deadline, time.monotonic() + step.get('timeout', 20))
+            while True:
+                try:
+                    context[name] = checks.audio_content(checks.confined(session.root, 'audio.wav'))
+                    assertions += 1
+                    break
+                except (OSError, checks.CheckFailed):
+                    runner.remaining(limit)
+                    time.sleep(.2)
+        elif action == 'text_fields':
+            rows = parameters.get(step['name'])
+            if not rows:
+                raise runner.NotTested('Independent source/language field expectations are missing: ' + step['name'])
+            if not isinstance(rows, list) or not 1 <= len(rows) <= 4096:
+                raise ValueError('Text checks need 1..4096 bounded field expectations')
+            context[name] = []
+            for row in rows:
+                if row.get('coverage') not in ('covered', 'original-fallback') or not isinstance(row['expected_hex'], str):
+                    raise ValueError('Distinguish missing language keys from runtime failures')
+                probe = row['probe']
+                if isinstance(probe, dict) and 'active_ref_delta' in probe:
+                    active = session.snapshot(until={'on_quest': True})
+                    delta = probe['active_ref_delta']
+                    if type(delta) is not int or not 0 <= delta < 65536 or delta % 4:
+                        raise ValueError('Active field references must come from the validated source catalog')
+                    probe = {'base': 0x08A3A630, 'ref': active['active_record_offset'] + delta}
+                elif isinstance(probe, dict) and 'entry' in probe:
+                    limit = min(deadline, time.monotonic() + step.get('timeout', 20))
+                    while True:
+                        loaded = session.snapshot()
+                        block = next((item for item in loaded.get('text_blocks', []) if item['entry'] == probe['entry'] and item['address']), None)
+                        if block:
+                            probe = {'base': block['address'], 'ref': probe['ref']}
+                            break
+                        runner.remaining(limit)
+                        time.sleep(.1)
+                sample = session.snapshot(timeout=step.get('timeout', 20), probe=probe,
+                                          until={'text_hex': row['expected_hex']})
+                checks.compare(sample['text_hex'], 'eq', row['expected_hex'])
+                context[name].append({'coverage': row['coverage'], 'probe': probe,
+                                      'expected_hex': row['expected_hex'], 'observed_hex': sample['text_hex'],
+                                      'request': sample['request']})
+                assertions += 1
+        elif action == 'variant':
+            context[name] = session.variant(step['name'])
+        elif action == 'peer_start':
+            context[name] = session.open_peer()
+        elif action in ('peer_fixture', 'peer_snapshot', 'peer_close'):
+            if not session.peer:
+                raise runner.NotTested('An independently owned second game peer is required')
+            session.peer.deadline = session.peer.adapter.deadline = deadline
+            if action == 'peer_fixture':
+                fixture = session.peer.device.get('suite_fixtures', {}).get(step['name'])
+                if not fixture:
+                    raise runner.NotTested('Missing finite peer navigation: ' + step['name'])
+                validate_program(fixture, fixture=True)
+                context[name] = {}
+                assertions += execute(session.peer, fixture, context[name], {**parameters, 'multiplayer': True},
+                                      session.peer.device, deadline)
+            elif action == 'peer_snapshot':
+                context[name] = session.peer.snapshot(step.get('timeout', 20), step.get('until'))
+                checks.compare(context[name]['quest_cheats'], 'eq', False)
+            else:
+                session.peer.close()
+                session.logs.extend(session.peer.logs)
+                session.peer = None
+        elif action == 'focus_cycle':
+            before = session.activate()
+            session.adapter.send('input', '0:window minimize')
+            background = session.snapshot(until={'focus': False})
+            session.adapter.send('input', '0:window restore')
+            returned = session.activate()
+            checks.compare(returned['clock_us'], 'gt', before['clock_us'])
+            checks.compare(returned['pad_buttons'], 'eq', 0)
+            context[name] = {'before': before, 'background': background, 'returned': returned}
+            assertions += 4
     return assertions
 
 
@@ -539,6 +876,7 @@ def run_device(device, name, suite, root, seconds):
         runner.remaining(deadline)
         deadline = min(hard_deadline, time.monotonic() + seconds)
         session.deadline = session.adapter.deadline = deadline
+        session.cap_deadline = deadline
         session.start()
         report['launched'] = True
         report.update(session.identity)
@@ -657,7 +995,13 @@ def ssh_device(device, name, definitions, root, seconds):
 def streaming_device(device, name, definitions, root, seconds):
     if not 1 <= seconds <= 300 or device.get('setup_seconds'):
         raise ValueError('Streaming has one inclusive cap of at most 300 seconds; no setup extension')
-    ledger_path = Path(device['reservation_ledger'])
+    ledger_name = os.path.normcase(os.path.realpath(device['reservation_ledger']))
+    private_root = os.path.normcase(os.path.realpath(runner.ROOT / 'out'))
+    temporary_root = os.path.normcase(os.path.realpath(tempfile.gettempdir()))
+    if not (ledger_name.startswith(private_root.rstrip(os.sep) + os.sep) or
+            ledger_name.startswith(temporary_root.rstrip(os.sep) + os.sep)):
+        raise ValueError('Reservation ledger must remain in private out/ or temporary storage')
+    ledger_path = Path(ledger_name)
     ledger = runner.read_json(ledger_path)
     if ledger.get('issue') != 310 or ledger.get('allowance') != 2 or ledger.get('maximum_seconds') != 300:
         raise ValueError('Streaming requires the task-specific private two-attempt ledger')
@@ -778,7 +1122,7 @@ def main(argv=None):
     render(root, report)
     print('Private suite evidence: ' + str(root), flush=True)
     for index, (name, device) in enumerate(devices):
-        target = root / runner.safe_name(name)
+        target = checks.confined(root, runner.safe_name(name))
         target.mkdir()
         function = ssh_device if device['adapter'] == 'ssh' else streaming_device if device['adapter'] == 'streaming' else run_device
         try:

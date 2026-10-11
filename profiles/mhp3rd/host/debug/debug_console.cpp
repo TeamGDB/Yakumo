@@ -11,6 +11,9 @@
 #include "kernel/fast_forward.hpp"
 #include "adhoc/session.hpp"
 #include "adhoc/client.hpp"
+#include "audio/audio_sink.hpp"
+#include "text/translation.hpp"
+#include "game/layered_armor.hpp"
 #if defined(MHP3RD_HAS_RENDERER)
 #include "camera/free_camera.hpp"
 #include "camera/game_camera.hpp"
@@ -29,6 +32,11 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace mhp3rd::debug {
 namespace {
@@ -125,7 +133,7 @@ std::vector<std::string> run_command(Ram &ram, const std::string &line) {
         const char *mode = std::getenv("MHP3RD_DEVICE_TEST");
         if (mode == nullptr || std::string(mode) != "1")
             return {"observation unavailable: explicit developer test mode required"};
-        game_command(ram, command, args, out);
+        game_command(ram, command, args, out, game::layered::observed_hunter(kernel().runtime().memory()));
         std::string &json = out.front();
         json.pop_back();
         json += ",\"clock_us\":" + std::to_string(kernel().now_us()) +
@@ -140,6 +148,21 @@ std::vector<std::string> run_command(Ram &ram, const std::string &line) {
         const auto cheats = held_cheats();
         json += ",\"quest_cheats\":" +
             std::string(cheats.health || cheats.stamina || cheats.timer || cheats.one_hit ? "true" : "false");
+        json += ",\"audio_device\":" + std::string(audio::AudioSink::instance().has_device() ? "true" : "false") +
+            ",\"audio_gain\":" + std::to_string(audio::AudioSink::instance().output_gain());
+        json += ",\"text_blocks\":[";
+        bool first_block = true;
+        for (const auto &block : text::applied_blocks()) {
+            if (!first_block) json += ',';
+            first_block = false;
+            json += "{\"entry\":" + std::to_string(block.entry) + ",\"address\":" + std::to_string(block.address) + '}';
+        }
+        json += ']';
+#if defined(_WIN32)
+        json += ",\"host_pid\":" + std::to_string(_getpid());
+#else
+        json += ",\"host_pid\":" + std::to_string(getpid());
+#endif
 #if defined(MHP3RD_HAS_RENDERER)
         const auto free = camera::free_camera_status();
         json += ",\"camera_target\":";
@@ -151,7 +174,10 @@ std::vector<std::string> run_command(Ram &ram, const std::string &line) {
         json += ",\"free_camera\":" + std::string(free.active ? "true" : "false") +
             ",\"photo\":" + (free.paused ? "true" : "false") +
             ",\"hud_hidden\":" + (gpu::hud::active() ? "true" : "false") +
+            ",\"hud_requested\":" + (gpu::hud::hidden() ? "true" : "false") +
+            ",\"hud_available\":" + (gpu::hud::available() ? "true" : "false") +
             ",\"lock_on\":" + (camera::lock_on_status().locked ? "true" : "false");
+        json += ",\"lock_target\":" + std::to_string(camera::lock_on_status().target);
         if (auto *renderer = active_renderer(); renderer && renderer->available()) {
             const auto pad = renderer->pad();
             const auto view = renderer->camera();
@@ -164,6 +190,11 @@ std::vector<std::string> run_command(Ram &ram, const std::string &line) {
             if (args.size() == 2u && args[1] == "perf") {
                 const auto &summary = perf::last_second();
                 json += ",\"perf_valid\":" + std::string(summary.valid ? "true" : "false") +
+                    ",\"perf_second\":" + std::to_string(summary.second) +
+                    ",\"target_width\":" + std::to_string(renderer->target_size()[0]) +
+                    ",\"target_height\":" + std::to_string(renderer->target_size()[1]) +
+                    ",\"window_width\":" + std::to_string(summary.width) +
+                    ",\"window_height\":" + std::to_string(summary.height) +
                     ",\"speed_percent\":" + std::to_string(summary.speed * 100.0) +
                     ",\"game_fps\":" + std::to_string(summary.game_fps) +
                     ",\"presented_fps\":" + std::to_string(summary.fps) + ",\"frame_ms\":[";

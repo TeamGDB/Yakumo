@@ -10,18 +10,36 @@
 
 #include <array>
 #include <chrono>
+#include <charconv>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <iostream>
+#include <stdexcept>
 
 namespace mhp3rd {
 namespace {
 
 // Epoch the virtual PSP clock starts at, so guest wall time advances with it.
 std::uint64_t boot_unix_us() {
-    static const std::uint64_t value = static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch())
-            .count());
+    static const std::uint64_t value = [] {
+#if defined(MHP3RD_DEBUG_MENU) || defined(MHP3RD_DEVICE_CLOCK_TEST)
+        const char *mode = std::getenv("MHP3RD_DEVICE_TEST");
+        const char *seed = std::getenv("MHP3RD_DEVICE_TEST_RTC_US");
+        if (mode && std::strcmp(mode, "1") == 0 && seed) {
+            std::uint64_t epoch = 0u;
+            const auto parsed = std::from_chars(seed, seed + std::strlen(seed), epoch);
+            if (parsed.ec != std::errc{} || parsed.ptr != seed + std::strlen(seed) || epoch < 946684800000000ull ||
+                epoch > 4102444800000000ull)
+                throw std::invalid_argument("invalid developer device-test RTC epoch");
+            std::cout << "[device-test] RTC epoch " << epoch << " us\n";
+            return epoch;
+        }
+#endif
+        return static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch())
+                .count());
+    }();
     return value;
 }
 

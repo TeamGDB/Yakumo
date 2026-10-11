@@ -1037,6 +1037,7 @@ target_compile_definitions(mhp3rd_imgui_font_bitmap_tests PRIVATE TEST_IMGUI_STB
 
 # Synthetic HLE suites link the real headless host with a public empty registry.
 add_library(mhp3rd_test_host STATIC ${MHP3RD_HOST_SOURCES} host/generated_stub.cpp "${MHP3RD_NIDS_INC}")
+target_compile_definitions(mhp3rd_test_host PRIVATE MHP3RD_DEVICE_CLOCK_TEST=1)
 target_include_directories(mhp3rd_test_host PUBLIC
     "${MHP3RD_PROFILE_DIR}/host" "${MHP3RD_PROFILE_DIR}/third_party"
     "${CMAKE_CURRENT_BINARY_DIR}/generated_nids")
@@ -1069,6 +1070,18 @@ set_target_properties(mhp3rd_kernel_hle_tests PROPERTIES RUNTIME_OUTPUT_DIRECTOR
 if(PSPRECOMP_BUILD_TESTS)
     add_test(NAME mhp3rd_kernel_hle_tests COMMAND mhp3rd_kernel_hle_tests)
     set_tests_properties(mhp3rd_kernel_hle_tests PROPERTIES TIMEOUT 60 ENVIRONMENT "MHP3RD_NO_RENDER=1;MHP3RD_TRACE_OSK=1")
+    add_test(NAME mhp3rd_device_clock_fixed COMMAND mhp3rd_kernel_hle_tests --rtc-fixed)
+    add_test(NAME mhp3rd_device_clock_normal COMMAND mhp3rd_kernel_hle_tests --rtc-real)
+    add_test(NAME mhp3rd_device_clock_invalid COMMAND mhp3rd_kernel_hle_tests --rtc-invalid)
+    add_custom_target(mhp3rd_device_clock_fixed DEPENDS mhp3rd_kernel_hle_tests)
+    add_custom_target(mhp3rd_device_clock_normal DEPENDS mhp3rd_kernel_hle_tests)
+    add_custom_target(mhp3rd_device_clock_invalid DEPENDS mhp3rd_kernel_hle_tests)
+    set_tests_properties(mhp3rd_device_clock_fixed PROPERTIES TIMEOUT 10 ENVIRONMENT
+        "MHP3RD_NO_RENDER=1;MHP3RD_DEVICE_TEST=1;MHP3RD_DEVICE_TEST_RTC_US=1609459200000000")
+    set_tests_properties(mhp3rd_device_clock_normal PROPERTIES TIMEOUT 10 ENVIRONMENT
+        "MHP3RD_NO_RENDER=1;MHP3RD_DEVICE_TEST=0;MHP3RD_DEVICE_TEST_RTC_US=1609459200000000")
+    set_tests_properties(mhp3rd_device_clock_invalid PROPERTIES TIMEOUT 10 ENVIRONMENT
+        "MHP3RD_NO_RENDER=1;MHP3RD_DEVICE_TEST=1;MHP3RD_DEVICE_TEST_RTC_US=1609459200000000junk")
 endif()
 
 add_executable(mhp3rd_media_tests
