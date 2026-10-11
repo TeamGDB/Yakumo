@@ -46,5 +46,17 @@
   "profiles/mhp3rd/host/platform/android_display.hpp": {
     "sha256": "90e5ee597fbc6e1b5f91702c3fc588813a1065be286e1c415b2ec82107336843",
     "reason": "Reviewed opaque type and function declarations only; no executable code is exempted. The runtime API adapter and frame-rate policy remain subject to normal diff coverage."
+  },
+  "profiles/mhp3rd/host/camera/game_camera.hpp": {
+    "sha256": "2b329a57dc0aa3f48ceba6814475efc1fee3f0f2cf2ab0e51f85f3ee024e6c24",
+    "reason": "Reviewed include and read-only follow-point declaration only; no executable header body changed. Valid, stale, nonfinite and foreign-runtime cases are exercised in analog_camera_tests.cpp; implementation mappings keep the normal diff gate."
+  },
+  "profiles/mhp3rd/host/debug/game_state.hpp": {
+    "sha256": "932f726319efbccfc87c967d20ddacfd227cb91d3c1d077555d1637379038d14",
+    "reason": "Reviewed optional observed-actor parameter declaration only. Dynamic actor coordinates and loaded files, invalid roles and unchanged guest memory are verified in debug_tools_tests.cpp; no executable body is exempted."
+  },
+  "profiles/mhp3rd/host/ui/input_script.hpp": {
+    "sha256": "68d61cf3e90826eaa3ca013eb65f166436a81b4777cd9cf83c45878ef97f5e94",
+    "reason": "Reviewed documentation-only additions for physical scancodes and owned window lifecycle commands. Parsing, input/release behavior and rejection cases are tested in the out-of-line implementation; no executable header body changed."
   }
 }

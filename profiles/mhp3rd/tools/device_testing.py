@@ -185,14 +185,23 @@ def output_directory(parent):
     elif parent == output:
         parent = output
     elif parent.startswith(temporary.rstrip(os.sep) + os.sep):
-        pass
+        parent = output_descendant(temporary, os.path.relpath(parent, temporary))
     elif parent.startswith(output.rstrip(os.sep) + os.sep):
-        pass
+        parent = output_descendant(output, os.path.relpath(parent, output))
     else:
         raise ValueError('Output parent must exist under repository out/ or the OS temporary directory')
     if not os.path.isdir(parent):
         raise ValueError('Output parent must be an existing directory')
     return Path(tempfile.mkdtemp(prefix='yakumo-device-', dir=parent))
+
+
+def output_descendant(root, relative):
+    """Resolve an explicitly allowed output subtree before filesystem access."""
+    root = os.path.normcase(os.path.realpath(root))
+    destination = os.path.normcase(os.path.realpath(os.path.join(root, relative)))
+    if not destination.startswith(root.rstrip(os.sep) + os.sep):
+        raise ValueError('Output subtree escapes the allowed root')
+    return destination
 
 
 def copy_fixture(source, destination):

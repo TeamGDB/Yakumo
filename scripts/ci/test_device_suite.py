@@ -486,6 +486,71 @@ class ExtendedSuiteTests(unittest.TestCase):
             with self.assertRaises(runner.NotTested):
                 suite.execute(session, [{'action': 'audio', 'as': 'audio'}], {}, {}, device, session.deadline)
 
+    def test_repeated_measurement_calibrates_and_rejects_acceleration(self):
+        from test_device_checks import png
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            parent = mock.Mock(root=root, logs=[])
+            profile = {'prepare': [{'action': 'snapshot', 'as': 'loaded'}],
+                       'route': [{'action': 'input', 'value': '0:axis leftx 0'}],
+                       'state': {'loaded': True}, 'execution_mode': 'aot'}
+            config = {'adapter': 'local', 'commit': 'c' * 40, 'baseline_commit': 'b' * 40,
+                      'baseline_binary': 'baseline', 'baseline_sha256': 'b' * 64,
+                      'performance_profiles': {'route': profile}}
+            created = []
+            accelerated = False
+            class Child:
+                def __init__(self, device, directory, deadline):
+                    self.root = directory
+                    self.logs = ['retained actual timing stream']
+                    self.adapter = Adapter()
+                    self.adapter.text = self.text
+                    self.identity = {'artifact_sha256': device.get('artifact_sha256', 'c' * 64),
+                                     'fixture_sha256': 'f' * 64, 'game_sha256': 'g' * 64}
+                    self.counter = 0
+                    self.closed = False
+                    created.append(self)
+                def prepare(self):
+                    (self.root / 'settings.ini').write_text('video.scale=1\n')
+                def snapshot(self, *args, **kwargs):
+                    self.counter += 1
+                    return {'loaded': True, 'vblanks': self.counter * 120, 'fast_forward': accelerated,
+                            'fast_loading': False, 'quest_cheats': False, 'photo': False, 'perf_valid': True,
+                            'speed_percent': 100, 'presented_fps': 120, 'frame_ms': [33.3] * 192}
+                def text(self):
+                    return '[gpu] synthetic GPU, driver test\n' + '[perf] fps 120 game 30 speed 100%\n' * self.counter
+                def file(self, name):
+                    return self.root / 'settings.ini'
+                def capture(self, name):
+                    (self.root / 'capture.png').write_bytes(png(8, 8, bytes(range(192))))
+                    return 'capture.png'
+                def close(self):
+                    self.closed = True
+            clock = [0.0]
+            def tick():
+                clock[0] += .25
+                return clock[0]
+            with mock.patch.object(suite, 'Session', Child), mock.patch.object(suite.time, 'monotonic', tick), \
+                    mock.patch.object(suite.time, 'sleep'):
+                result = suite.measure(parent, 'route', config, 1000, 's' * 64)
+            self.assertTrue(result['comparison']['threshold_enabled'])
+            self.assertEqual([len(result['runs'][x]) for x in ('baseline', 'candidate')], [3, 3])
+            self.assertEqual(result['comparison']['metrics']['speed_percent']['candidate'], 100)
+            self.assertTrue(all(child.closed for child in created))
+            self.assertEqual(len(parent.logs), 6)
+            for path in root.glob('perf-*'):
+                import shutil
+                shutil.rmtree(path)
+            accelerated = True
+            with mock.patch.object(suite, 'Session', Child), mock.patch.object(suite.time, 'monotonic', tick), \
+                    mock.patch.object(suite.time, 'sleep'):
+                with self.assertRaises(checks.CheckFailed):
+                    suite.measure(parent, 'route', config, 1000, 's' * 64)
+            self.assertTrue(created[-1].closed)
+            self.assertEqual(parent.start.call_count, 2)
+            with self.assertRaises(runner.NotTested):
+                suite.measure(parent, 'missing', config, 1000, 's' * 64)
+
 
 if __name__ == '__main__':
     unittest.main()
