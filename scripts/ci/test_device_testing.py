@@ -384,6 +384,36 @@ class DeviceTests(unittest.TestCase):
             process.stdout.close()
             process.stderr.close()
 
+    @unittest.skipIf(os.name == 'nt', 'POSIX process group cleanup')
+    def test_finished_group_permission_race_preserves_output_limit_failure(self):
+        real_popen = subprocess.Popen
+        children = []
+        def launch(*args, **kwargs):
+            child = real_popen(*args, **kwargs)
+            children.append(child)
+            return child
+        def empty_group(pid, sig):
+            self.assertEqual(pid, children[0].pid)
+            children[0].wait(timeout=5)
+            raise PermissionError('Public empty-group race')
+        with patch.object(dt.subprocess, 'Popen', side_effect=launch), patch.object(dt.os, 'killpg', side_effect=empty_group):
+            with self.assertRaisesRegex(ValueError, 'output exceeds'):
+                dt.command([sys.executable, '-c', 'import sys; sys.stderr.write("x"*100000)'],
+                           time.monotonic()+10, output_limit=10)
+        self.assertIsNotNone(children[0].returncode)
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX process group cleanup')
+    def test_live_group_permission_failure_is_not_hidden(self):
+        child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(10)'], start_new_session=True)
+        try:
+            with patch.object(dt.os, 'killpg', side_effect=PermissionError('Public live-group refusal')):
+                with self.assertRaises(PermissionError):
+                    dt.kill_command(child, force_group=True)
+            self.assertIsNone(child.poll())
+        finally:
+            child.kill()
+            child.wait(timeout=5)
+
     def test_adb_setup_budget_does_not_extend_gameplay_or_streaming(self):
         device = dict(self.device, adapter='adb', setup_seconds=1, seconds=1)
         self.assertEqual(dt.validate_device(device)['setup_seconds'], 1)

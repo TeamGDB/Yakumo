@@ -244,6 +244,11 @@ def kill_command(process, force_group=False):
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+        except PermissionError:
+            # Darwin can reject signaling an empty group after its leader exits.
+            # A live leader still indicates a real cleanup permission failure.
+            if process.poll() is None:
+                raise
     elif process.poll() is None:
         if os.name == 'nt':
             process.kill()
