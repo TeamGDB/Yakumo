@@ -760,7 +760,10 @@ def native_contract(session, group, device, deadline):
 
 
 def quick_telemetry(session, deadline):
-    first = session.snapshot()
+    first = session.snapshot(performance=True)
+    resolution = [first.get('target_width'), first.get('target_height')]
+    if any(type(value) is not int or value <= 0 for value in resolution):
+        raise runner.NotTested('Actual render resolution is unavailable')
     session.snapshot(until={'vblanks': {'op': 'ge', 'value': first['vblanks'] + 60}})
     values, seen = [], set()
     until = min(deadline, time.monotonic() + 8)
@@ -769,6 +772,7 @@ def quick_telemetry(session, deadline):
         if sample['fast_loading'] or sample['fast_forward'] or sample['quest_cheats'] or sample['photo']:
             raise checks.CheckFailed('Quick telemetry requires an unpaused, ordinary fixed scene')
         checks.compare(sample['map'], 'eq', first['map'])
+        checks.compare([sample.get('target_width'), sample.get('target_height')], 'eq', resolution)
         if sample.get('perf_valid') and sample['perf_second'] not in seen:
             checks.compare(sample['speed_percent'], 'gt', 0)
             frames = [value for value in sample['frame_ms'][-30:] if value > 0]
@@ -781,9 +785,10 @@ def quick_telemetry(session, deadline):
         runner.remaining(until)
         time.sleep(.1)
     gpu = re.findall(r'^\[gpu\] (.+driver .+)$', session.adapter.text(), re.M)
+    if len(gpu) != 1:
+        raise runner.NotTested('Actual GPU/driver identity is unavailable or ambiguous')
     return {'collected': True, 'evidence_kind': 'real-game smoke', 'scene': first['map'], 'samples': values,
-            'gpu_driver': gpu[0] if len(gpu) == 1 else 'NOT TESTED: GPU/driver log unavailable',
-            'resolution': [sample.get('target_width'), sample.get('target_height')],
+            'gpu_driver': gpu[0], 'resolution': resolution,
             'comparison': 'Deferred: no calibrated regression budget or improvement claim'}
 
 

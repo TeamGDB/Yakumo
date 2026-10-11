@@ -640,6 +640,7 @@ class ExtendedSuiteTests(unittest.TestCase):
                      'game_fps': 25, 'presented_fps': 90, 'frame_ms': [500] * 75 + [33.3] * 25 + [90] * 5,
                      'target_width': 480, 'target_height': 272}
             samples = [scene, scene] + [{**scene, 'perf_second': n} for n in range(3)]
+            session.adapter.output += '[gpu] public fixture GPU, driver public fixture version\n'
             session.snapshot = mock.Mock(side_effect=samples)
             with mock.patch.object(suite.time, 'sleep'):
                 value = suite.quick_telemetry(session, session.deadline)
@@ -648,6 +649,17 @@ class ExtendedSuiteTests(unittest.TestCase):
             self.assertNotIn(500, value['samples'][0]['frame_ms'])
             self.assertIn('Deferred', value['comparison'])
             self.assertEqual(value['resolution'], [480, 272])
+            self.assertTrue(session.snapshot.call_args_list[0].kwargs['performance'])
+            session.adapter.output = ''
+            session.snapshot.side_effect = samples
+            with mock.patch.object(suite.time, 'sleep'), self.assertRaises(runner.NotTested):
+                suite.quick_telemetry(session, session.deadline)
+            session.snapshot.side_effect = [{**scene, 'target_width': None}]
+            with self.assertRaises(runner.NotTested):
+                suite.quick_telemetry(session, session.deadline)
+            session.snapshot.side_effect = [scene, scene, {**scene, 'target_width': 481}]
+            with self.assertRaises(checks.CheckFailed):
+                suite.quick_telemetry(session, session.deadline)
             session.snapshot.side_effect = [scene, scene, {**scene, 'fast_forward': True}]
             with self.assertRaises(checks.CheckFailed):
                 suite.quick_telemetry(session, session.deadline)
