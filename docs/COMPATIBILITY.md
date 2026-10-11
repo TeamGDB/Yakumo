@@ -366,3 +366,32 @@ these rows green. The isolated APK SHA-256 was
 source `751424a`. Cleanup passed and the owned package returned to the idle
 launcher with no game PID. The current end-to-end transfer path does not fit the
 inclusive Google cap; the private reservation ledger remains at zero attempts.
+
+## Bounded Google QUICK pilot (2026-10-12)
+
+A later explicit authorization raised the task cap to 500 seconds per reservation,
+at most two sequential attempts / 1000 seconds total. The existing private ledger
+was migrated from 300 to 500 without resetting history. The runner retains a
+300-second default and rejects 501 seconds or a separate setup extension.
+
+| Requested device | Observed capability | Result | Total reservation time |
+| --- | --- | --- | --- |
+| Pixel 5 (`redfin/30`) | Adreno 620, Vulkan 1.1.128; reported driver version 2149490688 | Setup FAIL: bounded `adb install` timed out after 180 seconds; gameplay NOT TESTED | 244.6 seconds |
+| Pixel 6 (`oriole/31`) | Mali-G78, Vulkan 1.1.177; reported driver version 134221824 | Setup FAIL: official Android CLI installation timed out after 180 seconds; gameplay NOT TESTED | 233.6 seconds |
+
+Runner sources were `171a3fa` and `fe02d74`; both attempted the existing isolated
+developer APK at native source `751424a`, SHA-256
+`a8f080a66530832854976887dcbffb529b00f5a9206ccf85db50c0cbd2016295`.
+The owned host copies and private input hashes were verified. Neither installation
+completed, so device-side game/save transfer hashes, loaded quest/framebuffer,
+controls, photo and telemetry outcomes remain NOT TESTED. No game was launched,
+and no game captures or performance comparison are claimed.
+
+Both attempts consumed their allowance and were released, with creation/removal
+and recognized final idle-list evidence retained privately. Total measured time
+was 478.2 seconds, within both per-reservation and aggregate caps. There were no
+retry reservations, cap extensions, billing/IAM/project changes or recompilation
+of the APK/AOT/355 overlays. The first report's missing partial setup identity
+prompted a runner fix that preserves verified metadata on setup failure; original
+reports remain unchanged. These GPU families do not reproduce or rule out the
+Dimensity 7025 / IMG BXM-8-256 report.

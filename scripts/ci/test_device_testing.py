@@ -548,7 +548,7 @@ elif args[0] == 'logcat':
     @unittest.skipIf(os.name == 'nt', 'Raw upload is explicitly unavailable on Windows')
     def test_opt_in_raw_upload_checks_binary_integrity_and_rejects_windows(self):
         device = {**self.make_adb(), 'raw_adb_upload': True}
-        source = self.root / 'binary-fixture.bin'; payload = bytes(range(256)) * 1700
+        source = self.run_dir / 'binary-fixture.bin'; payload = bytes(range(256)) * 1700
         source.write_bytes(payload)
         adapter = dt.Adb(device, self.run_dir, time.monotonic() + 20)
         with patch.dict(os.environ, {'FAKE_ADB_ROOT': str(self.adb_root)}):
@@ -557,11 +557,28 @@ elif args[0] == 'logcat':
             with patch.dict(os.environ, {'TRUNCATE_BINARY_STDIN': '1'}):
                 with self.assertRaisesRegex(ValueError, 'fingerprint mismatch'):
                     adapter.upload(source, 'files/raw.bin')
+            outside = self.root / 'outside.bin'; outside.write_bytes(b'unrelated private file')
+            with self.assertRaises(ValueError):
+                adapter.upload(outside, 'files/raw.bin')
+            link = self.run_dir / 'escaped.bin'; link.symlink_to(outside)
+            with self.assertRaises(ValueError):
+                adapter.upload(link, 'files/raw.bin')
         with patch.object(dt.os, 'name', 'nt'):
             with self.assertRaises(ValueError):
                 adapter.upload(source, 'files/raw.bin')
             with self.assertRaises(ValueError):
                 dt.validate_device(device)
+
+    @unittest.skipIf(os.name == 'nt', 'Raw upload is explicitly unavailable on Windows')
+    def test_raw_prepare_stages_only_declared_inputs_and_preserves_originals(self):
+        device = {**self.make_adb(), 'raw_adb_upload': True}
+        originals = {name: dt.fingerprint(Path(device['game_dir']) / name) for name in ('EBOOT.ELF', 'disc.iso')}
+        adapter = dt.Adb(device, self.run_dir, time.monotonic() + 20)
+        with patch.dict(os.environ, {'FAKE_ADB_ROOT': str(self.adb_root)}):
+            adapter.prepare({})
+        for name, digest in originals.items():
+            self.assertEqual(dt.fingerprint(Path(device['game_dir']) / name), digest)
+            self.assertEqual(dt.fingerprint(self.run_dir / 'upload-inputs' / name), digest)
 
     def test_adb_running_package_is_not_disrupted(self):
         device = self.make_adb()

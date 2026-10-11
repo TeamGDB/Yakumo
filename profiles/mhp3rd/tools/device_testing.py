@@ -516,10 +516,16 @@ class Adb:
         return self.shell('run-as ' + self.package + ' sh -c ' + shlex.quote(text), **kwargs)
 
     def upload(self, source, destination):
-        if self.device.get('raw_adb_upload') and os.name == 'nt':
+        raw = self.device.get('raw_adb_upload')
+        if raw and os.name == 'nt':
             raise ValueError('Windows binary stdin requires the verified Base64 upload path')
+        if raw:
+            owned = os.path.normcase(os.path.realpath(self.root))
+            source = os.path.normcase(os.path.realpath(source))
+            if not source.startswith(owned.rstrip(os.sep) + os.sep):
+                raise ValueError('Raw upload source must remain within owned staging')
         expected = fingerprint(source)
-        if self.device.get('raw_adb_upload'):
+        if raw:
             with Path(source).open('rb') as stream:
                 command(self.prefix + ['shell', 'run-as', self.package, 'sh', '-c',
                                        shlex.quote('cat > ' + shlex.quote(destination))],
@@ -580,11 +586,21 @@ class Adb:
                 raise ValueError('Settings fixture must not be a symlink')
             copy_regular_file(self.device['settings'], staging / 'settings.ini')
             report['settings_sha256'] = fingerprint(staging / 'settings.ini')
+        if self.device.get('raw_adb_upload'):
+            (self.root / 'upload-inputs').mkdir()
         for name in ('EBOOT.ELF', 'disc.iso'):
             source = Path(self.device['game_dir']) / name
             if not source.is_file():
                 raise NotTested('Prepared game input is unavailable')
             # Stream into app-private storage; no shared temporary copy of game data.
+            if self.device.get('raw_adb_upload'):
+                # Read-only upload can reuse an owned hard link without copying the ISO.
+                staged = self.root / 'upload-inputs' / name
+                try:
+                    os.link(source.resolve(), staged)
+                except OSError:
+                    copy_regular_file(source, staged)
+                source = staged
             self.upload(source, 'files/device-testing/data/' + name)
         report['game_sha256'] = fingerprint(Path(self.device['game_dir']) / 'disc.iso')
         for item in sorted(staging.rglob('*')):
