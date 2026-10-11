@@ -145,6 +145,41 @@ class DeviceTests(unittest.TestCase):
         physical = next(check for check in menu['review'] if check['id'] == '07-physical-input')
         self.assertEqual(physical['requires'], 'human')
 
+    def test_performance_setting_is_editable_without_inherited_override(self):
+        for mode in ('settings', 'log'):
+            with self.subTest(mode=mode):
+                device = dict(self.device, performance=mode)
+                expected = None if mode == 'settings' else 'log'
+                self.fake.write_text(f'import os; assert os.environ.get("MHP3RD_PERF") == {expected!r}\n' + FAKE_GAME)
+                evidence = self.run_dir / mode
+                evidence.mkdir()
+                with patch.dict(os.environ, {'MHP3RD_PERF': 'compact'}):
+                    self.assertEqual(dt.run(self.suite, device, 'fixture', evidence), 2)
+                self.assertEqual(dt.read_json(evidence / 'report.json')['automatic']['verdict'], 'PASS')
+        for invalid in ('compact', '', True):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                dt.validate_device(dict(self.device, performance=invalid))
+
+    def test_android_settings_performance_contract_keeps_menu_unlocked(self):
+        package = 'org.example.yakumo.devicetest'
+        output = self.root / 'settings-manifest.xml'
+        contract = dt.android_manifest(package, output, 'settings')
+        self.assertNotIn('MHP3RD_PERF', contract['env'])
+        self.assertNotIn('SDL_ENV.MHP3RD_PERF', output.read_text())
+        self.assertEqual(contract, dt.android_contract(package, 'settings'))
+        self.assertEqual(dt.android_contract(package)['env']['MHP3RD_PERF'], 'log')
+        for invalid in ('compact', None):
+            with self.assertRaises(ValueError):
+                dt.android_contract(package, invalid)
+        apk = self.root / 'forced-log.apk'
+        with zipfile.ZipFile(apk, 'w') as archive:
+            archive.writestr('assets/device-testing.json', json.dumps(dt.android_contract(package)))
+        device = {'package': package, 'serial': 'fixture', 'apk': str(apk), 'performance': 'settings'}
+        adapter = dt.Adb(device, self.run_dir, time.monotonic() + 10)
+        with patch.object(dt, 'command', side_effect=AssertionError('Must reject before contacting ADB')):
+            with self.assertRaisesRegex(ValueError, 'contract'):
+                adapter.prepare({})
+
     def test_fixture_symlinks_and_special_files_rejected(self):
         link = self.saves / 'alias'
         try:

@@ -19,6 +19,8 @@
 # DEVICE_TEST_PACKAGE=<unique.name.devicetest> generates an isolated test APK
 # contract. Requires DEBUGGABLE=1 and MHP3RD_RELEASE=OFF in the native build.
 # It repacks existing libraries; it does not rebuild AOT or overlays.
+# DEVICE_TEST_PERFORMANCE=settings keeps the performance menu editable; the
+# default log mode forces diagnostic logging. Match the runner's performance field.
 # KEYSTORE (with KEYSTORE_PASS and KEY_ALIAS) signs with a key of your own, so
 # that later builds install over earlier ones and keep the player's data;
 # without it a throwaway key is made in the build directory.
@@ -75,6 +77,7 @@ if [[ -n "${DEVICE_TEST_PACKAGE:-}" ]]; then
     manifest="$work/device-testing-manifest.xml"
     python3 "$here/../../tools/device_testing.py" android-manifest \
         --package "$DEVICE_TEST_PACKAGE" --output "$manifest" \
+        --performance "${DEVICE_TEST_PERFORMANCE:-log}" \
         --contract "$work/assets/device-testing.json"
 fi
 assets=(-A "$work/assets")

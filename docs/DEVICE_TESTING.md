@@ -75,6 +75,14 @@ and special files are rejected. Game inputs use read-only source links (hard
 links on Windows when symlinks are unavailable); no destructive setup actions
 are part of the automatic scenarios.
 
+Menu/performance regressions use `"performance": "settings"` in the private
+device configuration. This removes the harness's usual `MHP3RD_PERF=log`
+override so the copied setting remains editable. For the Android test APK, pack
+with `DEVICE_TEST_PERFORMANCE=settings` and configure the same value; mismatched
+contracts are rejected before installation. Default runs still force logs.
+In settings mode, waits on buffered desktop stdout can remain incomplete until
+the game flushes it; use observed captures/manual checkpoints for menu state.
+
 Use a dedicated development installation. The runner owns and terminates only
 the process it launches; local execution has a separate bounded supervisor so a
 lost SSH connection does not leave an unbounded game. Check the current desktop

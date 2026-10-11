@@ -142,6 +142,8 @@ def validate_device(value):
         raise ValueError('Device cap must be 1..1800 seconds')
     if set(value.get('env', {})) - ENV_KEYS:
         raise ValueError('Unsupported environment override; isolation controls cannot be replaced')
+    if value.get('performance', 'log') not in ('log', 'settings'):
+        raise ValueError('Performance must be log or settings')
     for key in ('adb', 'android', 'python', 'args'):
         if key in value and (not isinstance(value[key], list) or
                 (key != 'args' and not value[key]) or any(not isinstance(item, str) or '\0' in item for item in value[key])):
@@ -381,6 +383,9 @@ class Local:
                    MHP3RD_DEBUG_COMMANDS=str(self.root / 'debug.txt'),
                    MHP3RD_SCREENSHOT_DIR=str(self.root / 'shots'), MHP3RD_SCREENSHOT_EVERY='0',
                    MHP3RD_PERF='log', MHP3RD_WINDOW_TITLE='Yakumo device scenario')
+        if self.device.get('performance') == 'settings':
+            # Menu regressions need the copied setting to remain editable.
+            env.pop('MHP3RD_PERF')
         if self.device.get('overlays'):
             env['MHP3RD_OVERLAY_DIR'] = str(Path(self.device['overlays']).resolve())
         if self.device['build'] == 'dev':
@@ -461,7 +466,7 @@ class Adb:
             if archive.getinfo('assets/device-testing.json').file_size > 1024 * 1024:
                 raise ValueError('APK test contract is oversized')
             contract = json.loads(archive.read('assets/device-testing.json'))
-        if contract != android_contract(self.package):
+        if contract != android_contract(self.package, self.device.get('performance', 'log')):
             raise ValueError('APK lacks the generated device-testing contract')
         report['artifact_sha256'] = fingerprint(apk)
         verify_artifact(self.device, report['artifact_sha256'])
@@ -623,18 +628,23 @@ def verify_artifact(device, actual):
         raise ValueError('Artifact differs from the configured fingerprint')
 
 
-def android_contract(package):
+def android_contract(package, performance='log'):
     if not valid_package(package):
         raise ValueError('Test package must end in .devicetest')
+    if performance not in ('log', 'settings'):
+        raise ValueError('Performance must be log or settings')
     root = '/data/data/' + package + '/files/device-testing'
-    return {'package': package, 'env': {'MHP3RD_GAME_DIR': root + '/data',
+    contract = {'package': package, 'env': {'MHP3RD_GAME_DIR': root + '/data',
             'MHP3RD_DATA_DIR': root + '/data', 'MHP3RD_INPUT_LIVE': root + '/input-live.txt',
             'MHP3RD_DEBUG_COMMANDS': root + '/debug.txt', 'MHP3RD_DEBUG_MENU': '1',
             'MHP3RD_SCREENSHOT_DIR': root + '/shots', 'MHP3RD_PERF': 'log'}}
+    if performance == 'settings':
+        contract['env'].pop('MHP3RD_PERF')
+    return contract
 
 
-def android_manifest(package, output):
-    contract = android_contract(package)
+def android_manifest(package, output, performance='log'):
+    contract = android_contract(package, performance)
     ns = '{http://schemas.android.com/apk/res/android}'
     ET.register_namespace('android', ns[1:-1])
     tree = ET.parse(ROOT / 'profiles/mhp3rd/packaging/android/AndroidManifest.xml')
@@ -1294,6 +1304,7 @@ def main(argv=None):
     part.add_argument('--package', required=True)
     part.add_argument('--output', required=True)
     part.add_argument('--contract', required=True)
+    part.add_argument('--performance', choices=('log', 'settings'), default='log')
     args = parser.parse_args(argv)
     try:
         if args.command == 'list':
@@ -1301,7 +1312,7 @@ def main(argv=None):
                 value = validate_scenario(read_json(path))
                 print(f'{value["id"]}: {value["build"]}/{value["execution"]} - {value["description"]}')
         elif args.command == 'android-manifest':
-            write_json(args.contract, android_manifest(args.package, args.output))
+            write_json(args.contract, android_manifest(args.package, args.output, args.performance))
         elif args.command == 'review':
             review(args.run, args.check, args.verdict, args.reviewer, args.notes, args.evidence)
         elif args.command == 'matrix':

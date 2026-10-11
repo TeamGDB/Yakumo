@@ -11,6 +11,8 @@ Keep the exact artifact hash/commit, fixture settings, input method, display
 size and captures in the report. Use copied settings/saves and no multiplayer
 connection. Complete two bounded sessions when a restart is needed. Record
 agent image reviews independently from a person's physical-control assessment.
+Set `"performance": "settings"` in the private device configuration so the
+harness does not lock the row. Pack Android with `DEVICE_TEST_PERFORMANCE=settings`.
 
 1. Open the menu with Escape, the configured controller menu gesture or the
    touch menu icon. Capture Video and visit every section in both directions.
