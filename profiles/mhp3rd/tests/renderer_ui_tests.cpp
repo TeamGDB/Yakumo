@@ -1166,8 +1166,11 @@ void held_frame_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::
         "releasing held frame displays the current guest framebuffer");
     renderer.upload_frame(0x04110000, magenta.data(), 1, 1, 1);
     expect(renderer.present(0x04110000), "held-frame contract restores original synthetic scene");
+    renderer.set_window_scale(1);
+    expect(SDL_SyncWindow(renderer.window()), "window-size control establishes native scale before comparison");
     int initial_w = 0, initial_h = 0;
     SDL_GetWindowSize(renderer.window(), &initial_w, &initial_h);
+    expect(initial_w == 480 && initial_h == 272, "window-size control uses documented native logical dimensions");
     renderer.set_window_scale(2);
     // SDL window resize requests are asynchronous on window systems such as X11.
     expect(SDL_SyncWindow(renderer.window()), "window scale request reaches its final native state");
@@ -3372,7 +3375,7 @@ void setup_screen_contracts(gpu::VulkanRenderer &renderer, const std::filesystem
     layer.set_interactive(false);
 }
 
-void menu_contracts(gpu::VulkanRenderer &renderer) {
+void menu_contracts(gpu::VulkanRenderer &renderer, bool camera_overrides = false) {
     // These contracts navigate with keys and virtual pads; unrelated desktop cursor motion must not steal focus.
     auto &menu_io = ImGui::GetIO();
     const auto saved_config_flags = menu_io.ConfigFlags;
@@ -3457,6 +3460,26 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
         ImGui::GetIO().AddKeyEvent(ImGuiKey_Space, false);
         frame();
     };
+    if (camera_overrides) {
+        for (int tab = 0; tab < 4; ++tab) {
+            ImGui::GetIO().AddKeyEvent(ImGuiKey_W, true);
+            frame();
+            ImGui::GetIO().AddKeyEvent(ImGuiKey_W, false);
+            frame();
+        }
+        settings::current().fast_loading = false;
+        change_video("Restore QoL Defaults", ImGuiKey_Space);
+        expect(settings::current().fast_loading == settings::defaults().fast_loading &&
+                settings::current().free_camera && settings::current().free_camera_speed == 777 &&
+                !settings::current().free_camera_hide_hud,
+            "QoL reset applies defaults while preserving startup camera environment overrides");
+        ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
+        frame();
+        ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, false);
+        frame();
+        menu_io.ConfigFlags = saved_config_flags;
+        return;
+    }
     const auto initial_sharp_screen = settings::current().sharp_screen;
     const auto initial_sharp_textures = settings::current().sharp_textures;
     const auto initial_aspect = settings::current().aspect;
@@ -3819,6 +3842,8 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
     settings::current().touch_size = 1.4f;
     settings::current().touch_opacity = 0.4f;
     settings::current().free_camera_speed = 450;
+    settings::current().free_camera = true;
+    settings::current().free_camera_hide_hud = !settings::defaults().free_camera_hide_hud;
     settings::current().name = "Public test hunter";
     change_video("Save as a New Preset", ImGuiKey_Space);
     const auto retained_preset = settings::current().control_preset.user;
@@ -3831,9 +3856,11 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
             reset_controls.background_gamepad == defaults.background_gamepad &&
             reset_controls.touch_size == defaults.touch_size &&
             reset_controls.touch_opacity == defaults.touch_opacity &&
-            reset_controls.free_camera_speed == defaults.free_camera_speed &&
             reset_controls.control_preset == defaults.control_preset && reset_controls.controls == defaults.controls,
-        "control defaults restore modified analog, mouse, touch, camera, name and shipped bindings");
+        "control defaults restore modified analog, mouse, touch, name and shipped bindings");
+    expect(reset_controls.free_camera && reset_controls.free_camera_speed == 450 &&
+            reset_controls.free_camera_hide_hud != defaults.free_camera_hide_hud,
+        "control defaults leave the QoL camera settings unchanged");
     expect(settings::find_user_preset(settings::current(), retained_preset) != nullptr,
         "control defaults keep the player's independently saved presets");
     settings::current() = before_control_reset;
@@ -4044,6 +4071,9 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
     settings::current().fast_forward_speed = original_fast_speed + 1;
     settings::current().lock_on = !settings::defaults().lock_on;
     settings::current().lock_on_marker = !settings::defaults().lock_on_marker;
+    settings::current().free_camera = !settings::defaults().free_camera;
+    settings::current().free_camera_speed = settings::defaults().free_camera_speed + 50;
+    settings::current().free_camera_hide_hud = !settings::defaults().free_camera_hide_hud;
     change_video("Restore QoL Defaults", ImGuiKey_Space);
     const auto &qol_defaults = settings::defaults();
     const auto &reset_qol = settings::current();
@@ -4051,6 +4081,14 @@ void menu_contracts(gpu::VulkanRenderer &renderer) {
             reset_qol.fast_forward_speed == qol_defaults.fast_forward_speed &&
             reset_qol.lock_on == qol_defaults.lock_on && reset_qol.lock_on_marker == qol_defaults.lock_on_marker,
         "QoL defaults restore only the moved settings");
+    expect(reset_qol.free_camera == qol_defaults.free_camera &&
+            reset_qol.free_camera_speed == qol_defaults.free_camera_speed &&
+            reset_qol.free_camera_hide_hud == qol_defaults.free_camera_hide_hud,
+        "QoL defaults also restore the experimental camera controls on its page");
+    expect(reset_qol.internal_scale == before_qol_reset.internal_scale && reset_qol.volume == before_qol_reset.volume &&
+            reset_qol.adhoc == before_qol_reset.adhoc && reset_qol.adhoc_server == before_qol_reset.adhoc_server &&
+            reset_qol.layered_armor == before_qol_reset.layered_armor,
+        "QoL defaults preserve other pages and the separate layered armor editor");
     settings::current() = before_qol_reset;
     page();
     page();
@@ -4660,6 +4698,11 @@ void input_script_contracts(
 
 }
 int run_contracts(int scripts) {
+    if (scripts == 6) {
+        set_environment("MHP3RD_FREE_CAMERA", "1");
+        set_environment("MHP3RD_FREE_CAMERA_SPEED", "777");
+        set_environment("MHP3RD_FREE_CAMERA_HIDE_HUD", "0");
+    }
     const auto sandbox = std::filesystem::temp_directory_path() /
         ("yakumo-renderer-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     std::filesystem::create_directories(sandbox);
@@ -4731,6 +4774,15 @@ int run_contracts(int scripts) {
         return 1;
     }
     auto &renderer = *selected;
+    if (scripts == 6) {
+        expect(ui::Layer::get().attach(renderer), "QoL override fixture attaches the real UI layer");
+        if (ImGui::GetCurrentContext() == nullptr) return 1;
+        menu_contracts(renderer, true);
+        renderer.shutdown();
+        std::filesystem::remove_all(sandbox);
+        std::cout << (failures ? "FAIL" : "PASS") << ": QoL reset overrides (" << failures << " failures)\n";
+        return failures ? 1 : 0;
+    }
     if (scripts == 4) {
         primitive_contracts(renderer);
         renderer.shutdown();
@@ -4853,6 +4905,8 @@ int main(int argc, char **argv) {
                 mode = 4;
             else if (std::string_view(argv[1]) == "--perf-overlay")
                 mode = 5;
+            else if (std::string_view(argv[1]) == "--qol-overrides")
+                mode = 6;
             else {
                 std::cerr << "FAIL: unknown test mode\n";
                 return 2;

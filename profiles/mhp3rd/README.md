@@ -401,6 +401,10 @@ The menu's text fields (*Hunter Name*, *Server*, *Nickname*) open the same keybo
 
 QoL groups Lock-On, Lock-On Marker and Layered Armor under **Modern Features:**, Fast Loading under **Quality of Life:**, and Fast-Forward and Fast-Forward Speed under **Singleplayer Only Cheats:**. Free-camera options remain under **Experimental Options:**. The page ends with **Reset to Defaults:** and **Restore QoL Defaults**.
 
+Restore QoL Defaults also resets the free-camera controls. Explicit environment
+overrides, other settings pages and the separate layered armor editor's choices
+are preserved.
+
 Esc, or L3+R3 on a gamepad, opens Yakumo's menu over the game; the same again, back at its top level or Start closes it. Esc never quits the game: Steam's desktop controller layout on a Steam Deck sends Esc with the B button, so an Esc that arrives together with a gamepad button is ignored.
 
 The menu opens where it was last closed: the same page, scrolled as it was, with the same row focused. The page is also kept for the next start (`ui.menu_tab` in `settings.ini`); the scroll position and the row only for the session. When that row is not there any more, the page opens at its top.

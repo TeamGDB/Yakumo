@@ -1105,7 +1105,7 @@ void Menu::controls() {
     section("Reset to Defaults:");
     if (button_row("Restore Control Defaults",
             {false, {},
-                "Every gamepad, keyboard, mouse, touch, name and free camera setting back to how "
+                "Every gamepad, keyboard, mouse, touch and name setting back to how "
                 "Yakumo ships, with the Default preset. Your own presets and the Action layout's "
                 "arrangement are kept."})) {
         const settings::Settings &d = settings::defaults();
@@ -1136,8 +1136,6 @@ void Menu::controls() {
         restore("input.touch_camera_speed", s.touch_camera_speed, d.touch_camera_speed);
         restore("input.touch_layout", s.touch_layout, d.touch_layout);
         restore("input.touch_haptics", s.touch_haptics, d.touch_haptics);
-        restore("experimental.free_camera", s.free_camera, d.free_camera);
-        restore("experimental.free_camera_speed", s.free_camera_speed, d.free_camera_speed);
         if (settings::overridden_by("input.preset") == nullptr) settings::choose_preset(s, d.control_preset);
         preset_notice_.clear();
         settings::save();
@@ -1594,6 +1592,9 @@ void Menu::qol() {
         restore("video.fast_forward_speed", s.fast_forward_speed, d.fast_forward_speed);
         restore("input.lock_on", s.lock_on, d.lock_on);
         restore("input.lock_on_marker", s.lock_on_marker, d.lock_on_marker);
+        restore("experimental.free_camera", s.free_camera, d.free_camera);
+        restore("experimental.free_camera_speed", s.free_camera_speed, d.free_camera_speed);
+        restore("experimental.free_camera_hide_hud", s.free_camera_hide_hud, d.free_camera_hide_hud);
         settings::save();
     }
 }
