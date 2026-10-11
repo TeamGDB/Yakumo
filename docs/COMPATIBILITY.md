@@ -318,9 +318,10 @@ and no quest cheats. Complete device scenarios and cloud validation are pending;
 no cloud reservations have been consumed at this checkpoint. The suite does not
 complete any exact-candidate release or human playtesting sign-off.
 
-The current delivery scope is the QUICK stage. Harness `755d872` passed all ten
-categories (12 automatic subchecks) on macOS in 103.0 seconds, with 0.84 seconds
-of preparation; earlier runs took 99.7 and 100.7 seconds. All passed cleanup,
+The current delivery scope is the QUICK stage. Final harness `c2eee50` passed all
+ten categories (12 automatic subchecks) on macOS in 110.468 seconds, with 0.887
+seconds of preparation. Earlier bounded runs passed in 99.7-104.8 seconds.
+All passed cleanup,
 using application source `751424a` and
 artifact SHA-256 `9e33423b4bed48cef751102d4be9c167b0cfd953f60b82070c907a75f2836339`.
 The aggregate identifies actual quest/input/
@@ -364,15 +365,17 @@ remained NOT TESTED. Separate native 56/56 evidence above does not silently turn
 these rows green. The isolated APK SHA-256 was
 `a8f080a66530832854976887dcbffb529b00f5a9206ccf85db50c0cbd2016295` at application
 source `751424a`. Cleanup passed and the owned package returned to the idle
-launcher with no game PID. The current end-to-end transfer path does not fit the
-inclusive Google cap; the private reservation ledger remains at zero attempts.
+launcher with no game PID. At that earlier checkpoint the transfer path exceeded
+the original Google cap and the ledger had zero attempts. Later authorizations
+and actual cloud attempts are recorded below.
 
 ## Bounded Google QUICK pilot (2026-10-12)
 
 A later explicit authorization raised the task cap to 500 seconds per reservation,
 at most two sequential attempts / 1000 seconds total. The existing private ledger
 was migrated from 300 to 500 without resetting history. The runner retains a
-300-second default and rejects 501 seconds or a separate setup extension.
+300-second default; that authorization phase rejects 501 seconds or a separate
+setup extension. A later phase is recorded separately below.
 
 | Requested device | Observed capability | Result | Total reservation time |
 | --- | --- | --- | --- |
@@ -422,4 +425,33 @@ gameplay/cleanup reserved, rather than the stale 180-second install cutoff.
 APK transfer and package installation have separate timing/output records;
 timeouts preserve partial output. Synthetic tests reject corrupt transfers,
 expired budgets, repeat model attempts, unauthorized counts/models/rates and
-history resets. Rerun results must be recorded separately after owned release.
+history resets.
+
+The first rerun used runner `c3472b4` on Pixel 5 / Adreno 620, with the same
+native source `751424a` and APK hash above. Its arm64/Vulkan preflight passed.
+
+| Google deployment phase | Observed result | Measured time |
+| --- | --- | --- |
+| APK transfer | PASS; device SHA-256 matched; ADB reported 0.8 MB/s | 237.809 seconds |
+| Package Manager install | PASS; `Success` | 4.502 seconds |
+| EBOOT transfer/hash | PASS | 1.744 seconds |
+| ISO transfer/hash | TIMEOUT; final hash unavailable | 291.012 seconds |
+
+The inclusive reservation lasted 598.347 seconds; its estimated pre-credit cost
+is $1.4959 at the checked rate, not an account charge. The remaining-budget
+deployment limit was 539.348 seconds, protecting 120 seconds for checks and the
+separate cleanup reserve. The temporary APK directory was removed, the owned
+package was stopped, the exact reservation was released and the final official
+CLI list showed no reservations. No game launched; quest, translation, photo,
+framebuffer and telemetry outcomes remain NOT TESTED, with a setup FAIL.
+
+Three attempts have now been consumed and released across both phases. This
+rerun phase has consumed one of its two attempts. The remaining Pixel 6 attempt
+is held: the current full-input deployment cannot fit the 800-second cap at the
+observed link speed. The 1,323,565,056-byte ISO alone would take about 27 minutes
+at the APK's reported 0.8 MB/s, before checks and cleanup. That is a planning
+estimate, not a measured full-ISO duration or a prediction for Pixel 6. The
+staged rerun establishes transfer as the Pixel 5 bottleneck; increasing the
+Package Manager timeout alone cannot make this workload fit. Original failures
+and private progress/cleanup evidence are retained. No further reservation,
+persistent game-data upload or billing/IAM change was made.

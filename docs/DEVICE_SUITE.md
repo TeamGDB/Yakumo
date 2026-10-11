@@ -73,9 +73,17 @@ the earlier 300-second ledger; never reset consumption. Keep a private
 ledger across resumed sessions. An incomplete upload is an incomplete pilot,
 not permission to extend the deadline or retry. Reserve the final 30 seconds
 for owned cleanup; preflight, creation, removal and final-list evidence stays private.
-The rerun phase retains both old rows, allows only its two declared models once
+The rerun phase requires `previous_total_attempts: 2` and both old rows under
+their original 500-second authorization, allows only its two declared models once
 each, and records per-device cost estimates. Changed pricing, unauthorized
 models, an unconfirmed prior release or an exhausted phase prevents creation.
+
+The measured cloud deployment is incomplete: the prepared Pixel 5 rerun installed
+the APK successfully but timed out transferring the full ISO. One rerun remains
+unused; the same deployment is not feasible within its 800-second limit at the
+observed throughput. See [the compatibility evidence](COMPATIBILITY.md#prepared-deployment-rerun-2026-10-12).
+Do not treat a locally fast transfer as proof of cloud feasibility, or spend a
+remaining attempt on an already known budget mismatch.
 
 ## Running the implementation
 
