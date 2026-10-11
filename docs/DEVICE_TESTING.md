@@ -11,9 +11,11 @@ process launch establish gameplay correctness.
 This CLI runs with the tester's permissions. Its private configuration deliberately
 selects executable/tool paths, arguments, source fixtures and remote hosts; review
 that configuration and scenario files like executable test code. Do not run
-downloaded configs or expose this CLI as a service for untrusted users. Narrow
-CodeQL annotations at local path/command sinks document those intentional
-permissions without disabling repository-wide scanning. Archive evidence and
+downloaded configs or expose this CLI as a service for untrusted users. CodeQL with the local
+threat model reports these intended path/command permissions as tainted flows;
+maintainers must review those findings against this documented boundary. Source
+suppression comments alone do not clear GitHub Code Scanning alerts, and this
+tool does not dismiss them or change scanner settings. Archive evidence and
 fixture links still receive explicit confinement checks. Tester-authored log
 regexes execute in a separate process with the wait deadline, so backtracking
 cannot leave the controller hanging.
@@ -258,7 +260,9 @@ scenario/device pair and the exact artifact identities, for example:
 }
 ```
 
-Use real hashes. Add macOS, Windows, Deck, available physical Androids and
+Use real hashes. Give Japanese/patched images or language/settings variants
+separate configuration/device IDs when they need distinct required rows; each
+run records its fixture and game fingerprints. Add macOS, Windows, Deck, available physical Androids and
 selected cloud GPU families. Include dev regression rows when relevant, then
 **separate final release-package rows**. Dev results cannot satisfy release rows.
 The current scenario fingerprint must match too, so an older scenario definition
