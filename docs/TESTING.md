@@ -486,6 +486,12 @@ list/detail translation under multiple pending loads.
 
 ## Shared device scenarios and manual evidence
 
+For menu regrouping and compact performance displays, use the `settings-menu`
+and `performance-overlay` scenarios and the
+[checkpoint guide](../profiles/mhp3rd/tests/manual/settings_menu.md).
+Record image reviews separately from physical-input confirmation; a boot or
+headless test cannot certify these visual checks.
+
 [DEVICE_TESTING.md](DEVICE_TESTING.md) describes bounded copied-fixture scenarios
 for local physical hosts, SSH, physical/emulated Android and optional Device
 Streaming. Use `make device-scenarios`, `make device-run` and the review CLI to

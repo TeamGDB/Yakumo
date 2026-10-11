@@ -1,0 +1,21 @@
+{
+  "id": "performance-overlay",
+  "build": "either",
+  "execution": "manual",
+  "seconds": 180,
+  "description": "Review all performance display modes, captured pixels and reversible F3/menu toggles on a rendered game.",
+  "prerequisites": [
+    "Disposable save/settings fixture and visible rendered game",
+    "Do not force MHP3RD_PERF: mode selection must remain editable",
+    "Follow tests/manual/settings_menu.md; retain a separate original-scene capture"
+  ],
+  "steps": [],
+  "review": [
+    {"id": "01-full", "expect": "Overlay and Overlay and Log retain the full top-left display. Off and Log Only leave the game picture free of the overlay."},
+    {"id": "02-compact", "expect": "Compact occupies one padded line at the bottom-left content inset, with readable FPS, speed and actual Vsync state. The old top-left rectangle stays clear."},
+    {"id": "03-logging", "expect": "Compact and Log emits full performance summaries; Compact alone emits none after the mode change has taken effect. Compare timestamped log intervals, not accumulated startup history."},
+    {"id": "04-toggle", "expect": "F3 hides/restores the selected style without changing its saved mode or log choice; repeated key-down events do not toggle twice. Without a keyboard, record F3 as unavailable and separately test menu Off/Compact round trips."},
+    {"id": "05-resize", "expect": "Frame/window captures agree on placement and Vsync indication at native and one larger target; aspect/resize changes leave the scene and inset intact."},
+    {"id": "06-restart", "expect": "Restarting the exact artifact restores the selected copied-settings mode. Report display timing and frame-rate behavior separately from overlay correctness."}
+  ]
+}

@@ -965,6 +965,16 @@ void screenshot_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::
         const std::string name = mode == settings::PerfDisplay::Overlay ? "public-overlay"
             : mode == settings::PerfDisplay::Compact                    ? "public-compact"
                                                                         : "public-compact-log";
+        renderer.set_perf_overlay(false);
+        const auto baseline_window = sandbox / (name + "-baseline-window.bmp");
+        renderer.capture_window(baseline_window);
+        for (int i = 0; i < 3 && renderer.window_capture_pending(); ++i) {
+            layer.begin_frame();
+            layer.end_frame();
+            expect(renderer.present(0x04110000), "overlay control presents the same synthetic game scene");
+        }
+        const auto baseline_frame = sandbox / (name + "-baseline-frame.bmp");
+        expect(renderer.capture_frame(baseline_frame), "overlay control captures the unmodified game frame");
         renderer.set_perf_overlay(true);
         const auto overlay_window = sandbox / (name + "-window.bmp");
         renderer.capture_window(overlay_window);
@@ -988,10 +998,29 @@ void screenshot_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::
             };
             const auto w = dimension(18), h = dimension(22);
             const auto row = (w * 3 + 3) & ~3u;
+            std::ifstream baseline_in(
+                overlay_path == overlay_frame ? baseline_frame : baseline_window, std::ios::binary);
+            const std::vector<std::uint8_t> baseline{
+                std::istreambuf_iterator<char>(baseline_in), std::istreambuf_iterator<char>()};
+            expect(baseline.size() == overlay.size() && overlay.size() == 54 + static_cast<std::size_t>(row) * h,
+                "baseline and overlay captures have the same complete image dimensions");
+            if (baseline.size() != overlay.size()) continue;
             const auto scale = std::max(1u, h / 360);
             const auto inset = 4 * scale;
             const auto overlay_height = compact ? perf::kCompactOverlayHeight : perf::kOverlayHeight;
             const auto top = compact ? h - inset - overlay_height * scale : inset;
+            bool outside_unchanged = true;
+            for (std::uint32_t y = 0; y < h; ++y) {
+                for (std::uint32_t x = 0; x < w; ++x) {
+                    if (x >= inset && x < inset + perf::kOverlayWidth * scale && y >= top &&
+                        y < top + overlay_height * scale)
+                        continue;
+                    const auto at = 54 + static_cast<std::size_t>(h - 1 - y) * row + x * 3u;
+                    for (std::size_t channel = 0; channel < 3; ++channel)
+                        outside_unchanged = outside_unchanged && overlay[at + channel] == baseline[at + channel];
+                }
+            }
+            expect(outside_unchanged, "every pixel outside the overlay retains the baseline scene on this GPU");
             const auto corner = 54 + static_cast<std::size_t>(h - 1 - top) * row + inset * 3;
             const auto outside = 54 + static_cast<std::size_t>(h / 2) * row + (w / 2) * 3;
             expect(corner + 2 < overlay.size() && overlay[corner] == 16 && overlay[corner + 1] == 16 &&
@@ -1002,12 +1031,13 @@ void screenshot_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::
                 "performance overlay leaves the scene outside its rectangle unchanged");
             if (!compact) continue;
             const auto old_corner = 54 + static_cast<std::size_t>(h - 1 - inset) * row + inset * 3;
-            expect(old_corner + 2 < overlay.size() && overlay[old_corner] == 0 && overlay[old_corner + 1] == 0 &&
-                    overlay[old_corner + 2] == 0,
+            expect(old_corner + 2 < overlay.size() && overlay[old_corner] == baseline[old_corner] &&
+                    overlay[old_corner + 1] == baseline[old_corner + 1] &&
+                    overlay[old_corner + 2] == baseline[old_corner + 2],
                 "compact leaves the former top-left overlay area untouched");
             const auto below = 54 + static_cast<std::size_t>(inset - 1u) * row + inset * 3;
-            expect(
-                below + 2 < overlay.size() && overlay[below] == 0 && overlay[below + 1] == 0 && overlay[below + 2] == 0,
+            expect(below + 2 < overlay.size() && overlay[below] == baseline[below] &&
+                    overlay[below + 1] == baseline[below + 1] && overlay[below + 2] == baseline[below + 2],
                 "compact leaves the standard inset below its single text line");
             std::vector<std::uint32_t> expected(perf::kOverlayWidth * perf::kCompactOverlayHeight);
             perf::draw_compact_overlay(expected.data(), perf::last_second(), !immediate);
@@ -1056,10 +1086,18 @@ void screenshot_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::
                 const auto inset = 4u * scale;
                 const auto at =
                     54 + static_cast<std::size_t>(inset + perf::kCompactOverlayHeight * scale - 1u) * row + inset * 3u;
+                std::ifstream baseline_in(baseline_frame, std::ios::binary);
+                const std::vector<std::uint8_t> baseline{
+                    std::istreambuf_iterator<char>(baseline_in), std::istreambuf_iterator<char>()};
+                expect(baseline.size() == bmp.size(), "F3 capture retains the original frame dimensions");
+                if (baseline.size() != bmp.size()) return;
                 expect(at + 2 < bmp.size() &&
                         (visible ? bmp[at] == 16 && bmp[at + 1] == 16 && bmp[at + 2] == 16
-                                 : bmp[at] == 0 && bmp[at + 1] == 0 && bmp[at + 2] == 0),
+                                 : bmp[at] == baseline[at] && bmp[at + 1] == baseline[at + 1] &&
+                                    bmp[at + 2] == baseline[at + 2]),
                     "F3 hides and restores the compact rectangle at the bottom-left inset");
+                if (!visible)
+                    expect(bmp == baseline, "F3 hides the entire compact display without altering any scene pixel");
             };
             f3();
             capture_visible("-hidden.bmp", false);
@@ -1069,6 +1107,15 @@ void screenshot_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::
             layer.end_frame();
             expect(renderer.present(0x04110000), "F3 restores compact during actual presentation");
             capture_visible("-restored.bmp", true);
+            SDL_Event repeat{};
+            repeat.type = SDL_EVENT_KEY_DOWN;
+            repeat.key.windowID = SDL_GetWindowID(renderer.window());
+            repeat.key.key = SDLK_F3;
+            repeat.key.scancode = SDL_SCANCODE_F3;
+            repeat.key.repeat = true;
+            expect(SDL_PushEvent(&repeat), "repeated F3 key-down queues");
+            renderer.pump_events();
+            capture_visible("-repeat.bmp", true);
         }
     }
     settings::current().perf = original_perf;

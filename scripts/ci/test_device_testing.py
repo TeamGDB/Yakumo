@@ -127,6 +127,24 @@ class DeviceTests(unittest.TestCase):
         self.assertEqual(dt.run(dt.scenario('quest-translation'), self.device, 'mac', self.run_dir, True), 2)
         self.assertIn('translation fixture', self.report()['automatic']['reason'])
 
+    def test_settings_scenarios_keep_visual_and_physical_checks_unverified(self):
+        for name in ('settings-menu', 'performance-overlay'):
+            with self.subTest(scenario=name):
+                suite = dt.scenario(name)
+                self.assertEqual(suite['build'], 'either')
+                self.assertEqual(suite['execution'], 'manual')
+                self.assertEqual(suite['steps'], [])
+                self.assertLessEqual(suite['seconds'], 180)
+                evidence = self.run_dir / name
+                evidence.mkdir()
+                self.assertEqual(dt.run(suite, self.device, 'fixture', evidence), 2)
+                report = dt.read_json(evidence / 'report.json')
+                self.assertIn('Use --manual', report['automatic']['reason'])
+                self.assertEqual(dt.result_status(report), 'NOT TESTED')
+        menu = dt.scenario('settings-menu')
+        physical = next(check for check in menu['review'] if check['id'] == '07-physical-input')
+        self.assertEqual(physical['requires'], 'human')
+
     def test_fixture_symlinks_and_special_files_rejected(self):
         link = self.saves / 'alias'
         try:
