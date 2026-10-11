@@ -156,6 +156,10 @@ def validate_device(value):
         raise ValueError('Raw ADB upload is an explicit POSIX-only option; Windows requires Base64')
     if type(value.get('android_cli_install', False)) is not bool:
         raise ValueError('Android CLI installation must be an explicit boolean option')
+    if type(value.get('deployment_share_percent', 70)) is not int or not 1 <= value.get('deployment_share_percent', 70) <= 90:
+        raise ValueError('Deployment share must be 1..90 percent of remaining time')
+    if type(value.get('gameplay_reserve_seconds', 0)) is not int or not 0 <= value.get('gameplay_reserve_seconds', 0) <= 1800:
+        raise ValueError('Gameplay reserve must be 0..1800 seconds within the session')
     if set(value.get('env', {})) - ENV_KEYS:
         raise ValueError('Unsupported environment override; isolation controls cannot be replaced')
     if value.get('performance', 'log') not in ('log', 'settings'):
@@ -350,6 +354,10 @@ def command(argv, deadline, *, data=None, check=True, maximum=20, return_status=
                     raise ValueError('Command output exceeds the evidence limit')
         process.wait(timeout=remaining(limit))
         completed = True
+    except subprocess.TimeoutExpired as error:
+        error.output = bytes(output['stdout'])
+        error.stderr = bytes(output['stderr'])
+        raise
     finally:
         stopped.set()
         kill_command(process, force_group=not completed)
@@ -550,6 +558,84 @@ class Adb:
             raise ValueError('Android upload fingerprint mismatch')
 
     def prepare(self, report):
+        started = time.monotonic()
+        overall = self.deadline
+        available = remaining(overall, 1800)
+        reserve = self.device.get('gameplay_reserve_seconds', 0)
+        budget = min(available * self.device.get('deployment_share_percent', 70) / 100, available - reserve)
+        if budget <= 0:
+            raise NotTested('No deployment time remains after reserving gameplay and cleanup')
+        report['deployment'] = {'available_seconds': available, 'budget_seconds': budget,
+                                'gameplay_reserve_seconds': reserve, 'phases': []}
+        self.session_deadline = overall
+        self.deadline = min(overall, time.monotonic() + budget)
+        try:
+            self.prepare_with_budget(report)
+        finally:
+            report['deployment']['duration_seconds'] = round(time.monotonic() - started, 3)
+            self.deadline = overall
+
+    def deployment_command(self, name, argv, report):
+        started = time.monotonic()
+        record = {'name': safe_name(name), 'status': 'FAIL'}
+        try:
+            result = command(argv, self.deadline, maximum=remaining(self.deadline, 1800),
+                             check=False, return_status=True)
+            record.update(returncode=result.returncode, stdout=result.stdout.decode(errors='replace'),
+                          stderr=result.stderr.decode(errors='replace'))
+            if result.returncode:
+                raise RuntimeError('Deployment phase failed: ' + name)
+            record['status'] = 'PASS'
+            return result.stdout
+        except subprocess.TimeoutExpired as error:
+            record.update(status='TIMEOUT', stdout=(error.output or b'').decode(errors='replace'),
+                          stderr=(error.stderr or b'').decode(errors='replace'))
+            raise
+        finally:
+            record['duration_seconds'] = round(time.monotonic() - started, 3)
+            report['deployment']['phases'].append(record)
+            write_json(self.root / ('deployment-' + safe_name(name) + '.json'), record)
+
+    def install_staged_apk(self, apk, report):
+        remote = '/data/local/tmp/yakumo-apk-' + uuid.uuid4().hex
+        created = False
+        try:
+            self.shell('mkdir -m 700 ' + remote)
+            created = True
+            target = remote + '/artifact.apk'
+            self.deployment_command('apk-transfer', self.prefix + ['push', str(apk), target], report)
+            actual = self.shell('sha256sum ' + target).decode(errors='replace').split()
+            if not actual or actual[0] != fingerprint(apk):
+                raise ValueError('Transferred APK fingerprint mismatch')
+            report['deployment']['apk_bytes'] = apk.stat().st_size
+            report['deployment']['device_apk_sha256'] = actual[0]
+            self.deployment_command('package-install', self.prefix + ['shell', 'pm install -r ' + target], report)
+        finally:
+            if created:
+                original = self.deadline
+                self.deadline = getattr(self, 'cleanup_deadline', None) or self.session_deadline
+                try:
+                    self.shell('rm -rf ' + remote)
+                    report['deployment']['apk_staging_cleanup'] = 'PASS'
+                finally:
+                    self.deadline = original
+
+    def deployment_upload(self, name, source, destination, report):
+        started = time.monotonic()
+        record = {'name': safe_name(name), 'status': 'FAIL'}
+        try:
+            self.upload(source, destination)
+            record.update(status='PASS', bytes=Path(source).stat().st_size, sha256=fingerprint(source))
+        except subprocess.TimeoutExpired as error:
+            record.update(status='TIMEOUT', stdout=(error.output or b'').decode(errors='replace'),
+                          stderr=(error.stderr or b'').decode(errors='replace'))
+            raise
+        finally:
+            record['duration_seconds'] = round(time.monotonic() - started, 3)
+            report['deployment']['phases'].append(record)
+            write_json(self.root / ('deployment-' + safe_name(name) + '.json'), record)
+
+    def prepare_with_budget(self, report):
         apk = self.root / 'artifact.apk'
         copy_regular_file(self.device['apk'], apk)
         with zipfile.ZipFile(apk) as archive:
@@ -571,11 +657,11 @@ class Adb:
         report['hardware']['vulkan_evidence'] = 'vulkan.json'
         verify_android_capabilities(report['hardware'], vulkan)
         if self.device.get('android_cli_install'):
-            command(self.device.get('android', ['android']) + ['--no-metrics', 'install',
+            self.deployment_command('combined-cli-install', self.device.get('android', ['android']) + ['--no-metrics', 'install',
                     '--device=' + self.device['serial'], '--apks=' + str(apk), '--install-options=-r'],
-                    self.deadline, maximum=180)
+                    report)
         else:
-            command(self.prefix + ['install', '-r', str(apk)], self.deadline, maximum=180)
+            self.install_staged_apk(apk, report)
         # Remove only this dedicated test package's fixed harness directory.
         self.app('rm -rf files/device-testing && mkdir -p files/device-testing/data files/device-testing/shots')
         staging = self.root / 'data'
@@ -605,7 +691,8 @@ class Adb:
                 except OSError:
                     copy_regular_file(declared, staged)
                 source = staged
-            self.upload(source, 'files/device-testing/data/' + name)
+            self.deployment_upload('game-eboot' if name == 'EBOOT.ELF' else 'game-iso', source,
+                                   'files/device-testing/data/' + name, report)
         report['game_sha256'] = fingerprint(Path(self.device['game_dir']) / 'disc.iso')
         for item in sorted(staging.rglob('*')):
             relative = item.relative_to(staging).as_posix()
@@ -997,8 +1084,8 @@ def plain_output(text):
 
 def streaming_limit(device):
     maximum = device.get('streaming_cap_seconds', 300)
-    if type(maximum) is not int or not 1 <= maximum <= 500:
-        raise ValueError('Streaming authorization must be 1..500 seconds; default is 300')
+    if type(maximum) is not int or not 1 <= maximum <= 800:
+        raise ValueError('Streaming authorization must be 1..800 seconds; default is 300')
     return maximum
 
 

@@ -1171,6 +1171,40 @@ def ssh_device(device, name, definitions, root, seconds):
     return report
 
 
+def cloud_authorization(ledger, device, seconds):
+    if ledger.get('issue') != 310 or ledger.get('allowance') != 2:
+        raise ValueError('Streaming requires the task-specific private authorization ledger')
+    phase = device.get('authorization_phase')
+    if phase:
+        runner.safe_name(phase)
+        matches = [value for value in ledger.get('authorization_phases', []) if value.get('id') == phase]
+        if len(matches) != 1:
+            raise ValueError('Select one explicitly authorized phase; history cannot be reset')
+        authorization = matches[0]
+        if authorization.get('allowance') != 2 or authorization.get('maximum_seconds') != 800 or \
+                authorization.get('rate_usd_per_minute') != .15 or authorization.get('maximum_cost_usd') != 2:
+            raise ValueError('Rerun phase requires two attempts, 800 seconds and the verified per-device cost limit')
+        models = authorization.get('models', [])
+        if len(models) != 2 or len(set(models)) != 2 or device['model'] not in models:
+            raise ValueError('Device model is outside the finite authorized pair')
+        rows = [row for row in ledger['reservations'] if row.get('authorization_phase') == phase]
+        if any(row['model'] == device['model'] for row in rows):
+            raise runner.NotTested('The authorized model attempt has already been consumed; no retry')
+    else:
+        authorization = ledger
+        if type(authorization.get('maximum_seconds')) is not int or not 1 <= authorization['maximum_seconds'] <= 500:
+            raise ValueError('Legacy authorization remains capped at 500 seconds')
+        rows = [row for row in ledger['reservations'] if not row.get('authorization_phase')]
+    if runner.streaming_limit(device) > authorization['maximum_seconds'] or seconds > authorization['maximum_seconds']:
+        raise ValueError('Configured cap exceeds the selected authorization')
+    if len(rows) >= authorization['allowance'] or any(row.get('state') != 'released' for row in ledger['reservations']):
+        raise runner.NotTested('Allowance exhausted or an earlier owned reservation is unconfirmed')
+    estimate = max(60, seconds) * authorization.get('rate_usd_per_minute', .15) / 60
+    if phase and estimate > authorization['maximum_cost_usd']:
+        raise ValueError('Selected duration/rate exceeds the authorized per-device cost')
+    return authorization
+
+
 def streaming_device(device, name, definitions, root, seconds):
     maximum = runner.streaming_limit(device)
     if not 1 <= seconds <= maximum or device.get('setup_seconds'):
@@ -1183,12 +1217,7 @@ def streaming_device(device, name, definitions, root, seconds):
         raise ValueError('Reservation ledger must remain in private out/ or temporary storage')
     ledger_path = Path(ledger_name)
     ledger = runner.read_json(ledger_path)
-    if ledger.get('issue') != 310 or ledger.get('allowance') != 2 or \
-            type(ledger.get('maximum_seconds')) is not int or not 1 <= ledger['maximum_seconds'] <= 500 or \
-            maximum > ledger['maximum_seconds']:
-        raise ValueError('Streaming requires the task-specific private two-attempt ledger')
-    if len(ledger['reservations']) >= 2 or any(row.get('state') != 'released' for row in ledger['reservations']):
-        raise runner.NotTested('Cloud allowance exhausted or previous owned reservation is unconfirmed')
+    cloud_authorization(ledger, device, seconds)
     lock = ledger_path.with_suffix('.lock')
     fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     os.close(fd)
@@ -1202,11 +1231,14 @@ def streaming_device(device, name, definitions, root, seconds):
         runner.require_idle_project(cli, device['project'], control, root / 'reservation-preflight.json')
         # Persist consumption before creation: ambiguous activation cannot be retried.
         ledger = runner.read_json(ledger_path)
-        if len(ledger['reservations']) >= 2 or any(item.get('state') != 'released' for item in ledger['reservations']):
-            raise runner.NotTested('Concurrent/resumed cloud allowance changed')
+        authorization = cloud_authorization(ledger, device, seconds)
         row = {'attempt': uuid.uuid4().hex, 'model': device['model'], 'cap_seconds': seconds,
                'started_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'state': 'attempting',
                'creation_log': str(root / 'reservation-create.log')}
+        if device.get('authorization_phase'):
+            row.update(authorization_phase=device['authorization_phase'], rate_usd_per_minute=.15,
+                       target_seconds=authorization.get('target_seconds', seconds),
+                       maximum_estimated_cost_usd=round(max(60, seconds) * .15 / 60, 4))
         ledger['reservations'].append(row)
         runner.write_json(ledger_path, ledger)
         creation_log = root / 'reservation-create.log'
@@ -1229,7 +1261,8 @@ def streaming_device(device, name, definitions, root, seconds):
         if creator.returncode or not reservation:
             raise RuntimeError('Reservation creation failed/unrecognized; no automatic retry')
         remote = {**device, 'adapter': 'adb', 'serial': runner.parse_adb_serial(creation_log.read_text(errors='replace')),
-                  'streaming_cleanup_deadline': hard}
+                  'streaming_cleanup_deadline': hard,
+                  'gameplay_reserve_seconds': device.get('gameplay_reserve_seconds', min(120, int(seconds / 4)))}
         report = run_device(remote, name, definitions, root, runner.remaining(control, seconds))
         if not report.get('launched') and time.monotonic() >= control:
             report.pop('session_failure', None)
@@ -1254,6 +1287,8 @@ def streaming_device(device, name, definitions, root, seconds):
         finally:
             if row is not None:
                 row['duration_seconds'] = round(time.monotonic() - started, 3)
+                if row.get('authorization_phase'):
+                    row['estimated_cost_usd'] = round(max(60, row['duration_seconds']) * row['rate_usd_per_minute'] / 60, 4)
                 runner.write_json(ledger_path, ledger)
             if row is None or row.get('state') == 'released':
                 runner.stop_process(watchdog)

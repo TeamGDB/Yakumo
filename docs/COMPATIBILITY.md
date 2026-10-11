@@ -395,3 +395,31 @@ of the APK/AOT/355 overlays. The first report's missing partial setup identity
 prompted a runner fix that preserves verified metadata on setup failure; original
 reports remain unchanged. These GPU families do not reproduce or rule out the
 Dimensity 7025 / IMG BXM-8-256 report.
+
+## Prepared deployment rerun (2026-10-12)
+
+The next explicit authorization permits one additional attempt per original model,
+two additional reservations total, targeting $1.50/600 seconds and capped at
+$2/800 seconds each before credits at the verified $0.15/device-minute rate.
+The two historical released rows remain unchanged in the ledger; a separate
+authorization phase enforces the pair, count, duration and cost estimates.
+
+Before spending that phase, the new staged deployment path was measured locally
+on physical Android with the same APK/private fixture hashes and no game launch:
+
+| Phase | Measured time |
+| --- | --- |
+| APK transfer, 203,390,550 bytes | 5.836 seconds |
+| Package Manager install | 15.765 seconds |
+| EBOOT transfer/hash | 0.859 seconds |
+| ISO transfer/hash, 1,323,565,056 bytes | 236.666 seconds |
+| Complete preparation including metadata/fixtures/cleanup | 266.624 seconds |
+
+All hashes matched and the unique temporary APK directory was removed. This
+validates the deployment implementation and local transport, not Google link
+throughput. Setup now uses an explicit share of remaining inclusive time with
+gameplay/cleanup reserved, rather than the stale 180-second install cutoff.
+APK transfer and package installation have separate timing/output records;
+timeouts preserve partial output. Synthetic tests reject corrupt transfers,
+expired budgets, repeat model attempts, unauthorized counts/models/rates and
+history resets. Rerun results must be recorded separately after owned release.

@@ -475,12 +475,38 @@ class DeviceTests(unittest.TestCase):
         adb.write_text('''import os, pathlib, shlex, subprocess, sys, hashlib
 root = pathlib.Path(os.environ['FAKE_ADB_ROOT'])
 args = sys.argv[3:]
-if args[0] == 'install':
+if args[0] == 'push':
+    import shutil,time
+    target=root / 'tmp' / pathlib.Path(args[2]).parent.name / pathlib.Path(args[2]).name
+    target.parent.mkdir(parents=True,exist_ok=True)
+    print('transfer started',flush=True)
+    time.sleep(float(os.environ.get('FAKE_PUSH_DELAY','0')))
+    shutil.copyfile(args[1],target)
+    if os.environ.get('FAKE_PUSH_CORRUPT'): target.write_bytes(b'wrong APK')
+    print(str(target.stat().st_size)+' bytes transferred',flush=True)
+elif args[0] == 'install':
     print('Success')
 elif args[:3] == ['exec-out', 'screencap', '-p']:
     sys.stdout.buffer.write(b'\\x89PNG\\r\\n\\x1a\\npublic fixture')
 elif args[0] == 'shell':
     words = shlex.split(' '.join(args[1:]))
+    if words[:2] == ['mkdir','-m']:
+        (root / 'tmp' / pathlib.Path(words[-1]).name).mkdir(parents=True)
+        raise SystemExit(0)
+    if words[:2] == ['rm','-rf'] and words[-1].startswith('/data/local/tmp/yakumo-apk-'):
+        import shutil
+        shutil.rmtree(root / 'tmp' / pathlib.Path(words[-1]).name)
+        raise SystemExit(0)
+    if words[0] == 'sha256sum':
+        target=root / 'tmp' / pathlib.Path(words[1]).parent.name / pathlib.Path(words[1]).name
+        print(hashlib.sha256(target.read_bytes()).hexdigest()+'  '+words[1])
+        raise SystemExit(0)
+    if words[:2] == ['pm','install']:
+        import time
+        print('package installation started',flush=True)
+        time.sleep(float(os.environ.get('FAKE_INSTALL_DELAY','0')))
+        print('Success')
+        raise SystemExit(0)
     if words[0] == 'run-as':
         payload = words[4]
         data = sys.stdin.buffer.read()
@@ -594,6 +620,45 @@ elif args[0] == 'logcat':
             self.assertEqual(dt.run(self.suite, device, 'phone', self.run_dir), 2)
         self.assertEqual((self.adb_root / 'pid').read_text(), '12344')
         self.assertIn('already running', self.report()['automatic']['reason'])
+
+    def test_deployment_split_budget_and_timeout_keep_output_cleanup_and_originals(self):
+        device = self.make_adb()
+        adapter = dt.Adb({**device, 'deployment_share_percent': 70, 'gameplay_reserve_seconds': 5},
+                         self.run_dir, time.monotonic() + 20)
+        overall = adapter.deadline
+        with patch.dict(os.environ, {'FAKE_ADB_ROOT': str(self.adb_root)}):
+            report = {}; adapter.prepare(report)
+        phases = report['deployment']['phases']
+        self.assertEqual([p['name'] for p in phases], ['apk-transfer','package-install','game-eboot','game-iso'])
+        self.assertTrue(all(p['status']=='PASS' for p in phases))
+        self.assertIn('bytes transferred', phases[0]['stdout'])
+        self.assertEqual(report['deployment']['device_apk_sha256'], report['artifact_sha256'])
+        self.assertLessEqual(report['deployment']['budget_seconds'], 14)
+        self.assertEqual(adapter.deadline, overall)
+        self.assertEqual(report['deployment']['apk_staging_cleanup'], 'PASS')
+        self.assertEqual(list((self.adb_root/'tmp').iterdir()), [])
+        for flag, phase in (('FAKE_PUSH_DELAY','apk-transfer'),('FAKE_INSTALL_DELAY','package-install')):
+            root=self.root/flag; root.mkdir()
+            timed=dt.Adb({**device,'deployment_share_percent':20},root,time.monotonic()+3)
+            evidence={}
+            with patch.dict(os.environ, {'FAKE_ADB_ROOT':str(self.adb_root),flag:'3'}):
+                with self.assertRaises(subprocess.TimeoutExpired): timed.prepare(evidence)
+            last=evidence['deployment']['phases'][-1]
+            self.assertEqual(last['name'],phase)
+            self.assertEqual(last['status'],'TIMEOUT')
+            self.assertIn('started',last['stdout'])
+            self.assertEqual(evidence['deployment']['apk_staging_cleanup'],'PASS')
+            self.assertEqual(list((self.adb_root/'tmp').iterdir()), [])
+        rejected=dt.Adb({**device,'gameplay_reserve_seconds':30},self.run_dir,time.monotonic()+10)
+        with self.assertRaises(dt.NotTested): rejected.prepare({})
+
+    def test_transfer_hash_mismatch_prevents_package_install(self):
+        device=self.make_adb(); adapter=dt.Adb(device,self.run_dir,time.monotonic()+20); report={}
+        with patch.dict(os.environ,{'FAKE_ADB_ROOT':str(self.adb_root),'FAKE_PUSH_CORRUPT':'1'}):
+            with self.assertRaisesRegex(ValueError,'fingerprint mismatch'): adapter.prepare(report)
+        self.assertEqual([p['name']for p in report['deployment']['phases']],['apk-transfer'])
+        self.assertEqual(report['deployment']['apk_staging_cleanup'],'PASS')
+        self.assertEqual(list((self.adb_root/'tmp').iterdir()),[])
 
     def test_official_installer_uses_selected_device_no_metrics_and_verified_copy(self):
         device = self.make_adb()
@@ -1007,7 +1072,7 @@ runner.bounded_match('(a+)+$', 'a'*1000+'!', time.monotonic()+2)
         device = {'adapter': 'streaming', 'build': 'dev', 'commit': 'a' * 40,
                   'seconds': 500, 'streaming_cap_seconds': 500}
         self.assertEqual(dt.validate_device(device), device)
-        for change in ({'seconds': 501}, {'streaming_cap_seconds': 501}, {'streaming_cap_seconds': True},
+        for change in ({'seconds': 501}, {'streaming_cap_seconds': 801}, {'streaming_cap_seconds': True},
                        {'streaming_cap_seconds': 0}, {'streaming_cap_seconds': 300}):
             with self.assertRaises(ValueError):
                 dt.validate_device({**device, **change})

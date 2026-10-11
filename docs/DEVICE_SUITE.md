@@ -60,15 +60,22 @@ read-only observations only in explicit developer testing mode; keep ordinary
 player behavior unchanged. Public suite definitions carry no fixture contents.
 
 Cloud pilot: validate locally first; at most two sequential owned reservations.
-The current explicit task authorization allows 500 seconds each, at most 1000
-seconds total, including activation, transfers, testing, evidence and cleanup.
+The initial explicit task authorization allowed 500 seconds each, at most 1000
+seconds total; both historical attempts were consumed and released. The current
+finite rerun phase permits two additional attempts, one per authorized model,
+targeting 600 seconds ($1.50) and capped at 800 seconds ($2) each before credits
+at the verified $0.15/device-minute rate. Activation, transfers, testing, evidence
+and cleanup all count. Maximum additional exposure is $4, not an expanded matrix.
 The runner keeps a conservative 300-second default; an authorized configuration
-must set `streaming_cap_seconds: 500`, `seconds: 500` and a matching private
-ledger maximum. Preserve all attempts and authorization history when migrating
+must select a matching private authorization phase and explicit cap. Preserve
+all attempts and authorization history when adding phases or migrating
 the earlier 300-second ledger; never reset consumption. Keep a private
 ledger across resumed sessions. An incomplete upload is an incomplete pilot,
 not permission to extend the deadline or retry. Reserve the final 30 seconds
 for owned cleanup; preflight, creation, removal and final-list evidence stays private.
+The rerun phase retains both old rows, allows only its two declared models once
+each, and records per-device cost estimates. Changed pricing, unauthorized
+models, an unconfirmed prior release or an exhausted phase prevents creation.
 
 ## Running the implementation
 

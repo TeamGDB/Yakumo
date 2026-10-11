@@ -163,7 +163,7 @@ checks ran. The prepared report initially remains NOT TESTED.
 | `local` | macOS/Linux/Windows physical host | Run in its logged-on desktop; supply local fixture paths |
 | `ssh` | Steam Deck/Linux, Windows or Android attached to Windows | Same runner installed on that host; SSH delegates local/ADB execution and returns evidence only |
 | `adb` | Physical Android and emulator | Explicit serial, dedicated debuggable test APK with generated contract |
-| `streaming` | Optional Google remote Android | Same APK/ADB contract, authenticated official CLI, idle project; 300-second default, explicitly authorized inclusive cap up to 500 seconds |
+| `streaming` | Optional Google remote Android | Same APK/ADB contract, authenticated official CLI, idle project; 300-second default, explicitly authorized inclusive cap up to 800 seconds |
 
 An SSH device wraps a `remote` device object with the same `build` and `commit`.
 Add `host` (an SSH alias), `checkout` (where this tooling revision is installed),
@@ -236,7 +236,7 @@ extension and keeps its original total reservation/transfer/gameplay cap.
 
 Use `adapter: "streaming"`, `project`, `model: "<codename>/<api>"` and an explicit
 `seconds` between 1 and 300 by default, alongside the APK/fixture fields.
-An explicit authorization may set `streaming_cap_seconds` up to 500; `seconds`
+An explicit authorization may set `streaming_cap_seconds` up to 800; `seconds`
 must stay within that bound, including activation/transfers/testing/cleanup.
 The task-specific suite also requires a matching private reservation ledger and
 preserves its two-attempt limit and history. A separate `setup_seconds` extension
@@ -251,6 +251,23 @@ uploads, rather than gameplay alone. Host cleanup removes a known reservation
 on success/failure/interrupt; a separate deadline watchdog provides a fallback.
 An unrecognized creation response is a failure requiring inspection of the
 creation log; it must not trigger deletion of someone else's reservation.
+
+Deployment uses a share of the remaining inclusive budget, rather than a fixed
+180-second installation cutoff. `deployment_share_percent` defaults to 70 and
+must be 1..90; `gameplay_reserve_seconds` protects a declared interval for checks
+(the suite streaming adapter defaults to up to 120 seconds). Acquisition time
+has already been deducted, and the reservation retains its separate cleanup
+reserve. Setup ends at the earlier of the percentage budget and the remaining
+time minus the gameplay reserve; success restores the original gameplay deadline.
+
+The default staged APK path records `apk-transfer` (`adb push`), verifies the
+device copy's SHA-256, then records `package-install` (`pm install`). The APK is
+temporarily held in a unique owned shell directory and removed on every exit;
+game/save/language fixtures remain app-private. Per-phase logs retain timings,
+return codes and partial stdout/stderr on timeout. EBOOT/ISO transfers record
+their independent durations, bytes and verified hashes. The optional official
+CLI installer remains a combined phase and cannot distinguish transport from
+package-manager time; it shares the same budget and never retries automatically.
 Collect evidence before release because the remote device is wiped.
 
 CLI behavior and access can change. Verify the installed version/help and

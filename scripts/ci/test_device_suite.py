@@ -529,6 +529,46 @@ class CombatOracleTests(unittest.TestCase):
 
 
 class CloudAllowanceTests(unittest.TestCase):
+    def test_rerun_authorization_preserves_two_old_rows_one_per_model_and_cost_cap(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base=Path(temp).resolve(); ledger=base/'ledger.json'
+            old=[{'model':'old-a/30','state':'released','cap_seconds':500,'duration_seconds':244},
+                 {'model':'old-b/31','state':'released','cap_seconds':500,'duration_seconds':234}]
+            value={'issue':310,'allowance':2,'maximum_seconds':500,'reservations':copy.deepcopy(old)}
+            legacy={'streaming_cap_seconds':500,'model':'old-a/30'}
+            with self.assertRaises(runner.NotTested): suite.cloud_authorization(value,legacy,500)
+            phase={'id':'quick-rerun','allowance':2,'maximum_seconds':800,'target_seconds':600,
+                   'rate_usd_per_minute':.15,'maximum_cost_usd':2,'models':['fixture-a/30','fixture-b/31']}
+            value['authorization_phases']=[phase];ledger.write_text(json.dumps(value))
+            fake=base/'android.py';fake.write_text("""import sys
+if 'create' in sys.argv: print('new reservation created with id owned123456; connected on port 5555')
+elif 'list' in sys.argv: print('No reservations found.')
+""")
+            device={'adapter':'streaming','android':[sys.executable,str(fake)],'project':'private-fixture',
+                    'model':'fixture-a/30','reservation_ledger':str(ledger),'streaming_cap_seconds':800,
+                    'authorization_phase':'quick-rerun'}
+            for model in phase['models']:
+                selected={**device,'model':model}
+                self.assertEqual(suite.cloud_authorization(value,selected,800),phase)
+            for change in ({'model':'unlisted/30'},{'authorization_phase':'missing'},{'streaming_cap_seconds':801}):
+                with self.assertRaises(ValueError): suite.cloud_authorization(value,{**device,**change},800)
+            bad=copy.deepcopy(value);bad['authorization_phases'][0]['rate_usd_per_minute']=.20
+            with self.assertRaises(ValueError):suite.cloud_authorization(bad,device,800)
+            with self.assertRaises(ValueError):suite.cloud_authorization(value,device,801)
+            for index,model in enumerate(phase['models']):
+                root=base/str(index);root.mkdir()
+                with mock.patch.object(suite,'run_device',return_value={'verdict':'NOT TESTED','launched':True}):
+                    suite.streaming_device({**device,'model':model},model.replace('/','-'),[],root,800)
+                saved=json.loads(ledger.read_text())
+                self.assertEqual(saved['reservations'][:2],old)
+                row=saved['reservations'][-1]
+                self.assertEqual(row['maximum_estimated_cost_usd'],2)
+                self.assertLessEqual(row['estimated_cost_usd'],2)
+                self.assertEqual(row['state'],'released')
+                with self.assertRaises(runner.NotTested):suite.cloud_authorization(saved,{**device,'model':model},800)
+            self.assertEqual(len(saved['reservations']),4)
+            with self.assertRaises(runner.NotTested):suite.cloud_authorization(saved,legacy,500)
+
     def test_explicit_500_budget_preserves_migrated_history_and_cleanup_deadline(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp).resolve(); ledger = base / 'ledger.json'
