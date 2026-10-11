@@ -13,6 +13,7 @@
 #include "adhoc/client.hpp"
 #if defined(MHP3RD_HAS_RENDERER)
 #include "camera/free_camera.hpp"
+#include "camera/game_camera.hpp"
 #include "camera/lock_on.hpp"
 #include "gpu/game_hud.hpp"
 #include "gpu/vulkan_renderer.hpp"
@@ -121,21 +122,32 @@ std::vector<std::string> run_command(Ram &ram, const std::string &line) {
 
     if (command.empty() || command[0] == '#') return out;
     if (command == "observe") {
-        if (!std::getenv("MHP3RD_DEVICE_TEST"))
+        const char *mode = std::getenv("MHP3RD_DEVICE_TEST");
+        if (mode == nullptr || std::string(mode) != "1")
             return {"observation unavailable: explicit developer test mode required"};
         game_command(ram, command, args, out);
         std::string &json = out.front();
         json.pop_back();
         json += ",\"clock_us\":" + std::to_string(kernel().now_us()) +
             ",\"vblanks\":" + std::to_string(kernel().vblank_count()) +
+            ",\"movie\":" + (mpeg_active() ? "true" : "false") +
             ",\"online\":" + (adhoc_session_active() || adhoc_networking_on() ? "true" : "false") +
             ",\"fast_loading\":" + (fast_loading::active() ? "true" : "false") +
             ",\"fast_forward\":" + (fast_forward::active() ? "true" : "false");
         const auto network = adhoc::Client::get().diagnostics();
         json += ",\"peer_count\":" + std::to_string(network.peers.size()) +
             ",\"peer_received\":" + std::to_string(network.total.bytes_in);
+        const auto cheats = held_cheats();
+        json += ",\"quest_cheats\":" +
+            std::string(cheats.health || cheats.stamina || cheats.timer || cheats.one_hit ? "true" : "false");
 #if defined(MHP3RD_HAS_RENDERER)
         const auto free = camera::free_camera_status();
+        json += ",\"camera_target\":";
+        if (const auto point = camera::game_camera_follow_point(kernel().runtime().memory()))
+            json += '[' + std::to_string((*point)[0]) + ',' + std::to_string((*point)[1]) + ',' +
+                std::to_string((*point)[2]) + ']';
+        else
+            json += "null";
         json += ",\"free_camera\":" + std::string(free.active ? "true" : "false") +
             ",\"photo\":" + (free.paused ? "true" : "false") +
             ",\"hud_hidden\":" + (gpu::hud::active() ? "true" : "false") +
@@ -149,13 +161,19 @@ std::vector<std::string> run_command(Ram &ram, const std::string &line) {
                 ",\"camera_valid\":" + (view.valid ? "true" : "false") + ",\"camera_yaw\":" + std::to_string(view.yaw) +
                 ",\"camera_position\":[" + std::to_string(view.position[0]) + ',' + std::to_string(view.position[1]) +
                 ',' + std::to_string(view.position[2]) + ']';
-            json += ",\"frame_ms\":[";
-            const auto &history = perf::frame_history();
-            for (std::size_t i = 0; i < history.size(); ++i) {
-                if (i) json += ',';
-                json += std::to_string(history[(perf::history_cursor() + i) % history.size()]);
+            if (args.size() == 2u && args[1] == "perf") {
+                const auto &summary = perf::last_second();
+                json += ",\"perf_valid\":" + std::string(summary.valid ? "true" : "false") +
+                    ",\"speed_percent\":" + std::to_string(summary.speed * 100.0) +
+                    ",\"game_fps\":" + std::to_string(summary.game_fps) +
+                    ",\"presented_fps\":" + std::to_string(summary.fps) + ",\"frame_ms\":[";
+                const auto &history = perf::frame_history();
+                for (std::size_t i = 0; i < history.size(); ++i) {
+                    if (i) json += ',';
+                    json += std::to_string(history[(perf::history_cursor() + i) % history.size()]);
+                }
+                json += ']';
             }
-            json += ']';
         }
 #endif
         json += "}";

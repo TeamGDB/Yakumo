@@ -148,6 +148,30 @@ void test_rates_and_release() {
     check(std::fabs(f.pitch() + 60.0f) < 0.001f, "lower pitch limit is bounded");
 }
 
+void test_follow_point_observation() {
+    Fixture f;
+    auto &memory = f.runtime.memory();
+    check(!game_camera_follow_point(memory), "no follow point before a camera update");
+    f.enable();
+    write_float(memory, camera_address + 0x10u, 100.0f);
+    write_float(memory, camera_address + 0x14u, 200.0f);
+    write_float(memory, camera_address + 0x18u, -300.0f);
+    f.frame(0.0f, 0.0f);
+    const auto before = f.snapshot();
+    const auto point = game_camera_follow_point(memory);
+    check(point && *point == std::array<float, 3>{100.0f, 200.0f, -300.0f},
+        "follow point reads the current camera's validated look-at coordinates");
+    check(f.snapshot() == before, "observing the point never changes guest memory");
+    psprecomp::Runtime other;
+    check(!game_camera_follow_point(other.memory()), "a different runtime cannot inherit camera observations");
+    memory.store32(camera_address + 0x14u, 0x7FC00000u);
+    check(!game_camera_follow_point(memory), "nonfinite camera coordinates remain unknown");
+    write_float(memory, camera_address + 0x14u, 200.0f);
+    f.flip(0.0f, 0.0f);
+    f.flip(0.0f, 0.0f);
+    check(!game_camera_follow_point(memory), "an old camera update cannot prove current movement");
+}
+
 void test_ownership() {
     Fixture f;
     f.enable();
@@ -661,6 +685,7 @@ void test_mouse_stock_turn() {
 int main() {
     test_passthrough();
     test_rates_and_release();
+    test_follow_point_observation();
     test_ownership();
     test_dispatch_and_write_extent();
     test_vertical_filter();

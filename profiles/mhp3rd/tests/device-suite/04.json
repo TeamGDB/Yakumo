@@ -1,0 +1,135 @@
+{
+  "id": "04",
+  "title": "Save and backup round trips",
+  "checks": [
+    {
+      "id": "save-reload",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "snapshot",
+          "as": "loaded",
+          "until": {
+            "loaded": true,
+            "on_quest": false
+          }
+        },
+        {
+          "action": "fixture",
+          "name": "save-in-game"
+        },
+        {
+          "action": "log",
+          "pattern": "\\[savedata\\] saved [1-9][0-9]* bytes",
+          "history": true
+        },
+        {
+          "action": "tree",
+          "path": "data/ms0/PSP/SAVEDATA/ULJM05800",
+          "as": "saved"
+        },
+        {
+          "action": "restart"
+        },
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "snapshot",
+          "as": "loaded",
+          "until": {
+            "loaded": true,
+            "on_quest": false
+          }
+        },
+        {
+          "action": "tree",
+          "path": "data/ms0/PSP/SAVEDATA/ULJM05800",
+          "as": "reloaded"
+        },
+        {
+          "action": "assert",
+          "actual": "reloaded",
+          "op": "eq",
+          "expected": {
+            "from": "saved"
+          }
+        }
+      ]
+    },
+    {
+      "id": "backup-export-import",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "tree",
+          "path": "data/ms0/PSP/SAVEDATA/ULJM05800",
+          "as": "source"
+        },
+        {
+          "action": "fixture",
+          "name": "backup-export-import-roundtrip"
+        },
+        {
+          "action": "tree",
+          "path": "data/save-backups/roundtrip/ULJM05800",
+          "as": "backup"
+        },
+        {
+          "action": "tree",
+          "path": "data/ms0/PSP/SAVEDATA/ULJM05800",
+          "as": "imported"
+        },
+        {
+          "action": "assert",
+          "actual": "backup",
+          "op": "eq",
+          "expected": {
+            "from": "source"
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "imported",
+          "op": "eq",
+          "expected": {
+            "from": "source"
+          }
+        }
+      ]
+    },
+    {
+      "id": "rejected-import-preserves",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "tree",
+          "path": "data/ms0/PSP/SAVEDATA/ULJM05800",
+          "as": "before"
+        },
+        {
+          "action": "fixture",
+          "name": "reject-corrupt-and-cancel-import"
+        },
+        {
+          "action": "tree",
+          "path": "data/ms0/PSP/SAVEDATA/ULJM05800",
+          "as": "after"
+        },
+        {
+          "action": "assert",
+          "actual": "after",
+          "op": "eq",
+          "expected": {
+            "from": "before"
+          }
+        }
+      ]
+    }
+  ]
+}

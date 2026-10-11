@@ -2,6 +2,7 @@
 
 #include "debug/debug_tools.hpp"
 #include "debug/quest_start.hpp"
+#include "camera/lock_on.hpp"
 #include "game/guest_ram.hpp"
 
 #include <algorithm>
@@ -10,6 +11,8 @@
 #include <cstdlib>
 #include <set>
 #include <sstream>
+#include <bit>
+#include <cmath>
 
 namespace mhp3rd::debug {
 namespace p3rd {
@@ -249,6 +252,7 @@ bool game_command(
         const bool valid_active = quest && offset >= 4u && offset <= 0x10000u && ram.contains(active + offset, 0x48u);
         std::ostringstream json;
         json << "{\"schema\":1,\"request\":" << arg(0) << ",\"loaded\":" << (loaded ? "true" : "false")
+             << ",\"village_ready\":" << (loaded && quests::start_blocked(ram).empty() ? "true" : "false")
              << ",\"task\":\"" << overlay(kTaskSlot) << "\",\"map\":\"" << overlay(quests::kMapSlot)
              << "\",\"on_quest\":" << (quest ? "true" : "false") << ",\"accepted_id\":";
         if (valid_character)
@@ -278,9 +282,43 @@ bool game_command(
             if (!first) json << ',';
             first = false;
             json << "{\"address\":" << m.address << ",\"kind\":" << static_cast<unsigned>(m.kind)
-                 << ",\"health\":" << m.health << ",\"maximum\":" << m.most << '}';
+                 << ",\"health\":" << m.health << ",\"maximum\":" << m.most;
+            if (ram.contains(m.address, camera::lock_on_layout::kExtent)) {
+                json << ",\"same_area\":"
+                     << ((ram.load32(m.address + camera::lock_on_layout::kFlags) & camera::lock_on_layout::kOtherArea)
+                                ? "false"
+                                : "true")
+                     << ",\"position\":[";
+                for (std::uint32_t i = 0; i < 3u; ++i) {
+                    if (i) json << ',';
+                    const float coordinate =
+                        std::bit_cast<float>(ram.load32(m.address + camera::lock_on_layout::kPosition + i * 4u));
+                    if (std::isfinite(coordinate))
+                        json << coordinate;
+                    else
+                        json << "null";
+                }
+                json << ']';
+            }
+            json << '}';
         }
-        json << "]}";
+        json << ']';
+        if (args.size() == 5u && args[1] == "text") {
+            const std::uint32_t block = arg(2);
+            const auto table = arg(3);
+            const auto entry = arg(4);
+            const std::string text = table < 128u && entry < 8192u && ram.contains(block, 4u)
+                ? text_entry(ram, block, static_cast<int>(table), entry)
+                : std::string();
+            json << ",\"text_hex\":\"";
+            for (unsigned char value : text) {
+                char byte[3];
+                std::snprintf(byte, sizeof(byte), "%02x", value);
+                json << byte;
+            }
+            json << '"';
+        }
+        json << '}';
         out.push_back("observation " + json.str());
     } else if (command == "state") {
         out.push_back("character: " + (character_loaded(ram) ? hunter_name(ram) : std::string("(none)")) + ", zenny " +

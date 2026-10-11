@@ -152,6 +152,7 @@ constexpr std::array<CodeWord, 24> kSignature{{
 }};
 
 struct State {
+    const psprecomp::GuestMemory *memory{};
     bool prepared{};
     bool hooked{};
     RotationFunction original{};
@@ -728,6 +729,7 @@ bool prepare_game_camera(psprecomp::Runtime &runtime, RotationFunction original)
         return false;
     }
     state.original = original;
+    state.memory = &runtime.memory();
     state.prepared = true;
     return true;
 }
@@ -763,6 +765,16 @@ void game_camera_frame(psprecomp::Runtime &runtime) {
 
 bool game_camera_driving() {
     return (driving_allowed() || (state.hooked && lock_on_status().locked)) && state.available;
+}
+
+std::optional<std::array<float, 3>> game_camera_follow_point(const psprecomp::GuestMemory &memory) {
+    if (state.memory != &memory || !state.prepared || !state.available || state.frame - state.last_update > 1u ||
+        memory.raw_pointer(state.address, 0x1Cu) == nullptr)
+        return std::nullopt;
+    const std::array<float, 3> point{load_float(memory, state.address + 0x10u),
+        load_float(memory, state.address + 0x14u), load_float(memory, state.address + 0x18u)};
+    if (std::any_of(point.begin(), point.end(), [](float value) { return !std::isfinite(value); })) return std::nullopt;
+    return point;
 }
 
 bool game_camera_aim_boost() {

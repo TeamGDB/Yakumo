@@ -154,7 +154,11 @@ DEVICE_TEST := profiles/mhp3rd/tools/device_testing.py
 DEVICE_CONFIG ?= device-testing.local.json
 DEVICE_SCENARIO ?= boot
 DEVICE_OUTPUT ?= out/device-testing
-.PHONY: device-scenarios device-prepare device-run device-review device-matrix
+.PHONY: device-scenarios device-prepare device-run device-review device-matrix device-suite
+
+device-suite:
+	@mkdir -p "$(DEVICE_OUTPUT)"
+	$(PYTHON) profiles/mhp3rd/tools/device_suite.py --config "$(DEVICE_CONFIG)" --output-parent "$(DEVICE_OUTPUT)" $(DEVICE_ARGS)
 
 device-scenarios:
 	$(PYTHON) $(DEVICE_TEST) list

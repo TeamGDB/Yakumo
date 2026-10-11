@@ -1,0 +1,110 @@
+{
+  "id": "10",
+  "title": "Performance",
+  "checks": [
+    {
+      "id": "village-route",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "snapshot",
+          "as": "loaded",
+          "until": {
+            "loaded": true,
+            "on_quest": false
+          }
+        },
+        {
+          "action": "fixture",
+          "name": "warmed-repeated-village-route"
+        },
+        {
+          "action": "snapshot",
+          "as": "village"
+        },
+        {
+          "action": "assert",
+          "actual": "village.perf_speed_percent",
+          "op": "ge",
+          "expected": 99
+        },
+        {
+          "action": "assert",
+          "actual": "village.perf_comparison",
+          "op": "eq",
+          "expected": {
+            "parameter": "village-performance-verdict"
+          }
+        }
+      ]
+    },
+    {
+      "id": "quest-loading-route",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "warmed-repeated-quest-loading-route"
+        },
+        {
+          "action": "snapshot",
+          "as": "quest"
+        },
+        {
+          "action": "assert",
+          "actual": "quest.perf_p99_ms",
+          "op": "le",
+          "expected": {
+            "parameter": "calibrated-p99-budget-ms"
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "quest.perf_load_ms",
+          "op": "le",
+          "expected": {
+            "parameter": "calibrated-load-budget-ms"
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "quest.perf_speed_percent",
+          "op": "ge",
+          "expected": 99
+        }
+      ]
+    },
+    {
+      "id": "resolution-interpolation-fastforward",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "performance-resolution-interpolation-fastforward"
+        },
+        {
+          "action": "snapshot",
+          "as": "modes"
+        },
+        {
+          "action": "assert",
+          "actual": "modes.variants_completed",
+          "op": "eq",
+          "expected": {
+            "parameter": "required-performance-variants"
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "modes.simulation_speed_restored",
+          "op": "ge",
+          "expected": 99
+        }
+      ]
+    }
+  ]
+}

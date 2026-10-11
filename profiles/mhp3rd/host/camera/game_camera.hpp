@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <array>
 #include <optional>
 #include <span>
 
@@ -45,6 +46,9 @@ void game_camera_frame(psprecomp::Runtime &runtime);
 // The port is driving the game's camera right now, so the game must not also
 // act on the second stick: its own turn and vertical presets would fight ours.
 [[nodiscard]] bool game_camera_driving();
+// Read-only diagnostic of the current follow camera's look-at point. Empty
+// without a validated, recently updated camera; never writes guest state.
+[[nodiscard]] std::optional<std::array<float, 3>> game_camera_follow_point(const psprecomp::GuestMemory &memory);
 
 // A bow or a bowgun is aiming under the driver: the stick goes to the game,
 // stretched to full length, so the game's aim code steps at any push and the

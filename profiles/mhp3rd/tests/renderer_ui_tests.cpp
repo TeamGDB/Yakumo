@@ -4574,6 +4574,7 @@ void input_script_contracts(
     controls.keys = {};
     controls.pad = {};
     controls.keys[static_cast<int>(input::Action::Triangle)][0].inputs[0] = input::key(SDL_SCANCODE_F13);
+    controls.keys[static_cast<int>(input::Action::Cross)][0].inputs[0] = input::key(SDL_SCANCODE_F14);
     controls.keys[static_cast<int>(input::Action::Circle)][0].inputs[0] = input::mouse_button(1);
     controls.pad[static_cast<int>(input::Action::Square)][0].inputs[0] = input::pad(input::PadInput::South);
     settings::current().mouse = true;
@@ -4598,6 +4599,8 @@ void input_script_contracts(
     tick();
     expect(events.key_down == 1 && events.mouse_down == 1 && (renderer.pad().buttons & 0xb000) == 0xb000,
         "scripted key, mouse and virtual pad map to exact PSP Triangle/Circle/Square bits");
+    expect(
+        (renderer.pad().buttons & 0x4000u) != 0u, "physical scancode action reaches the exact bound PSP Cross control");
     const auto motion = renderer.take_mouse_motion();
     expect(motion.x == 7 && motion.y == -3, "script mouse preserves exact relative counts");
     auto *pad = renderer.gamepad();
@@ -4743,14 +4746,16 @@ int run_contracts(int scripts) {
         else
             clear_environment("MHP3RD_INPUT_LIVE");
         set_environment("MHP3RD_SCREENSHOT_DIR", sandbox.string().c_str());
-        const auto script = std::string("bad; ;1:key F13 2;1:mouse 7 -3;1:click left 2;1:pad a+invalid 2;") +
+        const auto script =
+            std::string("bad; ;1:key F13 2;1:scan F14 2;1:mouse 7 -3;1:click left 2;1:pad a+invalid 2;") +
             "1:axis leftx 2;2:joy 4 attach Public script joystick;2:joy 4 attach;"
             "3:joy 4 button 2 2;3:joy 4 hat 3 2;3:joy 4 axis 1 -2;6:joy 4 nonsense;7:joy 4 detach;"
             "2:finger 3 down .1 .2;3:finger 3 move .2 .3;4:finger 3 up;5:hold 4 .3 .4 2;"
             "6:swipe 5 .1 .2 .6 .7 3;5:drag .1 .2 .3 .4 2;"
             "8:text Public UTF-8 text;8:drop " +
             (sandbox / "synthetic.zip").string() +
-            ";8:shot script-window;9:shot;10:key NoSuchKey;10:click invalid;10:axis invalid 1;"
+            ";8:shot script-window;9:shot;10:key NoSuchKey;10:scan NoSuchScan;10:window invalid;10:window raise;"
+            "10:click invalid;10:axis invalid 1;"
             "10:joy 99 button 0;10:hold 1;10:swipe 1;10:drag 1;10:pointer malformed;10:unknown;";
         set_environment("MHP3RD_INPUT_SCRIPT", script.c_str());
     }
@@ -4886,6 +4891,10 @@ int run_contracts(int scripts) {
         auto result = debug::run_command(ram, "observe 41");
         expect(result.size() == 1 && result[0].find("unavailable") != std::string::npos,
             "structured observations require explicit developer test mode");
+        set_environment("MHP3RD_DEVICE_TEST", "0");
+        result = debug::run_command(ram, "observe 41");
+        expect(result[0].find("unavailable") != std::string::npos,
+            "an explicit zero keeps developer observation mode off");
         set_environment("MHP3RD_DEVICE_TEST", "1");
         result = debug::run_command(ram, "observe 42");
         expect(result.size() == 1 && result[0].find("\"request\":42") != std::string::npos &&
@@ -4893,6 +4902,10 @@ int run_contracts(int scripts) {
                 result[0].find("\"vblanks\":" + std::to_string(kernel().vblank_count())) != std::string::npos &&
                 result[0].find("\"photo\":false") != std::string::npos,
             "readbacks report actual kernel clocks and photo state rather than command acknowledgement");
+        result = debug::run_command(ram, "observe 43 perf");
+        expect(result[0].find("\"frame_ms\":[") != std::string::npos &&
+                result[0].find("\"speed_percent\":") != std::string::npos,
+            "explicit performance readback includes measured frame history and guest speed");
         clear_environment("MHP3RD_DEVICE_TEST");
     }
 #endif

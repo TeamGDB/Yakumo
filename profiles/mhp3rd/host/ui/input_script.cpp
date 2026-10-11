@@ -46,6 +46,7 @@ struct State {
         SDL_Joystick *joystick{};
         int joy_button{-1};
         bool joy_hat{};
+        SDL_Scancode scancode{SDL_SCANCODE_UNKNOWN};
     };
     // Test joysticks without a mapping (`joy`), by the script's number.
     std::map<int, SDL_Joystick *> joysticks;
@@ -68,13 +69,13 @@ std::string trim(const std::string &text) {
     return text.substr(first, text.find_last_not_of(" \t\r\n") - first + 1u);
 }
 
-void push_key(SDL_Keycode key, bool down) {
+void push_key(SDL_Keycode key, bool down, SDL_Scancode scancode = SDL_SCANCODE_UNKNOWN) {
     SDL_Event event{};
     event.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
     event.key.timestamp = SDL_GetTicksNS();
     event.key.windowID = SDL_GetWindowID(Layer::get().renderer().window());
     event.key.key = key;
-    event.key.scancode = SDL_GetScancodeFromKey(key, nullptr);
+    event.key.scancode = scancode == SDL_SCANCODE_UNKNOWN ? SDL_GetScancodeFromKey(key, nullptr) : scancode;
     event.key.down = down;
     SDL_PushEvent(&event);
     // A pushed event does not change SDL's keyboard snapshot, which the game's
@@ -245,15 +246,20 @@ void run(const Step &due) {
     const Step step = due;
     State &s = state();
     std::cout << "[script] frame " << s.frame << ": " << step.action << " " << step.argument << std::endl;
-    if (step.action == "key") {
+    if (step.action == "key" || step.action == "scan") {
         const auto [name, frames] = name_and_frames(step.argument, kHoldFrames);
-        const SDL_Keycode key = SDL_GetKeyFromName(name.c_str());
-        if (key == SDLK_UNKNOWN) {
+        const SDL_Scancode scancode =
+            step.action == "scan" ? SDL_GetScancodeFromName(name.c_str()) : SDL_SCANCODE_UNKNOWN;
+        const SDL_Keycode key = step.action == "scan" ? SDL_GetKeyFromScancode(scancode, SDL_KMOD_NONE, false)
+                                                      : SDL_GetKeyFromName(name.c_str());
+        if (key == SDLK_UNKNOWN || (step.action == "scan" && scancode == SDL_SCANCODE_UNKNOWN)) {
             std::cout << "[script] unknown key " << step.argument << std::endl;
             return;
         }
-        push_key(key, true);
-        s.releases.push_back({s.frame + frames, key, {}});
+        push_key(key, true, scancode);
+        State::Release release{s.frame + frames, key, {}};
+        release.scancode = scancode;
+        s.releases.push_back(release);
     } else if (step.action == "mouse") {
         float dx = 0.0f;
         float dy = 0.0f;
@@ -306,6 +312,21 @@ void run(const Step &due) {
             return;
         }
         SDL_SetJoystickVirtualAxis(s.pad, axis, static_cast<Sint16>(std::clamp(value, -1.0f, 1.0f) * 32767.0f));
+    } else if (step.action == "window") {
+        // Operate only this process's renderer window, never another app.
+        SDL_Window *window = Layer::get().renderer().window();
+        bool ok = false;
+        if (step.argument == "raise")
+            ok = SDL_RaiseWindow(window);
+        else if (step.argument == "minimize")
+            ok = SDL_MinimizeWindow(window);
+        else if (step.argument == "restore")
+            ok = SDL_RestoreWindow(window);
+        else {
+            std::cout << "[script] unknown window action " << step.argument << std::endl;
+            return;
+        }
+        if (!ok) std::cout << "[script] window action failed: " << SDL_GetError() << std::endl;
     } else if (step.action == "joy") {
         run_joystick(step.argument);
     } else if (step.action == "finger") {
@@ -504,7 +525,7 @@ void tick() {
             ++it;
             continue;
         }
-        if (it->key != SDLK_UNKNOWN) push_key(it->key, false);
+        if (it->key != SDLK_UNKNOWN) push_key(it->key, false, it->scancode);
         if (it->mouse_button != 0u) push_mouse_button(it->mouse_button, false);
         for (SDL_GamepadButton button : it->buttons) SDL_SetJoystickVirtualButton(s.pad, button, false);
         if (it->joystick != nullptr && it->joy_button >= 0)

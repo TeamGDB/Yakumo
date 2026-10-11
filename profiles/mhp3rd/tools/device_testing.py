@@ -260,7 +260,7 @@ def kill_command(process, force_group=False):
 
 
 def command(argv, deadline, *, data=None, check=True, maximum=20, return_status=False,
-            input_file=None, output_limit=EVIDENCE_LIMIT):
+            input_file=None, output_limit=EVIDENCE_LIMIT, env=None):
     """Execute trusted configured tools with argv boundaries and a time limit."""
     seconds = remaining(deadline, maximum)
     launch = argv
@@ -273,6 +273,7 @@ def command(argv, deadline, *, data=None, check=True, maximum=20, return_status=
     process = subprocess.Popen(launch, stdin=subprocess.PIPE if data is not None else
                                input_file if input_file is not None else subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               env=env,
                                start_new_session=os.name != 'nt')
     try:
         chunks = queue.Queue(maxsize=4)
@@ -429,7 +430,7 @@ class Local:
         return self.process is not None and self.process.poll() is None
 
     def send(self, kind, value):
-        with (self.root / ('debug.txt' if kind == 'debug' else 'input-live.txt')).open('a') as output:
+        with (self.root / ('debug.txt' if kind == 'debug' else 'input-live.txt')).open('a', encoding='utf-8') as output:
             output.write(value + '\n')
 
     def capture(self, name):

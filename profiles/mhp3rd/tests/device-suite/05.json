@@ -1,0 +1,126 @@
+{
+  "id": "05",
+  "title": "Japanese and patched translation inputs",
+  "checks": [
+    {
+      "id": "menu-dialogue",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "fixture",
+          "name": "translated-menu-dialogue"
+        },
+        {
+          "action": "snapshot",
+          "as": "menu",
+          "text_probe": {
+            "parameter": "menu-probe"
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "menu.text_hex",
+          "op": "eq",
+          "expected": {
+            "parameter": "menu-expected-hex"
+          }
+        },
+        {
+          "action": "snapshot",
+          "as": "dialogue",
+          "text_probe": {
+            "parameter": "dialogue-probe"
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "dialogue.text_hex",
+          "op": "eq",
+          "expected": {
+            "parameter": "dialogue-expected-hex"
+          }
+        }
+      ]
+    },
+    {
+      "id": "catalog-reopen",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "translated-catalog-open"
+        },
+        {
+          "action": "snapshot",
+          "as": "first"
+        },
+        {
+          "action": "assert",
+          "actual": "first.catalog_text",
+          "op": "eq",
+          "expected": {
+            "parameter": "catalog-text"
+          }
+        },
+        {
+          "action": "fixture",
+          "name": "catalog-change-star-reopen"
+        },
+        {
+          "action": "snapshot",
+          "as": "reopened"
+        },
+        {
+          "action": "assert",
+          "actual": "reopened.catalog_text",
+          "op": "eq",
+          "expected": {
+            "parameter": "catalog-text"
+          }
+        }
+      ]
+    },
+    {
+      "id": "active-quest-fallback",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "translated-normal-quest"
+        },
+        {
+          "action": "snapshot",
+          "as": "quest"
+        },
+        {
+          "action": "assert",
+          "actual": "quest.active_text",
+          "op": "eq",
+          "expected": {
+            "parameter": "active-text"
+          }
+        },
+        {
+          "action": "fixture",
+          "name": "restart-original-language"
+        },
+        {
+          "action": "snapshot",
+          "as": "original"
+        },
+        {
+          "action": "assert",
+          "actual": "original.active_text",
+          "op": "eq",
+          "expected": {
+            "parameter": "original-active-text"
+          }
+        }
+      ]
+    }
+  ]
+}

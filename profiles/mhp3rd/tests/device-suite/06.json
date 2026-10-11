@@ -1,0 +1,129 @@
+{
+  "id": "06",
+  "title": "Mods, textures and layered appearance",
+  "checks": [
+    {
+      "id": "import-replace-files",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "import-synthetic-mod-and-pack"
+        },
+        {
+          "action": "tree",
+          "path": "data/mods/synthetic",
+          "as": "mod"
+        },
+        {
+          "action": "assert",
+          "actual": "mod",
+          "op": "eq",
+          "expected": {
+            "parameter": "synthetic-mod-inventory"
+          }
+        },
+        {
+          "action": "tree",
+          "path": "data/textures/NPJB40001",
+          "as": "pack"
+        },
+        {
+          "action": "assert",
+          "actual": "pack",
+          "op": "eq",
+          "expected": {
+            "parameter": "synthetic-pack-inventory"
+          }
+        }
+      ]
+    },
+    {
+      "id": "replacement-render",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "capture",
+          "as": "original"
+        },
+        {
+          "action": "fixture",
+          "name": "enable-synthetic-texture-target"
+        },
+        {
+          "action": "capture",
+          "as": "replaced"
+        },
+        {
+          "action": "image",
+          "image": "replaced",
+          "as": "replaced-content"
+        },
+        {
+          "action": "difference",
+          "before": "original",
+          "after": "replaced",
+          "as": "difference",
+          "op": "gt",
+          "expected": 0.001
+        }
+      ]
+    },
+    {
+      "id": "layered-equipment-save",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "snapshot",
+          "as": "before"
+        },
+        {
+          "action": "tree",
+          "path": "data/ms0",
+          "as": "saved"
+        },
+        {
+          "action": "fixture",
+          "name": "layered-look-reload"
+        },
+        {
+          "action": "snapshot",
+          "as": "after"
+        },
+        {
+          "action": "assert",
+          "actual": "after.equipment",
+          "op": "eq",
+          "expected": {
+            "from": "before.equipment"
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "after.layered_models",
+          "op": "ne",
+          "expected": {
+            "from": "before.layered_models"
+          }
+        },
+        {
+          "action": "tree",
+          "path": "data/ms0",
+          "as": "after-save"
+        },
+        {
+          "action": "assert",
+          "actual": "after-save",
+          "op": "eq",
+          "expected": {
+            "from": "saved"
+          }
+        }
+      ]
+    }
+  ]
+}

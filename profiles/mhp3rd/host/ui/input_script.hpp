@@ -10,6 +10,8 @@
 //   key NAME [N]      press a key and release it N frames later, 4 by default
 //                     (SDL key names: Escape, Down, Return, Q). While the game
 //                     has input it reaches the game through the bindings too
+//   scan NAME [N]     press a physical SDL scancode (W, ., F12), independent
+//                     of the current keyboard layout, with the same bounded release
 //   mouse DX DY       move the mouse by DX, DY counts
 //   click BUTTON [N]  press a mouse button (left, middle, right, x1, x2) for N
 //                     frames, 4 by default
@@ -20,6 +22,9 @@
 //                     dpdown, dpleft, dpright, ...)
 //   axis NAME VALUE   hold an axis of the virtual gamepad at VALUE, -1 to 1
 //                     (leftx, lefty, rightx, righty, lefttrigger, righttrigger)
+//   window raise|minimize|restore
+//                     change this process's actual SDL window for bounded
+//                     developer focus/lifecycle tests; observe the outcome
 //   joy K attach [NAME]
 //                     a test joystick numbered K that SDL has no mapping for,
 //                     like a controller it does not know: 12 buttons, 4 axes

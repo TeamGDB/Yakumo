@@ -1,0 +1,284 @@
+{
+  "id": "03",
+  "title": "Single-player quest, combat and camera",
+  "checks": [
+    {
+      "id": "quest-identity-clock",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "snapshot",
+          "as": "loaded",
+          "until": {
+            "loaded": true,
+            "on_quest": false
+          }
+        },
+        {
+          "action": "debug",
+          "value": "quest start 204"
+        },
+        {
+          "action": "snapshot",
+          "as": "quest",
+          "until": {
+            "on_quest": true,
+            "active_id": 204,
+            "quest_ticks": {
+              "op": "lt",
+              "value": 89990
+            },
+            "fast_loading": false,
+            "camera_valid": true
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "quest.accepted_id",
+          "op": "eq",
+          "expected": 204
+        },
+        {
+          "action": "assert",
+          "actual": "quest.quest_ticks",
+          "op": "gt",
+          "expected": 0
+        },
+        {
+          "action": "snapshot",
+          "as": "later"
+        },
+        {
+          "action": "assert",
+          "actual": "later.quest_ticks",
+          "op": "lt",
+          "expected": {
+            "from": "quest.quest_ticks"
+          }
+        },
+        {
+          "action": "capture",
+          "as": "quest-frame"
+        },
+        {
+          "action": "image",
+          "image": "quest-frame",
+          "as": "quest-frame-content"
+        }
+      ]
+    },
+    {
+      "id": "movement-camera",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "snapshot",
+          "as": "before"
+        },
+        {
+          "action": "assert",
+          "actual": "before.free_camera",
+          "op": "eq",
+          "expected": false
+        },
+        {
+          "action": "input",
+          "value": "0:axis rightx 1"
+        },
+        {
+          "action": "snapshot",
+          "as": "turned",
+          "until": {
+            "camera_yaw": {
+              "op": "angle_delta_gt",
+              "value": {
+                "angle": {
+                  "from": "before.camera_yaw"
+                },
+                "minimum": 10
+              }
+            }
+          }
+        },
+        {
+          "action": "input",
+          "value": "0:axis rightx 0"
+        },
+        {
+          "action": "assert",
+          "actual": "turned.camera_valid",
+          "op": "eq",
+          "expected": true
+        },
+        {
+          "action": "assert",
+          "actual": "turned.camera_yaw",
+          "op": "ne",
+          "expected": {
+            "from": "before.camera_yaw"
+          }
+        },
+        {
+          "action": "fixture",
+          "name": "quest-movement-route"
+        },
+        {
+          "action": "snapshot",
+          "as": "moved"
+        },
+        {
+          "action": "assert",
+          "actual": "moved.camera_target",
+          "op": "distance_gt",
+          "expected": {
+            "point": {
+              "from": "turned.camera_target"
+            },
+            "minimum": 10
+          }
+        }
+      ]
+    },
+    {
+      "id": "small-combat",
+      "seconds": 120,
+      "steps": [
+        {
+          "action": "restart",
+          "reset": true
+        },
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "debug",
+          "value": "quest start 204"
+        },
+        {
+          "action": "snapshot",
+          "as": "fresh-quest",
+          "until": {
+            "on_quest": true,
+            "active_id": 204,
+            "quest_ticks": {
+              "op": "lt",
+              "value": 89970
+            },
+            "fast_loading": false
+          }
+        },
+        {
+          "action": "fixture",
+          "name": "quest-area-transition"
+        },
+        {
+          "action": "snapshot",
+          "as": "area",
+          "until": {
+            "map": "P_m12a01d.ovl",
+            "fast_loading": false,
+            "quest_ticks": {
+              "op": "lt",
+              "value": 89900
+            }
+          }
+        },
+        {
+          "action": "approach",
+          "as": "target",
+          "kind": 50
+        },
+        {
+          "action": "attack",
+          "target": "target",
+          "as": "hit"
+        },
+        {
+          "action": "assert",
+          "actual": "hit.after_health",
+          "op": "lt",
+          "expected": {
+            "from": "hit.before_health"
+          }
+        }
+      ]
+    },
+    {
+      "id": "large-lock-on",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "reach-live-large-monster"
+        },
+        {
+          "action": "snapshot",
+          "as": "monster"
+        },
+        {
+          "action": "input",
+          "value": "0:pad rightstick 4"
+        },
+        {
+          "action": "snapshot",
+          "as": "locked",
+          "until": {
+            "lock_on": true
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "locked.lock_on",
+          "op": "eq",
+          "expected": true
+        }
+      ]
+    },
+    {
+      "id": "area-return",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "snapshot",
+          "as": "before"
+        },
+        {
+          "action": "assert",
+          "actual": "before.map",
+          "op": "ne",
+          "expected": "P_m12a00d.ovl"
+        },
+        {
+          "action": "fixture",
+          "name": "abandon-quest"
+        },
+        {
+          "action": "snapshot",
+          "as": "returned",
+          "until": {
+            "on_quest": false,
+            "loaded": true,
+            "village_ready": true
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "returned.task",
+          "op": "eq",
+          "expected": "lobby_task.ovl"
+        },
+        {
+          "action": "assert",
+          "actual": "returned.map",
+          "op": "eq",
+          "expected": "P_v00a00d.ovl"
+        }
+      ]
+    }
+  ]
+}

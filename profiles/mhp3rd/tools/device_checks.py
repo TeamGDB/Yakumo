@@ -33,6 +33,16 @@ def compare(actual, operator, expected):
             raise CheckFailed('Numeric comparison requires numbers, not unknown/bool values')
         ok = {'gt': actual > expected, 'ge': actual >= expected,
               'lt': actual < expected, 'le': actual <= expected}[operator]
+    elif operator == 'distance_gt':
+        point, minimum = expected['point'], expected['minimum']
+        if not isinstance(actual, list) or not isinstance(point, list) or len(actual) != 3 or len(point) != 3 or \
+                any(type(v) not in (float, int) or not math.isfinite(v) for v in actual + point):
+            raise CheckFailed('Distance requires two finite observed positions')
+        ok = math.sqrt(sum((a - b) ** 2 for a, b in zip(actual, point))) > minimum
+    elif operator == 'angle_delta_gt':
+        if type(actual) not in (float, int) or type(expected['angle']) not in (float, int):
+            raise CheckFailed('Angle delta requires observed numbers')
+        ok = abs((actual - expected['angle'] + 180) % 360 - 180) > expected['minimum']
     else:
         raise ValueError('Unknown comparison operator')
     if not ok:
@@ -172,6 +182,25 @@ def image_difference(before, after):
     count = before[0] * before[1]
     changed = sum(before[2][i:i + 3] != after[2][i:i + 3] for i in range(0, len(before[2]), 3))
     return changed / count
+
+
+def reference_region(actual, reference, region, tolerance=12, maximum_bad_fraction=.02):
+    """A navigation oracle; independent state checks must still prove outcomes."""
+    if actual[:2] != reference[:2] or len(region) != 4 or not 0 <= tolerance <= 255 or not 0 <= maximum_bad_fraction < 1:
+        raise CheckFailed('Invalid reference dimensions or tolerance')
+    x, y, width, height = region
+    if any(type(v) is not int for v in region) or x < 0 or y < 0 or width <= 0 or height <= 0 or \
+            x + width > actual[0] or y + height > actual[1]:
+        raise CheckFailed('Reference region escapes capture')
+    bad = 0
+    for row in range(y, y + height):
+        for column in range(x, x + width):
+            at = (row * actual[0] + column) * 3
+            bad += max(abs(actual[2][at + c] - reference[2][at + c]) for c in range(3)) > tolerance
+    fraction = bad / (width * height)
+    if fraction > maximum_bad_fraction:
+        raise CheckFailed(f'Reference region mismatch: {fraction:.4f}')
+    return fraction
 
 
 def percentile(samples, fraction):

@@ -1,0 +1,184 @@
+{
+  "id": "07",
+  "title": "Photo tools",
+  "checks": [
+    {
+      "id": "freeze-step",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "snapshot",
+          "as": "loaded",
+          "until": {
+            "loaded": true,
+            "on_quest": false
+          }
+        },
+        {
+          "action": "fixture",
+          "name": "enable-free-camera"
+        },
+        {
+          "action": "input",
+          "value": "0:window raise"
+        },
+        {
+          "action": "input",
+          "value": "0:key F6 4"
+        },
+        {
+          "action": "snapshot",
+          "as": "flying",
+          "until": {
+            "free_camera": true
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "flying.free_camera",
+          "op": "eq",
+          "expected": true
+        },
+        {
+          "action": "input",
+          "value": "0:key P 4"
+        },
+        {
+          "action": "snapshot",
+          "as": "held",
+          "until": {
+            "photo": true
+          }
+        },
+        {
+          "action": "hold",
+          "fields": [
+            "clock_us",
+            "vblanks"
+          ],
+          "seconds": 0.6
+        },
+        {
+          "action": "input",
+          "value": "0:scan . 2"
+        },
+        {
+          "action": "snapshot",
+          "as": "stepped",
+          "until": {
+            "vblanks": {
+              "op": "ge",
+              "value": {
+                "from": "held.vblanks",
+                "add": 2
+              }
+            }
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "stepped.vblanks",
+          "op": "eq",
+          "expected": 2,
+          "subtract": "held.vblanks"
+        },
+        {
+          "action": "assert",
+          "actual": "stepped.photo",
+          "op": "eq",
+          "expected": true
+        },
+        {
+          "action": "hold",
+          "fields": [
+            "clock_us",
+            "vblanks"
+          ],
+          "seconds": 0.5
+        },
+        {
+          "action": "input",
+          "value": "0:key P 4"
+        },
+        {
+          "action": "snapshot",
+          "as": "resumed",
+          "until": {
+            "photo": false
+          }
+        },
+        {
+          "action": "input",
+          "value": "0:key F6 4"
+        },
+        {
+          "action": "snapshot",
+          "as": "left",
+          "until": {
+            "free_camera": false
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "left.free_camera",
+          "op": "eq",
+          "expected": false
+        }
+      ]
+    },
+    {
+      "id": "hud-png",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "photo-held-hud-visible"
+        },
+        {
+          "action": "capture",
+          "as": "hud"
+        },
+        {
+          "action": "input",
+          "value": "0:key F7 4"
+        },
+        {
+          "action": "snapshot",
+          "as": "hidden",
+          "until": {
+            "hud_hidden": true
+          }
+        },
+        {
+          "action": "capture",
+          "as": "no-hud"
+        },
+        {
+          "action": "difference",
+          "before": "hud",
+          "after": "no-hud",
+          "as": "hud-difference",
+          "op": "gt",
+          "expected": 0.0001
+        },
+        {
+          "action": "game_png",
+          "as": "png"
+        },
+        {
+          "action": "image",
+          "image": "png",
+          "as": "png-content",
+          "dimensions": [
+            480,
+            272
+          ]
+        }
+      ]
+    }
+  ]
+}

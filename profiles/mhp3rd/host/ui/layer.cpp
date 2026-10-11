@@ -479,7 +479,8 @@ void Layer::apply_theme() {
 void Layer::begin_frame() {
 #if defined(MHP3RD_DEBUG_MENU)
     // Explicit test mode also services readbacks while the menu holds the guest.
-    if (std::getenv("MHP3RD_DEVICE_TEST")) debug::read([](const game::Ram &) { debug::frame(kernel().runtime()); });
+    if (const char *mode = std::getenv("MHP3RD_DEVICE_TEST"); mode && std::string(mode) == "1")
+        debug::read([](const game::Ram &) { debug::frame(kernel().runtime()); });
 #endif
     renderer_->begin_ui_frame();
     // Blocked, the interface reads no gamepad at all, while the keyboard,

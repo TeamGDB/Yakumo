@@ -1,0 +1,133 @@
+{
+  "id": "09",
+  "title": "Platform lifecycle",
+  "checks": [
+    {
+      "id": "focus-resume",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "snapshot",
+          "as": "loaded",
+          "until": {
+            "loaded": true,
+            "on_quest": false
+          }
+        },
+        {
+          "action": "snapshot",
+          "as": "before"
+        },
+        {
+          "action": "fixture",
+          "name": "os-background-return"
+        },
+        {
+          "action": "snapshot",
+          "as": "returned",
+          "until": {
+            "focus": true
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "returned.clock_us",
+          "op": "gt",
+          "expected": {
+            "from": "before.clock_us"
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "returned.pad_buttons",
+          "op": "eq",
+          "expected": 0
+        },
+        {
+          "action": "capture",
+          "as": "returned"
+        },
+        {
+          "action": "image",
+          "image": "returned",
+          "as": "returned-content"
+        }
+      ]
+    },
+    {
+      "id": "audio-controller-change",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "audio-capture-controller-reconnect"
+        },
+        {
+          "action": "snapshot",
+          "as": "reconnected"
+        },
+        {
+          "action": "assert",
+          "actual": "reconnected.audio_nonzero_samples",
+          "op": "gt",
+          "expected": 0
+        },
+        {
+          "action": "assert",
+          "actual": "reconnected.audio_clipped_fraction",
+          "op": "lt",
+          "expected": 0.01
+        },
+        {
+          "action": "assert",
+          "actual": "reconnected.pad_buttons",
+          "op": "eq",
+          "expected": 0
+        }
+      ]
+    },
+    {
+      "id": "android-surface-display",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "android-rotation-surface-display"
+        },
+        {
+          "action": "snapshot",
+          "as": "recreated"
+        },
+        {
+          "action": "assert",
+          "actual": "recreated.surface_generation",
+          "op": "gt",
+          "expected": {
+            "parameter": "previous-surface-generation"
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "recreated.clock_us",
+          "op": "gt",
+          "expected": {
+            "parameter": "previous-clock-us"
+          }
+        },
+        {
+          "action": "capture",
+          "as": "surface"
+        },
+        {
+          "action": "image",
+          "image": "surface",
+          "as": "surface-content"
+        }
+      ]
+    }
+  ]
+}

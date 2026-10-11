@@ -81,6 +81,14 @@ void test_text() {
     check(names.size() == 6u && names[3] == "Ore" && names[5] == "Round", "a table reads back in order");
     check(game::text_entry(ram, game::kTextBlock, 3, 4) == "Scale", "one entry reads alone");
     check(game::text_entry(ram, game::kTextBlock, 3, 6).empty(), "past the end is empty");
+    std::vector<std::string> observation;
+    game_command(ram, "observe", {"1", "text", std::to_string(game::kTextBlock), "3", "3"}, observation);
+    check(observation.front().find("\"text_hex\":\"4f7265\"") != std::string::npos,
+        "text readback resolves the actual loaded table entry");
+    observation.clear();
+    game_command(ram, "observe", {"1", "text", "0", "99999", "3"}, observation);
+    check(observation.front().find("\"text_hex\":\"\"") != std::string::npos,
+        "out-of-range text probe is unknown rather than an arbitrary memory read");
     // A broken end marker means it is not a table.
     ram.store32(game::kTextBlock + 0x1000u + 6u * 4u, 0u);
     check(game::text_table(ram, game::kTextBlock, 3).empty(), "a table without its end marker is refused");

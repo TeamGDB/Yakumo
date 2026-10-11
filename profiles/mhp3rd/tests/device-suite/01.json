@@ -1,0 +1,130 @@
+{
+  "id": "01",
+  "title": "Installation, update and boot",
+  "checks": [
+    {
+      "id": "boot-character",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "snapshot",
+          "as": "loaded",
+          "until": {
+            "loaded": true,
+            "on_quest": false
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "loaded.task",
+          "op": "eq",
+          "expected": "lobby_task.ovl"
+        },
+        {
+          "action": "assert",
+          "actual": "loaded.map",
+          "op": "eq",
+          "expected": "P_v00a00d.ovl"
+        },
+        {
+          "action": "capture",
+          "as": "village"
+        },
+        {
+          "action": "image",
+          "image": "village",
+          "as": "village-content"
+        }
+      ]
+    },
+    {
+      "id": "update-preservation",
+      "seconds": 120,
+      "steps": [
+        {
+          "action": "installation",
+          "update": true,
+          "as": "updated"
+        },
+        {
+          "action": "assert",
+          "actual": "updated.settings_preserved",
+          "op": "eq",
+          "expected": true
+        },
+        {
+          "action": "assert",
+          "actual": "updated.after",
+          "op": "eq",
+          "expected": {
+            "from": "updated.before"
+          }
+        },
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "snapshot",
+          "as": "loaded",
+          "until": {
+            "loaded": true,
+            "village_ready": true
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "loaded.map",
+          "op": "eq",
+          "expected": "P_v00a00d.ovl"
+        }
+      ]
+    },
+    {
+      "id": "portable-unicode",
+      "seconds": 120,
+      "steps": [
+        {
+          "action": "installation",
+          "unicode": true,
+          "as": "portable"
+        },
+        {
+          "action": "assert",
+          "actual": "portable.portable",
+          "op": "eq",
+          "expected": true
+        },
+        {
+          "action": "assert",
+          "actual": "portable.after",
+          "op": "eq",
+          "expected": {
+            "from": "portable.before"
+          }
+        },
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "snapshot",
+          "as": "loaded",
+          "until": {
+            "village_ready": true
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "loaded.loaded",
+          "op": "eq",
+          "expected": true
+        }
+      ]
+    }
+  ]
+}

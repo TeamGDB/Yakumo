@@ -1,0 +1,239 @@
+{
+  "id": "02",
+  "title": "Settings and controls",
+  "checks": [
+    {
+      "id": "keyboard-release",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "snapshot",
+          "as": "loaded",
+          "until": {
+            "loaded": true,
+            "on_quest": false
+          }
+        },
+        {
+          "action": "input",
+          "value": "0:window raise"
+        },
+        {
+          "action": "input",
+          "value": "0:scan W 30"
+        },
+        {
+          "action": "snapshot",
+          "as": "pressed",
+          "until": {
+            "pad_y": 1
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "pressed.pad_y",
+          "op": "eq",
+          "expected": 1
+        },
+        {
+          "action": "snapshot",
+          "as": "released",
+          "until": {
+            "pad_y": 128
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "released.pad_buttons",
+          "op": "eq",
+          "expected": 0
+        },
+        {
+          "action": "hold",
+          "fields": [
+            "pad_x",
+            "pad_y",
+            "pad_buttons"
+          ],
+          "seconds": 0.5
+        }
+      ]
+    },
+    {
+      "id": "gamepad-release",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "input",
+          "value": "0:axis leftx 1"
+        },
+        {
+          "action": "snapshot",
+          "as": "pressed",
+          "until": {
+            "pad_x": 255
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "pressed.pad_x",
+          "op": "eq",
+          "expected": 255
+        },
+        {
+          "action": "input",
+          "value": "0:axis leftx 0"
+        },
+        {
+          "action": "snapshot",
+          "as": "released",
+          "until": {
+            "pad_x": 128
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "released.pad_buttons",
+          "op": "eq",
+          "expected": 0
+        }
+      ]
+    },
+    {
+      "id": "combination",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "input",
+          "value": "0:pad y+b 30"
+        },
+        {
+          "action": "snapshot",
+          "as": "combined",
+          "until": {
+            "pad_buttons": 12288
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "combined.pad_buttons",
+          "op": "eq",
+          "expected": 12288
+        },
+        {
+          "action": "snapshot",
+          "as": "released",
+          "until": {
+            "pad_buttons": 0
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "released.pad_buttons",
+          "op": "eq",
+          "expected": 0
+        }
+      ]
+    },
+    {
+      "id": "preset-persistence",
+      "seconds": 120,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "settings-modern-preset"
+        },
+        {
+          "action": "settings",
+          "as": "saved"
+        },
+        {
+          "action": "assert",
+          "actual": "saved.input.preset",
+          "op": "eq",
+          "expected": "modern"
+        },
+        {
+          "action": "restart"
+        },
+        {
+          "action": "fixture",
+          "name": "load-character"
+        },
+        {
+          "action": "settings",
+          "as": "reloaded"
+        },
+        {
+          "action": "assert",
+          "actual": "reloaded.input.preset",
+          "op": "eq",
+          "expected": "modern"
+        },
+        {
+          "action": "input",
+          "value": "0:axis righttrigger 1"
+        },
+        {
+          "action": "snapshot",
+          "as": "mapped",
+          "until": {
+            "pad_buttons": 4096
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "mapped.pad_buttons",
+          "op": "eq",
+          "expected": 4096
+        },
+        {
+          "action": "input",
+          "value": "0:axis righttrigger 0"
+        },
+        {
+          "action": "snapshot",
+          "as": "released",
+          "until": {
+            "pad_buttons": 0
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "released.pad_buttons",
+          "op": "eq",
+          "expected": 0
+        }
+      ]
+    },
+    {
+      "id": "touch-release",
+      "seconds": 90,
+      "steps": [
+        {
+          "action": "fixture",
+          "name": "touch-move-and-release"
+        },
+        {
+          "action": "snapshot",
+          "as": "neutral",
+          "until": {
+            "pad_x": 128,
+            "pad_y": 128,
+            "pad_buttons": 0
+          }
+        },
+        {
+          "action": "assert",
+          "actual": "neutral.pad_buttons",
+          "op": "eq",
+          "expected": 0
+        }
+      ]
+    }
+  ]
+}
