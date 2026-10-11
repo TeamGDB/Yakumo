@@ -163,7 +163,7 @@ checks ran. The prepared report initially remains NOT TESTED.
 | `local` | macOS/Linux/Windows physical host | Run in its logged-on desktop; supply local fixture paths |
 | `ssh` | Steam Deck/Linux, Windows or Android attached to Windows | Same runner installed on that host; SSH delegates local/ADB execution and returns evidence only |
 | `adb` | Physical Android and emulator | Explicit serial, dedicated debuggable test APK with generated contract |
-| `streaming` | Optional Google remote Android | Same APK/ADB contract, authenticated official CLI, idle project, explicit total cap of 300 seconds or less |
+| `streaming` | Optional Google remote Android | Same APK/ADB contract, authenticated official CLI, idle project; 300-second default, explicitly authorized inclusive cap up to 500 seconds |
 
 An SSH device wraps a `remote` device object with the same `build` and `commit`.
 Add `host` (an SSH alias), `checkout` (where this tooling revision is installed),
@@ -215,6 +215,9 @@ decode directly into the dedicated app's storage, and verify source/destination
 SHA-256 before launch. This avoids Windows ADB stdin truncation at Ctrl-Z bytes.
 No game input is staged in shared device storage. The device needs `base64` and
 `sha256sum`; transfer/decode/hash failures keep the run failed.
+On POSIX hosts, an explicitly selected `raw_adb_upload: true` streams the file
+directly without an encoded temporary copy, retaining source/destination SHA-256
+checks. Windows rejects that option and keeps its verified Base64 path.
 
 For the first large ADB upload, optionally set `"setup_seconds": 600` alongside
 `"seconds": 60`. Preparation has its own deadline, then gameplay receives at
@@ -225,7 +228,12 @@ extension and keeps its original total reservation/transfer/gameplay cap.
 ### Optional Device Streaming
 
 Use `adapter: "streaming"`, `project`, `model: "<codename>/<api>"` and an explicit
-`seconds` between 1 and 300, alongside the APK/fixture fields. Authentication and
+`seconds` between 1 and 300 by default, alongside the APK/fixture fields.
+An explicit authorization may set `streaming_cap_seconds` up to 500; `seconds`
+must stay within that bound, including activation/transfers/testing/cleanup.
+The task-specific suite also requires a matching private reservation ledger and
+preserves its two-attempt limit and history. A separate `setup_seconds` extension
+is rejected. Authentication and
 API setup happen separately. The tool does not provision resources, attach
 billing, change IAM, or run in public CI. Every Android CLI invocation uses
 `--no-metrics`. It requires an idle dedicated project and removes only the

@@ -59,10 +59,16 @@ fingerprint, evidence-confinement and bounded-cleanup mechanisms. Add structured
 read-only observations only in explicit developer testing mode; keep ordinary
 player behavior unchanged. Public suite definitions carry no fixture contents.
 
-Cloud pilot: validate locally first; at most two sequential owned reservations,
-300 seconds each including activation, transfers and cleanup. Keep a private
+Cloud pilot: validate locally first; at most two sequential owned reservations.
+The current explicit task authorization allows 500 seconds each, at most 1000
+seconds total, including activation, transfers, testing, evidence and cleanup.
+The runner keeps a conservative 300-second default; an authorized configuration
+must set `streaming_cap_seconds: 500`, `seconds: 500` and a matching private
+ledger maximum. Preserve all attempts and authorization history when migrating
+the earlier 300-second ledger; never reset consumption. Keep a private
 ledger across resumed sessions. An incomplete upload is an incomplete pilot,
-not permission to extend the deadline or retry.
+not permission to extend the deadline or retry. Reserve the final 30 seconds
+for owned cleanup; preflight, creation, removal and final-list evidence stays private.
 
 ## Running the implementation
 

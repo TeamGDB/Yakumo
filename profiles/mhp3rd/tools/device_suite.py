@@ -1170,8 +1170,9 @@ def ssh_device(device, name, definitions, root, seconds):
 
 
 def streaming_device(device, name, definitions, root, seconds):
-    if not 1 <= seconds <= 300 or device.get('setup_seconds'):
-        raise ValueError('Streaming has one inclusive cap of at most 300 seconds; no setup extension')
+    maximum = runner.streaming_limit(device)
+    if not 1 <= seconds <= maximum or device.get('setup_seconds'):
+        raise ValueError('Streaming exceeds its explicit inclusive cap; no setup extension')
     ledger_name = os.path.normcase(os.path.realpath(device['reservation_ledger']))
     private_root = os.path.normcase(os.path.realpath(runner.ROOT / 'out'))
     temporary_root = os.path.normcase(os.path.realpath(tempfile.gettempdir()))
@@ -1180,7 +1181,9 @@ def streaming_device(device, name, definitions, root, seconds):
         raise ValueError('Reservation ledger must remain in private out/ or temporary storage')
     ledger_path = Path(ledger_name)
     ledger = runner.read_json(ledger_path)
-    if ledger.get('issue') != 310 or ledger.get('allowance') != 2 or ledger.get('maximum_seconds') != 300:
+    if ledger.get('issue') != 310 or ledger.get('allowance') != 2 or \
+            type(ledger.get('maximum_seconds')) is not int or not 1 <= ledger['maximum_seconds'] <= 500 or \
+            maximum > ledger['maximum_seconds']:
         raise ValueError('Streaming requires the task-specific private two-attempt ledger')
     if len(ledger['reservations']) >= 2 or any(row.get('state') != 'released' for row in ledger['reservations']):
         raise runner.NotTested('Cloud allowance exhausted or previous owned reservation is unconfirmed')
@@ -1194,7 +1197,7 @@ def streaming_device(device, name, definitions, root, seconds):
     reservation, watchdog, report = None, None, None
     row = None
     try:
-        runner.require_idle_project(cli, device['project'], control)
+        runner.require_idle_project(cli, device['project'], control, root / 'reservation-preflight.json')
         # Persist consumption before creation: ambiguous activation cannot be retried.
         ledger = runner.read_json(ledger_path)
         if len(ledger['reservations']) >= 2 or any(item.get('state') != 'released' for item in ledger['reservations']):
@@ -1225,7 +1228,7 @@ def streaming_device(device, name, definitions, root, seconds):
             raise RuntimeError('Reservation creation failed/unrecognized; no automatic retry')
         remote = {**device, 'adapter': 'adb', 'serial': runner.parse_adb_serial(creation_log.read_text(errors='replace')),
                   'streaming_cleanup_deadline': hard}
-        report = run_device(remote, name, definitions, root, runner.remaining(control, 300))
+        report = run_device(remote, name, definitions, root, runner.remaining(control, seconds))
         if not report.get('launched') and time.monotonic() >= control:
             report.pop('session_failure', None)
             report['verdict'] = 'NOT TESTED'
@@ -1234,9 +1237,13 @@ def streaming_device(device, name, definitions, root, seconds):
     finally:
         try:
             if reservation:
-                runner.command(cli + ['remove', reservation, '--project=' + device['project']], hard,
-                               maximum=runner.remaining(hard))
-                runner.require_idle_project(cli, device['project'], hard)
+                removal = runner.command(cli + ['remove', reservation, '--project=' + device['project']], hard,
+                                         maximum=runner.remaining(hard), check=False, return_status=True)
+                runner.write_json(root / 'reservation-remove.json', {'returncode': removal.returncode,
+                    'stdout': removal.stdout.decode(errors='replace'), 'stderr': removal.stderr.decode(errors='replace')})
+                if removal.returncode:
+                    raise RuntimeError('Owned reservation removal failed; inspect private cleanup evidence')
+                runner.require_idle_project(cli, device['project'], hard, root / 'reservation-final-list.json')
                 row['state'] = 'released'
                 if report is not None:
                     report['reservation_released'] = True

@@ -545,6 +545,24 @@ elif args[0] == 'logcat':
         self.assertEqual((self.adb_root / 'files/device-testing/data/ms0/save.dat').read_bytes(), b'original fixture')
         self.assertEqual((self.adb_root / 'files/device-testing/data/disc.iso').read_bytes(), b'public synthetic bytes')
 
+    @unittest.skipIf(os.name == 'nt', 'Raw upload is explicitly unavailable on Windows')
+    def test_opt_in_raw_upload_checks_binary_integrity_and_rejects_windows(self):
+        device = {**self.make_adb(), 'raw_adb_upload': True}
+        source = self.root / 'binary-fixture.bin'; payload = bytes(range(256)) * 1700
+        source.write_bytes(payload)
+        adapter = dt.Adb(device, self.run_dir, time.monotonic() + 20)
+        with patch.dict(os.environ, {'FAKE_ADB_ROOT': str(self.adb_root)}):
+            adapter.upload(source, 'files/raw.bin')
+            self.assertEqual((self.adb_root / 'files/raw.bin').read_bytes(), payload)
+            with patch.dict(os.environ, {'TRUNCATE_BINARY_STDIN': '1'}):
+                with self.assertRaisesRegex(ValueError, 'fingerprint mismatch'):
+                    adapter.upload(source, 'files/raw.bin')
+        with patch.object(dt.os, 'name', 'nt'):
+            with self.assertRaises(ValueError):
+                adapter.upload(source, 'files/raw.bin')
+            with self.assertRaises(ValueError):
+                dt.validate_device(device)
+
     def test_adb_running_package_is_not_disrupted(self):
         device = self.make_adb()
         (self.adb_root / 'pid').write_text('12344')
@@ -942,6 +960,14 @@ runner.bounded_match('(a+)+$', 'a'*1000+'!', time.monotonic()+2)
         self.assertEqual(self.report()['automatic']['verdict'], 'PASS')
 
     def test_cloud_preflight_fails_closed_except_exact_idle_response(self):
+        device = {'adapter': 'streaming', 'build': 'dev', 'commit': 'a' * 40,
+                  'seconds': 500, 'streaming_cap_seconds': 500}
+        self.assertEqual(dt.validate_device(device), device)
+        for change in ({'seconds': 501}, {'streaming_cap_seconds': 501}, {'streaming_cap_seconds': True},
+                       {'streaming_cap_seconds': 0}, {'streaming_cap_seconds': 300}):
+            with self.assertRaises(ValueError):
+                dt.validate_device({**device, **change})
+        self.assertEqual(dt.streaming_limit({}), 300)
         for result in (subprocess.CompletedProcess([], 1, b'No reservations found.\n', b''),
                        subprocess.CompletedProcess([], 0, b'No reservations found.\n', b'')):
             with patch.object(dt, 'command', return_value=result):

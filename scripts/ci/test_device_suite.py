@@ -529,6 +529,67 @@ class CombatOracleTests(unittest.TestCase):
 
 
 class CloudAllowanceTests(unittest.TestCase):
+    def test_explicit_500_budget_preserves_migrated_history_and_cleanup_deadline(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp).resolve(); ledger = base / 'ledger.json'
+            history = {'attempt': 'earlier', 'state': 'released', 'cap_seconds': 300, 'reservation': 'older123456'}
+            value = {'issue': 310, 'allowance': 2, 'maximum_seconds': 300, 'reservations': [history]}
+            ledger.write_text(json.dumps(value))
+            # An explicit authorization migration changes the bound, never consumption.
+            migrated = json.loads(ledger.read_text()); migrated['maximum_seconds'] = 500
+            migrated['authorization_history'] = [{'previous': 300, 'maximum': 500}]
+            ledger.write_text(json.dumps(migrated))
+            fake = base / 'android.py'
+            fake.write_text("""import sys
+if 'create' in sys.argv: print('new reservation created with id owned123456; connected on port 5555')
+elif 'list' in sys.argv: print('No reservations found.')
+""")
+            device = {'adapter': 'streaming', 'android': [sys.executable, str(fake)], 'project': 'private-fixture',
+                      'model': 'fixture/33', 'reservation_ledger': str(ledger), 'streaming_cap_seconds': 500}
+            target = base / 'pilot'; target.mkdir()
+            started = time.monotonic()
+            with mock.patch.object(suite, 'run_device', return_value={'verdict': 'NOT TESTED', 'launched': True}) as run:
+                report = suite.streaming_device(device, 'cloud', [], target, 500)
+            self.assertGreater(run.call_args.args[-1], 450)
+            self.assertLessEqual(run.call_args.args[-1], 470)
+            self.assertGreaterEqual(run.call_args.args[0]['streaming_cleanup_deadline'], started + 500)
+            self.assertLessEqual(run.call_args.args[0]['streaming_cleanup_deadline'], time.monotonic() + 500)
+            self.assertEqual(report['reservation_total_cap_seconds'], 500)
+            self.assertTrue(report['reservation_released'])
+            saved = json.loads(ledger.read_text())
+            self.assertEqual(saved['reservations'][0], history)
+            self.assertEqual(len(saved['reservations']), 2)
+            self.assertEqual(saved['authorization_history'], migrated['authorization_history'])
+            for name in ('reservation-preflight.json', 'reservation-remove.json', 'reservation-final-list.json'):
+                self.assertEqual(json.loads((target / name).read_text())['returncode'], 0)
+            with self.assertRaises(ValueError):
+                suite.streaming_device(device, 'cloud', [], target, 501)
+            with self.assertRaises(ValueError):
+                suite.streaming_device({k: v for k, v in device.items() if k != 'streaming_cap_seconds'},
+                                       'cloud', [], target, 500)
+            with self.assertRaises(runner.NotTested):
+                suite.streaming_device(device, 'cloud', [], target, 500)
+
+    def test_setup_failure_consumes_attempt_but_releases_owned_reservation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp).resolve(); ledger = base / 'ledger.json'
+            ledger.write_text(json.dumps({'issue': 310, 'allowance': 2, 'maximum_seconds': 500, 'reservations': []}))
+            fake = base / 'android.py'
+            fake.write_text("""import sys
+if 'create' in sys.argv: print('new reservation created with id owned123456; connected on port 5555')
+elif 'list' in sys.argv: print('No reservations found.')
+""")
+            device = {'adapter': 'streaming', 'android': [sys.executable, str(fake)], 'project': 'private-fixture',
+                      'model': 'fixture/33', 'reservation_ledger': str(ledger), 'streaming_cap_seconds': 500}
+            with mock.patch.object(suite, 'run_device', side_effect=TimeoutError('bounded upload expired')) as run:
+                with self.assertRaises(TimeoutError):
+                    suite.streaming_device(device, 'cloud', [], base, 500)
+            self.assertEqual(run.call_count, 1)
+            rows = json.loads(ledger.read_text())['reservations']
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]['state'], 'released')
+            self.assertFalse(ledger.with_suffix('.lock').exists())
+
     def test_two_sequential_consumed_attempts_and_owned_cleanup(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp).resolve()

@@ -150,6 +150,10 @@ def validate_device(value):
         raise ValueError('Setup cap must be 0..900 seconds on physical/emulated ADB devices only')
     if setup + value.get('seconds', 60) > 1800:
         raise ValueError('Setup and gameplay must fit the 1800-second total cap')
+    if value['adapter'] == 'streaming' and (value.get('seconds', 60) > streaming_limit(value) or setup):
+        raise ValueError('Streaming exceeds its explicit inclusive cap or requests a setup extension')
+    if type(value.get('raw_adb_upload', False)) is not bool or value.get('raw_adb_upload') and os.name == 'nt':
+        raise ValueError('Raw ADB upload is an explicit POSIX-only option; Windows requires Base64')
     if set(value.get('env', {})) - ENV_KEYS:
         raise ValueError('Unsupported environment override; isolation controls cannot be replaced')
     if value.get('performance', 'log') not in ('log', 'settings'):
@@ -510,7 +514,16 @@ class Adb:
         return self.shell('run-as ' + self.package + ' sh -c ' + shlex.quote(text), **kwargs)
 
     def upload(self, source, destination):
+        if self.device.get('raw_adb_upload') and os.name == 'nt':
+            raise ValueError('Windows binary stdin requires the verified Base64 upload path')
         expected = fingerprint(source)
+        if self.device.get('raw_adb_upload'):
+            with Path(source).open('rb') as stream:
+                command(self.prefix + ['shell', 'run-as', self.package, 'sh', '-c',
+                                       shlex.quote('cat > ' + shlex.quote(destination))],
+                        self.deadline, input_file=stream, maximum=remaining(self.deadline, 1800))
+            self.verify_upload(source, destination, expected)
+            return
         # Keep encoding bounded and private, without a shared device-side game copy.
         with tempfile.TemporaryFile(mode='w+b', dir=self.root) as encoded:
             with Path(source).open('rb') as stream:
@@ -521,6 +534,9 @@ class Adb:
             command(self.prefix + ['shell', 'run-as', self.package, 'sh', '-c',
                                    shlex.quote('base64 -d > ' + shlex.quote(destination))],
                     self.deadline, input_file=encoded, maximum=remaining(self.deadline, 1800))
+        self.verify_upload(source, destination, expected)
+
+    def verify_upload(self, source, destination, expected):
         actual = self.app('sha256sum ' + shlex.quote(destination)).decode(errors='replace').split()
         if not actual or actual[0] != expected or fingerprint(source) != expected:
             raise ValueError('Android upload fingerprint mismatch')
@@ -860,8 +876,8 @@ def run(suite, device, name, root, manual=False):
         if suite.get('translation') and not device.get('translation'):
             raise NotTested('A translation fixture is required')
         if device['adapter'] == 'streaming':
-            if not 1 <= device.get('seconds', 0) <= 300:
-                raise ValueError('Streaming requires an explicit overall cap of at most 300 seconds')
+            if not 1 <= device.get('seconds', 0) <= streaming_limit(device):
+                raise ValueError('Streaming requires an explicit bounded overall cap')
             cli = device.get('android', ['android']) + ['--no-metrics', 'device', 'remote']
             # Parse the CLI's own creation output. Never delete a different user's reservation.
             require_idle_project(cli, device['project'], deadline)
@@ -952,10 +968,20 @@ def plain_output(text):
     return re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', text)
 
 
-def require_idle_project(cli, project, deadline):
+def streaming_limit(device):
+    maximum = device.get('streaming_cap_seconds', 300)
+    if type(maximum) is not int or not 1 <= maximum <= 500:
+        raise ValueError('Streaming authorization must be 1..500 seconds; default is 300')
+    return maximum
+
+
+def require_idle_project(cli, project, deadline, evidence=None):
     result = command(cli + ['list', '--short', '--project=' + project], deadline,
                      check=False, return_status=True)
     text = plain_output(result.stdout.decode(errors='replace')).strip()
+    if evidence is not None:
+        write_json(evidence, {'returncode': result.returncode, 'stdout': result.stdout.decode(errors='replace'),
+                              'stderr': result.stderr.decode(errors='replace')})
     if result.returncode in (0, 1) and not result.stderr.strip() and text == 'No reservations found.':
         return
     if result.returncode or result.stderr.strip() or not text:
