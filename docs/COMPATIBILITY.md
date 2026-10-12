@@ -575,11 +575,12 @@ Internal resolution is separate from presentation size: 960×544 on Windows,
 
 The desktop GPU medians did not change at the logging precision. Android ×1
 reduced GPU medians by 0.6 ms in the village and 1.8 ms in camp, while camp
-CPU render time increased by about 0.9 ms. At ×2, village FPS improved but
-still did not sustain the target speed. Camp results varied between runs:
-the first on run lost FPS, the repeat regained it, and the pooled GPU median
-increased. These measurements do not establish a repeatable camp improvement
-or regression. Sampled Android GPU clocks varied; thermal status remained 0
+CPU render time increased by about 0.9 ms. At ×2 the pooled village median
+improved, but the direction did not repeat: the first off/on pair measured
+25.1/29.1 FPS, while the later on/off pair measured 28.3/30.0 FPS. Camp also
+reversed direction between pairs. The ×2 data therefore establishes neither
+a repeatable improvement nor a regression, and the optimized runs still did
+not sustain the target speed. Sampled Android GPU clocks varied; thermal status remained 0
 with no reported limit index. Those readings do not establish a fixed clock
 or exclude every vendor power constraint.
 
