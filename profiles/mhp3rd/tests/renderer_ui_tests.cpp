@@ -381,6 +381,32 @@ void keyboard_contracts(gpu::VulkanRenderer &renderer) {
 void opaque_alpha_contracts(gpu::VulkanRenderer &renderer) {
     renderer.set_frame_rate_auto(false);
     renderer.set_frame_rate(settings::FrameRate::Fps30);
+    renderer.set_sharp_textures(false);
+    renderer.set_texture_pack(false);
+    // Compare with the pre-optimization pipeline on this GPU. Perspective
+    // interpolation can put a constant vertex alpha just below one, so an
+    // untested draw is not an oracle for a strict GEQUAL255 comparison.
+    const char *previous_rollback = std::getenv("MHP3RD_NO_OPAQUE_DRAWS");
+    const std::optional<std::string> rollback =
+        previous_rollback ? std::optional<std::string>(previous_rollback) : std::nullopt;
+    set_environment("MHP3RD_NO_OPAQUE_DRAWS", "1");
+    gpu::VulkanRenderer reference;
+    std::string reference_error;
+    const bool reference_ready = reference.initialize({"Yakumo opacity reference"}, reference_error);
+    if (rollback)
+        set_environment("MHP3RD_NO_OPAQUE_DRAWS", rollback->c_str());
+    else
+        clear_environment("MHP3RD_NO_OPAQUE_DRAWS");
+    expect(reference_ready, "opacity reference initializes the actual rollback renderer");
+    if (!reference_ready) {
+        std::cerr << reference_error << '\n';
+        return;
+    }
+    SDL_HideWindow(reference.window());
+    reference.set_frame_rate_auto(false);
+    reference.set_frame_rate(settings::FrameRate::Fps30);
+    reference.set_sharp_textures(false);
+    reference.set_texture_pack(false);
     psprecomp::GuestMemory memory;
     gpu::DrawCall clear{};
     clear.primitive = gpu::PrimitiveType::Sprites;
@@ -432,25 +458,29 @@ void opaque_alpha_contracts(gpu::VulkanRenderer &renderer) {
         for (std::uint32_t i = 0; i < texture.size(); ++i)
             memory.store32(draw.texture.address + 4u * i, (texture[i] & 0x00ffffffu) | (alpha << 24u));
     };
-    const auto capture = [&](const gpu::DrawCall &submitted) {
-        renderer.begin_frame();
-        renderer.begin_display_list();
-        renderer.submit(clear, memory);
-        renderer.submit(submitted, memory);
-        expect(renderer.present(clear.target.color_address), "opacity contract presents its synthetic target");
+    const auto capture_with = [&](gpu::VulkanRenderer &target, const gpu::DrawCall &submitted) {
+        target.begin_frame();
+        target.begin_display_list();
+        target.submit(clear, memory);
+        target.submit(submitted, memory);
+        expect(target.present(clear.target.color_address), "opacity contract presents its synthetic target");
         std::vector<std::uint8_t> pixels;
         std::uint32_t width{}, height{};
-        expect(renderer.read_frame(pixels, width, height) && width == 480u && height == 272u,
+        expect(target.read_frame(pixels, width, height) && width == 480u && height == 272u,
             "opacity contract reads the complete native target");
         return pixels;
     };
+    const auto capture = [&](const gpu::DrawCall &submitted) { return capture_with(renderer, submitted); };
     put_texture(255u);
-    // Unequal clip-W and linear filtering must preserve constant opaque alpha.
-    // The oracle draws the identical colors directly, with no comparison or blend.
+    // Keep exact independent color checks where alpha comes from the opaque
+    // texture alone, and exact rollback comparisons for interpolated vertex alpha.
     for (std::uint32_t function = 0u; function <= 4u; ++function) {
         draw.texture.function = function;
         draw.alpha_test.enabled = draw.blend.enabled = false;
-        const auto expected = capture(draw);
+        const auto untested = capture_with(reference, draw);
+        std::size_t covered = 0u;
+        for (std::size_t i = 3u; i < untested.size(); i += 4u) covered += untested[i] == 255u;
+        expect(covered > 2000u, "opacity reference covers a nonempty perspective triangle");
         draw.blend.enabled = true;
         draw.blend.source_factor = 2u;
         draw.blend.destination_factor = 3u;
@@ -459,8 +489,28 @@ void opaque_alpha_contracts(gpu::VulkanRenderer &renderer) {
         for (const auto comparison : {std::array<std::uint32_t, 2>{7u, 128u}, {7u, 192u}, {7u, 255u}, {2u, 255u}}) {
             draw.alpha_test.function = comparison[0];
             draw.alpha_test.reference = comparison[1];
-            expect(capture(draw) == expected,
-                "opaque filtered/perspective fragment preserves full RGBA across passing alpha tests and blending");
+            const auto expected = capture_with(reference, draw);
+            if (function >= 3u)
+                expect(expected == untested, "opaque sampled alpha passes without changing independent RGBA");
+            const auto actual = capture(draw);
+            if (actual != expected) {
+                std::size_t changed = 0u;
+                for (std::size_t i = 0u; i + 3u < actual.size() && i + 3u < expected.size(); i += 4u) {
+                    if (std::equal(actual.begin() + i, actual.begin() + i + 4u, expected.begin() + i)) continue;
+                    if (changed++ == 0u) {
+                        std::cerr << "Opacity pixel mismatch: texture function " << function << ", alpha function "
+                                  << comparison[0] << ", reference " << comparison[1] << ", pixel " << i / 4u
+                                  << ", expected/actual RGBA";
+                        for (std::size_t channel = 0u; channel < 4u; ++channel)
+                            std::cerr << ' ' << static_cast<unsigned>(expected[i + channel]) << '/'
+                                      << static_cast<unsigned>(actual[i + channel]);
+                        std::cerr << '\n';
+                    }
+                }
+                std::cerr << "Opacity differing pixels: " << changed << '\n';
+            }
+            expect(actual == expected,
+                "opaque filtered/perspective fragment preserves the original pipeline's exact RGBA");
         }
     }
     draw.texture.function = 3u;

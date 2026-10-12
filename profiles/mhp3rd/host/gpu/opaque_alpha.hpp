@@ -44,6 +44,14 @@ inline bool opaque_fragment_alpha(
     }
 }
 
+// Opaque inputs alone do not prove an exact fragment alpha: perspective
+// interpolation can round a constant vertex alpha below one. Keep its blend
+// and comparison path. Through draws avoid that division; replace/add take
+// alpha directly from the sampled opaque image instead of the varying color.
+inline bool opaque_alpha_is_exact(bool through, bool texture_enabled, std::uint32_t function) {
+    return through || (texture_enabled && (function == 3u || function == 4u));
+}
+
 // Whether ge.frag's existing predicate passes at alpha exactly one. Preserve
 // enabled tests with invalid state or a partial mask, including ALWAYS.
 inline bool opaque_alpha_test_passes(

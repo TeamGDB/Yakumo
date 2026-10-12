@@ -6822,7 +6822,8 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
     const bool use_material_color = !no_material_color && !call.has_vertex_color && !call.lighting_enabled;
     // Replay and raw decoding keep their original pipelines until separately
     // covered. For CPU vertices, check alpha as they are already converted.
-    const bool track_opaque = impl.opaque_draws && !raw && !impl.interpolating;
+    const bool track_opaque = impl.opaque_draws && !raw && !impl.interpolating &&
+        opaque_alpha_is_exact(call.through, call.texture.enabled, call.texture.function);
     bool vertices_opaque = track_opaque;
     const auto to_gpu = [&](const Vertex &vertex) {
         GpuVertex out{};

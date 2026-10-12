@@ -144,6 +144,24 @@ void test_alpha_predicates() {
     expect(!opaque_alpha_test_passes(true, 6u, 256u, 255u), "GREATER out-of-byte reference is not assumed to pass");
 }
 
+void test_interpolated_alpha() {
+    const float rounded = std::nextafter(1.0f, 0.0f);
+    expect(!shader_predicate(7u, rounded, 255u), "a rounded opaque varying can fail the strict upper endpoint");
+    expect(!opaque_alpha_is_exact(false, false, 0u), "untextured perspective alpha retains its original path");
+    for (std::uint32_t function : {0u, 1u, 2u}) {
+        expect(!opaque_alpha_is_exact(false, true, function),
+            "modulate, decal and blend depend on the perspective-interpolated vertex alpha");
+        expect(opaque_alpha_is_exact(true, true, function), "through alpha does not use a perspective division");
+    }
+    for (std::uint32_t function : {3u, 4u}) {
+        expect(opaque_alpha_is_exact(false, true, function), "replace and add take alpha from the opaque sample");
+        expect(!opaque_alpha_is_exact(false, false, function), "disabled texturing still uses the varying alpha");
+    }
+    for (std::uint32_t function : {5u, 8u, std::numeric_limits<std::uint32_t>::max()})
+        expect(!opaque_alpha_is_exact(false, true, function), "unknown perspective texture functions remain guarded");
+    expect(opaque_alpha_is_exact(true, false, 0u), "untextured through alpha can be exact");
+}
+
 std::array<double, 4> alpha_blend(const std::array<double, 4> &source, const std::array<double, 4> &destination) {
     // Vulkan uses SRC_ALPHA / ONE_MINUS_SRC_ALPHA for RGB, and ONE / ZERO
     // for alpha. Compare all four channels, including arbitrary destination alpha.
@@ -186,6 +204,7 @@ int main() {
     test_vertex_alpha();
     test_fragment_alpha();
     test_alpha_predicates();
+    test_interpolated_alpha();
     test_blend_equivalence();
     if (failures != 0) return 1;
     std::cout << "opaque alpha tests passed\n";
