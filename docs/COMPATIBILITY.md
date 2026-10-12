@@ -314,11 +314,17 @@ installer/portable variants remain unsupported on that adapter. Japanese and
 verified English-patched inputs pass the menu/dialogue field checks, including
 covered expectations that differ from source and original fallback. The normal
 counter/gate route has independently reached quest 204 with an advancing timer
-and no quest cheats. Complete device scenarios and cloud validation are pending;
+and no quest cheats. At that implementation checkpoint, complete extended device
+scenarios and cloud validation were pending;
 no cloud reservations have been consumed at this checkpoint. The suite does not
 complete any exact-candidate release or human playtesting sign-off.
 
-The current delivery scope is the QUICK stage. Final harness `c2eee50` passed all
+The local QUICK implementation and validation stage is complete. Google testing
+and extended gameplay are deferred under the existing #310/PR #311 and are not
+merge requirements for this stage. The capability gaps and historical failures
+below retain their actual verdicts.
+
+Final harness `c2eee50` passed all
 ten categories (12 automatic subchecks) on macOS in 110.468 seconds, with 0.887
 seconds of preparation. Earlier bounded runs passed in 99.7-104.8 seconds.
 All passed cleanup,
@@ -454,4 +460,7 @@ estimate, not a measured full-ISO duration or a prediction for Pixel 6. The
 staged rerun establishes transfer as the Pixel 5 bottleneck; increasing the
 Package Manager timeout alone cannot make this workload fit. Original failures
 and private progress/cleanup evidence are retained. No further reservation,
-persistent game-data upload or billing/IAM change was made.
+persistent game-data upload or billing/IAM change was made. The maintainer has
+now deferred Google testing and transfer/downloader work from the local QUICK
+delivery. The unused attempt is not being spent in this stage; all original
+FAIL/NOT TESTED reports and private reservation history remain preserved.

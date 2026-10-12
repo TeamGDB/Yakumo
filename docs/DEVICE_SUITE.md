@@ -1,10 +1,18 @@
 # Automatic pre-release suite
 
 Implementation tracking: [#310](https://github.com/TeamGDB/Yakumo/issues/310).
-The current deliverable is the **QUICK** stage: ten limited automatic categories,
+The delivered local **QUICK** stage contains ten limited automatic categories,
 with real-game smoke and public synthetic/native contracts labelled separately.
 The earlier extended matrix is retained as deferred follow-up; its definitions,
 failures and missing fixtures do not establish a complete release sign-off.
+
+Local QUICK implementation and validation are complete for this stage. Windows
+and Steam Deck lifecycle registration and ADB native-contract execution remain
+documented capability gaps: their rows and incomplete aggregates stay NOT TESTED.
+Google device testing and extended gameplay are deferred in the existing
+[#310](https://github.com/TeamGDB/Yakumo/issues/310) and
+[PR #311](https://github.com/TeamGDB/Yakumo/pull/311); they are not merge requirements
+for the local QUICK delivery. No separate follow-up issue is required.
 
 The suite adds real-game observations to the shared device runner. Public native
 contracts remain mandatory; their synthetic inputs are not device gameplay
@@ -59,10 +67,10 @@ fingerprint, evidence-confinement and bounded-cleanup mechanisms. Add structured
 read-only observations only in explicit developer testing mode; keep ordinary
 player behavior unchanged. Public suite definitions carry no fixture contents.
 
-Cloud pilot: validate locally first; at most two sequential owned reservations.
+Historical cloud authorization: local validation preceded the paid attempts.
 The initial explicit task authorization allowed 500 seconds each, at most 1000
-seconds total; both historical attempts were consumed and released. The current
-finite rerun phase permits two additional attempts, one per authorized model,
+seconds total; both historical attempts were consumed and released. A later
+finite rerun phase allowed two additional attempts, one per authorized model,
 targeting 600 seconds ($1.50) and capped at 800 seconds ($2) each before credits
 at the verified $0.15/device-minute rate. Activation, transfers, testing, evidence
 and cleanup all count. Maximum additional exposure is $4, not an expanded matrix.
@@ -82,8 +90,10 @@ The measured cloud deployment is incomplete: the prepared Pixel 5 rerun installe
 the APK successfully but timed out transferring the full ISO. One rerun remains
 unused; the same deployment is not feasible within its 800-second limit at the
 observed throughput. See [the compatibility evidence](COMPATIBILITY.md#prepared-deployment-rerun-2026-10-12).
-Do not treat a locally fast transfer as proof of cloud feasibility, or spend a
-remaining attempt on an already known budget mismatch.
+The maintainer deferred further reservations, transfer/downloader implementation
+and cloud staging from this local QUICK stage. The historical allowance is not
+an instruction to spend its unused attempt. Preserve the private ledger and all
+FAIL/NOT TESTED evidence; future cloud work needs an explicit resumed scope.
 
 ## Running the implementation
 
@@ -99,8 +109,16 @@ python3 profiles/mhp3rd/tools/device_suite.py --config device-testing.local.json
   --profile extended --devices mac --seconds 1800 --output-parent out
 ```
 
-`make device-suite DEVICE_CONFIG=device-testing.local.json` accepts additional
-arguments through `DEVICE_ARGS`. The private configuration extends the shared
+The equivalent Make invocation must include device selection in `DEVICE_ARGS`:
+
+```sh
+make device-suite DEVICE_CONFIG=device-testing.local.json \
+  DEVICE_ARGS='--profile quick --devices mac --seconds 360'
+```
+
+Replace `mac` with the configured local device names for a larger local matrix.
+Bare `make device-suite` has no device selection and exits with a usage error.
+The private configuration extends the shared
 runner's local/SSH/ADB artifact contract. `observations: true` requires a
 developer artifact compiled with the debug menu; the runner enables both debug
 commands and the explicit device-test gate. Exact release artifacts keep separate
@@ -186,6 +204,7 @@ derive from measured baseline spread; unstable baselines remain incomplete.
 Resolution or settings differences invalidate the comparison. No optimization
 claim follows from presented FPS alone.
 
-The implementation is incremental. Fixture discovery and remaining device
-capabilities are tracked in #310; a definition's presence does not mean its
-required outcomes have been validated. The aggregate is the record of what ran.
+The local QUICK delivery is complete with the recorded capability gaps. Deferred
+fixture discovery, Google testing and extended device outcomes stay tracked in
+the existing #310/PR #311. A definition's presence does not mean its required
+outcomes have been validated. The aggregate is the record of what ran.

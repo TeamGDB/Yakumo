@@ -2,7 +2,7 @@
 
 ## Automated
 
-- **Automatic device suite** (`profiles/mhp3rd/tools/device_suite.py`) runs the ten standard pre-release categories against private copied game/save/language fixtures. [DEVICE_SUITE.md](DEVICE_SUITE.md) maps their independent state, file, pixel and PCM assertions and documents the single command. Its public Python regressions cover changed outcomes, bounded real synthetic child sessions, language/image restoration, paired ownership and cleanup, readback identity, timing calibration and the two-attempt cloud allowance. Run them with `python3 -m unittest discover -s scripts/ci -p 'test_device*.py'`; the normal full Python suite includes them. Native debug/text tests reject invalid observed actor, scene, text and loader ranges, and verify original-language blocks without treating missing keys as runtime failure. These public synthetic contracts do not establish real-device gameplay coverage. Unsupported or unfinished device subchecks remain NOT TESTED.
+- **Automatic device suite** (`profiles/mhp3rd/tools/device_suite.py`) runs the ten standard pre-release categories against private copied game/save/language fixtures. [DEVICE_SUITE.md](DEVICE_SUITE.md) maps their independent state, file, pixel and PCM assertions and documents the single command. Its public Python regressions cover changed outcomes, bounded real synthetic child sessions, language/image restoration, paired ownership and cleanup, readback identity, timing calibration and reservation phase/history enforcement. Run them with `python3 -m unittest discover -s scripts/ci -p 'test_device*.py'`; the normal full Python suite includes them. Native debug/text tests reject invalid observed actor, scene, text and loader ranges, and verify original-language blocks without treating missing keys as runtime failure. These public synthetic contracts do not establish real-device gameplay coverage. Unsupported or unfinished device subchecks remain NOT TESTED.
 
 - **Renderer and UI fixtures** (`mhp3rd_renderer_ui_tests` and its compatibility, legacy and checked variants) use public synthetic frames, guest memory and SDL virtual controllers. Tests select keyboard/gamepad input through SDL events, isolate scripted UI mouse coordinates from the desktop cursor, close mapping-file readers before replacing files on Windows, and configure both SDL and the executable's CRT environment so diagnostic flags reach the real host code. Menu text entry waits at most sixteen frames for queued input to be consumed between editing steps; disabling mouse interaction alone does not prevent cursor events from delaying ImGui's keyboard/text queue. The menu checks include returning from Layered Armor to QoL without closing the menu, changing the moved settings and editing the hunter name after gamepad navigation. Input-script, UI lifecycle and bounded texture-cache modes share this executable and have separate CTest timeouts. The live-input checks use explicit CRLF and LF bytes to verify complete lines, pending partial input, truncation and quitting on every platform. No game data is required.
 
@@ -24,9 +24,11 @@
 - **Full application builds on every platform** — further work tracked in [#15](https://github.com/TeamGDB/Yakumo/issues/15). Unit-test CI does not build playable releases; release packaging remains a separate process.
 - **Regression tests on your own copy of the game**, replaying recorded input and comparing frames against reference images — planned in [#16](https://github.com/TeamGDB/Yakumo/issues/16).
 
-The current automatic device deliverable selects `--profile quick`: bounded
+The completed local automatic device delivery selects `--profile quick`: bounded
 real-game smoke and executed synthetic/native contract rows for ten categories,
-with evidence kinds in the report. `--profile extended` retains the deeper
+with evidence kinds in the report. Windows/Deck lifecycle and ADB native-contract
+gaps remain NOT TESTED. Google testing is deferred within #310/PR #311 and does
+not block this local delivery. `--profile extended` retains the deeper
 follow-up matrix and its failures/gaps. Neither a QUICK pass nor native transport
 contracts certify full multiplayer hunts, imports, lifecycle or a release.
 

@@ -15,7 +15,12 @@ python3 profiles/mhp3rd/tools/device_suite.py --config device-testing.local.json
 
 See [DEVICE_SUITE.md](DEVICE_SUITE.md) for the private fixture/observation contract,
 focused reruns and the limited QUICK stage. Evidence kinds distinguish real-game
-smoke from executed public native contracts; the deeper matrix is deferred.
+smoke from executed public native contracts. The local QUICK delivery is complete
+with the documented Windows/Deck lifecycle and ADB native-contract gaps retained
+as NOT TESTED. Google testing and the deeper matrix are deferred in the existing
+[#310](https://github.com/TeamGDB/Yakumo/issues/310) and
+[PR #311](https://github.com/TeamGDB/Yakumo/pull/311), rather than merge requirements
+for this local stage.
 Each subcheck determines
 its own assertions without a person reviewing a capture. Required missing routes
 or capabilities remain NOT TESTED, and any failure makes the aggregate fail.
@@ -233,6 +238,11 @@ delegation includes the declared remote setup cap. Streaming rejects this
 extension and keeps its original total reservation/transfer/gameplay cap.
 
 ### Optional Device Streaming
+
+The Google follow-up is deferred from the completed local QUICK delivery. This
+section documents the existing bounded adapter; it does not authorize another
+reservation or cloud transfer/staging implementation for this stage. Preserve
+the historical private ledger and failure evidence under #310/PR #311.
 
 Use `adapter: "streaming"`, `project`, `model: "<codename>/<api>"` and an explicit
 `seconds` between 1 and 300 by default, alongside the APK/fixture fields.
