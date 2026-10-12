@@ -405,6 +405,7 @@ const std::vector<Field> &fields() {
                 s.mouse_sensitivity = variable_float(t, 0.10f, kMinMouseSensitivity, kMaxMouseSensitivity);
             }},
         BOOL_FIELD("input.touch_controls", touch_controls),
+        BOOL_FIELD("input.touch_psp.floating_stick", touch_psp.floating_stick),
         BOOL_FIELD("input.touch_dpad", touch_dpad),
         {"input.touch_opacity", nullptr,
             [](Settings &s, const std::string &t) {
@@ -557,7 +558,8 @@ const std::vector<Field> &fields() {
 const std::vector<Field> &all_fields() {
     static const std::vector<Field> table = [] {
         // Field keys are C strings; these hold them for the program's life.
-        static std::vector<std::string> keys(input::kActions * 2u + input::touch::kElements);
+        static std::vector<std::string> keys(
+            input::kActions * 2u + input::touch::kElements + input::touch::kPspElements);
         std::vector<Field> list = fields();
         for (std::size_t i = 0; i < input::kActions; ++i) {
             keys[i] = std::string(kBindPrefix) + input::info(static_cast<input::Action>(i)).key;
@@ -577,8 +579,23 @@ const std::vector<Field> &all_fields() {
             std::string &key = keys[input::kActions * 2u + i];
             key = std::string("input.touch_action.") + input::touch::info(static_cast<input::touch::Element>(i)).key;
             list.push_back(Field{key.c_str(), nullptr,
-                [i](Settings &s, const std::string &t) { return input::touch::parse(t, s.touch_action.elements[i]); },
+                [i](Settings &s, const std::string &t) {
+                    if (!input::touch::parse(t, s.touch_action.elements[i])) return false;
+                    if (i == static_cast<std::size_t>(input::touch::Element::R3))
+                        s.touch_action.elements[i].buttons = 0u;
+                    return true;
+                },
                 [i](const Settings &s) { return input::touch::format(s.touch_action.elements[i]); }, nullptr});
+        }
+        for (std::size_t i = 0; i < input::touch::kPspElements; ++i) {
+            std::string &key = keys[input::kActions * 2u + input::touch::kElements + i];
+            key = std::string("input.touch_psp.") + input::touch::info(static_cast<input::touch::PspElement>(i)).key;
+            list.push_back(Field{key.c_str(), nullptr,
+                [i](Settings &s, const std::string &t) {
+                    return input::touch::parse_psp_placement(
+                        static_cast<input::touch::PspElement>(i), t, s.touch_psp.elements[i]);
+                },
+                [i](const Settings &s) { return input::touch::format(s.touch_psp.elements[i]); }, nullptr});
         }
         return list;
     }();
@@ -805,6 +822,7 @@ State &state() {
 void write_entries(const Settings &values, Entries &entries) {
     for (const Field &field : all_fields()) entries[field.key] = field.format(values);
     entries[kVersionKey] = std::to_string(kVersion);
+    entries["input.touch_psp.version"] = "1";
     write_combos(values.controls.combos, std::string(kComboPrefix), entries);
     write_user_presets(values.user_presets, entries);
     entries.erase(kRetiredTypeNameKey);
@@ -825,6 +843,15 @@ void read_entries(Settings &values, const Entries &entries) {
     for (const Field &field : all_fields())
         if (const auto found = entries.find(field.key); found != entries.end() && !field.parse(values, found->second))
             std::cerr << "[settings] ignoring " << field.key << "=" << found->second << "\n";
+    auto &dpad = values.touch_psp.at(input::touch::PspElement::DPad);
+    values.touch_dpad = values.touch_dpad && dpad.shown;
+    dpad.shown = values.touch_dpad;
+    // Move only the previous factory R3 placement, once; edited placements stay where they are.
+    if (entries.count("input.touch_psp.version") == 0u) {
+        auto &r3 = values.touch_psp.at(input::touch::PspElement::R3);
+        const input::touch::Placement previous{input::touch::Anchor::Right, 0.6f, 0.19f, 0.04f, 0u, true};
+        if (r3 == previous) r3 = input::touch::default_psp_layout().at(input::touch::PspElement::R3);
+    }
     settle_controls(values, entries);
 }
 

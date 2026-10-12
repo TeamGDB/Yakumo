@@ -4,6 +4,7 @@
 #include "input/chords.hpp"
 #include "input/presets.hpp"
 #include "input/touch_action.hpp"
+#include "input/touch_psp.hpp"
 #include "kernel/fast_forward.hpp"
 
 #include <array>
@@ -137,9 +138,9 @@ struct Settings {
     float touch_size{1.0f};           // 0.6-1.6 of the default size
     float touch_camera_speed{180.0f}; // degrees the camera turns for a drag across the screen's height
     TouchLayout touch_layout{TouchLayout::Psp};
-    // The action layout's elements, kept on this device, and a short
-    // vibration when one of its buttons is pressed.
+    // Both layouts are kept on this device, with shared touch feedback.
     input::touch::ActionLayout touch_action{input::touch::default_action_layout()};
+    input::touch::PspLayout touch_psp{input::touch::default_psp_layout()};
     bool touch_haptics{true};
     NameEntry name_entry{NameEntry::Keyboard}; // on-screen keyboard, or the name below at once
     std::string name{"Hunter"};                // the fixed name

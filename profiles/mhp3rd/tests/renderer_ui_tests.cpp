@@ -2581,6 +2581,8 @@ void touch_editor_contracts(gpu::VulkanRenderer &renderer) {
     player.touch_size = 1;
     auto &layer = ui::Layer::get();
     layer.set_interactive(true);
+    const auto saved_touch_mode = player.touch_layout;
+    player.touch_layout = settings::TouchLayout::Action;
     ui::open_touch_editor();
     ScriptedUiMouse mouse(renderer.window());
     auto frame = [&](const char *focused = nullptr) {
@@ -2611,7 +2613,7 @@ void touch_editor_contracts(gpu::VulkanRenderer &renderer) {
     activate("Size of all", ImGuiKey_RightArrow);
     expect(std::abs(player.touch_size - 1.05f) < 0.001f, "touch editor global size advances exactly five percent");
     const auto before_haptic = player.touch_haptics;
-    activate("Haptic feedback");
+    activate("Haptic Feedback");
     expect(player.touch_haptics != before_haptic, "touch editor haptic option toggles");
     activate("Panel", ImGuiKey_RightArrow);
     activate("Panel", ImGuiKey_LeftArrow);
@@ -2658,6 +2660,131 @@ void touch_editor_contracts(gpu::VulkanRenderer &renderer) {
     expect(player.touch_action == input::touch::default_action_layout(), "whole layout reset restores every element");
     activate("Done");
     expect(!ui::touch_editor_open(), "Done closes touch editor");
+    const auto saved_psp = player.touch_psp;
+    const auto saved_dpad = player.touch_dpad;
+    player.touch_layout = settings::TouchLayout::Psp;
+    player.touch_psp = input::touch::default_psp_layout();
+    player.touch_dpad = true;
+    ui::open_touch_editor();
+    frame();
+    frame();
+    activate("Floating Stick");
+    expect(!player.touch_psp.floating_stick, "PSP editor switches to a fixed stick");
+    activate("Floating Stick");
+    expect(player.touch_psp.floating_stick, "PSP editor restores the floating stick");
+    const auto psp_haptics = player.touch_haptics;
+    activate("Haptic Feedback");
+    expect(player.touch_haptics != psp_haptics, "haptic feedback is editable in the PSP layout too");
+    activate("Add Combination");
+    expect(player.touch_psp.at(input::touch::PspElement::Combo1).shown &&
+            player.touch_psp.at(input::touch::PspElement::Combo1).buttons == 0x2200,
+        "PSP editor adds a visible R plus Circle combination");
+    activate("Size", ImGuiKey_RightArrow);
+    activate("Presses", ImGuiKey_RightArrow);
+    expect(player.touch_psp.at(input::touch::PspElement::Combo1).size > 0.055f &&
+            player.touch_psp.at(input::touch::PspElement::Combo1).buttons != 0x2200,
+        "new PSP combination can be resized and rebound in the shared editor");
+    const auto before_picker = player.touch_psp.at(input::touch::PspElement::Combo1).buttons;
+    activate("Choose Buttons…");
+    activate("L##touch_button_256");
+    activate("Done Choosing");
+    expect(player.touch_psp.at(input::touch::PspElement::Combo1).buttons == (before_picker ^ 0x100),
+        "PSP combination picker toggles an individual button without losing the others");
+    const auto configured = player.touch_psp.at(input::touch::PspElement::Combo1);
+    activate("Shown");
+    auto hidden = configured;
+    hidden.shown = false;
+    expect(player.touch_psp.at(input::touch::PspElement::Combo1) == hidden,
+        "hiding a PSP combination preserves its size, position and binding");
+    activate("Choose another");
+    activate("Add Combination");
+    expect(player.touch_psp.at(input::touch::PspElement::Combo1) == hidden &&
+            player.touch_psp.at(input::touch::PspElement::Combo2).shown,
+        "adding another button never overwrites a hidden PSP combination");
+    activate("Remove Combination");
+    expect(player.touch_psp.at(input::touch::PspElement::Combo2) ==
+            input::touch::default_psp_layout().at(input::touch::PspElement::Combo2),
+        "only removal releases a PSP combination slot");
+    const auto hidden_at =
+        input::touch::psp_element_circle(renderer.touch_controls().layout(), input::touch::PspElement::Combo1).centre;
+    ImGui::GetIO().AddMousePosEvent(hidden_at.x, hidden_at.y);
+    frame();
+    ImGui::GetIO().AddMouseButtonEvent(0, true);
+    frame();
+    ImGui::GetIO().AddMouseButtonEvent(0, false);
+    frame();
+    activate("Shown");
+    expect(player.touch_psp.at(input::touch::PspElement::Combo1) == configured,
+        "a hidden combination can be selected and restored without losing its configuration");
+    activate("Reset this element");
+    expect(player.touch_psp.at(input::touch::PspElement::Combo1).shown &&
+            player.touch_psp.at(input::touch::PspElement::Combo1).buttons == 0x2200,
+        "resetting one combination restores its default chord without deleting it");
+    activate("Remove Combination");
+    expect(!player.touch_psp.at(input::touch::PspElement::Combo1).shown,
+        "removing a PSP combination frees its on-screen slot");
+    activate("Panel", ImGuiKey_RightArrow);
+    activate("Panel", ImGuiKey_LeftArrow);
+    const auto triangle_at =
+        renderer.touch_controls().layout().controls[static_cast<std::size_t>(input::touch::Control::Triangle)].centre;
+    const auto triangle_before = player.touch_psp.at(input::touch::PspElement::Triangle);
+    ImGui::GetIO().AddMousePosEvent(triangle_at.x, triangle_at.y);
+    frame();
+    ImGui::GetIO().AddMouseButtonEvent(0, true);
+    frame();
+    ImGui::GetIO().AddMousePosEvent(triangle_at.x - 25, triangle_at.y - 20);
+    frame();
+    ImGui::GetIO().AddMouseButtonEvent(0, false);
+    frame();
+    const auto triangle_after = player.touch_psp.at(input::touch::PspElement::Triangle);
+    expect(triangle_after.x != triangle_before.x && triangle_after.y != triangle_before.y,
+        "PSP face button dragging saves its new position");
+    activate("Shown");
+    expect(
+        !player.touch_psp.at(input::touch::PspElement::Triangle).shown, "PSP face button can be hidden independently");
+    activate("Reset this element");
+    expect(player.touch_psp.at(input::touch::PspElement::Triangle) == triangle_before,
+        "PSP element reset restores its original placement and binding");
+    activate("Choose another");
+    const auto menu_at =
+        renderer.touch_controls().layout().controls[static_cast<std::size_t>(input::touch::Control::Menu)].centre;
+    ImGui::GetIO().AddMousePosEvent(menu_at.x, menu_at.y);
+    frame();
+    ImGui::GetIO().AddMouseButtonEvent(0, true);
+    frame();
+    ImGui::GetIO().AddMouseButtonEvent(0, false);
+    frame();
+    activate("Shown");
+    expect(
+        player.touch_psp.at(input::touch::PspElement::Menu).shown, "the PSP editor cannot hide the only menu button");
+    activate("Choose another");
+    activate("Panel", ImGuiKey_RightArrow);
+    const auto dpad_at = renderer.touch_controls().layout().dpad.centre;
+    ImGui::GetIO().AddMousePosEvent(dpad_at.x, dpad_at.y);
+    frame();
+    ImGui::GetIO().AddMouseButtonEvent(0, true);
+    frame();
+    ImGui::GetIO().AddMouseButtonEvent(0, false);
+    frame();
+    activate("Shown");
+    expect(!player.touch_dpad && !player.touch_psp.at(input::touch::PspElement::DPad).shown &&
+            !renderer.touch_controls().layout().dpad_shown,
+        "editor visibility hides the same D-pad state as the screen toggle");
+    const auto hidden_dpad = settings::from_entries(settings::to_entries(player));
+    expect(!hidden_dpad.touch_dpad && !hidden_dpad.touch_psp.at(input::touch::PspElement::DPad).shown,
+        "the editor's D-pad visibility remains consistent after saving and loading");
+    activate("Shown");
+    expect(player.touch_dpad && player.touch_psp.at(input::touch::PspElement::DPad).shown &&
+            renderer.touch_controls().layout().dpad_shown,
+        "editor visibility restores both D-pad state fields together");
+    activate("Choose another");
+    activate("Reset the whole layout");
+    expect(player.touch_psp == input::touch::default_psp_layout(), "PSP reset restores its own whole layout");
+    activate("Done");
+    expect(!ui::touch_editor_open(), "Done closes the PSP editor");
+    player.touch_psp = saved_psp;
+    player.touch_dpad = saved_dpad;
+    player.touch_layout = saved_touch_mode;
     player.touch_action = saved_layout;
     player.touch_opacity = saved_opacity;
     player.touch_size = saved_size;
@@ -2668,10 +2795,11 @@ void touch_editor_contracts(gpu::VulkanRenderer &renderer) {
 
 void touch_event_contracts(gpu::VulkanRenderer &renderer) {
     auto &player = settings::current();
-    const auto enabled = player.touch_controls;
-    const auto original = player.touch_layout;
+    const auto saved = player;
     player.touch_controls = true;
     player.touch_layout = settings::TouchLayout::Psp;
+    player.touch_psp = input::touch::default_psp_layout();
+    player.touch_dpad = true;
     renderer.set_game_input(true);
     int width{}, height{};
     expect(SDL_GetWindowSize(renderer.window(), &width, &height), "touch fixture reads real SDL window dimensions");
@@ -2719,6 +2847,61 @@ void touch_event_contracts(gpu::VulkanRenderer &renderer) {
     finger(SDL_EVENT_FINGER_DOWN, 3, menu);
     finger(SDL_EVENT_FINGER_UP, 3, menu);
     expect(renderer.take_touch_menu() && !renderer.take_touch_menu(), "touch menu tap is delivered exactly once");
+    player.lock_on = true;
+    player.controls = input::layout(input::Preset::Default);
+    (void)renderer.take_lock_on_press();
+    const auto r3 = psp.controls[static_cast<std::size_t>(input::touch::Control::R3)].centre;
+    finger(SDL_EVENT_FINGER_DOWN, 20, r3);
+    expect(!renderer.take_lock_on_press(), "on-screen R3 does not lock on before release");
+    finger(SDL_EVENT_FINGER_UP, 20, r3);
+    expect(renderer.take_lock_on_press() && !renderer.take_lock_on_press(),
+        "on-screen R3 delivers the default lock-on tap exactly once");
+    finger(SDL_EVENT_FINGER_DOWN, 20, r3);
+    finger(SDL_EVENT_FINGER_CANCELED, 20, r3);
+    expect(!renderer.take_lock_on_press(), "a canceled R3 finger never locks on");
+    finger(SDL_EVENT_FINGER_DOWN, 20, r3);
+    finger(SDL_EVENT_FINGER_MOTION, 20, {r3.x + 200, r3.y});
+    finger(SDL_EVENT_FINGER_UP, 20, {r3.x + 200, r3.y});
+    expect(!renderer.take_lock_on_press(), "dragging away cancels the R3 tap");
+    player.controls.pad = {};
+    player.controls.pad[static_cast<int>(input::Action::Triangle)][0].inputs[0] =
+        input::pad(input::PadInput::RightStick);
+    finger(SDL_EVENT_FINGER_DOWN, 21, r3);
+    expect((renderer.pad().buttons & 0x1000) != 0, "on-screen R3 follows a custom gamepad R3 assignment");
+    finger(SDL_EVENT_FINGER_UP, 21, r3);
+    expect((renderer.pad().buttons & 0x1000) == 0, "virtual R3 releases its custom PSP assignment");
+    const auto dpad = psp.dpad;
+    const input::touch::Point up{dpad.centre.x, dpad.centre.y - dpad.radius * 0.7f};
+    const auto toggle = psp.controls[static_cast<std::size_t>(input::touch::Control::DpadToggle)].centre;
+    finger(SDL_EVENT_FINGER_DOWN, 22, up);
+    expect((renderer.pad().buttons & 0x10) != 0, "the SDL D-pad direction is held before toggling");
+    finger(SDL_EVENT_FINGER_DOWN, 23, toggle);
+    expect(!player.touch_dpad && !renderer.touch_controls().layout().dpad_shown && (renderer.pad().buttons & 0x10) == 0,
+        "the screen toggle persists D-pad visibility and releases the old direction");
+    finger(SDL_EVENT_FINGER_UP, 23, toggle);
+    finger(SDL_EVENT_FINGER_DOWN, 23, toggle);
+    expect(player.touch_dpad && renderer.touch_controls().layout().dpad_shown && (renderer.pad().buttons & 0x10) == 0,
+        "showing the D-pad again does not resurrect the old held direction");
+    finger(SDL_EVENT_FINGER_UP, 22, up);
+    finger(SDL_EVENT_FINGER_UP, 23, toggle);
+    player.touch_psp.at(input::touch::PspElement::DPad).shown = false;
+    finger(SDL_EVENT_FINGER_DOWN, 24, toggle);
+    expect(player.touch_dpad && player.touch_psp.at(input::touch::PspElement::DPad).shown &&
+            renderer.touch_controls().layout().dpad_shown,
+        "one screen tap can show a D-pad that was hidden in the editor");
+    finger(SDL_EVENT_FINGER_UP, 24, toggle);
+    const auto combo = input::touch::add_psp_combo(player.touch_psp);
+    expect(combo.has_value(), "SDL fixture adds a PSP combination");
+    player.touch_psp.at(*combo) = {input::touch::Anchor::Centre, 0, 0.7f, 0.06f, 0x2200, true};
+    const auto combo_at = input::touch::psp_element_circle(renderer.touch_controls().layout(), *combo).centre;
+    finger(SDL_EVENT_FINGER_DOWN, 25, combo_at);
+    expect((renderer.pad().buttons & 0x2200) == 0x2200, "SDL touch forwards R plus Circle together to the game");
+    draw_overlay();
+    renderer.set_game_input(false);
+    renderer.pump_events();
+    expect(renderer.pad().buttons == 0 && !renderer.touch_controls().any_finger(),
+        "opening a menu clears held PSP combinations and virtual R3");
+    renderer.set_game_input(true);
     player.touch_layout = settings::TouchLayout::Action;
     const auto attack = renderer.action_touch_controls().placed(input::touch::Element::Attack).centre;
     finger(SDL_EVENT_FINGER_DOWN, 4, attack);
@@ -2727,6 +2910,35 @@ void touch_event_contracts(gpu::VulkanRenderer &renderer) {
     draw_overlay();
     finger(SDL_EVENT_FINGER_UP, 4, attack);
     expect(!renderer.action_touch_controls().held(input::touch::Element::Attack), "action attack releases on up");
+    player.controls = input::layout(input::Preset::Default);
+    const auto action_r3 = renderer.action_touch_controls().placed(input::touch::Element::R3).centre;
+    finger(SDL_EVENT_FINGER_DOWN, 30, action_r3);
+    expect(renderer.action_touch_controls().held(input::touch::Element::R3) && !renderer.take_lock_on_press(),
+        "the Action crosshair is the same virtual R3 input and waits for release");
+    draw_overlay();
+    finger(SDL_EVENT_FINGER_UP, 30, action_r3);
+    expect(
+        renderer.take_lock_on_press() && !renderer.take_lock_on_press(), "Action R3 locks on exactly once on release");
+    finger(SDL_EVENT_FINGER_DOWN, 30, action_r3);
+    finger(SDL_EVENT_FINGER_CANCELED, 30, action_r3);
+    expect(!renderer.take_lock_on_press(), "a canceled Action R3 finger never locks on");
+    finger(SDL_EVENT_FINGER_DOWN, 30, action_r3);
+    finger(SDL_EVENT_FINGER_MOTION, 30, {action_r3.x - 200, action_r3.y});
+    finger(SDL_EVENT_FINGER_UP, 30, {action_r3.x - 200, action_r3.y});
+    expect(!renderer.take_lock_on_press(), "dragging away cancels the Action crosshair tap");
+    player.controls.pad = {};
+    player.controls.pad[static_cast<int>(input::Action::Triangle)][0].inputs[0] =
+        input::pad(input::PadInput::RightStick);
+    finger(SDL_EVENT_FINGER_DOWN, 31, action_r3);
+    expect((renderer.pad().buttons & 0x1000) != 0, "Action R3 follows the player's custom R3 binding");
+    finger(SDL_EVENT_FINGER_UP, 31, action_r3);
+    expect((renderer.pad().buttons & 0x1000) == 0, "Action R3 releases its custom PSP assignment");
+    player.touch_action.at(input::touch::Element::R3).shown = false;
+    finger(SDL_EVENT_FINGER_DOWN, 32, action_r3);
+    expect(!renderer.action_touch_controls().held(input::touch::Element::R3) && renderer.pad().buttons == 0,
+        "a hidden Action crosshair does not capture a touch or press its R3 assignment");
+    finger(SDL_EVENT_FINGER_UP, 32, action_r3);
+    player.touch_action.at(input::touch::Element::R3).shown = true;
     finger(SDL_EVENT_FINGER_DOWN, 5, attack);
     renderer.set_game_input(false);
     expect(!renderer.touch_controls_visible() && !renderer.action_touch_controls().held(input::touch::Element::Attack),
@@ -2747,8 +2959,8 @@ void touch_event_contracts(gpu::VulkanRenderer &renderer) {
     keyboard.key.down = false;
     SDL_PushEvent(&keyboard);
     renderer.pump_events();
-    player.touch_controls = enabled;
-    player.touch_layout = original;
+    player = saved;
+    settings::save();
 }
 
 void scripted_mouse_contracts(gpu::VulkanRenderer &renderer) {
@@ -3830,7 +4042,7 @@ void menu_contracts(gpu::VulkanRenderer &renderer, bool camera_overrides = false
     slider_setting("Camera Stick D-Pad Point", &settings::Settings::right_stick_zone, 0.05f);
     change_video("Camera Stick", ImGuiKey_LeftArrow);
     expect(settings::current().right_stick == original_camera, "camera selector round trip restores camera mode");
-    toggle_setting("D-Pad", &settings::Settings::touch_dpad);
+    toggle_setting("Haptic Feedback", &settings::Settings::touch_haptics);
     const auto original_layout = settings::current().touch_layout;
     change_video("Layout", ImGuiKey_RightArrow);
     expect(settings::current().touch_layout == settings::TouchLayout::Action, "touch selector activates Action layout");
@@ -4830,6 +5042,55 @@ int run_contracts(int scripts) {
         std::cout << (failures ? "FAIL" : "PASS") << ": performance renderer (" << failures << " failures)\n";
         return failures ? 1 : 0;
     }
+    if (scripts == 7) {
+        render_contracts(renderer);
+        touch_editor_contracts(renderer);
+        touch_event_contracts(renderer);
+        auto &player = settings::current();
+        player.touch_layout = settings::TouchLayout::Psp;
+        player.touch_psp = input::touch::default_psp_layout();
+        auto &layer = ui::Layer::get();
+        layer.set_interactive(true);
+        ui::open_touch_editor();
+        for (int frame = 0; frame < 3; ++frame) {
+            layer.begin_frame();
+            ui::touch_editor_frame(false);
+            layer.end_frame();
+            renderer.present_ui(true);
+        }
+        renderer.capture_window(sandbox / "psp-editor.bmp");
+        for (int frame = 0; frame < 3 && renderer.window_capture_pending(); ++frame) {
+            layer.begin_frame();
+            ui::touch_editor_frame(false);
+            layer.end_frame();
+            renderer.present_ui(true);
+        }
+        expect(std::filesystem::exists(sandbox / "psp-editor.bmp"), "PSP editor capture shows the actual UI");
+        layer.begin_frame();
+        ui::touch_editor_frame(true);
+        layer.end_frame();
+        renderer.present_ui(true);
+        player.touch_layout = settings::TouchLayout::Action;
+        player.touch_action = input::touch::default_action_layout();
+        ui::open_touch_editor();
+        renderer.capture_window(sandbox / "action-editor.bmp");
+        for (int frame = 0; frame < 3; ++frame) {
+            layer.begin_frame();
+            ui::touch_editor_frame(false);
+            layer.end_frame();
+            renderer.present_ui(true);
+        }
+        expect(
+            std::filesystem::exists(sandbox / "action-editor.bmp"), "Action editor capture includes the R3 crosshair");
+        layer.begin_frame();
+        ui::touch_editor_frame(true);
+        layer.end_frame();
+        renderer.present_ui(true);
+        renderer.shutdown();
+        std::cout << "Touch controls captures: " << sandbox.string() << '\n';
+        std::cout << (failures ? "FAIL" : "PASS") << ": touch UI (" << failures << " failures)\n";
+        return failures ? 1 : 0;
+    }
     expect(ui::take_screenshot().empty(), "UI screenshot without a presented game target reports no picture");
     unavailable_renderer_contracts(sandbox);
     layered_armor_ui_contracts(renderer, fixture.runtime);
@@ -4941,6 +5202,8 @@ int main(int argc, char **argv) {
                 mode = 5;
             else if (std::string_view(argv[1]) == "--qol-overrides")
                 mode = 6;
+            else if (std::string_view(argv[1]) == "--touch-controls")
+                mode = 7;
             else {
                 std::cerr << "FAIL: unknown test mode\n";
                 return 2;

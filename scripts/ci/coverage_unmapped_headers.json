@@ -4,8 +4,8 @@
     "reason": "AudioSink method declarations have no standalone LLVM line map. Their out-of-line implementations and actual SDL output-gain behavior are covered by renderer/audio regression tests and remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/settings/settings.hpp": {
-    "sha256": "d2b0cd32d64cd56b18a2f589e275618f0884a9f0131e6cd5db19dfa07b2aea7f",
-    "reason": "Reviewed declarations and aggregate member defaults, including the two appended compact performance enum values; no standalone function body is exempted. Settings round trips and mode selection are tested. Executable implementations remain subject to the normal diff gate."
+    "sha256": "5c4e07eff5e34d66d6b0ba4bdc2d611c83f969dc3a08a164fb9859376ab7bdfd",
+    "reason": "Reviewed declarations and aggregate member defaults, including independent PSP and Action touch layouts; no standalone function body is exempted. Settings round trips, legacy defaults and invalid touch placements are tested. Executable implementations remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/perf/perf_overlay.hpp": {
     "sha256": "48d8fd2b2912a0231e0d8293bf0f9027a091235c0bae95d68845a6d4a058bc79",

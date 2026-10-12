@@ -29,6 +29,7 @@ constexpr ElementInfo kInfo[kElements] = {
     {"start", "Start"},
     {"select", "Select"},
     {"swipe", "Swipe area"},
+    {"r3", "R3"},
 };
 
 ActionLayout make_default() {
@@ -57,6 +58,7 @@ ActionLayout make_default() {
     set(Element::Select, Anchor::Right, 0.055f, 0.28f, 0.035f, kSelect);
     // Above the middle, clear of both thumbs' elements.
     set(Element::Swipe, Anchor::Centre, 0.0f, 0.30f, 0.09f, 0u);
+    set(Element::R3, Anchor::Right, 0.075f, 0.925f, 0.04f, 0u);
     return l;
 }
 
@@ -104,7 +106,7 @@ const ElementInfo &info(Element element) {
 }
 
 bool rebindable(Element element) {
-    return is_button(element) && element != Element::Pause;
+    return is_button(element) && element != Element::Pause && element != Element::R3;
 }
 
 const std::vector<ButtonChoice> &button_choices() {
@@ -229,6 +231,7 @@ Placement move_to(const Placement &placement, Element element, Point centre, con
 
 void ActionControls::set_layout(const ActionLayout &layout, const Area &area, float scale) {
     layout_ = layout;
+    layout_.at(Element::R3).buttons = 0u;
     area_ = area;
     scale_ = scale;
     for (std::size_t i = 0; i < kElements; ++i)

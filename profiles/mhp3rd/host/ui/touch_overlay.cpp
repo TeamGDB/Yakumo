@@ -53,6 +53,10 @@ const char *label(Control control) {
         return "START";
     case Control::Select:
         return "SELECT";
+    case Control::R3:
+        return "R3";
+    case Control::DpadToggle:
+        return "D-PAD";
     default:
         return nullptr;
     }
@@ -164,6 +168,11 @@ void draw_icon(ImDrawList *list, Element element, ImVec2 c, float r, ImU32 ink, 
         list->AddRect({c.x - s * 0.7f, c.y - s * 0.62f}, {c.x + s * 0.25f, c.y + s * 0.3f}, ink, 0.0f, 0, t);
         list->AddRectFilled({c.x - s * 0.2f, c.y - s * 0.12f}, {c.x + s * 0.7f, c.y + s * 0.7f}, ink);
         break;
+    case Element::R3:
+        list->AddCircle(c, s * 0.65f, ink, 0, t);
+        for (const ImVec2 d : {ImVec2{1, 0}, ImVec2{-1, 0}, ImVec2{0, 1}, ImVec2{0, -1}})
+            list->AddLine(add(c, d, s * 0.45f), add(c, d, s * 1.15f), ink, t);
+        break;
     default:
         break;
     }
@@ -266,6 +275,7 @@ void draw_touch_controls(const input::touch::Controls &controls, float opacity) 
     const ImU32 symbol_colours[] = {colour(64, 224, 176, base), colour(240, 96, 112, base), colour(128, 160, 255, base),
         colour(232, 144, 208, base)};
     for (std::size_t i = 0; i < input::touch::kControls; ++i) {
+        if (!layout.shown[i]) continue;
         const auto control = static_cast<Control>(i);
         const Circle &circle = layout.controls[i];
         const ImVec2 c{circle.centre.x, circle.centre.y};
@@ -277,14 +287,23 @@ void draw_touch_controls(const input::touch::Controls &controls, float opacity) 
         list->AddCircle(c, circle.radius, colour(255, 255, 255, base * (held ? 1.0f : 0.8f)), 0, thickness);
         if (held) list->AddCircleFilled(c, circle.radius * 0.92f, colour(255, 255, 255, base * 0.35f));
         const ImU32 ink = i < 4u ? symbol_colours[i] : colour(255, 255, 255, base);
-        if (const char *text = label(control)) {
+        const bool rebound = layout.buttons[i] != input::touch::psp_button(control) || control >= Control::Combo1;
+        const std::string binding = rebound
+            ? (layout.buttons[i] == 0u ? "NONE" : input::touch::buttons_label(layout.buttons[i]))
+            : std::string{};
+        if (const char *text = rebound ? binding.c_str() : label(control)) {
             ImFont *font = ImGui::GetFont();
-            const float size = circle.radius * (text[1] == '\0' ? 0.9f : 0.42f);
+            const float natural = circle.radius * (text[1] == '\0' || text[2] == '\0' ? 0.9f : 0.42f);
+            const float measured = font->CalcTextSizeA(natural, 1e9f, 0.0f, text).x;
+            const float size = natural * std::min(1.0f, circle.radius * 1.65f / std::max(measured, 1.0f));
             const ImVec2 extent = font->CalcTextSizeA(size, 1e9f, 0.0f, text);
             list->AddText(font, size, {c.x - extent.x * 0.5f, c.y - extent.y * 0.5f}, ink, text);
         } else {
             draw_symbol(list, control, c, circle.radius, ink, thickness * 1.3f);
         }
+        if (control == Control::DpadToggle && !layout.dpad_shown)
+            list->AddLine({c.x - circle.radius * 0.65f, c.y + circle.radius * 0.65f},
+                {c.x + circle.radius * 0.65f, c.y - circle.radius * 0.65f}, ink, thickness);
     }
     // The D-pad: a cross of four arms, each lit while held.
     if (layout.dpad_shown) {
@@ -324,8 +343,9 @@ void draw_touch_controls(const input::touch::Controls &controls, float opacity) 
     }
     // The floating stick while the thumb is down: its reach and the knob.
     const input::touch::Stick &stick = controls.stick_state();
-    if (stick.active) {
-        const ImVec2 origin{stick.origin.x, stick.origin.y};
+    if (layout.stick_shown && (stick.active || !layout.floating_stick)) {
+        const auto centre = stick.active ? stick.origin : layout.stick.centre;
+        const ImVec2 origin{centre.x, centre.y};
         list->AddCircleFilled(origin, layout.stick_radius, colour(0, 0, 0, base * 0.3f));
         list->AddCircle(origin, layout.stick_radius, colour(255, 255, 255, base * 0.7f), 0,
             std::max(1.5f, layout.stick_radius * 0.04f));
@@ -333,6 +353,28 @@ void draw_touch_controls(const input::touch::Controls &controls, float opacity) 
         const ImVec2 knob{origin.x + push.x * layout.stick_radius, origin.y + push.y * layout.stick_radius};
         list->AddCircleFilled(knob, layout.stick_radius * 0.45f, colour(255, 255, 255, base * 0.6f));
     }
+}
+
+void draw_psp_element(
+    ImDrawList *list, input::touch::PspElement element, const input::touch::Layout &layout, const ElementLook &look) {
+    input::touch::Layout single = layout;
+    single.shown.fill(false);
+    single.dpad_shown = element == input::touch::PspElement::DPad;
+    single.stick_shown = element == input::touch::PspElement::Stick;
+    single.floating_stick = false;
+    if (static_cast<std::size_t>(element) < input::touch::kControls)
+        single.shown[static_cast<std::size_t>(element)] = true;
+    input::touch::Controls preview;
+    preview.set_layout(single);
+    const Circle circle = input::touch::psp_element_circle(single, element);
+    if (look.held) preview.finger_down(1u, circle.centre);
+    draw_touch_controls(preview, look.opacity * (look.hidden ? 0.45f : 1.0f));
+    const ImVec2 c{circle.centre.x, circle.centre.y};
+    const float r = circle.radius;
+    if (look.selected) list->AddCircle(c, r + 3.0f, colour(236, 190, 96, 0.9f), 0, 2.0f);
+    if (look.hidden)
+        list->AddLine({c.x - r * 0.7f, c.y + r * 0.7f}, {c.x + r * 0.7f, c.y - r * 0.7f},
+            colour(255, 255, 255, look.opacity), 2.0f);
 }
 
 } // namespace mhp3rd::ui

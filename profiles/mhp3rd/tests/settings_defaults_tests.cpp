@@ -388,6 +388,53 @@ void test_performance_modes() {
 }
 
 int main() {
+    {
+        using namespace mhp3rd::input::touch;
+        Settings edited = from_entries({});
+        edited.touch_psp.floating_stick = false;
+        edited.touch_psp.at(PspElement::Circle) = {Anchor::Left, 0.6f, 0.7f, 0.09f, 0x2200, false};
+        check(add_psp_combo(edited.touch_psp).has_value(), "a PSP combination can be added before saving");
+        edited.touch_psp.at(PspElement::Combo1).shown = false;
+        const auto again = from_entries(to_entries(edited));
+        check(again.touch_psp == edited.touch_psp && again.touch_action == edited.touch_action,
+            "PSP layout, hidden combinations and stick mode round trip independently from Action");
+        const auto legacy = from_entries({});
+        check(legacy.touch_psp == default_psp_layout(), "old settings receive the default editable PSP layout");
+        auto previous = to_entries(legacy);
+        previous.erase("input.touch_psp.version");
+        previous["input.touch_psp.r3"] = "right 0.600 0.190 0.040 0x0000 1";
+        check(from_entries(previous).touch_psp.at(PspElement::R3) == default_psp_layout().at(PspElement::R3),
+            "the old factory R3 placement upgrades to the bottom-right corner");
+        previous["input.touch_psp.version"] = "1";
+        check(from_entries(previous).touch_psp.at(PspElement::R3).y == 0.19f,
+            "a saved explicit R3 placement is not moved again");
+        previous.erase("input.touch_psp.version");
+        previous["input.touch_psp.r3"] = "left 0.300 0.500 0.050 0x0000 1";
+        check(from_entries(previous).touch_psp.at(PspElement::R3).anchor == Anchor::Left,
+            "customized old R3 placements are preserved");
+        previous["input.touch_action.r3"] = "right 0.075 0.925 0.040 0x4000 1";
+        check(from_entries(previous).touch_action.at(Element::R3).buttons == 0,
+            "saved Action R3 bindings cannot inject PSP buttons");
+        for (const bool global : {false, true})
+            for (const bool element : {false, true}) {
+                auto state = to_entries(legacy);
+                state["input.touch_dpad"] = global ? "1" : "0";
+                state["input.touch_psp.dpad"] = format(legacy.touch_psp.at(PspElement::DPad));
+                auto p = legacy.touch_psp.at(PspElement::DPad);
+                p.shown = element;
+                state["input.touch_psp.dpad"] = format(p);
+                const auto visible = from_entries(state);
+                check(visible.touch_dpad == (global && element) &&
+                        visible.touch_psp.at(PspElement::DPad).shown == visible.touch_dpad,
+                    "loaded D-pad flags converge to one visibility state");
+            }
+        const auto invalid = from_entries({{"input.touch_psp.circle", "bad"}, {"input.touch_psp.floating_stick", "bad"},
+            {"input.touch_psp.menu", "left 0.1 0.1 0.04 0x2000 0"}});
+        check(invalid.touch_psp.at(PspElement::Circle) == default_psp_layout().at(PspElement::Circle) &&
+                invalid.touch_psp.floating_stick && invalid.touch_psp.at(PspElement::Menu).shown &&
+                invalid.touch_psp.at(PspElement::Menu).buttons == 0,
+            "invalid PSP values preserve defaults and cannot disable menu access");
+    }
     test_performance_modes();
     test_background_settings();
     test_crisp_text();

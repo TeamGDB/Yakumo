@@ -1,6 +1,6 @@
 #pragma once
 
-// The editor of the action touch layout (#174), opened from the menu's
+// The editor of the selected PSP or Action touch layout, opened from the menu's
 // Controls page: the layout drawn full screen over the game, each element
 // dragged where it should be, and a small panel to resize, rebind and hide
 // the element chosen, set the opacity and the haptic feedback, and reset.

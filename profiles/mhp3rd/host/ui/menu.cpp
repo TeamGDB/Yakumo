@@ -1043,33 +1043,27 @@ void Menu::controls() {
         if (choice_row("Layout", action ? "Action" : "PSP buttons",
                 off(options_for("input.touch_layout",
                     "PSP buttons: a stick where the left thumb lands, the face buttons on the "
-                    "right, L and R at the top corners. Action: large buttons named for what "
+                    "right, L and R at the top corners, R3 and a D-pad toggle. Action: large buttons named for what "
                     "they do (attack, evade, guard, the combined attack), a fixed stick, the "
                     "item pouch, and swipes for the item bar; every element can be moved, "
                     "resized and rebound.")))) {
             s.touch_layout = action ? settings::TouchLayout::Psp : settings::TouchLayout::Action;
             settings::save();
         }
-        const auto action_only = [&](RowOptions options) {
-            options = off(std::move(options));
-            if (s.touch_layout != settings::TouchLayout::Action && !options.disabled) {
-                options.disabled = true;
-                options.note = "For the Action layout";
-            }
-            return options;
-        };
-        if (button_row("Edit the Action Layout…",
-                action_only({false, {},
-                    "Move, resize, rebind and hide the Action layout's elements, over "
+        if (button_row(action ? "Edit the Action Layout…" : "Edit the PSP Layout…",
+                off({false, {},
+                    "Move, resize, rebind and hide the selected layout's elements, over "
                     "the game. Kept on this device."})))
             open_touch_editor();
         if (toggle_row("Haptic Feedback", s.touch_haptics,
-                action_only(options_for("input.touch_haptics",
-                    "A short vibration when an Action button is pressed or a swipe is "
+                off(options_for("input.touch_haptics",
+                    "A short vibration when a touch button is pressed, a D-pad direction changes or a swipe is "
                     "taken, where the device can.")))) {
             s.touch_haptics = !s.touch_haptics;
             settings::save();
         }
+        // Optional builds can expose the old setting; normal menus use the screen button and editor.
+#if defined(MHP3RD_SHOW_TOUCH_DPAD_SETTING)
         RowOptions dpad = off(options_for("input.touch_dpad",
             "A D-pad at the left edge, for the game's menus, the "
             "item box and the camera's D-pad controls. Off gives "
@@ -1080,8 +1074,10 @@ void Menu::controls() {
         }
         if (toggle_row("D-Pad", s.touch_dpad, dpad)) {
             s.touch_dpad = !s.touch_dpad;
+            s.touch_psp.at(input::touch::PspElement::DPad).shown = s.touch_dpad;
             settings::save();
         }
+#endif
         int opacity = static_cast<int>(std::lround(s.touch_opacity * 100.0f));
         if (slider_row("Controls Opacity", opacity, 10, 100, 5, "%d%%",
                 off(options_for("input.touch_opacity", "How strongly the on-screen controls are drawn.")))) {
@@ -1106,7 +1102,7 @@ void Menu::controls() {
     if (button_row("Restore Control Defaults",
             {false, {},
                 "Every gamepad, keyboard, mouse, touch and name setting back to how "
-                "Yakumo ships, with the Default preset. Your own presets and the Action layout's "
+                "Yakumo ships, with the Default preset. Your own presets and the touch layouts' "
                 "arrangement are kept."})) {
         const settings::Settings &d = settings::defaults();
         const auto restore = [&](const char *key, auto &value, const auto &fallback) {
@@ -1131,6 +1127,7 @@ void Menu::controls() {
         restore("input.invert_mouse_y", s.invert_mouse_y, d.invert_mouse_y);
         restore("input.touch_controls", s.touch_controls, d.touch_controls);
         restore("input.touch_dpad", s.touch_dpad, d.touch_dpad);
+        s.touch_psp.at(input::touch::PspElement::DPad).shown = s.touch_dpad;
         restore("input.touch_opacity", s.touch_opacity, d.touch_opacity);
         restore("input.touch_size", s.touch_size, d.touch_size);
         restore("input.touch_camera_speed", s.touch_camera_speed, d.touch_camera_speed);
@@ -1684,6 +1681,9 @@ void Menu::system() {
         settings::save();
     }
 
+    if (button_row("Quit Game", {false, {}, "Close Yakumo. Progress since your last save is lost."}, colors::kDanger))
+        confirm_ = Confirm::Quit;
+
     section("Text:");
     {
         const TextLanguages &available = text_languages();
@@ -1728,9 +1728,6 @@ void Menu::system() {
     if (button_row("Set Up Game Data Again…",
             {false, {}, "Choose the disc image again, for example after moving it. The game closes first."}))
         confirm_ = Confirm::Setup;
-    if (button_row("Quit Game", {false, {}, "Close Yakumo. Progress since your last save is lost."}, colors::kDanger))
-        confirm_ = Confirm::Quit;
-
     section("Saves:");
     save_rows();
 

@@ -1,6 +1,7 @@
 // The on-screen touch controls' layout, fingers and stick, without a screen.
 #include "input/touch_action.hpp"
 #include "input/touch_controls.hpp"
+#include "input/touch_psp.hpp"
 
 #include <cmath>
 #include <iostream>
@@ -24,14 +25,18 @@ const Circle &at(const Layout &layout, Control control) {
 void test_layout_fits(float width, float height, Insets insets, float size, const char *what) {
     const Layout layout = make_layout(width, height, insets, size);
     bool inside = true;
-    for (const Circle &c : layout.controls)
+    for (std::size_t i = 0; i < kControls; ++i) {
+        if (!layout.shown[i]) continue;
+        const Circle &c = layout.controls[i];
         inside = inside && c.centre.x - c.radius >= insets.left - 0.5f &&
             c.centre.x + c.radius <= width - insets.right + 0.5f && c.centre.y - c.radius >= insets.top - 0.5f &&
             c.centre.y + c.radius <= height - insets.bottom + 0.5f;
+    }
     check(inside, what);
     bool apart = true;
     for (std::size_t i = 0; i < kControls; ++i)
         for (std::size_t j = i + 1; j < kControls; ++j) {
+            if (!layout.shown[i] || !layout.shown[j]) continue;
             const Circle &a = layout.controls[i];
             const Circle &b = layout.controls[j];
             apart = apart && std::hypot(a.centre.x - b.centre.x, a.centre.y - b.centre.y) >= a.radius + b.radius;
@@ -42,8 +47,11 @@ void test_layout_fits(float width, float height, Insets insets, float size, cons
             d.centre.y + d.radius <= height - insets.bottom + 0.5f && d.centre.x + d.radius < layout.stick_split,
         "the D-pad is on the left, on screen");
     bool dpad_apart = true;
-    for (const Circle &c : layout.controls)
+    for (std::size_t i = 0; i < kControls; ++i) {
+        if (!layout.shown[i]) continue;
+        const Circle &c = layout.controls[i];
         dpad_apart = dpad_apart && std::hypot(c.centre.x - d.centre.x, c.centre.y - d.centre.y) >= c.radius + d.radius;
+    }
     check(dpad_apart, "the D-pad overlaps no button");
     check(at(layout, Control::Cross).centre.x > layout.stick_split, "the face buttons are on the right");
     check(at(layout, Control::L).centre.x < layout.stick_split, "L is on the left");
@@ -144,6 +152,166 @@ void test_fingers() {
     check(!controls.any_finger() && controls.buttons() == 0u, "release_all lets go of everything");
 }
 
+void test_psp_editing() {
+    PspLayout edited = default_psp_layout();
+    const auto combo = add_psp_combo(edited);
+    check(combo == PspElement::Combo1 && edited.at(*combo).buttons == 0x2200u && edited.at(*combo).shown,
+        "adding a PSP combination starts with R plus Circle");
+    for (std::size_t i = 1; i < kPspCombos; ++i) check(add_psp_combo(edited).has_value(), "eight combinations fit");
+    check(!add_psp_combo(edited), "a ninth combination is rejected without modifying the layout");
+    edited.at(PspElement::Combo2).shown = false;
+    const auto hidden_combo = edited.at(PspElement::Combo2);
+    check(!add_psp_combo(edited) && edited.at(PspElement::Combo2) == hidden_combo,
+        "hiding a combination preserves its binding and occupied slot");
+    const auto full = edited;
+    remove_psp_combo(edited, PspElement::Triangle);
+    check(edited == full, "removing a standard PSP button through the combination API does nothing");
+    remove_psp_combo(edited, PspElement::Combo3);
+    check(!edited.at(PspElement::Combo3).shown && add_psp_combo(edited) == PspElement::Combo3,
+        "removing a combination frees its slot for reuse");
+    for (std::size_t i = 0; i < kPspElements; ++i) {
+        const auto e = static_cast<PspElement>(i);
+        Placement back;
+        check(parse_psp_placement(e, format(edited.elements[i]), back) &&
+                std::abs(back.size - edited.elements[i].size) < 0.001f && back.buttons == edited.elements[i].buttons &&
+                back.shown == edited.elements[i].shown,
+            "each PSP placement survives serialization");
+        check(info(e).key[0] && info(e).name[0], "every PSP element has a stable key and editor name");
+    }
+    auto p = edited.at(PspElement::Circle);
+    const auto original = p;
+    for (const char *invalid :
+        {"", "bad 0 0 0.1 0x2000 1", "left nan 0 0.1 0x2000 1", "left 0 0 0.1 0xFFFF 1", "left 0 0 0.1 0x10000 1"})
+        check(!parse_psp_placement(PspElement::Circle, invalid, p) && p == original,
+            "malformed PSP placements preserve the old value");
+    check(parse_psp_placement(PspElement::Menu, "left 0 0 0.1 0x2000 0", p) && p.shown && p.buttons == 0,
+        "loaded settings cannot hide or rebind the menu");
+    check(parse_psp_placement(PspElement::R3, "right 9 -2 3 0x2000 1", p) && p.x == 4.0f && p.y == 0.0f &&
+            p.size == kMaxElementSize && p.buttons == 0,
+        "host button placement clamps coordinates and strips PSP bindings");
+    const Area area = safe_area(1280, 720, {40, 10, 20, 30});
+    edited = default_psp_layout();
+    edited.at(PspElement::Circle) = move_to(edited.at(PspElement::Circle), Element::Stick, {680, 250}, area);
+    edited.at(PspElement::Circle).size = 0.1f;
+    edited.at(PspElement::Circle).buttons = 0x1200u;
+    const Layout layout = make_layout(1280, 720, {40, 10, 20, 30}, 1.2f, true, edited);
+    const Circle circle = at(layout, Control::Circle);
+    check(std::abs(circle.centre.x - 680) < 0.001f && std::abs(circle.centre.y - 250) < 0.001f &&
+            std::abs(circle.radius - 81.6f) < 0.001f,
+        "edited placement follows the safe area, global scale and own size");
+    Controls controls;
+    controls.set_layout(layout);
+    controls.finger_down(1, circle.centre);
+    check(controls.buttons() == 0x1200u, "a moved PSP button presses its configured chord");
+    controls.finger_up(1);
+    const auto slot = add_psp_combo(edited);
+    edited.at(*slot) = {Anchor::Centre, 0, 0.48f, 0.06f, 0x2200, true};
+    controls.set_layout(make_layout(1280, 720, {}, 1, true, edited));
+    const auto combo_at = psp_element_circle(controls.layout(), *slot).centre;
+    controls.finger_down(2, combo_at);
+    controls.finger_down(3, at(controls.layout(), Control::R).centre);
+    check(controls.buttons() == 0x2200u, "a combination holds both buttons in the same frame");
+    controls.finger_up(2);
+    check(controls.buttons() == 0x200u, "releasing a combination preserves another finger's shoulder press");
+    controls.finger_up(3);
+    controls.finger_down(4, combo_at);
+    controls.finger_move(4, {combo_at.x + 300, combo_at.y});
+    check(controls.buttons() == 0, "dragging away from a combination releases its buttons");
+    controls.finger_move(4, combo_at);
+    check(controls.buttons() == 0x2200, "returning to the combination presses it again");
+    edited.at(*slot).shown = false;
+    controls.set_layout(make_layout(1280, 720, {}, 1, true, edited));
+    check(controls.buttons() == 0 && controls.take_camera_drag().x == 0,
+        "hiding a held combination releases it without turning the camera");
+    controls.release_all();
+    edited.floating_stick = false;
+    edited.at(PspElement::Stick) = {Anchor::Left, 0.5f, 0.8f, 0.12f, 0, true};
+    controls.set_layout(make_layout(1280, 720, {}, 1, true, edited));
+    const auto centre = controls.layout().stick.centre;
+    controls.finger_down(5, centre);
+    controls.finger_move(5, {centre.x + 3 * controls.layout().stick_radius, centre.y});
+    check(controls.stick_state().origin.x == centre.x && controls.stick().x > 0.99f,
+        "the fixed stick stays at its edited centre and clamps long drags");
+    controls.finger_up(5);
+    controls.finger_down(6, {100, 700});
+    check(!controls.stick_state().active, "free left-hand space does not activate a fixed stick");
+    controls.release_all();
+    edited.floating_stick = true;
+    controls.set_layout(make_layout(1280, 720, {}, 1, true, edited));
+    controls.finger_down(7, {100, 700});
+    check(controls.stick_state().active && controls.stick_state().origin.x == 100,
+        "switching back restores the original floating stick");
+    edited.at(PspElement::Stick).shown = false;
+    controls.set_layout(make_layout(1280, 720, {}, 1, true, edited));
+    check(!controls.stick_state().active && controls.stick().x == 0, "hiding a held stick centers its input");
+}
+
+void test_psp_host_buttons() {
+    Controls controls;
+    controls.set_layout(make_layout(1280, 720, {}, 1));
+    const auto r3 = at(controls.layout(), Control::R3);
+    check(r3.centre.x > 1280 * 0.9f && r3.centre.y > 720 * 0.85f, "the default PSP R3 is in the bottom-right corner");
+    const auto d = controls.layout().dpad;
+    controls.finger_down(1, {d.centre.x, d.centre.y - d.radius * 0.8f});
+    check(controls.buttons() == 0x10, "the D-pad is held before the in-game toggle");
+    const auto toggle = at(controls.layout(), Control::DpadToggle).centre;
+    controls.finger_down(2, toggle);
+    check(!controls.layout().dpad_shown && controls.buttons() == 0 && controls.take_dpad_toggle() &&
+            !controls.take_dpad_toggle(),
+        "the toggle hides the D-pad, releases directions and emits one change");
+    controls.finger_move(2, toggle);
+    check(!controls.take_dpad_toggle(), "holding or moving the toggle does not repeat it");
+    controls.finger_up(2);
+    controls.finger_down(2, toggle);
+    check(controls.layout().dpad_shown && controls.take_dpad_toggle() && controls.buttons() == 0,
+        "a second tap shows the D-pad without resurrecting its old held finger");
+    controls.release_all();
+    controls.finger_down(3, at(controls.layout(), Control::R3).centre);
+    check(controls.held(Control::R3) && controls.buttons() == 0, "R3 is a host input, not an invented PSP button");
+    controls.release_all();
+    check(!controls.held(Control::R3) && !controls.take_dpad_toggle(), "release_all cancels all host touch input");
+}
+
+void test_psp_haptics() {
+    Controls controls;
+    controls.set_layout(make_layout(1280, 720, {}, 1));
+    const auto cross = at(controls.layout(), Control::Cross).centre;
+    const auto circle = at(controls.layout(), Control::Circle).centre;
+    controls.finger_down(1, cross);
+    check(controls.take_haptics() == 1 && controls.take_haptics() == 0,
+        "PSP button down gives one consumable haptic tick");
+    controls.finger_move(1, cross);
+    check(controls.take_haptics() == 0, "holding a PSP button does not repeat feedback");
+    controls.finger_move(1, circle);
+    check(controls.take_haptics() == 1, "sliding to another PSP face button gives one tick");
+    controls.finger_move(1, {700, 300});
+    check(controls.take_haptics() == 0, "sliding off a PSP button gives no feedback");
+    controls.finger_move(1, circle);
+    check(controls.take_haptics() == 1, "returning to a PSP button gives feedback");
+    controls.release_all();
+    const auto d = controls.layout().dpad;
+    controls.finger_down(2, {d.centre.x, d.centre.y - d.radius * 0.8f});
+    check(controls.take_haptics() == 1, "PSP D-pad down gives feedback");
+    controls.finger_move(2, {d.centre.x, d.centre.y - d.radius * 0.8f});
+    check(controls.take_haptics() == 0, "holding a D-pad direction does not repeat feedback");
+    controls.finger_move(2, {d.centre.x + d.radius * 0.8f, d.centre.y});
+    check(controls.take_haptics() == 1, "changing D-pad direction gives feedback");
+    controls.finger_move(2, d.centre);
+    check(controls.take_haptics() == 0, "the D-pad's neutral center gives no feedback");
+    controls.release_all();
+    controls.finger_down(3, {700, 300});
+    controls.finger_move(3, {710, 310});
+    controls.finger_down(4, {400, 600});
+    check(controls.take_haptics() == 0, "free camera and stick motion do not vibrate");
+    controls.release_all();
+    controls.finger_down(5, at(controls.layout(), Control::R3).centre);
+    check(controls.take_haptics() == 1, "the PSP virtual R3 gives feedback");
+    controls.finger_up(5);
+    controls.finger_down(6, at(controls.layout(), Control::Menu).centre);
+    controls.release_all();
+    check(controls.take_haptics() == 0, "releasing all controls discards pending feedback");
+}
+
 // The action layout (#174).
 void test_action_layout_fits(float width, float height, Insets insets, float scale, const char *what) {
     ActionControls controls;
@@ -200,6 +368,14 @@ void test_action_fingers() {
     controls.set_layout(default_action_layout(), area, 1.0f);
     const auto centre = [&](Element e) { return controls.placed(e).centre; };
     std::uint64_t ms = 1000u;
+    const auto r3 = centre(Element::R3);
+    check(r3.x > area.width * 0.9f && r3.y > area.height * 0.85f && !rebindable(Element::R3),
+        "the Action R3 is a host button in the bottom-right corner");
+    controls.finger_down(10, r3, ms);
+    check(controls.held(Element::R3) && controls.buttons(ms) == 0 && controls.take_haptics() == 1,
+        "Action R3 is held with feedback and presses no invented PSP bit");
+    controls.finger_up(10, ms);
+    check(!controls.held(Element::R3), "Action R3 releases with its finger");
 
     controls.finger_down(1, centre(Element::Attack), ms);
     check(controls.buttons(ms) == 0x1000u && controls.held(Element::Attack), "the attack presses △");
@@ -253,7 +429,11 @@ void test_action_fingers() {
     ActionLayout changed = default_action_layout();
     changed.at(Element::Secondary).shown = false;
     changed.at(Element::Guard).buttons = 0x0200u | 0x1000u;
+    changed.at(Element::R3).buttons = 0x4000u;
     controls.set_layout(changed, area, 1.0f);
+    controls.finger_down(10, centre(Element::R3), ms);
+    check(controls.buttons(ms) == 0, "a malformed Action R3 binding cannot add a PSP button");
+    controls.finger_up(10, ms);
     controls.finger_down(8, centre(Element::Secondary), ms);
     check(controls.buttons(ms) == 0u, "a hidden button presses nothing");
     controls.finger_down(9, centre(Element::Guard), ms);
@@ -263,6 +443,9 @@ void test_action_fingers() {
 } // namespace
 
 int main() {
+    test_psp_haptics();
+    test_psp_editing();
+    test_psp_host_buttons();
     test_layouts();
     test_stick_maths();
     test_dpad();

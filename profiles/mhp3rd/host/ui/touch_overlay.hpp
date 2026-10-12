@@ -2,6 +2,7 @@
 
 #include "input/touch_action.hpp"
 #include "input/touch_controls.hpp"
+#include "input/touch_psp.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -28,5 +29,7 @@ struct ElementLook {
 };
 void draw_action_element(ImDrawList *list, input::touch::Element element, const input::touch::Placement &placement,
     const input::touch::Placed &placed, const input::touch::Point &stick_thumb, const ElementLook &look);
+void draw_psp_element(
+    ImDrawList *list, input::touch::PspElement element, const input::touch::Layout &layout, const ElementLook &look);
 
 } // namespace mhp3rd::ui

@@ -36,6 +36,7 @@ enum class Element : std::uint8_t {
     Start,
     Select,
     Swipe, // the swipe area: left and right swipes press D-pad Left and Right
+    R3,    // virtual right-stick button, using the player's gamepad assignment
     Count
 };
 inline constexpr std::size_t kElements = static_cast<std::size_t>(Element::Count);
@@ -50,7 +51,7 @@ struct Placement {
     float x{};               // the centre from the anchor (right: leftwards), in heights of the safe area
     float y{};               // the centre from the safe area's top, in heights of the safe area
     float size{};            // the radius in heights of the safe area; the swipe area's half height
-    std::uint16_t buttons{}; // SceCtrlButtons pressed; ignored for the stick, Pause and the swipe area
+    std::uint16_t buttons{}; // SceCtrlButtons pressed; ignored for the stick, Pause, R3 and swipe area
     bool shown{true};
     friend bool operator==(const Placement &, const Placement &) = default;
 };

@@ -1037,6 +1037,7 @@ struct VulkanRenderer::Impl {
     // menu, never locks on too.
     input::TapDetector lock_on_keys_tap;
     input::TapDetector lock_on_pad_tap;
+    input::TapDetector lock_on_touch_tap;
     bool lock_on_pressed{};
     void sample_lock_on(bool focused);
     bool suppress_held{};
@@ -1046,8 +1047,10 @@ struct VulkanRenderer::Impl {
     // sample; what they press, for the game and for the port's own binds.
     input::Resolver keys_resolver;
     input::Resolver pad_resolver;
+    input::Resolver touch_resolver;
     input::PadState typed{};
     input::PadState mapped{};
+    input::PadState touch_mapped{}; // the PSP overlay's virtual R3, using the player's gamepad bindings
     void resolve_bindings(bool focused);
     // L sent ahead of the rest for actions such as Item left, counted in
     // the game's reads of the pad (input::LeadIn).
@@ -1065,6 +1068,7 @@ struct VulkanRenderer::Impl {
     input::touch::Controls touch;
     input::touch::ActionControls action_touch;
     input::touch::Insets touch_insets{};
+    settings::TouchLayout touch_mode{settings::TouchLayout::Psp};
     bool touch_visible{};
     bool real_mouse_seen{};
     MouseMotion touch_motion{};
@@ -1080,6 +1084,13 @@ struct VulkanRenderer::Impl {
         int height = 0;
         if (window == nullptr || !SDL_GetWindowSize(window, &width, &height) || width <= 0 || height <= 0) return;
         const settings::Settings &player = settings::current();
+        if (touch_mode != player.touch_layout) {
+            touch.release_all();
+            action_touch.release_all();
+            touch_resolver.reset();
+            lock_on_touch_tap = {};
+            touch_mode = player.touch_layout;
+        }
         const float size = player.touch_size;
         const bool dpad = player.touch_dpad;
         const TouchLayoutKey key{width, height, content_rect, size, dpad};
@@ -1112,15 +1123,18 @@ struct VulkanRenderer::Impl {
             insets.right += margin;
             insets.bottom += margin;
             touch_insets = insets;
-            touch.set_layout(
-                input::touch::make_layout(static_cast<float>(width), static_cast<float>(height), insets, size, dpad));
         }
+        touch.set_layout(input::touch::make_layout(
+            static_cast<float>(width), static_cast<float>(height), touch_insets, size, dpad, player.touch_psp));
         // The action layout follows its editor as well; placing it is cheap.
         action_touch.set_layout(player.touch_action,
             input::touch::safe_area(static_cast<float>(width), static_cast<float>(height), touch_insets), size);
     }
     [[nodiscard]] static bool action_layout() {
         return settings::current().touch_layout == settings::TouchLayout::Action;
+    }
+    [[nodiscard]] bool touch_r3_held() const {
+        return action_layout() ? action_touch.held(input::touch::Element::R3) : touch.held(input::touch::Control::R3);
     }
     void handle_touch(const SDL_Event &event) {
         const bool finger = event.type == SDL_EVENT_FINGER_DOWN || event.type == SDL_EVENT_FINGER_MOTION ||
@@ -1134,12 +1148,14 @@ struct VulkanRenderer::Impl {
                 touch_visible = false;
                 touch.release_all();
                 action_touch.release_all();
+                lock_on_touch_tap = {};
             }
             return;
         }
         if (!settings::current().touch_controls || !game_input) {
             touch.release_all();
             action_touch.release_all();
+            lock_on_touch_tap = {};
             return;
         }
         int width = 0;
@@ -1151,6 +1167,7 @@ struct VulkanRenderer::Impl {
         const std::uint64_t id = event.tfinger.fingerID;
         if (event.type == SDL_EVENT_FINGER_DOWN) touch_visible = true;
         input::touch::Point drag;
+        const bool r3_before = touch_r3_held();
         if (action_layout()) {
             // Event time, so a swipe's speed is the finger's, not the frame's.
             const std::uint64_t ms = SDL_NS_TO_MS(event.tfinger.timestamp);
@@ -1161,11 +1178,6 @@ struct VulkanRenderer::Impl {
             else
                 action_touch.finger_up(id, ms);
             drag = action_touch.take_camera_drag();
-            if (action_touch.take_haptics() > 0 && settings::current().touch_haptics) {
-#if defined(MHP3RD_ANDROID_APP)
-                android::haptic_tick();
-#endif
-            }
         } else {
             if (event.type == SDL_EVENT_FINGER_DOWN)
                 touch.finger_down(id, at);
@@ -1173,7 +1185,22 @@ struct VulkanRenderer::Impl {
                 touch.finger_move(id, at);
             else
                 touch.finger_up(id);
+            if (touch.take_dpad_toggle()) {
+                settings::current().touch_dpad = touch.layout().dpad_shown;
+                settings::current().touch_psp.at(input::touch::PspElement::DPad).shown = settings::current().touch_dpad;
+                settings::save();
+                update_touch_layout();
+            }
             drag = touch.take_camera_drag();
+        }
+        if (event.type == SDL_EVENT_FINGER_CANCELED ||
+            (event.type == SDL_EVENT_FINGER_MOTION && r3_before && !touch_r3_held()))
+            lock_on_touch_tap = {};
+        const int haptics = action_layout() ? action_touch.take_haptics() : touch.take_haptics();
+        if (haptics > 0 && settings::current().touch_haptics) {
+#if defined(MHP3RD_ANDROID_APP)
+            android::haptic_tick();
+#endif
         }
         touch_motion.x += drag.x / static_cast<float>(height);
         touch_motion.y += drag.y / static_cast<float>(height);
@@ -5736,6 +5763,18 @@ void VulkanRenderer::Impl::resolve_bindings(bool focused) {
         now, window);
     log("keys", keys_resolver);
     lead_request = input::lead_requested(input::table(player.controls, false), keys_resolver.targets());
+    if (touch_visible && game_input && player.touch_controls) {
+        touch_mapped = touch_resolver.update(
+            input::table(player.controls, true),
+            [&](input::Binding binding) {
+                return binding == input::pad(input::PadInput::RightStick) && touch_r3_held();
+            },
+            now, 0u); // R3 is the only virtual gamepad input; no longer virtual chord can follow it.
+        lead_request |= input::lead_requested(input::table(player.controls, true), touch_resolver.targets());
+    } else {
+        touch_resolver.reset();
+        touch_mapped = {};
+    }
     if (gamepad == nullptr || (!focused && !player.background_gamepad)) {
         pad_resolver.reset();
         mapped = {};
@@ -5760,6 +5799,8 @@ void VulkanRenderer::Impl::resolve_bindings(bool focused) {
 void VulkanRenderer::Impl::sample_host_binds(bool focused) {
     (void)focused;
     input::PadState pressed = typed;
+    pressed.screenshot = pressed.screenshot || touch_mapped.screenshot;
+    pressed.frame_step = pressed.frame_step || touch_mapped.frame_step;
     if (gamepad != nullptr) {
         pressed.screenshot = pressed.screenshot || mapped.screenshot;
         pressed.frame_step = pressed.frame_step || mapped.frame_step;
@@ -5777,7 +5818,7 @@ void VulkanRenderer::Impl::sample_hide_hud(bool focused) {
         return;
     }
     (void)focused;
-    const bool held = typed.hide_hud || (gamepad != nullptr && mapped.hide_hud);
+    const bool held = typed.hide_hud || touch_mapped.hide_hud || (gamepad != nullptr && mapped.hide_hud);
     if (held && !hide_hud_held) hide_hud_pressed = true;
     hide_hud_held = held;
 }
@@ -5789,6 +5830,7 @@ void VulkanRenderer::Impl::sample_lock_on(bool focused) {
     if (!game_input || free_camera || !player.lock_on) {
         lock_on_keys_tap = {};
         lock_on_pad_tap = {};
+        lock_on_touch_tap = {};
         return;
     }
     // Whether every input of one of the bind's chords is down, whatever the
@@ -5817,6 +5859,11 @@ void VulkanRenderer::Impl::sample_lock_on(bool focused) {
     // Keys and mouse buttons act on their own, so moving on W A S D never
     // spoils a tap; only the pad's inputs are also parts of other chords.
     if (lock_on_keys_tap.update(typed_now, false)) lock_on_pressed = true;
+    const bool touch_now =
+        touch_visible && player.touch_controls && chord_held(player.controls.pad[action], [&](input::Binding binding) {
+            return binding == input::pad(input::PadInput::RightStick) && touch_r3_held();
+        });
+    if (lock_on_touch_tap.update(touch_now, false)) lock_on_pressed = true;
     if (!focused && !player.background_gamepad) {
         // Losing access to the controller is not the user's release of a tap.
         lock_on_pad_tap = {};
@@ -5981,6 +6028,8 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
     if (impl_->touch_visible) {
         const bool action = Impl::action_layout();
         pad.buttons |= action ? impl_->action_touch.buttons(SDL_GetTicks()) : impl_->touch.buttons();
+        pad.buttons |= impl_->touch_mapped.buttons;
+        pad.fast_forward = pad.fast_forward || impl_->touch_mapped.fast_forward;
         const input::touch::Point stick = action ? impl_->action_touch.stick() : impl_->touch.stick();
         analog_x += static_cast<int>(std::lround(stick.x * 127.0f));
         analog_y += static_cast<int>(std::lround(stick.y * 127.0f));
@@ -6083,6 +6132,9 @@ void VulkanRenderer::set_game_input(bool enabled) {
     if (!enabled) {
         impl_->touch.release_all();
         impl_->action_touch.release_all();
+        impl_->lock_on_touch_tap = {};
+        impl_->touch_resolver.reset();
+        impl_->touch_mapped = {};
     }
     impl_->game_input = enabled;
 }

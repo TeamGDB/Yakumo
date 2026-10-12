@@ -21,7 +21,28 @@
 // work together.
 namespace mhp3rd::input::touch {
 
-enum class Control : std::uint8_t { Triangle, Circle, Cross, Square, L, R, Start, Select, Menu, Count };
+enum class Control : std::uint8_t {
+    Triangle,
+    Circle,
+    Cross,
+    Square,
+    L,
+    R,
+    Start,
+    Select,
+    Menu,
+    R3,
+    DpadToggle,
+    Combo1,
+    Combo2,
+    Combo3,
+    Combo4,
+    Combo5,
+    Combo6,
+    Combo7,
+    Combo8,
+    Count
+};
 inline constexpr std::size_t kControls = static_cast<std::size_t>(Control::Count);
 
 // The PSP button (SceCtrlButtons) a control presses; 0 for the menu button.
@@ -46,9 +67,14 @@ struct Insets {
 
 struct Layout {
     std::array<Circle, kControls> controls{};
+    std::array<std::uint16_t, kControls> buttons{};
+    std::array<bool, kControls> shown{};
     // The D-pad, when shown: its centre and the reach of its arms.
     bool dpad_shown{};
     Circle dpad{};
+    Circle stick{}; // the fixed stick, or the floating stick's resting marker
+    bool stick_shown{true};
+    bool floating_stick{true};
     float stick_radius{}; // the stick's reach from where the thumb landed
     float stick_split{};  // x: fingers landing left of it are for the stick
     float width{};
@@ -76,7 +102,7 @@ struct Stick {
 
 class Controls {
 public:
-    void set_layout(const Layout &layout) { layout_ = layout; }
+    void set_layout(const Layout &layout);
     [[nodiscard]] const Layout &layout() const { return layout_; }
 
     void finger_down(std::uint64_t id, Point at);
@@ -94,6 +120,8 @@ public:
     [[nodiscard]] Point take_camera_drag();
     // The menu button was tapped since the last take.
     [[nodiscard]] bool take_menu();
+    [[nodiscard]] bool take_dpad_toggle();
+    [[nodiscard]] int take_haptics();
     [[nodiscard]] bool held(Control control) const;
     // The D-pad directions held now (PSP bits), for drawing.
     [[nodiscard]] std::uint16_t dpad_held() const;
@@ -119,6 +147,8 @@ private:
     Stick stick_{};
     Point camera_drag_{};
     bool menu_tapped_{};
+    bool dpad_toggled_{};
+    int haptics_{};
 };
 
 } // namespace mhp3rd::input::touch
