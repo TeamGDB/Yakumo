@@ -525,5 +525,70 @@ runs passed. Full-suite and final hosted results are recorded separately in
 the PR.
 
 The earlier village measurements at `5e1fa00` above used broader eligibility
-and do not establish the updated combined performance. No new hardware
-throughput, long-hunt, moving-combat or cross-GPU gain is claimed.
+and do not establish the updated combined performance. The subsequent
+physical comparison below measures the narrowed combined source.
+
+## Combined alpha-path physical performance (2026-10-12)
+
+Application source `397d125` was tested on Windows 11 x64 with a Radeon
+RX 5600 XT (AMD 26.8.1), SteamOS with RADV VANGOGH (Mesa 26.2.0-devel),
+and Android 14 with a Mali-G52 MC2 (r32p1). Host-only builds reused compatible
+90-object AOT code and all 355 overlays; no framework, generated-code or
+overlay rebuild was needed. These are developer artifacts with diagnostics,
+not an exact release-package performance certification.
+
+Each comparison used the same native artifact, copied save and prepared disc
+image, original language, fixed developer RTC epoch, audio disabled and a
+manual 30 FPS target. Optimizations on means both new rollback switches are
+unset; off sets `MHP3RD_NO_TRIVIAL_ALPHA_VARIANTS=1` and
+`MHP3RD_NO_OPAQUE_DRAWS=1`. The broad alpha/opaque alternating benchmark is
+not an equivalent baseline because it also disables earlier alpha work.
+Android APK variants contain identical native-library bytes and differ in
+benchmark metadata, including these switches. Their private manifests are
+separate from the public generated APK test contract.
+
+Finite state-based navigation loaded the copied character, then started
+quest 204 offline through the supported developer command. Both village and
+camp were stationary. Readbacks checked the actual map, active quest,
+unchanged dimensions, normal loading/speed modes, disabled cheats and inactive
+photo mode. After at least 600 warmup vblanks, each scene supplied 20 distinct
+one-second performance samples. The first two samples were excluded to keep
+capture/write work outside the reported steady-state window. Two runs per
+mode therefore contribute 36 samples per row. Mode order was on/off/off/on
+on desktops and Android ×1, and off/on/on/off for Android ×2.
+
+Medians below describe this workload; GPU times are logged at 0.1 ms precision.
+Internal resolution is separate from presentation size: 960×544 on Windows,
+1280×800 on Deck, and 1650×720 on Android. Android's widescreen aspect makes
+×1 render at 623×272 and ×2 at 1247×544.
+
+| Device / internal size | Scene | FPS off → on | Speed (%) off → on | GPU (ms) off → on | CPU render (ms) off → on |
+| --- | --- | --- | --- | --- | --- |
+| Steam Deck / 960×544 | Village | 30.0 → 30.0 | 100.0 → 100.0 | 1.4 → 1.4 | 9.2 → 9.2 |
+| Steam Deck / 960×544 | Quest 204 camp | 30.0 → 30.0 | 100.0 → 100.0 | 1.0 → 1.0 | 6.7 → 6.7 |
+| Windows / RX 5600 XT / 960×544 | Village | 30.0 → 30.0 | 100.0 → 100.0 | 1.0 → 1.0 | 5.0 → 4.9 |
+| Windows / RX 5600 XT / 960×544 | Quest 204 camp | 30.0 → 30.0 | 100.0 → 100.0 | 0.6 → 0.6 | 3.6 → 3.4 |
+| Android / Mali-G52 / 623×272 (×1) | Village | 30.0 → 30.0 | 100.0 → 100.0 | 17.5 → 16.9 | 18.4 → 18.2 |
+| Android / Mali-G52 / 623×272 (×1) | Quest 204 camp | 30.0 → 30.0 | 100.0 → 100.0 | 16.9 → 15.1 | 13.2 → 14.1 |
+| Android / Mali-G52 / 1247×544 (×2) | Village | 27.2 → 28.7 | 90.7 → 95.6 | 29.8 → 28.2 | 17.8 → 17.3 |
+| Android / Mali-G52 / 1247×544 (×2) | Quest 204 camp | 29.2 → 29.5 | 97.5 → 98.2 | 26.5 → 27.3 | 12.6 → 12.5 |
+
+The desktop GPU medians did not change at the logging precision. Android ×1
+reduced GPU medians by 0.6 ms in the village and 1.8 ms in camp, while camp
+CPU render time increased by about 0.9 ms. At ×2, village FPS improved but
+still did not sustain the target speed. Camp results varied between runs:
+the first on run lost FPS, the repeat regained it, and the pooled GPU median
+increased. These measurements do not establish a repeatable camp improvement
+or regression. Sampled Android GPU clocks varied; thermal status remained 0
+with no reported limit index. Those readings do not establish a fixed clock
+or exclude every vendor power constraint.
+
+All 16 accepted device runs completed with owned-process cleanup. Their
+representative village/camp captures were inspected: matching geometry,
+textures and UI, with no visible alpha corruption. Animation frames were not
+pixel-identical. Initial fixture/log-read/map-transition failures and the
+Windows run missing overlays remain in private evidence and are excluded
+from the table. Normal player/release installations, saves and launchers were
+not replaced. Moving combat, audio performance, multiplayer, long thermal
+sessions, other GPUs and the independent historical Android surface-loss
+startup issue remain outside this validation.
