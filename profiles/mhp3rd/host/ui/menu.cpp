@@ -555,12 +555,11 @@ void Menu::video() {
         static const char *const kCompat[] = {"Auto", "On", "Off"};
         const int current = static_cast<int>(s.gpu_compat);
         RowOptions o = options_for("video.gpu_compat",
-            "Leaves out what some older phone GPU drivers may get wrong: specialized shaders, robust buffer "
-            "access, the pipeline cache and a second frame in flight. It costs speed, so Auto turns it on only "
-            "when the start-up test picture comes out wrong or the driver refuses a shader. Applies when Yakumo "
-            "starts next. Now: " +
+            "Helps with graphics problems on some GPU drivers. May lower FPS or cause stuttering by disabling "
+            "renderer optimizations. Auto enables it only when the GPU self-test fails or a shader cannot be "
+            "created. Changes apply after restarting Yakumo. Active now: " +
                 renderer().gpu_compat_status() + ".");
-        if (const int delta = choice_row("GPU Compatibility", kCompat[current], o)) {
+        if (const int delta = choice_row("GPU Compatibility (restart required)", kCompat[current], o)) {
             s.gpu_compat = static_cast<settings::GpuCompat>(cycle(current, delta, 3));
             settings::save();
         }
@@ -1975,6 +1974,38 @@ Note &note() {
 }
 constexpr std::chrono::milliseconds kNoteTime{3000};
 
+struct GpuCompatNotice {
+    std::optional<settings::GpuCompat> activation;
+    Clock::time_point until{};
+};
+GpuCompatNotice &gpu_compat_notice() {
+    static GpuCompatNotice value;
+    return value;
+}
+constexpr std::chrono::seconds kGpuCompatNoticeTime{8};
+
+void draw_gpu_compat_notice(const GpuCompatNotice &notice) {
+    const ImGuiIO &io = ImGui::GetIO();
+    const float font = Layer::get().font_size();
+    const float left = std::chrono::duration<float>(notice.until - Clock::now()).count();
+    ImGui::SetNextWindowPos({io.DisplaySize.x * 0.5f, io.DisplaySize.y - font * 3.0f}, ImGuiCond_Always, {0.5f, 1.0f});
+    ImGui::SetNextWindowSize({std::min(io.DisplaySize.x - font * 2.0f, font * 34.0f), 0.0f}, ImGuiCond_Always);
+    ImGui::SetNextWindowBgAlpha(0.85f);
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, std::clamp(left * 2.0f, 0.0f, 1.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {font * 0.8f, font * 0.5f});
+    ImGui::Begin("##gpu_compat_notice", nullptr,
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings |
+            ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextUnformatted(notice.activation == settings::GpuCompat::Auto
+            ? "Yakumo: GPU Compatibility enabled automatically (Auto)"
+            : "Yakumo: GPU Compatibility enabled (On)");
+    ImGui::TextUnformatted("May reduce performance. Review this setting in Video > GPU Compatibility.");
+    ImGui::PopTextWrapPos();
+    ImGui::End();
+    ImGui::PopStyleVar(2);
+}
+
 // The note, small, at the bottom of the window, fading out in its last half
 // second.
 void draw_note(const Note &n) {
@@ -2057,7 +2088,9 @@ void note_menu_closed(bool quit) {
 } // namespace
 
 bool attach(gpu::VulkanRenderer &renderer) {
-    return Layer::get().attach(renderer);
+    const bool attached = Layer::get().attach(renderer);
+    if (attached) gpu_compat_notice() = {};
+    return attached;
 }
 
 void show_note(const std::string &text) {
@@ -2138,6 +2171,10 @@ void draw_over_game() {
         layer.end_frame();
         return;
     }
+    if (const auto activation = layer.renderer().take_gpu_compat_activation();
+        activation && std::getenv("MHP3RD_NO_GPU_COMPAT_NOTICE") == nullptr)
+        gpu_compat_notice() = {activation, Clock::now() + kGpuCompatNoticeTime};
+    const bool compat_noted = gpu_compat_notice().activation && Clock::now() < gpu_compat_notice().until;
     const double hint_left = menu || settings::current().menu_hint_seen ? -1.0 : hint_seconds_left();
     const bool overlay = network_overlay();
     const bool touch = !menu && layer.renderer().touch_controls_visible();
@@ -2150,11 +2187,12 @@ void draw_over_game() {
     const double hud_note = menu || layer.renderer().window_capture_pending() ? 0.0 : gpu::hud::note_seconds_left();
     const std::optional<std::array<float, 2>> marker = menu ? std::nullopt : lock_on_marker_at();
     if (hint_left <= 0.0 && !overlay && !menu && !touch && gpu_problem.empty() && !flying && !fast && !noted &&
-        hud_note <= 0.0 && !marker)
+        !compat_noted && hud_note <= 0.0 && !marker)
         return;
     layer.begin_frame();
     if (marker) draw_lock_on_marker(*marker);
     if (noted) draw_note(note());
+    if (compat_noted) draw_gpu_compat_notice(gpu_compat_notice());
     if (flying) draw_free_camera_indicator(free_camera);
     if (touch) {
         const settings::Settings &player = settings::current();

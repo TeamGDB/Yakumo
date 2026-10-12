@@ -267,6 +267,9 @@ public:
     // Whether GPU compatibility mode is on this run, and why, for the menu:
     // "On (reason)" or "Off".
     [[nodiscard]] std::string gpu_compat_status() const;
+    // Consumed once after compatibility actually turns on, at startup or in play.
+    // Auto that remains off, and a plain-shader retry with Off, produce no event.
+    [[nodiscard]] std::optional<settings::GpuCompat> take_gpu_compat_activation();
     // The pad the game reads, or null.
     [[nodiscard]] SDL_Gamepad *gamepad() const noexcept;
 

@@ -1179,6 +1179,25 @@ if(MHP3RD_RENDERER_TESTS)
         set_tests_properties(mhp3rd_renderer_ui_compat_tests PROPERTIES
             TIMEOUT 90
             ENVIRONMENT "MHP3RD_GPU_COMPAT=on")
+        foreach(notice_case IN ITEMS on auto off auto_selftest auto_pipeline auto_play off_plain silent)
+            set(notice_test "mhp3rd_gpu_compat_notice_${notice_case}")
+            add_custom_target(${notice_test} DEPENDS mhp3rd_renderer_ui_tests)
+            add_test(NAME ${notice_test} COMMAND mhp3rd_renderer_ui_tests --gpu-compat-notice)
+            set_tests_properties(${notice_test} PROPERTIES TIMEOUT 45)
+        endforeach()
+        set_tests_properties(mhp3rd_gpu_compat_notice_on PROPERTIES ENVIRONMENT "MHP3RD_GPU_COMPAT=on")
+        set_tests_properties(mhp3rd_gpu_compat_notice_auto PROPERTIES ENVIRONMENT "MHP3RD_GPU_COMPAT=auto")
+        set_tests_properties(mhp3rd_gpu_compat_notice_off PROPERTIES ENVIRONMENT "MHP3RD_GPU_COMPAT=off")
+        set_tests_properties(mhp3rd_gpu_compat_notice_auto_selftest PROPERTIES
+            ENVIRONMENT "MHP3RD_GPU_COMPAT=auto;MHP3RD_GPU_SELFTEST=fail")
+        set_tests_properties(mhp3rd_gpu_compat_notice_auto_pipeline PROPERTIES
+            ENVIRONMENT "MHP3RD_GPU_COMPAT=auto;MHP3RD_GPU_FAIL_PIPELINES=1")
+        set_tests_properties(mhp3rd_gpu_compat_notice_auto_play PROPERTIES
+            ENVIRONMENT "MHP3RD_GPU_COMPAT=auto;MHP3RD_GPU_FAIL_PIPELINES=play")
+        set_tests_properties(mhp3rd_gpu_compat_notice_off_plain PROPERTIES
+            ENVIRONMENT "MHP3RD_GPU_COMPAT=off;MHP3RD_GPU_SELFTEST=fail")
+        set_tests_properties(mhp3rd_gpu_compat_notice_silent PROPERTIES
+            ENVIRONMENT "MHP3RD_GPU_COMPAT=on;MHP3RD_NO_GPU_COMPAT_NOTICE=1")
         # Keep the narrow alpha rollback equivalent on public primitive buffers.
         add_custom_target(mhp3rd_renderer_trivial_alpha_legacy_tests DEPENDS mhp3rd_renderer_ui_tests)
         add_test(NAME mhp3rd_renderer_trivial_alpha_legacy_tests

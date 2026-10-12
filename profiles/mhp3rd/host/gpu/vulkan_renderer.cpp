@@ -1480,7 +1480,8 @@ struct VulkanRenderer::Impl {
     DeviceFacts facts;
     bool gpu_compat{};
     bool gpu_compat_auto{}; // Auto: may still turn it on
-    bool robust_buffers{};  // the device was made with robust buffer access
+    std::optional<settings::GpuCompat> gpu_compat_activation;
+    bool robust_buffers{}; // the device was made with robust buffer access
     std::string gpu_compat_reason;
     // What turning it on while the device runs changes; robust buffer
     // access, a device feature, stays as the device was made.
@@ -2580,6 +2581,7 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
         const char *variable = settings::overridden_by("video.gpu_compat");
         if (wanted == settings::GpuCompat::On) {
             impl.gpu_compat = true;
+            impl.gpu_compat_activation = settings::GpuCompat::On;
             impl.gpu_compat_reason = variable != nullptr ? std::string(variable) : "the Video setting";
             log_line("[gpu-compat] on (" + impl.gpu_compat_reason +
                 "): no specialization constants, robust buffer access, pipeline cache, background pipelines, "
@@ -5388,6 +5390,7 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
 void VulkanRenderer::Impl::turn_on_compat(const std::string &reason) {
     if (gpu_compat) return;
     gpu_compat = true;
+    gpu_compat_activation = settings::GpuCompat::Auto;
     gpu_compat_reason = reason;
     health->plain_fragment = true;
     // The pipeline cache, and the background pipelines that use it.
@@ -6825,6 +6828,11 @@ std::string VulkanRenderer::gpu_compat_status() const {
     if (!impl_ || !impl_->ready) return "Off";
     if (impl_->gpu_compat) return "On (" + impl_->gpu_compat_reason + ")";
     return impl_->health->plain_fragment ? "Off (plain shader after a failure)" : "Off";
+}
+
+std::optional<settings::GpuCompat> VulkanRenderer::take_gpu_compat_activation() {
+    if (!impl_ || !impl_->ready) return std::nullopt;
+    return std::exchange(impl_->gpu_compat_activation, std::nullopt);
 }
 
 bool VulkanRenderer::check_gpu_decode() const {

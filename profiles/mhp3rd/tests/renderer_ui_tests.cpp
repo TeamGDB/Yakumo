@@ -105,6 +105,27 @@ private:
     SDL_Window *window_;
     bool relative_;
 };
+
+class UiTextLog {
+public:
+    explicit UiTextLog(const std::filesystem::path &path) : path_(path.string()) {
+        ImGuiContextHook hook;
+        hook.Type = ImGuiContextHookType_NewFramePost;
+        hook.UserData = this;
+        hook.Callback = [](ImGuiContext *, ImGuiContextHook *entry) {
+            ImGui::LogToFile(-1, static_cast<UiTextLog *>(entry->UserData)->path_.c_str());
+        };
+        hook_ = ImGui::AddContextHook(ImGui::GetCurrentContext(), &hook);
+    }
+    ~UiTextLog() {
+        ImGui::LogFinish();
+        ImGui::RemoveContextHook(ImGui::GetCurrentContext(), hook_);
+    }
+
+private:
+    std::string path_;
+    ImGuiID hook_{};
+};
 void unavailable_renderer_contracts(const std::filesystem::path &sandbox) {
     gpu::VulkanRenderer unavailable;
     expect(!unavailable.available() && unavailable.window() == nullptr && !unavailable.pump_events(),
@@ -120,7 +141,7 @@ void unavailable_renderer_contracts(const std::filesystem::path &sandbox) {
     expect(!unavailable.initialize_ui(ui_error) && !ui_error.empty(),
         "UI initialization without a device fails with a diagnostic");
     expect(!unavailable.gpu_decode() && !unavailable.check_gpu_decode() && unavailable.gpu_compat_status() == "Off" &&
-            unavailable.gpu_problem().empty(),
+            unavailable.gpu_problem().empty() && !unavailable.take_gpu_compat_activation(),
         "unavailable device enables no GPU decoding or compatibility capabilities");
     std::vector<std::uint8_t> pixels;
     std::uint32_t width = 0, height = 0;
@@ -4056,14 +4077,27 @@ void menu_contracts(gpu::VulkanRenderer &renderer, bool camera_overrides = false
         expect(static_cast<int>(settings::current().perf) == (static_cast<int>(initial_perf) + step) % 6,
             "Performance Overlay cycles through all six modes, including both compact modes");
     }
-    if (settings::overridden_by("video.gpu_compat")) {
-        const auto locked_compat = settings::current().gpu_compat;
-        change_video("GPU Compatibility", ImGuiKey_RightArrow);
-        expect(settings::current().gpu_compat == locked_compat,
-            "explicit compatibility environment override locks its menu selector");
-    } else {
-        cycle_setting("GPU Compatibility", &settings::Settings::gpu_compat);
+    const auto active_compat = renderer.gpu_compat_status();
+    const auto compat_text_path = install::user_data_directory() / "gpu-compat-menu.txt";
+    {
+        UiTextLog log(compat_text_path);
+        if (settings::overridden_by("video.gpu_compat")) {
+            const auto locked_compat = settings::current().gpu_compat;
+            change_video("GPU Compatibility (restart required)", ImGuiKey_RightArrow);
+            expect(settings::current().gpu_compat == locked_compat,
+                "explicit compatibility environment override locks its menu selector");
+        } else {
+            cycle_setting("GPU Compatibility (restart required)", &settings::Settings::gpu_compat);
+        }
     }
+    std::ifstream compat_text_input(compat_text_path);
+    const std::string compat_text{std::istreambuf_iterator<char>(compat_text_input), std::istreambuf_iterator<char>()};
+    expect(compat_text.find("GPU Compatibility (restart required)") != std::string::npos &&
+            compat_text.find("May lower FPS or cause stuttering") != std::string::npos &&
+            compat_text.find("Active now: " + active_compat) != std::string::npos,
+        "real GPU compatibility row explains restart, performance cost and the active renderer mode");
+    expect(renderer.gpu_compat_status() == active_compat,
+        "changing the saved compatibility choice does not change the active renderer before restart");
     const auto original_window_scale = settings::current().window_scale;
     change_video("Window Resolution", ImGuiKey_RightArrow);
     expect(settings::current().window_scale == original_window_scale + 1,
@@ -5268,6 +5302,97 @@ void input_script_contracts(
     expect(log.str().find("startup ignored") == std::string::npos, "live file ignores lines present before attachment");
 }
 
+void gpu_compat_notice_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::path &sandbox) {
+    expect(ui::attach(renderer), "GPU notice fixture attaches the production UI");
+    auto &player = settings::current();
+    player.menu_hint_seen = true;
+    const bool in_play = [] {
+        const char *value = std::getenv("MHP3RD_GPU_FAIL_PIPELINES");
+        return value && std::string_view(value) == "play";
+    }();
+    const bool expected_enabled = player.gpu_compat == settings::GpuCompat::On ||
+        (player.gpu_compat == settings::GpuCompat::Auto &&
+            (std::getenv("MHP3RD_GPU_SELFTEST") || std::getenv("MHP3RD_GPU_FAIL_PIPELINES")));
+    const bool muted = std::getenv("MHP3RD_NO_GPU_COMPAT_NOTICE") != nullptr;
+    auto frame = [&] {
+        renderer.begin_frame();
+        ui::draw_over_game();
+        renderer.present_ui(true);
+    };
+    if (in_play) {
+        expect(renderer.gpu_compat_status() == "Off", "Auto starts off before the in-play pipeline failure");
+        frame();
+        expect(ImGui::FindWindowByName("##gpu_compat_notice") == nullptr,
+            "healthy Auto startup does not announce compatibility");
+        // A public triangle with an alpha function absent from the startup test
+        // needs a new real GE pipeline, exercising the documented play failure.
+        psprecomp::GuestMemory memory;
+        gpu::DrawCall triangle{};
+        triangle.primitive = gpu::PrimitiveType::Triangles;
+        triangle.through = true;
+        triangle.has_vertex_color = true;
+        triangle.alpha_test = {true, 7, 1, 255};
+        triangle.target.color_address = 0x04000000;
+        triangle.target.color_stride = 512;
+        triangle.target.color_format = 3;
+        triangle.target.depth_address = 0x04088000;
+        triangle.target.depth_stride = 512;
+        triangle.depth.write_enabled = false;
+        for (const auto position :
+            std::array<std::array<float, 4>, 3>{{{0, 0, 1, 1}, {480, 0, 1, 1}, {0, 272, 1, 1}}}) {
+            gpu::Vertex vertex;
+            vertex.position = position;
+            vertex.color = 0xffffffff;
+            triangle.vertices.push_back(vertex);
+        }
+        renderer.begin_frame();
+        renderer.submit(triangle, memory);
+        renderer.present(triangle.target.color_address);
+    }
+    const auto text_path = sandbox / "gpu-compat-notice.txt";
+    {
+        UiTextLog log(text_path);
+        frame();
+    }
+    const bool actual_enabled = renderer.gpu_compat_status().starts_with("On");
+    expect(actual_enabled == expected_enabled, "fixture reaches the expected actual compatibility state");
+    std::ifstream text_input(text_path);
+    const std::string text{std::istreambuf_iterator<char>(text_input), std::istreambuf_iterator<char>()};
+    auto *notice = ImGui::FindWindowByName("##gpu_compat_notice");
+    const bool shown = expected_enabled && !muted;
+    expect((notice && notice->Active && notice->DrawList->VtxBuffer.Size > 0) == shown,
+        "notice appears for actual On/Auto activation and remains absent for Off, healthy Auto or opt-out");
+    expect(!renderer.take_gpu_compat_activation(), "the UI consumes the activation exactly once");
+    expect(
+        !ui::menu_over_game() && !ui::take_quit_request(), "notification does not open a modal menu or request quit");
+    if (shown) {
+        const std::string title = player.gpu_compat == settings::GpuCompat::Auto
+            ? "Yakumo: GPU Compatibility enabled automatically (Auto)"
+            : "Yakumo: GPU Compatibility enabled (On)";
+        expect(text.find(title) != std::string::npos && text.find("May reduce performance") != std::string::npos &&
+                text.find("Video > GPU Compatibility") != std::string::npos,
+            "notification displays the activation source, performance warning and the setting to review");
+        const auto flags = notice->Flags;
+        expect((flags & ImGuiWindowFlags_NoInputs) == ImGuiWindowFlags_NoInputs &&
+                (flags & ImGuiWindowFlags_NoFocusOnAppearing) != 0,
+            "compatibility notice cannot take game input or window focus");
+        renderer.capture_window(sandbox / "gpu-compat-notice.bmp");
+        for (int n = 0; n < 3; ++n) frame();
+        expect(std::filesystem::exists(sandbox / "gpu-compat-notice.bmp"),
+            "activation warning remains visible in diagnostic window captures");
+        std::this_thread::sleep_for(std::chrono::milliseconds(8200));
+        ui::show_note("Public notification-expiry fixture");
+        for (int n = 0; n < 3; ++n) frame();
+        notice = ImGui::FindWindowByName("##gpu_compat_notice");
+        expect(notice && !notice->Active && !renderer.take_gpu_compat_activation(),
+            "the warning expires and later frames do not restart its timer or repeat it");
+    } else {
+        expect(text.find("GPU Compatibility enabled") == std::string::npos,
+            "no activation announcement is rendered when compatibility is not announced");
+    }
+    std::cout << "GPU compatibility notice capture: " << sandbox.string() << '\n';
+}
+
 }
 int run_contracts(int scripts) {
     if (scripts == 6) {
@@ -5348,6 +5473,13 @@ int run_contracts(int scripts) {
         return 1;
     }
     auto &renderer = *selected;
+    if (scripts == 8) {
+        gpu_compat_notice_contracts(renderer, sandbox);
+        renderer.shutdown();
+        expect(!renderer.take_gpu_compat_activation(), "stopped renderer cannot announce an activation");
+        std::cout << (failures ? "FAIL" : "PASS") << ": GPU compatibility notice (" << failures << " failures)\n";
+        return failures ? 1 : 0;
+    }
     if (scripts == 6) {
         expect(ui::Layer::get().attach(renderer), "QoL override fixture attaches the real UI layer");
         if (ImGui::GetCurrentContext() == nullptr) return 1;
@@ -5559,6 +5691,8 @@ int main(int argc, char **argv) {
                 mode = 6;
             else if (std::string_view(argv[1]) == "--touch-controls")
                 mode = 7;
+            else if (std::string_view(argv[1]) == "--gpu-compat-notice")
+                mode = 8;
             else {
                 std::cerr << "FAIL: unknown test mode\n";
                 return 2;
