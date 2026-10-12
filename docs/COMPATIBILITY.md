@@ -124,6 +124,33 @@ unverified: the developer's active game was left untouched and no new game
 window was opened. This demonstrates removal of the search's blocking cost;
 it does not claim every reported quest stutter is resolved.
 
+## Touch editor and virtual R3 checks (2026-10-12)
+
+PR #313 application source `f8a2f5f` passed all 69 renderer-enabled native
+suites on Apple M1/macOS with SDL 3.4.16. Its integration with `main` at
+`43190f0` passed all 72 suites on the same machine. The integration tree
+matched GitHub's PR merge tree; it was also used for the physical Android
+checks below. All CI checks on `f8a2f5f` passed, including desktop/Android
+native suites, sanitizers, formatting, static analysis and the 80% diff gate.
+
+| Platform | Verified behavior |
+| --- | --- |
+| macOS, Apple M1 / MoltenVK | Synthetic SDL/UI regressions passed for both layouts: selecting or moving less than the drag threshold preserves placement exactly; PSP stock controls resize relative to their factory geometry across viewports, safe areas and global sizes; virtual R3 drives mapped movement/camera axes in Camera, D-pad and Off modes and releases/cancels cleanly |
+| Redmi 12C, Android 14, Mali-G52 MC2 / r32p1 | Inspected PSP and Action editor captures through Android input. Moved/resized a PSP R+Circle combination button to 105%, hid/restored it without changing its saved placement/binding, and checked persistence after restarting. Simultaneous real Android touch contacts held that combination and the fixed stick (`0x2200`, stick X 189), then released to neutral. An ordinary Action button tap preserved the saved touch configuration; moving/resizing it retained the PSP combination settings. In a loaded quest, R3 in both layouts drove mapped movement and camera input, then released to neutral. The tester confirmed tactile vibration |
+
+Android used a separate bounded device-test package, copied fixtures, 90
+compatible AOT objects and all 355 existing overlays. Captures, saved settings
+and input observations were inspected. Player installations were unchanged,
+and the owned test process was stopped. Interrupted SSH/controller attempts
+were retained separately and excluded from the successful results.
+
+These are targeted input checks. Physical-device default R3 monster lock-on,
+vibration intensity/repetition and the disabled setting, rotation, additional
+Android devices, audio quality, multiplayer and long-session gameplay were
+not checked. The haptic logic has automated coverage; the tactile confirmation
+does not establish motor timing or callback counts. No new Steam Deck or
+Windows gameplay check was performed for the follow-up fixes.
+
 ## Updating this page
 
 Run through [the smoke test](TESTING.md) on the platform, then change the cells you checked in the same pull request as the fix, or in a pull request of their own. Add a row to *Tested hardware* with the commit you tested. A result without a commit cannot be compared with anything later, so it does not go in the table.
