@@ -580,9 +580,10 @@ improved, but the direction did not repeat: the first off/on pair measured
 25.1/29.1 FPS, while the later on/off pair measured 28.3/30.0 FPS. Camp also
 reversed direction between pairs. The ×2 data therefore establishes neither
 a repeatable improvement nor a regression, and the optimized runs still did
-not sustain the target speed. Sampled Android GPU clocks varied; thermal status remained 0
-with no reported limit index. Those readings do not establish a fixed clock
-or exclude every vendor power constraint.
+not sustain the target speed. Sampled Android GPU clocks varied. Thermal status remained 0 in fresh HAL
+readings, while the vendor GPU limit index varied from 0 to 6 during monitoring.
+The specific limiter and its contribution to frame time were not identified;
+these readings do not establish a fixed clock or unrestricted GPU operation.
 
 All 16 accepted device runs completed with owned-process cleanup. Their
 representative village/camp captures were inspected: matching geometry,
