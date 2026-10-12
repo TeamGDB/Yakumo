@@ -147,8 +147,13 @@ void test_store() {
     // A changed data file must be reported as broken.
     {
         std::fstream data(folder / "DATA.BIN", std::ios::binary | std::ios::in | std::ios::out);
-        data.seekp(100);
-        data.put('\x7f');
+        data.seekg(100);
+        const auto original = data.get();
+        check(original != std::char_traits<char>::eof(), "the corruption fixture reads an existing data byte");
+        if (original != std::char_traits<char>::eof()) {
+            data.seekp(100);
+            data.put(static_cast<char>(original ^ 1));
+        }
     }
     check(load_save(root, files).status == LoadStatus::Broken, "a modified data file is rejected");
     SaveFiles missing = files;
