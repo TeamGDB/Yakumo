@@ -1684,6 +1684,17 @@ void Menu::system() {
     if (button_row("Quit Game", {false, {}, "Close Yakumo. Progress since your last save is lost."}, colors::kDanger))
         confirm_ = Confirm::Quit;
 
+    section("Game Data:");
+#if !defined(MHP3RD_ANDROID_APP)
+    if (button_row("Open the Data Folder", {false, {}, "Show Yakumo's data folder in the file manager."})) {
+        if (!SDL_OpenURL(folder_url(path_from_utf8(data_dir)).c_str()))
+            std::cout << "[menu] cannot open " << data_dir << ": " << SDL_GetError() << "\n";
+    }
+#endif
+    if (button_row("Set Up Game Data Again…",
+            {false, {}, "Choose the disc image again, for example after moving it. The game closes first."}))
+        confirm_ = Confirm::Setup;
+
     section("Text:");
     {
         const TextLanguages &available = text_languages();
@@ -1719,15 +1730,7 @@ void Menu::system() {
         if (saved) saved_log_path() = saved->error.empty() ? saved->where : "Not saved: " + saved->error;
     }
     if (!saved_log_path().empty()) info_row("Log", saved_log_path());
-#else
-    if (button_row("Open the Data Folder", {false, {}, "Show Yakumo's data folder in the file manager."})) {
-        if (!SDL_OpenURL(folder_url(path_from_utf8(data_dir)).c_str()))
-            std::cout << "[menu] cannot open " << data_dir << ": " << SDL_GetError() << "\n";
-    }
 #endif
-    if (button_row("Set Up Game Data Again…",
-            {false, {}, "Choose the disc image again, for example after moving it. The game closes first."}))
-        confirm_ = Confirm::Setup;
     section("Saves:");
     save_rows();
 

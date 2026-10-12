@@ -4649,6 +4649,32 @@ void menu_contracts(gpu::VulkanRenderer &renderer, bool camera_overrides = false
     expect(menu_screenshots == 1, "System screenshot action saves exactly one real PNG in the isolated folder");
     toggle_setting("Pause the Game When the Menu Opens", &settings::Settings::menu_pause);
     toggle_setting("Pause During Multiplayer", &settings::Settings::menu_pause_multiplayer);
+#if defined(__linux__)
+    // Exercise the real folder action without launching a desktop application.
+    std::ostringstream folder_error;
+    const char *launcher_path = std::getenv("PATH");
+    {
+        struct RestoreLauncher {
+            std::streambuf *output;
+            std::optional<std::string> path;
+            ~RestoreLauncher() {
+                std::cout.rdbuf(output);
+                if (path)
+                    set_environment("PATH", path->c_str());
+                else
+                    clear_environment("PATH");
+            }
+        } restore{std::cout.rdbuf(folder_error.rdbuf()),
+            launcher_path ? std::optional<std::string>{launcher_path} : std::nullopt};
+        set_environment("PATH", "");
+        change_video("Open the Data Folder", ImGuiKey_Space);
+    }
+    expect(folder_error.str().find("[menu] cannot open " + install::path_to_utf8(install::user_data_directory()) +
+               ":") != std::string::npos,
+        "Game Data folder action reports its configured folder when the desktop launcher is unavailable");
+    expect(
+        ui::menu_over_game() && !ui::take_quit_request(), "failed folder action preserves the menu and game lifecycle");
+#endif
     for (const char *action : {"Quit Game", "Set Up Game Data Again…"}) {
         change_video(action, ImGuiKey_Space);
         frame();
