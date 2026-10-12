@@ -39,6 +39,14 @@
     "sha256": "f81cd59c91e5f83e627bcf0327a5535404da18c0202fbc8162b7b3dd68f69b35",
     "reason": "Reviewed function declarations only; this edit updates a documented menu label. No executable body is exempted. Mod menu implementations and renderer/UI regressions remain subject to the normal diff gate."
   },
+  "profiles/mhp3rd/host/ui/touch_editor.hpp": {
+    "sha256": "43177edc1f48321d457195b078ca235bcabe3a2d8dac69ac525937bfaca6ca5d",
+    "reason": "Reviewed comments and function declarations only; the change documents the shared PSP and Action editor. No executable body is exempted. Editor implementations and renderer/UI regression tests remain subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/ui/touch_overlay.hpp": {
+    "sha256": "ffe6474d8dc66c959278ab6cd50ce3534c4189f89090b3c4a16746bcd838baf9",
+    "reason": "Reviewed include and drawing-function declaration only; ElementLook remains an aggregate. No executable body is exempted. PSP and Action drawing implementations and renderer/UI regression tests remain subject to the normal diff gate."
+  },
   "profiles/mhp3rd/host/ui/layered_armor_screen.hpp": {
     "sha256": "c154c41c563ca09adbb76ecfe0376247dcf7c2867af6100b1b5a51602573ef96",
     "reason": "Reviewed function declarations only; these edits document the move from Mods to QoL. No executable body is exempted. Layered armor menu implementations and renderer/UI regressions remain subject to the normal diff gate."
