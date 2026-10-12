@@ -66,5 +66,9 @@
   "profiles/mhp3rd/host/ui/input_script.hpp": {
     "sha256": "68d61cf3e90826eaa3ca013eb65f166436a81b4777cd9cf83c45878ef97f5e94",
     "reason": "Reviewed documentation-only additions for physical scancodes and owned window lifecycle commands. Parsing, input/release behavior and rejection cases are tested in the out-of-line implementation; no executable header body changed."
+  },
+  "profiles/mhp3rd/host/gpu/vulkan_renderer.hpp": {
+    "sha256": "da8d09b0d501f8f5436b9da4d3f64c4e6ae395c816a49949bd0ff37f7a485382",
+    "reason": "Reviewed activation-consumer declaration and comments only; no executable header body changed. This header has no standalone LLVM line map in the native inventory. On/Auto activation, inactive states, one-shot consumption, UI display and expiry are tested in renderer/UI regressions; out-of-line renderer and menu implementations remain subject to the normal diff gate."
   }
 }

@@ -925,6 +925,7 @@ The settings a player needs are in the [in-game menu](#in-game-menu). Environmen
 | `MHP3RD_NO_FAST_STORE` | off | Convert the frame written back to guest memory pixel by pixel, as before, instead of a row at a time |
 | `MHP3RD_TEXTURE_CACHE_LIMIT` | `1024` | Keep at most this many decoded textures on the GPU; a small number tests eviction |
 | `MHP3RD_GPU_COMPAT` | `auto` | `1` or `on` forces [GPU compatibility mode](#gpu-compatibility-mode) on, `0` or `off` keeps it off even when the start-up self-test fails (menu: GPU compatibility) |
+| `MHP3RD_NO_GPU_COMPAT_NOTICE` | off | Suppresses the one-time activation notification for diagnostic comparisons; the selected compatibility mode and GPU fallbacks are unchanged |
 | `MHP3RD_NO_GPU_SELFTEST` | off | Skips the start-up self-test of the GE's pipelines |
 | `MHP3RD_GPU_SELFTEST` | unset | `fail` counts the self-test's result with the specialized fragment shader as wrong, so Auto turns GPU compatibility mode on (with the setting Off, the retry with the plain shader runs); `fail-all` counts every result as wrong, so the note over the game shows. For testing the fallbacks on any GPU |
 | `MHP3RD_DESCRIPTOR_POOL_SETS` | per pool | Makes every descriptor pool hold this many sets (textures 512, the lighting set 4, pre-rotation 8). Pools are counted exactly as declared, the way phone drivers count them, and a full one makes the next; a small number (`16`) exercises that growth on any GPU, and a `[render] texture sets: pool N …` line says each time |
