@@ -6004,21 +6004,24 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
     // bindings. Bits follow SceCtrlButtons; the stick is centred at 0x80.
     const settings::Settings &player = settings::current();
     const input::PadState &typed = impl_->typed;
+    const input::PadState &touch_mapped = impl_->touch_mapped;
     PadState pad{};
-    pad.buttons = typed.buttons;
-    pad.fast_forward = typed.fast_forward;
-    int analog_x = typed.stick_x;
-    int analog_y = typed.stick_y;
+    pad.buttons = typed.buttons | touch_mapped.buttons;
+    pad.fast_forward = typed.fast_forward || touch_mapped.fast_forward;
+    int analog_x = typed.stick_x + touch_mapped.stick_x;
+    int analog_y = typed.stick_y + touch_mapped.stick_y;
+    const int camera_x = std::clamp(typed.camera_x + touch_mapped.camera_x, -127, 127);
+    const int camera_y = std::clamp(typed.camera_y + touch_mapped.camera_y, -127, 127);
     // Camera keys push the second stick fully, as a right stick would: in
     // the D-pad mode they press the D-pad instead, and with it off, nothing.
     if (player.right_stick == settings::RightStick::Camera) {
-        pad.right_x = static_cast<std::uint8_t>(0x80 + typed.camera_x);
-        pad.right_y = static_cast<std::uint8_t>(0x80 + typed.camera_y);
+        pad.right_x = static_cast<std::uint8_t>(0x80 + camera_x);
+        pad.right_y = static_cast<std::uint8_t>(0x80 + camera_y);
     } else if (player.right_stick == settings::RightStick::DPad) {
-        if (typed.camera_x < 0) pad.buttons |= 0x0080u;
-        if (typed.camera_x > 0) pad.buttons |= 0x0020u;
-        if (typed.camera_y < 0) pad.buttons |= 0x0010u;
-        if (typed.camera_y > 0) pad.buttons |= 0x0040u;
+        if (camera_x < 0) pad.buttons |= 0x0080u;
+        if (camera_x > 0) pad.buttons |= 0x0020u;
+        if (camera_y < 0) pad.buttons |= 0x0010u;
+        if (camera_y > 0) pad.buttons |= 0x0040u;
     }
 
     // The gamepad adds to the same bits and offsets, so both sources are live.
@@ -6028,8 +6031,6 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
     if (impl_->touch_visible) {
         const bool action = Impl::action_layout();
         pad.buttons |= action ? impl_->action_touch.buttons(SDL_GetTicks()) : impl_->touch.buttons();
-        pad.buttons |= impl_->touch_mapped.buttons;
-        pad.fast_forward = pad.fast_forward || impl_->touch_mapped.fast_forward;
         const input::touch::Point stick = action ? impl_->action_touch.stick() : impl_->touch.stick();
         analog_x += static_cast<int>(std::lround(stick.x * 127.0f));
         analog_y += static_cast<int>(std::lround(stick.y * 127.0f));

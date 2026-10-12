@@ -147,11 +147,11 @@ void touch_editor_frame(bool back) {
         }
     }
     if (st.dragging && st.selected) {
-        if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Left) && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
             const input::touch::Point centre{io.MousePos.x - st.grab.x, io.MousePos.y - st.grab.y};
             auto &p = placement(*st.selected);
             p = input::touch::move_to(p, st.psp ? Element::Stick : static_cast<Element>(*st.selected), centre, area);
-        } else {
+        } else if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
             st.dragging = false;
             settings::save();
         }

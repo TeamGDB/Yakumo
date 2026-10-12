@@ -2624,6 +2624,10 @@ void touch_editor_contracts(gpu::VulkanRenderer &renderer) {
     frame();
     ImGui::GetIO().AddMouseButtonEvent(0, true);
     frame();
+    ImGui::GetIO().AddMousePosEvent(at.x + 2, at.y + 1);
+    frame();
+    expect(player.touch_action.at(input::touch::Element::Attack) == before,
+        "a click or sub-threshold movement preserves exact Action placement");
     ImGui::GetIO().AddMousePosEvent(at.x - 20, at.y - 15);
     frame();
     ImGui::GetIO().AddMouseButtonEvent(0, false);
@@ -2711,6 +2715,10 @@ void touch_editor_contracts(gpu::VulkanRenderer &renderer) {
     frame();
     ImGui::GetIO().AddMouseButtonEvent(0, true);
     frame();
+    ImGui::GetIO().AddMousePosEvent(hidden_at.x + 2, hidden_at.y + 1);
+    frame();
+    expect(player.touch_psp.at(input::touch::PspElement::Combo1) == hidden,
+        "a click or sub-threshold movement preserves exact hidden PSP placement");
     ImGui::GetIO().AddMouseButtonEvent(0, false);
     frame();
     activate("Shown");
@@ -2933,6 +2941,58 @@ void touch_event_contracts(gpu::VulkanRenderer &renderer) {
     expect((renderer.pad().buttons & 0x1000) != 0, "Action R3 follows the player's custom R3 binding");
     finger(SDL_EVENT_FINGER_UP, 31, action_r3);
     expect((renderer.pad().buttons & 0x1000) == 0, "Action R3 releases its custom PSP assignment");
+    for (const auto layout : {settings::TouchLayout::Psp, settings::TouchLayout::Action}) {
+        player.touch_layout = layout;
+        const auto point = layout == settings::TouchLayout::Psp
+            ? renderer.touch_controls().layout().controls[static_cast<std::size_t>(input::touch::Control::R3)].centre
+            : renderer.action_touch_controls().placed(input::touch::Element::R3).centre;
+        for (const auto direction :
+            {input::Action::StickUp, input::Action::StickLeft, input::Action::StickDown, input::Action::StickRight}) {
+            player.controls.pad = {};
+            player.controls.pad[static_cast<int>(direction)][0].inputs[0] = input::pad(input::PadInput::RightStick);
+            finger(SDL_EVENT_FINGER_DOWN, 40, point);
+            const auto pad = renderer.pad();
+            const bool positive = direction == input::Action::StickDown || direction == input::Action::StickRight;
+            const auto value = direction == input::Action::StickLeft || direction == input::Action::StickRight
+                ? pad.analog_x
+                : pad.analog_y;
+            expect(positive ? value > 128 : value < 128, "virtual R3 honors every mapped movement direction");
+            finger(SDL_EVENT_FINGER_UP, 40, point);
+            expect(renderer.pad().analog_x == 128 && renderer.pad().analog_y == 128,
+                "releasing virtual R3 recenters mapped movement");
+        }
+        for (const auto mode : {settings::RightStick::Camera, settings::RightStick::DPad, settings::RightStick::Off})
+            for (const auto direction : {input::Action::CameraUp, input::Action::CameraLeft, input::Action::CameraDown,
+                     input::Action::CameraRight}) {
+                player.right_stick = mode;
+                player.controls.pad = {};
+                player.controls.pad[static_cast<int>(direction)][0].inputs[0] = input::pad(input::PadInput::RightStick);
+                finger(SDL_EVENT_FINGER_DOWN, 41, point);
+                const auto pad = renderer.pad();
+                const bool positive = direction == input::Action::CameraDown || direction == input::Action::CameraRight;
+                const auto value = direction == input::Action::CameraLeft || direction == input::Action::CameraRight
+                    ? pad.right_x
+                    : pad.right_y;
+                const unsigned bit = direction == input::Action::CameraUp ? 0x10u
+                    : direction == input::Action::CameraRight             ? 0x20u
+                    : direction == input::Action::CameraDown              ? 0x40u
+                                                                          : 0x80u;
+                if (mode == settings::RightStick::Camera)
+                    expect((positive ? value > 128 : value < 128) && (pad.buttons & 0xF0u) == 0,
+                        "virtual R3 camera assignment follows analog camera mode");
+                else
+                    expect(pad.right_x == 128 && pad.right_y == 128 &&
+                            (pad.buttons & 0xF0u) == (mode == settings::RightStick::DPad ? bit : 0u),
+                        "virtual R3 camera assignment follows D-pad or disabled camera mode");
+                finger(SDL_EVENT_FINGER_CANCELED, 41, point);
+                expect(renderer.pad().right_x == 128 && renderer.pad().right_y == 128 &&
+                        (renderer.pad().buttons & 0xF0u) == 0,
+                    "canceling virtual R3 releases mapped camera directions");
+            }
+    }
+    player.touch_layout = settings::TouchLayout::Action;
+    player.controls = input::layout(input::Preset::Default);
+    player.right_stick = saved.right_stick;
     player.touch_action.at(input::touch::Element::R3).shown = false;
     finger(SDL_EVENT_FINGER_DOWN, 32, action_r3);
     expect(!renderer.action_touch_controls().held(input::touch::Element::R3) && renderer.pad().buttons == 0,

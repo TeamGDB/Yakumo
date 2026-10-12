@@ -169,8 +169,14 @@ Layout make_layout(float width, float height, Insets insets, float size, bool dp
             const Placed placed = place(p, Element::Stick, area, size);
             circle.centre = placed.centre;
         }
-        if (p.size != normal.size || is_combo(e)) circle.radius = place(p, Element::Stick, area, size).radius;
-        if (is_combo(e)) circle.centre = place(p, Element::Stick, area, size).centre;
+        if (is_combo(e)) {
+            const Placed placed = place(p, Element::Stick, area, size);
+            circle = {placed.centre, placed.radius};
+        } else {
+            // The editor's percentage scales the actual factory radius, including
+            // narrow screens and cutouts, rather than switching sizing units.
+            circle.radius *= p.size / normal.size;
+        }
         if (e == PspElement::DPad) {
             layout.dpad = circle;
             layout.dpad_shown = dpad && p.shown;

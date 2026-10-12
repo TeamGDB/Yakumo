@@ -3,6 +3,7 @@
 #include "input/touch_controls.hpp"
 #include "input/touch_psp.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 
@@ -152,6 +153,31 @@ void test_fingers() {
     check(!controls.any_finger() && controls.buttons() == 0u, "release_all lets go of everything");
 }
 
+void test_psp_relative_sizes() {
+    for (const Point screen : {Point{800, 600}, Point{1280, 800}, Point{1920, 1080}, Point{2400, 1080}})
+        for (const Insets insets : {Insets{}, Insets{40, 10, 20, 30}})
+            for (const float global : {0.6f, 1.0f, 1.6f})
+                for (std::size_t i = 0; i < kPspElements; ++i) {
+                    const auto element = static_cast<PspElement>(i);
+                    PspLayout original = default_psp_layout();
+                    original.at(element).shown = true;
+                    const Circle before =
+                        psp_element_circle(make_layout(screen.x, screen.y, insets, global, true, original), element);
+                    for (const float percent : {0.5f, 1.05f, 2.5f}) {
+                        PspLayout resized = original;
+                        const float factory_size = original.at(element).size;
+                        resized.at(element).size = std::clamp(factory_size * percent, kMinElementSize, kMaxElementSize);
+                        const float fraction = resized.at(element).size / factory_size;
+                        const Circle after =
+                            psp_element_circle(make_layout(screen.x, screen.y, insets, global, true, resized), element);
+                        check(std::abs(after.radius - before.radius * fraction) < 0.001f,
+                            "PSP size percentages scale the current factory radius on every screen and inset");
+                        check(after.centre.x == before.centre.x && after.centre.y == before.centre.y,
+                            "resizing a PSP element preserves its placement");
+                    }
+                }
+}
+
 void test_psp_editing() {
     PspLayout edited = default_psp_layout();
     const auto combo = add_psp_combo(edited);
@@ -197,8 +223,8 @@ void test_psp_editing() {
     const Layout layout = make_layout(1280, 720, {40, 10, 20, 30}, 1.2f, true, edited);
     const Circle circle = at(layout, Control::Circle);
     check(std::abs(circle.centre.x - 680) < 0.001f && std::abs(circle.centre.y - 250) < 0.001f &&
-            std::abs(circle.radius - 81.6f) < 0.001f,
-        "edited placement follows the safe area, global scale and own size");
+            std::abs(circle.radius - 86.4f) < 0.001f,
+        "edited position follows the safe area while size scales the factory radius and global scale");
     Controls controls;
     controls.set_layout(layout);
     controls.finger_down(1, circle.centre);
@@ -443,6 +469,7 @@ void test_action_fingers() {
 } // namespace
 
 int main() {
+    test_psp_relative_sizes();
     test_psp_haptics();
     test_psp_editing();
     test_psp_host_buttons();
