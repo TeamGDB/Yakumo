@@ -495,3 +495,35 @@ Only the isolated diagnostic application was updated. The player's installed
 combat, other physical GPUs, raw GPU decoding, interpolation, prolonged play
 and the separate Android surface-loss startup crash remain unverified by
 these checks. No quality setting, phone-wide setting or upscaler changed.
+
+## Combined alpha-path precision regression (2026-10-12)
+
+PR #312 combines #301 and #302 against main `5b10e66`. The application fix
+is at `987a31c`; the savedata fixture correction is at `0cd308f`. These
+changes do not alter framework headers, generated game code or overlays.
+
+Linux aarch64, Clang 19.1.7, SDL 3.2.10 and Mesa 25.0.7 software Vulkan
+reproduced the filtered/perspective failure. Three vertex-alpha texture modes
+at GEQUAL255 differed in 5,214 pixels each when discard was removed. A
+constant opaque vertex input can interpolate just below one; it does not
+prove that the original strict fragment comparison passes. The updated
+regression compares complete RGBA buffers against an isolated rollback
+renderer with the same linear sampling and no texture replacements. It failed
+before the guard and passed afterward, without pixel tolerances or skipped
+comparisons. The reference must cover more than 2,000 pixels, preventing an
+empty-triangle pass. Texture-only alpha keeps its independent direct-color
+checks.
+
+Opaque selection now retains perspective-varying vertex alpha, including its
+blend and discard operations. Through draws and the recognized texture-only
+alpha paths still require the original opacity proofs. Nine relevant Linux
+checks passed: normal, compatibility, broad legacy, opacity rollback, checked
+renderer, trivial-alpha rollback, render/opacity helpers and savedata. The
+corruption fixture flips a bit in an existing byte instead of assigning a
+constant that could equal its random ciphertext; all 64 repeated savedata
+runs passed. Full-suite and final hosted results are recorded separately in
+the PR.
+
+The earlier village measurements at `5e1fa00` above used broader eligibility
+and do not establish the updated combined performance. No new hardware
+throughput, long-hunt, moving-combat or cross-GPU gain is claimed.
