@@ -108,7 +108,7 @@ private:
 
 class UiTextLog {
 public:
-    explicit UiTextLog(const std::filesystem::path &path) : path_(path.string()) {
+    explicit UiTextLog(const std::filesystem::path &path) : path_(install::path_to_utf8(path)) {
         ImGuiContextHook hook;
         hook.Type = ImGuiContextHookType_NewFramePost;
         hook.UserData = this;
@@ -4092,7 +4092,9 @@ void menu_contracts(gpu::VulkanRenderer &renderer, bool camera_overrides = false
     }
     std::ifstream compat_text_input(compat_text_path);
     const std::string compat_text{std::istreambuf_iterator<char>(compat_text_input), std::istreambuf_iterator<char>()};
-    expect(compat_text.find("GPU Compatibility (restart required)") != std::string::npos &&
+    // Custom row captions use DrawList::AddText rather than ImGui text logging.
+    // The annotated ID is exercised by the mode changes above; log the real footer.
+    expect(compat_text.find("Changes apply after restarting Yakumo") != std::string::npos &&
             compat_text.find("May lower FPS or cause stuttering") != std::string::npos &&
             compat_text.find("Active now: " + active_compat) != std::string::npos,
         "real GPU compatibility row explains restart, performance cost and the active renderer mode");
