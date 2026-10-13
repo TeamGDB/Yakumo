@@ -291,7 +291,7 @@ set(MHP3RD_PROGRAM_SOURCES
 if(MHP3RD_ANDROID_APP)
     add_library(Yakumo SHARED ${MHP3RD_PROGRAM_SOURCES} host/platform/android_app.cpp
         host/platform/android_jni.cpp host/platform/android_documents.cpp host/platform/android_performance.cpp
-        host/platform/android_fatal.cpp)
+        host/platform/android_fatal.cpp host/platform/android_gpu_driver.cpp)
     target_sources(Yakumo PRIVATE host/platform/android_display.cpp)
     target_compile_definitions(Yakumo PRIVATE MHP3RD_ANDROID_APP=1)
     set_target_properties(Yakumo PROPERTIES
@@ -313,7 +313,22 @@ if(MHP3RD_RENDERER)
         "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders"
         "${CMAKE_CURRENT_BINARY_DIR}/generated_version"
         "${MHP3RD_PROFILE_DIR}/third_party/imgui")
-    target_link_libraries(Yakumo PRIVATE SDL3::SDL3 Vulkan::Vulkan)
+    if(MHP3RD_ANDROID_APP)
+        # A custom GPU driver (host/platform/android_gpu_driver.hpp): the
+        # player can pick a Turnip/Mesa build for their Adreno GPU instead of
+        # the phone's own. That needs every vk* call resolved through a
+        # function-pointer table instead of the system libvulkan.so at link
+        # time (volk, third_party/volk, unmodified) and a way to open a
+        # dlopen-like handle for libvulkan.so backed by a chosen driver file
+        # instead (adrenotools, cmake/Adrenotools.cmake). Desktop and other
+        # platforms keep linking Vulkan::Vulkan directly, below, untouched.
+        target_sources(Yakumo PRIVATE "${MHP3RD_PROFILE_DIR}/third_party/volk/volk.c")
+        target_include_directories(Yakumo PRIVATE "${MHP3RD_PROFILE_DIR}/third_party/volk")
+        include("${MHP3RD_PROFILE_DIR}/cmake/Adrenotools.cmake")
+        target_link_libraries(Yakumo PRIVATE SDL3::SDL3 adrenotools)
+    else()
+        target_link_libraries(Yakumo PRIVATE SDL3::SDL3 Vulkan::Vulkan)
+    endif()
 endif()
 # The host only: the generated code never sees FFmpeg.
 mhp3rd_use_ffmpeg(Yakumo)
@@ -524,6 +539,14 @@ target_link_libraries(mhp3rd_settings_tests PRIVATE psprecomp_core)
 set_target_properties(mhp3rd_settings_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 if(PSPRECOMP_BUILD_TESTS)
     add_test(NAME mhp3rd_settings_tests COMMAND mhp3rd_settings_tests)
+endif()
+
+# Reading a GPU driver package's meta.json and choosing its main library.
+add_executable(mhp3rd_driver_meta_tests tests/driver_meta_tests.cpp)
+target_include_directories(mhp3rd_driver_meta_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+set_target_properties(mhp3rd_driver_meta_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_driver_meta_tests COMMAND mhp3rd_driver_meta_tests)
 endif()
 
 # Where the data directory is (portable or per-user) and the copy of an
