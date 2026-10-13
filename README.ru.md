@@ -84,6 +84,8 @@ Monster Hunter, Monster Hunter Portable 3rd HD Ver., CAPCOM, PlayStation, PSP и
 
 ## Переводы сообщества
 
+Доступно в **Yakumo v0.7.5 и новее**.
+
 Переводы текста игры поддерживают их авторы; файлы скачиваются отдельно. Совместимость и обновления описаны в README каждого проекта.
 
 В каталоге размещаются ссылки только на публичные репозитории GitHub и загрузки с GitHub (файлы в репозитории или Releases).
@@ -93,7 +95,7 @@ Monster Hunter, Monster Hunter Portable 3rd HD Ver., CAPCOM, PlayStation, PSP и
 | Португальский (Бразилия) | [devdouglasonofre](https://github.com/devdouglasonofre) | **V1** | [mhp3rd-yakumo-ptbr](https://github.com/devdouglasonofre/mhp3rd-yakumo-ptbr) | [Последний релиз](https://github.com/devdouglasonofre/mhp3rd-yakumo-ptbr/releases/latest) |
 | Русский | [MHunterG](https://github.com/MHunterG) | **Draft** | [mhp3rd-yakumo-ru](https://github.com/MHunterG/mhp3rd-yakumo-ru) | [Последний релиз](https://github.com/MHunterG/mhp3rd-yakumo-ru/releases/latest) |
 
-В сборке Yakumo с поддержкой переводов скачайте `.lang`, откройте **System → Text → Import Translation…**, выберите импортированный язык в **Game Text Language** и перезапустите игру. Подробнее — в [документации по переводу текста](docs/TEXT_TRANSLATION.md) (на английском).
+Скачайте `.lang`, откройте **System → Text → Import Translation…**, выберите импортированный язык в **Game Text Language** и перезапустите игру. Подробнее — в [документации по переводу текста](docs/TEXT_TRANSLATION.md) (на английском).
 
 ## Требования
 

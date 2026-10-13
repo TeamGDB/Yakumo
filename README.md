@@ -82,6 +82,8 @@ A prebuilt release needs nothing but your disc image. Pick the file for your dev
 
 ## Community translations
 
+Available in **Yakumo v0.7.5 and later**.
+
 Translations of the game's text are maintained by their authors and downloaded separately. See each project's README for compatibility details and updates.
 
 The catalog links only to public GitHub repositories and downloads hosted on GitHub (repository files or Releases).
@@ -91,7 +93,7 @@ The catalog links only to public GitHub repositories and downloads hosted on Git
 | Portuguese (Brazil) | [devdouglasonofre](https://github.com/devdouglasonofre) | **V1** | [mhp3rd-yakumo-ptbr](https://github.com/devdouglasonofre/mhp3rd-yakumo-ptbr) | [Latest release](https://github.com/devdouglasonofre/mhp3rd-yakumo-ptbr/releases/latest) |
 | Russian | [MHunterG](https://github.com/MHunterG) | **Draft** | [mhp3rd-yakumo-ru](https://github.com/MHunterG/mhp3rd-yakumo-ru) | [Latest release](https://github.com/MHunterG/mhp3rd-yakumo-ru/releases/latest) |
 
-In a Yakumo build with translation support, download the `.lang` file, open **System → Text → Import Translation…**, select the imported language under **Game Text Language**, then restart. See [Text translation](docs/TEXT_TRANSLATION.md) for details.
+Download the `.lang` file, open **System → Text → Import Translation…**, select the imported language under **Game Text Language**, then restart. See [Text translation](docs/TEXT_TRANSLATION.md) for details.
 
 ## Requirements
 

@@ -34,6 +34,8 @@ Files must end in `.lang`. To add a language, drop a file into the data
 directory's `translations` folder (the menu shows that folder) and set the
 language, normally through the menu.
 
+Game-text translations are available in Yakumo v0.7.5 and later.
+
 No translation ships with Yakumo. The project README lists
 [community translations](../README.md#community-translations), their authors
 and their versions. The catalog links only to public GitHub repositories and
