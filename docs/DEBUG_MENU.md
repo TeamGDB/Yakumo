@@ -106,6 +106,14 @@ unknown fields, rather than evidence of a successful check. Completed original
 text loads remain observable even when the selected language has no matching key.
 Observation requests also work while the test session is held in photo mode.
 
+`observe REQUEST perf` includes CPU guest/render/wait/pacing time, GPU time
+(`null` when timestamps are unavailable), GE/recorded draw counts, render passes,
+target copies and requested/running presentation rates. These share the existing
+`perf_second` window: repeated reads of the same window are not new samples.
+`frame_ms` is a rolling presentation history, so overlapping readbacks must not
+be concatenated as independent frames. Use guest speed and the 30 Hz game clock
+alongside presentation FPS when investigating combat slowdowns such as #330.
+
 `MHP3RD_DEVICE_TEST_RTC_US` optionally pins the boot RTC to a Unix timestamp in
 microseconds from 2000 through 2100. It is accepted only with explicit developer
 test mode; ordinary/release runs keep the wall clock. Pin the same value for

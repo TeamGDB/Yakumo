@@ -197,7 +197,19 @@ std::vector<std::string> run_command(Ram &ram, const std::string &line) {
                     ",\"window_height\":" + std::to_string(summary.height) +
                     ",\"speed_percent\":" + std::to_string(summary.speed * 100.0) +
                     ",\"game_fps\":" + std::to_string(summary.game_fps) +
-                    ",\"presented_fps\":" + std::to_string(summary.fps) + ",\"frame_ms\":[";
+                    ",\"presented_fps\":" + std::to_string(summary.fps) +
+                    ",\"guest_ms\":" + std::to_string(summary.guest_ms) +
+                    ",\"render_ms\":" + std::to_string(summary.render_ms) +
+                    ",\"wait_ms\":" + std::to_string(summary.wait_ms) +
+                    ",\"pacing_ms\":" + std::to_string(summary.pacing_ms) +
+                    ",\"gpu_valid\":" + (summary.gpu_valid ? "true" : "false") + ",\"gpu_ms\":";
+                json += summary.gpu_valid ? std::to_string(summary.gpu_avg_ms) : "null";
+                json += ",\"ge_draws\":" + std::to_string(summary.draws) +
+                    ",\"recorded_draws\":" + std::to_string(summary.recorded_draws) +
+                    ",\"render_passes\":" + std::to_string(summary.passes) +
+                    ",\"target_copies\":" + std::to_string(summary.copies) +
+                    ",\"requested_rate\":" + std::to_string(summary.requested_rate) +
+                    ",\"running_rate\":" + std::to_string(summary.frame_rate) + ",\"frame_ms\":[";
                 const auto &history = perf::frame_history();
                 for (std::size_t i = 0; i < history.size(); ++i) {
                     if (i) json += ',';
