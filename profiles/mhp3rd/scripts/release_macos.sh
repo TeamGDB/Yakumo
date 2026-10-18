@@ -243,7 +243,8 @@ if [[ $prepare_deps -eq 0 ]]; then
     grep -qF -- "$FFMPEG_FLAGS" "$build_dir/bin/lib/FFmpeg-SOURCE.txt" ||
         fail "the build's FFmpeg was not configured as cmake/FFmpeg.cmake pins it"
     # Overlays newer than the executable may have been linked against another one.
-    newer="$(find "$build_dir/bin/overlays" -name '*.dylib' -newer "$executable" | head -1)"
+    # Stop find itself: head can give it SIGPIPE under pipefail with 355 files.
+    newer="$(find "$build_dir/bin/overlays" -name '*.dylib' -newer "$executable" -print -quit)"
     [[ -z "$newer" ]] || echo "note: overlays such as $(basename "$newer") are newer than the executable"
 fi
 

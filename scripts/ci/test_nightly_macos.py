@@ -191,6 +191,56 @@ class MacosNightlyContracts(unittest.TestCase):
         self.assertNotEqual(self.run_driver().returncode, 0)
         self.assertEqual(list(real.iterdir()), [])
 
+    def run_overlay_age_check(self, directory, executable):
+        # Execute the packager's actual preflight statement with real find and
+        # filesystem timestamps, without running a build or fetching sources.
+        statement = next(line for line in RELEASE.read_text().splitlines()
+                         if line.strip().startswith('newer='))
+        body = ('set -euo pipefail\nbuild_dir="$1"\nexecutable="$2"\n' + statement
+                + '\nprintf "%s" "$newer"\n')
+        return subprocess.run([self.bash, '-c', body, 'public-overlay-age-test',
+                               str(directory), str(executable)], env=self.env,
+                              capture_output=True, text=True, timeout=10)
+
+    def test_overlay_age_preflight_ignores_older_and_non_overlay_files(self):
+        directory = self.base / 'public build'
+        overlays = directory / 'bin/overlays';overlays.mkdir(parents=True)
+        executable = directory / 'bin/Yakumo';executable.write_bytes(b'public fixture')
+        os.utime(executable, (2000, 2000))
+        result = self.run_overlay_age_check(directory, executable)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '')
+        older = overlays / 'old.dylib';older.write_bytes(b'public fixture')
+        os.utime(older, (1000, 1000))
+        unrelated = overlays / 'new.txt';unrelated.write_bytes(b'public fixture')
+        os.utime(unrelated, (3000, 3000))
+        result = self.run_overlay_age_check(directory, executable)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, '')
+
+        os.utime(older, (3000, 3000))
+        result = self.run_overlay_age_check(directory, executable)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, str(older))
+
+    def test_overlay_age_preflight_handles_a_full_cache_without_sigpipe(self):
+        directory = self.base / ('long public path ' * 8) / ('another public path ' * 8)
+        overlays = directory / 'bin/overlays';overlays.mkdir(parents=True)
+        executable = directory / 'bin/Yakumo';executable.write_bytes(b'public fixture')
+        os.utime(executable, (1000, 1000))
+        files = set()
+        for index in range(355):
+            path = overlays / f'libovl{index:08x}_public_fixture.dylib'
+            path.write_bytes(b'public fixture')
+            os.utime(path, (2000, 2000))
+            files.add(str(path))
+        # The old find|head pipeline raced with the pipe buffer. More than one
+        # pipe's worth of real filenames makes the regression repeatable.
+        for _ in range(20):
+            result = self.run_overlay_age_check(directory, executable)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(result.stdout, files)
+
     def run_sdk_resolver(self, sdk, version='13.1'):
         # Exercise the packager's standalone SDK resolution contract on every
         # host, without requiring macOS command-line tools in Python-only CI.
