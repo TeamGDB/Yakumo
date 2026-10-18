@@ -651,3 +651,121 @@ Windows x64, source commit `e7b96c5` (`sound-settings`, based on `c40b979`):
 - A bounded game run with isolated data loaded all 355 existing overlays. The game audio diagnostic reported BGM/SFX at 7/7. Changing BGM through the new Audio menu produced BGM 6/7 with SFX still 7/7 after resuming. The Master Volume, BGM Volume and SFX Volume menu captures were inspected.
 - The user also confirmed that the controls work and both volume levels change during gameplay.
 - Original Options screen round trips, save/restart persistence of these levels, and other platforms were not checked in this pass. No coverage percentage was measured on Windows.
+
+## Barioth encounter and sparse CPU skinning (2026-10-18)
+
+Tools-only source `fe1711092d156c84927484600717ac57a5cef2b0` and optimized
+native source `d9ea6820047ca290b2004c7f0237db5ea9352a1a` use the same cached
+native AOT code and all 355 compatible overlays. Framework/runtime headers,
+generated code, overlays, shaders and graphics quality are unchanged. Testing
+used an Apple M1 Mac with 8 GiB, macOS 27.0 (26A428), Apple M1 Vulkan 1.1.357
+and MoltenVK 1.4.2. These are developer artifacts with observation/camera
+diagnostics, not exact release-package certification.
+
+A private baseline CPU sample identified weighted vertex decoding and renderer
+submission. Twenty post-ready trace windows in original Tundra quest 507 counted
+47,410,890 indexed min/max-span vertices for 14,887,446 index references
+(3.1846 times as many; worst primitive 32.75 times). This includes all skinned
+scene draws, rather than attributing every draw to Barioth. The old decoder
+skins unused vertices between sparse indices. Eligible sparse CPU draws now
+gather only referenced vertices, retaining the same index order and arithmetic.
+Full spans remain for temporal interpolation, which can need vertices referenced
+only by an older frame; interpolated 45/60/90/120 FPS receives no performance
+improvement claim. Raw GPU, through, morph and noncontiguous paths also retain
+their existing behavior. `MHP3RD_NO_SPARSE_VERTEX_DECODE=1` restores the old path.
+
+The [automatic encounter](DEBUG_MENU.md#fast-barioth-encounter) uses the original
+quest departure/map/actor/model lifecycle, then relocates the hunter near the
+landed Barioth. Ready observations confirmed kind 5, its live PMO model, original
+Tundra area 7, five actors (one Barioth and four small monsters), advancing quest
+time and normal lock-on camera. Snow, effects, AI and attacks remain active.
+This deliberately tests the normal environment rather than an arena. Original
+quest abandonment hit Barioth's deleting destructor once and the base actor
+destructor five times, ended the target lifetime, released the test camera and
+returned to village readiness with an empty monster table. All four copied save
+files remained byte-identical. Only owned developer processes/copies were
+cleaned up; player installations and unrelated sessions were not stopped.
+
+Six fixed-mode runs compare the same `d9ea682` native artifact with the rollback
+switch set (off) versus unset (on), in order off/on, on/off, off/on. Both use the
+same copied save/settings/game, developer RTC epoch 1780000000000000 us, native
+AOT/overlays, original language, muted audio, no texture pack, 480×272 internal
+resolution (×1), 960×544 window, Immediate presentation and manual 30 FPS.
+GPU compatibility Auto resolved to off in every run. The collector warmed up
+to quest tick 89550 and measured approximately 300 further original 30 Hz ticks
+per run, retaining actual start/end ticks. RTC was pinned; identical AI/RNG
+trajectories or pixel-identical motion are not asserted. Separate-process AI
+and draw-count variation remains a limitation. No external game/compiler was
+observed by the private timing guard during these six runs. AC power and no
+recorded thermal warning do not establish fixed clocks or sustained thermals.
+
+Values below are medians of the three run medians (frame-time p95/p99 are
+medians of the three per-run percentiles). CPU/GPU times are per game frame;
+wait includes pacing. Vertex space is each one-second window's frame maximum.
+
+| Metric | Old CPU path (off) | Sparse CPU path (on) |
+| --- | --- | --- |
+| CPU guest / render / guest + render, ms | 3.786 / 6.915 / 10.803 | 3.738 / 6.409 / 10.383 |
+| GPU, ms | 1.167 | 1.231 |
+| Wait / pacing, ms | 22.580 / 21.829 | 22.987 / 22.134 |
+| Vertex space, MiB | 5.318 | 3.548 |
+| Speed, % | 99.979 | 100.022 |
+| Game / presented frames per second | 29.971 / 29.975 | 29.971 / 29.978 |
+| Present time median / p95 / p99, ms | 33.308 / 36.230 / 36.918 | 33.311 / 36.063 / 37.299 |
+
+The paired render medians decreased by 3.2%, 7.0% and 11.4%; the aggregate
+render median decreased by 7.3%, combined guest/render by 3.9% and vertex space
+by 33.3%. The target already sustained 30 FPS: these results establish reduced
+CPU work and buffer space, not a higher game rate or improved p99. GPU time
+did not improve. The ready/final captures for all six runs were inspected;
+normal attacks and camera motion differ, with no observed geometry/texture
+corruption. A prior interrupted ensemble with a concurrent game/build in an
+unrelated worktree was excluded entirely.
+
+Two separate 600-tick continuous-scene diagnostics alternated the same switch
+each second. Each supplied ten on and ten off telemetry windows after warmup.
+Off/on render medians were 7.119/6.310 ms and 6.536/5.700 ms (11.4% and 12.8%
+lower); render time per draw decreased by 8.1% and 10.4%. These corroborate the
+CPU effect in evolving combat, but mixed-mode frame-time/vertex-space peaks
+are not pooled with the fixed-mode comparison. Both diagnostics completed
+without observed external game/compiler interference and their actual game
+captures were inspected.
+
+An additional two pairs compared the separate tools-only `fe17110` and final
+`d9ea682` artifacts, in before/after then after/before order, with the same
+settings and fixed quest-tick interval. The guard observed no external
+game/compiler interference. Medians of the two per-run summaries were:
+
+| Metric | Before (`fe17110`) | After (`d9ea682`) |
+| --- | --- | --- |
+| CPU guest / render / guest + render, ms | 3.510 / 7.010 / 10.582 | 3.630 / 6.380 / 10.040 |
+| GPU / wait / pacing, ms | 1.227 / 22.845 / 22.092 | 1.275 / 23.336 / 22.557 |
+| Speed, % | 100.010 | 99.957 |
+| Game / presented frames per second | 29.971 / 29.974 | 29.971 / 29.961 |
+| Present time median / p95 / p99, ms | 33.336 / 35.943 / 36.815 | 33.330 / 36.070 / 37.195 |
+
+Render medians decreased by 8.9% and 9.1% in the two pairs. Aggregate render
+decreased by 9.0% and combined guest/render by 5.1%, while guest and GPU time
+increased slightly. This agrees with a CPU rendering improvement without
+establishing an FPS, p95 or p99 gain. All four runs' ready/final frames showed
+the actual loaded Barioth and original environment without observed rendering
+corruption; normal AI poses were not pixel-identical.
+
+Real-game correctness diagnostics compared over 608,000 gathered draws with
+full-span reference vertices, with zero differences. Separate 120 FPS replay
+checks reported zero of 522,240 pixels different, including the active combat
+window. Ready and combat captures were inspected by the agent for recognizable
+Barioth geometry, hunter/camera, terrain, snow/effects and texture correctness;
+this is not human play or a completed hunt. The renderer-enabled macOS suite
+passed 81/81 tests. A separate headless coverage-stub release build with
+`MHP3RD_DEBUG_MENU=ON` excluded developer debug sources/macros/symbols and
+encounter strings. Public synthetic tests and ordinary CI require no game data
+or timing thresholds.
+
+The severe 5–20 FPS Android symptom in #330 was not reproduced on this Mac.
+No Redmi, Lenovo tablet or Snapdragon 685 measurement is claimed: the user
+requested Mac investigation first and will test Android separately. This work
+identifies a combat CPU cost; it does not establish the complete cause of that
+device-specific slowdown or resolve the separate 120 FPS animation report.
+Arbitrary spawning, selective live despawning, an arena, other monsters, audio,
+complete hunts, multiplayer and sustained thermal behavior remain unverified.
