@@ -139,7 +139,9 @@ strip="$(ls -d "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/bin/llvm-strip | head -
 "$strip" --strip-unneeded "$lib"/*.so
 # extractNativeLibs is on, so the libraries may be compressed: the package
 # manager unpacks them at install time.
-(cd "$work" && cp dex/classes.dex . && zip -q unsigned.apk classes.dex && zip -q -r -9 unsigned.apk lib)
+# Omit directory records: apksigner removes them, breaking the nightly
+# requirement that signing preserve all unsigned ZIP regions byte for byte.
+(cd "$work" && cp dex/classes.dex . && zip -q unsigned.apk classes.dex && zip -q -D -r -9 unsigned.apk lib)
 
 echo "aligning"
 "$build_tools/zipalign" -f -P 16 4 "$work/unsigned.apk" "$work/aligned.apk"

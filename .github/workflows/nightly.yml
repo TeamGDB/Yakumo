@@ -99,6 +99,19 @@ jobs:
         if: matrix.platform == 'macos-arm64'
         shell: bash
         run: test "$(uname -m)" = arm64
+      - name: Regression-test the APK packager and isolated signer with public fixtures
+        if: matrix.platform == 'android-arm64'
+        shell: bash
+        run: |
+          PYTHONPATH=scripts/ci python - <<'PY'
+          import unittest
+          suite = unittest.defaultTestLoader.loadTestsFromName(
+              'test_nightly_android.AndroidPackagingTests.'
+              'test_actual_unsigned_package_survives_protected_signing_byte_for_byte')
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          if not result.wasSuccessful() or result.skipped or result.testsRun != 1:
+              raise SystemExit(1)
+          PY
       - name: Build and inspect using only synthetic public inputs
         env:
           NIGHTLY_PLATFORM: ${{ matrix.platform }}

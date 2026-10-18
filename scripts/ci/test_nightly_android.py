@@ -1,5 +1,6 @@
 """Public Android orchestration and unsigned APK packaging regressions."""
 
+import base64
 import hashlib
 import io
 import json
@@ -17,6 +18,7 @@ import zipfile
 import nightly_android_policy as policy
 from nightly_formats import canonical_package
 from test_nightly_android_policy import android_tools
+from test_nightly_transfer import namespace, sdk_tools
 
 ROOT = Path(__file__).resolve().parents[2]
 DRIVER = r'''
@@ -303,6 +305,50 @@ class AndroidPackagingTests(unittest.TestCase):
         inspected = self.base / 'inspected.apk'
         canonical_package(self.output, inspected, 'android-arm64', self.repo, 'a' * 40)
         self.assertEqual(inspected.read_bytes(), self.output.read_bytes())
+
+    def test_actual_unsigned_package_survives_protected_signing_byte_for_byte(self):
+        result = self.run_packager()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        with zipfile.ZipFile(self.output) as archive:
+            # The official signer removes empty directory records. Keeping them
+            # would invalidate the strict unchanged-payload contract even when
+            # every regular file is intact. Exercise the real native packager.
+            self.assertFalse(any(entry.is_dir() for entry in archive.infolist()))
+        tools = sdk_tools()
+        self.assertIsNotNone(tools)
+        _, _, keytool, java_home = tools
+        environment = {**self.env, 'PUBLIC_TEST_PASSWORD': 'public-disposable-fixture-password'}
+        if java_home:
+            environment['JAVA_HOME'] = java_home
+
+        def run(args):
+            return subprocess.run([str(arg) for arg in args], env=environment, check=True,
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=120).stdout
+
+        key = self.base / 'public-test.keystore'
+        run([keytool, '-genkeypair', '-keystore', key, '-storepass:env', 'PUBLIC_TEST_PASSWORD',
+             '-keypass:env', 'PUBLIC_TEST_PASSWORD', '-alias', 'public-fixture', '-keyalg', 'RSA',
+             '-keysize', '2048', '-validity', '2', '-dname', 'CN=Public disposable test fixture', '-noprompt'])
+        certificate = run([keytool, '-exportcert', '-keystore', key, '-storepass:env', 'PUBLIC_TEST_PASSWORD',
+                           '-alias', 'public-fixture'])
+        pinned_tools = self.sdk / 'build-tools/35.0.0'
+        if not pinned_tools.exists():
+            pinned_tools.symlink_to(self.aapt.parent, target_is_directory=True)
+        source = '0123456789abcdef0123456789abcdef01234567'
+        private = self.base / 'sign-private'
+        signing_environment = {**environment, 'GITHUB_SHA': source, 'SIGN_INPUT': str(self.base),
+                               'SIGN_PRIVATE': str(private),
+                               'ANDROID_RELEASE_KEYSTORE_B64': base64.b64encode(key.read_bytes()).decode(),
+                               'ANDROID_RELEASE_KEYSTORE_PASSWORD': environment['PUBLIC_TEST_PASSWORD'],
+                               'ANDROID_RELEASE_KEY_ALIAS': 'public-fixture'}
+        with mock.patch.dict(os.environ, signing_environment):
+            namespace('sign-with-key')['main']()
+        signed = private / 'signed.apk'
+        verification = run([pinned_tools / 'apksigner', 'verify', '--verbose', '--print-certs',
+                            '--min-sdk-version', '24', '--max-sdk-version', '35', signed]).decode()
+        validator = namespace('verify-signed')
+        validator['CERTIFICATE'] = hashlib.sha256(certificate).hexdigest()
+        validator['validate_signed_pair'](self.output, signed, verification)
 
     def test_debug_identity_and_invalid_sdk_selection_fail_before_key_access(self):
         for updates in [{'DEBUGGABLE': '1'}, {'DEVICE_TEST_PACKAGE': 'other.app'},

@@ -97,6 +97,12 @@ These applications are never executed, published or offered to players. Only
 synthetic failure logs may be uploaded for diagnosis. This exception does not
 allow uploading logs from credentialed builds using original game inputs.
 
+The Android probe also exercises the actual APK packager, protected signing
+command and unchanged-payload validator with public native fixtures and a
+disposable key. The packager omits directory ZIP records, which the official
+signer would otherwise remove; all regular files and unsigned ZIP regions must
+remain byte-identical through signing. This regression must run without skips.
+
 A successful public probe verifies the synthetic packaging path. It does not
 measure full AOT memory/time requirements, verify a complete game build, test
 real overlay execution or establish device/gameplay compatibility. Inspect the
