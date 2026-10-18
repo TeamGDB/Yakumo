@@ -29,7 +29,8 @@ VERDICTS = ('PASS', 'FAIL', 'NOT TESTED')
 NAME = re.compile(r'[a-z0-9][a-z0-9_-]{0,63}\Z')
 ENV_KEYS = {'MHP3RD_LANGUAGE', 'MHP3RD_TRACE_TEXT', 'MHP3RD_NO_RENDER',
             'MHP3RD_NO_AUDIO', 'MHP3RD_FONT', 'MHP3RD_GPU_COMPAT',
-            'MHP3RD_TEXT_NO_QUEST_DIRECT', 'MHP3RD_TEXT_SEARCH_UNLIMITED'}
+            'MHP3RD_TEXT_NO_QUEST_DIRECT', 'MHP3RD_TEXT_SEARCH_UNLIMITED', 'MHP3RD_NO_SPARSE_VERTEX_DECODE',
+            'MHP3RD_PERF_ALTERNATE'}
 EVIDENCE_LIMIT = 64 * 1024 * 1024
 EVIDENCE_FILES = {'report.json', 'run.log', 'vulkan.json', 'logcat.log'}
 ACTIVITY = 'io.github.teamgdb.yakumo.YakumoActivity'
@@ -645,7 +646,8 @@ class Adb:
             if archive.getinfo('assets/device-testing.json').file_size > 1024 * 1024:
                 raise ValueError('APK test contract is oversized')
             contract = json.loads(archive.read('assets/device-testing.json'))
-        if contract != android_contract(self.package, self.device.get('performance', 'log'), self.device.get('observations', False)):
+        if contract != android_contract(self.package, self.device.get('performance', 'log'),
+                                        self.device.get('observations', False), self.device.get('rtc_epoch_us')):
             raise ValueError('APK lacks the generated device-testing contract')
         report['artifact_sha256'] = fingerprint(apk)
         verify_artifact(self.device, report['artifact_sha256'])
@@ -824,7 +826,7 @@ def verify_artifact(device, actual):
         raise ValueError('Artifact differs from the configured fingerprint')
 
 
-def android_contract(package, performance='log', observations=False):
+def android_contract(package, performance='log', observations=False, rtc_epoch_us=None):
     if not valid_package(package):
         raise ValueError('Test package must end in .devicetest')
     if performance not in ('log', 'settings'):
@@ -838,11 +840,15 @@ def android_contract(package, performance='log', observations=False):
         contract['env'].pop('MHP3RD_PERF')
     if observations:
         contract['env'].update(MHP3RD_DEVICE_TEST='1', MHP3RD_TRACE_CAMERA='1')
+    if rtc_epoch_us is not None:
+        if not observations or type(rtc_epoch_us) is not int or not 946684800000000 <= rtc_epoch_us <= 4102444800000000:
+            raise ValueError('Pinned APK RTC requires explicit observations and a year from 2000 to 2100')
+        contract['env']['MHP3RD_DEVICE_TEST_RTC_US'] = str(rtc_epoch_us)
     return contract
 
 
-def android_manifest(package, output, performance='log', observations=False):
-    contract = android_contract(package, performance, observations)
+def android_manifest(package, output, performance='log', observations=False, rtc_epoch_us=None):
+    contract = android_contract(package, performance, observations, rtc_epoch_us)
     ns = '{http://schemas.android.com/apk/res/android}'
     ET.register_namespace('android', ns[1:-1])
     tree = ET.parse(ROOT / 'profiles/mhp3rd/packaging/android/AndroidManifest.xml')
@@ -1528,6 +1534,7 @@ def main(argv=None):
     part.add_argument('--contract', required=True)
     part.add_argument('--performance', choices=('log', 'settings'), default='log')
     part.add_argument('--observations', action='store_true', help='Enable developer-only structured readbacks')
+    part.add_argument('--rtc-epoch-us', type=int, help='Pin developer test RTC; must match the device configuration')
     args = parser.parse_args(argv)
     try:
         if args.command == 'list':
@@ -1535,7 +1542,8 @@ def main(argv=None):
                 value = validate_scenario(read_json(path))
                 print(f'{value["id"]}: {value["build"]}/{value["execution"]} - {value["description"]}')
         elif args.command == 'android-manifest':
-            write_json(args.contract, android_manifest(args.package, args.output, args.performance, args.observations))
+            write_json(args.contract, android_manifest(args.package, args.output, args.performance, args.observations,
+                                                       args.rtc_epoch_us))
         elif args.command == 'review':
             review(args.run, args.check, args.verdict, args.reviewer, args.notes, args.evidence)
         elif args.command == 'matrix':

@@ -264,6 +264,10 @@ public:
         raw_also_decoded_ = also_decode;
     }
 
+    // A previous frame can reference vertices unused by the current primitive.
+    // Retain the complete span while temporal skinning replay records frames.
+    void set_skinning_replay(bool replay) noexcept { full_skinning_span_ = replay; }
+
     // Runs commands from `pc` until `stall` (0 = no stall) or END. Returns the
     // address execution stopped at; `finished` reports whether the list ended.
     std::uint32_t execute(const GuestMemory &memory, std::uint32_t pc, std::uint32_t stall, bool &finished);
@@ -324,7 +328,8 @@ private:
 
     std::vector<std::uint32_t> call_stack_;
     std::uint32_t command_pc_{};
-    DrawCall call_; // reused by draw_primitive for every draw
+    DrawCall call_;                             // reused by draw_primitive for every draw
+    std::vector<std::uint16_t> decode_indices_; // reused sorted source selection for sparse skinned draws
     DrawSink draw_sink_;
     SignalSink signal_sink_;
     TransferSink transfer_sink_;
@@ -334,6 +339,7 @@ private:
     std::uint64_t unhandled_commands_{};
     bool raw_vertices_{};
     bool raw_also_decoded_{};
+    bool full_skinning_span_{};
 };
 
 // Copies the game makes out of VRAM with the DMA controller, remembered for

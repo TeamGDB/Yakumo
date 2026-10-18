@@ -55,6 +55,7 @@
 #include "ui/touch_overlay.hpp"
 #if defined(MHP3RD_DEBUG_MENU)
 #include "debug/debug_console.hpp"
+#include "debug/debug_tools.hpp"
 #include "game/guest_ram.hpp"
 #endif
 #include "imgui_internal.h"
@@ -793,6 +794,7 @@ void primitive_contracts(gpu::VulkanRenderer &renderer) {
         draw.environment_version = static_cast<std::uint64_t>(frame + 1);
         const auto moment = std::chrono::steady_clock::now();
         renderer.begin_frame();
+        expect(renderer.skinning_replay(), "interpolation recording preserves full skinning spans for the older frame");
         renderer.submit(clear, memory);
         renderer.submit(draw, memory);
         // A repeated draw also exercises replay-group batching.
@@ -820,6 +822,7 @@ void primitive_contracts(gpu::VulkanRenderer &renderer) {
     renderer.set_fast_forward(false);
     renderer.set_frame_rate(settings::FrameRate::Fps30);
     renderer.set_frame_rate_auto(true);
+    expect(!renderer.skinning_replay(), "ordinary 30 FPS rendering can compact sparse skinning again");
     draw.world[12] = 0;
     draw.lighting_enabled = false;
     for (auto &v : draw.vertices) v.position[2] = 0;
@@ -6046,6 +6049,23 @@ int run_contracts(int scripts) {
     {
         game::GuestRam ram(fixture.runtime.memory());
         clear_environment("MHP3RD_DEVICE_TEST");
+        clear_environment("PSPRECOMP_COUNT_PC");
+        auto pc_result = debug::run_command(ram, "pcstats");
+        expect(pc_result.size() == 1u && pc_result[0].find("before startup") != std::string::npos,
+            "unarmed PC profiling remains explicitly unavailable instead of an empty success claim");
+        const auto untouched = ram.load32(0x09FAC8D4u);
+        auto encounter_result = debug::run_command(ram, "encounter status");
+        expect(encounter_result.size() == 1u && encounter_result[0].find("\"phase\":\"idle\"") != std::string::npos,
+            "encounter status is a read-only structured result without a test-mode mutation grant");
+        encounter_result = debug::run_command(ram, "encounter start unknown");
+        expect(encounter_result[0].find("usage:") != std::string::npos,
+            "unknown encounter presets are refused before any request or guest write");
+        debug::run_command(ram, "encounter start barioth");
+        const auto refused = debug::recent_log();
+        expect(!refused.empty() &&
+                refused.back().find("explicit developer device-test mode required") != std::string::npos &&
+                ram.load32(0x09FAC8D4u) == untouched,
+            "console encounter mutation requires the exact test-mode gate and preserves guest memory on refusal");
         auto result = debug::run_command(ram, "observe 41");
         expect(result.size() == 1 && result[0].find("unavailable") != std::string::npos,
             "structured observations require explicit developer test mode");
@@ -6054,6 +6074,11 @@ int run_contracts(int scripts) {
         expect(result[0].find("unavailable") != std::string::npos,
             "an explicit zero keeps developer observation mode off");
         set_environment("MHP3RD_DEVICE_TEST", "1");
+        debug::run_command(ram, "encounter start barioth-tundra");
+        const auto unavailable = debug::recent_log();
+        expect(!unavailable.empty() &&
+                unavailable.back().find("original quest/native corpus unavailable") != std::string::npos,
+            "public synthetic artifacts cannot pretend to prepare an unavailable real-game encounter");
         result = debug::run_command(ram, "observe 42");
         expect(result.size() == 1 && result[0].find("\"request\":42") != std::string::npos &&
                 result[0].find("\"clock_us\":" + std::to_string(kernel().now_us())) != std::string::npos &&
@@ -6071,6 +6096,7 @@ int run_contracts(int scripts) {
                 {"render_ms", measured.render_ms}, {"wait_ms", measured.wait_ms}, {"pacing_ms", measured.pacing_ms},
                 {"ge_draws", measured.draws}, {"recorded_draws", measured.recorded_draws},
                 {"render_passes", measured.passes}, {"target_copies", measured.copies},
+                {"vertex_mib", measured.vertex_mib}, {"index_mib", measured.index_mib},
                 {"requested_rate", measured.requested_rate}, {"running_rate", measured.frame_rate}})
             expect(result[0].find(std::string("\"") + name + "\":" + std::to_string(value)) != std::string::npos,
                 "performance observation preserves the actual component timing and workload counters");

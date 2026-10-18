@@ -32,6 +32,7 @@ inputs=pathlib.Path(os.environ['MHP3RD_INPUT_LIVE'])
 print('Functions: 12345\nOverlay corpora: 355\n[gpu] Synthetic GPU, driver synthetic\n[gpu-compat] off',flush=True)
 print('[debug] reading commands from synthetic',flush=True)
 mode=sys.argv[1] if len(sys.argv)>1 else ''
+if mode!='rtc':print('[device-test] RTC epoch 1780000000000000 us',flush=True)
 phase='demo';offset=0;input_offset=0;ticks=90000;sequence=0;second=0
 ready={'schema':1,'preset':'barioth-tundra','phase':'ready','actor':123,'model':456,'in_view':True}
 while True:
@@ -112,7 +113,7 @@ class EncounterBenchmarkTests(unittest.TestCase):
         self.assertGreater(session.adapter.reads,2)
 
     def test_owned_synthetic_session_and_failure_cleanup(self):
-        for mode in ('', 'online'):
+        for mode in ('', 'online', 'rtc'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
                 base = Path(temporary)
                 (base/'game').mkdir(); (base/'saves').mkdir(); (base/'evidence').mkdir()
@@ -124,6 +125,7 @@ class EncounterBenchmarkTests(unittest.TestCase):
                           'commit': 'a'*40, 'binary': sys.executable, 'args': [str(base/'fake.py'), mode],
                           'game_dir': str(base/'game'), 'saves': str(base/'saves'),
                           'settings': str(base/'settings.ini'),
+                          'env': {'MHP3RD_NO_AUDIO': '1', 'MHP3RD_NO_SPARSE_VERTEX_DECODE': '1'},
                           'suite_fixtures': {'load-character': [{'action': 'input', 'value': '0:pad b 4'}]}}
                 sessions = []
                 original = bench.suite.Session
@@ -137,6 +139,8 @@ class EncounterBenchmarkTests(unittest.TestCase):
                         report = bench.run(device, base/'evidence', 20, 30, 89890)
                         self.assertEqual(report['status'], 'COLLECTED')
                         self.assertEqual(report['capture_review'], 'PENDING')
+                        self.assertTrue(report['rtc_verified'])
+                        self.assertEqual(report['performance_environment'], {'MHP3RD_NO_AUDIO': '1'})
                         self.assertEqual(report['measurement']['median_ms'], 33)
                         self.assertEqual(report['measurement']['present_frames'], 15)
                         self.assertTrue(all(row['gpu_ms'] is None for row in report['measurement']['seconds']))

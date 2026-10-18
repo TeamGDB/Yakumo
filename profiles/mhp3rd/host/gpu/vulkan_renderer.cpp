@@ -8953,6 +8953,10 @@ double VulkanRenderer::frame_rate_now() const noexcept {
     return impl_->governor.rate();
 }
 
+bool VulkanRenderer::skinning_replay() const noexcept {
+    return impl_ && impl_->ready && (impl_->recording ? impl_->interpolating : impl_->interpolation_wanted());
+}
+
 bool VulkanRenderer::capture_frame(const std::filesystem::path &path) {
     std::vector<std::uint8_t> pixels;
     std::uint32_t width = 0u;

@@ -318,6 +318,30 @@ The manual check matters most on Windows, where the standard library's narrow pa
 
 ### Renderer performance paths (#92)
 
+For large-monster CPU cost, `mhp3rd_ge_state_tests` verifies sparse indexed
+skinning against full-span decoding, including all weight/normal/position and
+index formats, repeated/nonmonotonic indices, the maximum 16-bit index,
+mirrored EDRAM, morph/through fallbacks and raw GPU comparison. Fractional
+eight-bone fixtures require bit-identical referenced attributes. The legacy
+variant sets `MHP3RD_NO_SPARSE_VERTEX_DECODE=1`; the scalar and checked variants
+retain their existing independent checks. Temporal-replay fixtures require
+the full current span, including vertices referenced only by an older frame.
+The renderer/HLE policy disables compaction while frame interpolation records
+skinning data, and re-enables it at the ordinary presentation rate.
+No private data or timing threshold is needed for these regressions.
+
+Use the [Barioth benchmark](DEVICE_TESTING.md#barioth-encounter-performance) for
+actual combat measurements. `MHP3RD_NO_SPARSE_VERTEX_DECODE=1` restores the old
+CPU path. For a separate continuous-scene diagnostic,
+`MHP3RD_PERF_ALTERNATE=sparse` alternates it each second; the `[perf]` line's
+`alt on/off` names the window it covers. Keep mixed-mode diagnostics separate
+from fixed-artifact baseline/candidate timing reports. With
+`MHP3RD_CHECK_DECODE=1`, any `[sparse-decode-check] referenced vertex differs`
+is a failure. Require positive `[sparse-decode-check] N draws compared, 0 differed`
+progress before claiming that the gather checker ran. Comparisons are too
+expensive for performance measurements. Interpolated 45/60/90/120 FPS rendering
+retains its full spans and receives no sparse-decoding performance claim.
+
 Build `mhp3rd_render_tests` and run it through CTest: it checks, without a GPU or game data, that the index lists transformed draws are now drawn with name exactly the vertices the old expansion wrote, in the same order.
 
 The speed changes each have an off switch that restores the old path: `MHP3RD_NO_DIRECT_VERTICES`, `MHP3RD_NO_LOOKUP_CACHE`, `MHP3RD_NO_BUFFER_REUSE` and `MHP3RD_NO_DRAW_MERGE`. When a frame looks wrong, run once with all four set: if the fault goes away, set them one at a time to find the change behind it, and report which. `MHP3RD_CHECK_DIRECT_VERTICES=1` compares every transformed draw with the old expansion while playing and prints `[direct-check] N draws compared, M differed`; M must stay 0.

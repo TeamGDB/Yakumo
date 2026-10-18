@@ -191,6 +191,7 @@ void run_ge_list(Runtime &rt, std::uint32_t id) {
         const psprecomp::GuestMemory &memory = rt.memory();
         renderer.begin_display_list();
         media().ge.set_raw_vertices(renderer.gpu_decode(), renderer.check_gpu_decode());
+        media().ge.set_skinning_replay(renderer.skinning_replay());
         media().ge.set_draw_sink([&renderer, &memory](const gpu::DrawCall &call) { renderer.submit(call, memory); });
         media().ge.set_view_hook(camera::free_camera_view_hook(memory));
     }
@@ -308,6 +309,7 @@ void replay_frame(Runtime &rt, gpu::VulkanRenderer &renderer) {
     for (const MediaState::ListRun &run : frame.runs) {
         renderer.begin_display_list();
         ge.set_raw_vertices(renderer.gpu_decode(), renderer.check_gpu_decode());
+        ge.set_skinning_replay(renderer.skinning_replay());
         ge.set_view_hook(camera::free_camera_view_hook(memory));
         bool finished = false;
         try {

@@ -149,6 +149,7 @@ echo "quest list hall 8" >> cmd.txt  # the Guild Hall's 8-star quests
 | `encounter start barioth` | Prepare original quest 507 in Barioth's Tundra area, then relocate the hunter near the actual loaded monster and focus the normal camera |
 | `encounter status` | Structured phase, actor/model addresses, actor population, projection, quest ticks and failure reason |
 | `encounter cancel` | Cancel pending setup and release its camera lock; the ordinary quest continues |
+| `pcstats` | Print actual `[count-pc]` hits for up to eight comma-separated guest addresses armed through `PSPRECOMP_COUNT_PC` before startup; read-only lifecycle/profiling evidence |
 | `monsterhp N` | Every large monster's health to N (at least 1) |
 | `find8`/`find16`/`find32 V [LO HI]` | Every place in user memory holding V; narrowed with `next V`, `changed`, `unchanged`, `delta D`; `list` shows them |
 | `findbytes HEX` | Every place holding that byte string |
