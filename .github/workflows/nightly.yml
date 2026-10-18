@@ -1,12 +1,14 @@
 name: Nightly builds
 
 on:
+  schedule:
+    - cron: '0 0 * * *'
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish the four validated packages as a new Yakumo-nightly pre-release
+        description: Publish the four validated packages as the latest Yakumo-nightly release
         type: boolean
-        default: false
+        default: true
         required: true
   pull_request:
     paths:
@@ -23,10 +25,32 @@ permissions:
   contents: read
 
 concurrency:
-  group: nightly-${{ github.event_name }}-${{ github.ref }}
+  group: nightly-${{ github.event_name == 'pull_request' && github.ref || 'trusted-main' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  plan:
+    name: Plan trusted nightly publication
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.repository == 'TeamGDB/Yakumo' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      publish: ${{ steps.plan.outputs.publish }}
+    # Public metadata only; no environment or build/signing/publication secrets.
+    steps:
+      - name: Checkout the immutable workflow commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Skip scheduled commits already published with all four packages
+        id: plan
+        env:
+          NIGHTLY_PUBLISH: ${{ inputs.publish }}
+          NIGHTLY_METADATA_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/nightly_schedule.py >> "$GITHUB_OUTPUT"
+
   probe:
     name: Public packaging probe (${{ matrix.platform }})
     if: github.event_name == 'pull_request'
@@ -62,6 +86,17 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Verify public nightly metadata using the read-only Actions token
+        if: matrix.platform == 'linux-x86_64'
+        timeout-minutes: 3
+        env:
+          NIGHTLY_METADATA_TOKEN: ${{ github.token }}
+        run: |
+          PYTHONPATH=scripts/ci python - <<'PY'
+          from nightly_schedule import latest_source
+          latest_source()
+          print('Public nightly metadata verified; no private build credentials were used.')
+          PY
       - name: Prepare fresh isolated directories
         shell: python
         run: |
@@ -143,7 +178,8 @@ jobs:
 
   build:
     name: Private build and inspection (${{ matrix.platform }})
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'TeamGDB/Yakumo' && github.ref == 'refs/heads/main'
+    needs: plan
+    if: needs.plan.outputs.build == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.repository == 'TeamGDB/Yakumo' && github.ref == 'refs/heads/main'
     strategy:
       fail-fast: false
       matrix:
@@ -254,7 +290,7 @@ jobs:
   sign:
     name: Sign the inspected Android APK
     needs: build
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'TeamGDB/Yakumo' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.repository == 'TeamGDB/Yakumo' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: nightly-android-signing
@@ -845,8 +881,8 @@ jobs:
 
   publish:
     name: Publish the four validated platform packages
-    needs: [build, sign]
-    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.repository == 'TeamGDB/Yakumo' && github.ref == 'refs/heads/main'
+    needs: [plan, build, sign]
+    if: needs.plan.outputs.publish == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.repository == 'TeamGDB/Yakumo' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: nightly-publication
@@ -1128,7 +1164,7 @@ jobs:
               except Exception:
                   raise SystemExit('Nightly publication transfer validation failed.')
           PY
-      - name: Create a unique nightly pre-release in Yakumo-nightly
+      - name: Publish a unique nightly release as Latest in Yakumo-nightly
         env:
           GH_TOKEN: ${{ secrets.NIGHTLY_PUBLISH_TOKEN }}
         shell: bash
@@ -1146,7 +1182,7 @@ jobs:
             "$PUBLIC_ROOT/SHA256SUMS" "$PUBLIC_ROOT/build.json"
           )
           gh release create "$tag" --repo TeamGDB/Yakumo-nightly --target main \
-            --prerelease --latest=false --title "Nightly ${GITHUB_SHA:0:12} (all platforms)" \
+            --latest --title "Nightly ${GITHUB_SHA:0:12} (all platforms)" \
             --notes-file "$PUBLIC_ROOT/release-notes.md" "${packages[@]}"
       - name: Remove transferred publication files
         if: always()

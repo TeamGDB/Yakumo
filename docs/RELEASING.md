@@ -4,11 +4,15 @@ A release gives players the program ready to run: the executable with the recomp
 
 Stable release preparation is maintainer-controlled: the recompiled code is generated from the game's executable, so a build needs a private copy of the game. The optional [trusted nightly pipeline](NIGHTLY_BUILDS.md) retrieves approved inputs from private R2; game inputs, generated source, caches and raw diagnostics never become public CI outputs. Every package is checked before publication. Nightlies are distributed separately in [Yakumo-nightly](https://github.com/TeamGDB/Yakumo-nightly/releases); stable releases remain here and require maintainer approval.
 
-The manual nightly workflow covers Linux portable tarballs, Windows portable ZIPs, macOS ARM64 ZIPs and Android ARM64 APKs. Android uses the production application ID and signing key, so a nightly updates the ordinary Yakumo installation. Public pull-request probes exercise the build/packaging paths with tiny synthetic inputs and never execute or publish their applications. They do not establish original-game build success or gameplay compatibility; the first trusted build-only run and device audit are required before nightly publication. Flatpak, DMG and stable-release automation are not part of this workflow.
+The nightly workflow runs daily at 00:00 UTC when `main` has changed since the latest complete nightly, with a manual rebuild option. It covers Linux portable tarballs, Windows portable ZIPs, macOS ARM64 ZIPs and Android ARM64 APKs. Android uses the production application ID and signing key, so a nightly updates the ordinary Yakumo installation. Nightlies publish as normal GitHub Releases marked Latest in the separate `Yakumo-nightly` channel after package and signature checks. They remain experimental; this publication status does not establish gameplay compatibility. Public pull-request probes use tiny synthetic inputs and never execute or publish their applications. Flatpak, DMG and stable-release automation are not part of this workflow.
 
 ## Stable releases and test builds
 
 There are two kinds of release, and players must be able to tell them apart at a glance.
+
+The policy below applies to releases in `TeamGDB/Yakumo`. The separate
+`Yakumo-nightly` repository uses normal GitHub Releases for convenient downloads,
+with explicit nightly warnings; those releases are not stable-release sign-off.
 
 | | Stable | Test build |
 | --- | --- | --- |

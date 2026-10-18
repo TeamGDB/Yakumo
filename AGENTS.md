@@ -22,7 +22,7 @@ Read the documents relevant to the task before changing code, testing, packaging
 | [TESTING.md](docs/TESTING.md) | Automated checks, manual smoke tests and subsystem regression checks |
 | [COMPATIBILITY.md](docs/COMPATIBILITY.md) | Verified behavior and remaining problems by platform, with tested commits |
 | [RELEASING.md](docs/RELEASING.md) | Release branches, stable/test policy, packaging, artifact checks and publishing; `release/X.Y` branches are retained for patch releases |
-| [NIGHTLY_BUILDS.md](docs/NIGHTLY_BUILDS.md) | Private R2 inputs, trusted manual nightly builds, publication isolation and game-data leak prevention |
+| [NIGHTLY_BUILDS.md](docs/NIGHTLY_BUILDS.md) | Daily UTC and manual nightlies, private R2 inputs, isolated publication and game-data leak prevention |
 | [MACOS.md](docs/MACOS.md) | macOS installation, player data, updates and troubleshooting |
 | [LINUX.md](docs/LINUX.md) | Linux and Steam Deck installation, Flatpak, portable releases and Game Mode |
 | [PROFILE_GUIDE.md](docs/PROFILE_GUIDE.md) | Adding a title profile and keeping game-specific behavior outside the framework |

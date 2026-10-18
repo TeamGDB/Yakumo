@@ -15,9 +15,17 @@ with one distribution format per platform:
 | Android ARM64 | `yakumo-nightly-<sha12>-android-arm64.apk` | NDK 28.2, API 29, signed with the production release key |
 
 Each build reuses 355 verified native overlay libraries and generates/compiles
-the current main executable. Flatpak and DMG automation, scheduled execution,
-automatic private-cache refresh and automatic stable releases are outside this
+the current main executable. A daily run at **00:00 UTC** builds and publishes
+only when the pinned `main` commit differs from the latest complete nightly.
+Manual runs can force a rebuild. Flatpak and DMG automation, automatic
+private-cache refresh and automatic stable Yakumo releases are outside this
 workflow. Existing manual stable-release packaging remains available.
+
+Nightlies are published immediately after package and Android signature checks
+as normal GitHub Releases marked **Latest** in `Yakumo-nightly`. They remain
+experimental development snapshots; the GitHub release status does not mean
+they passed stable-release gameplay testing. The separate channel provides a
+convenient [latest nightly link](https://github.com/TeamGDB/Yakumo-nightly/releases/latest).
 
 The Android nightly uses the normal Yakumo application ID and production signing
 identity. It updates the normal application rather than installing a separate
@@ -48,13 +56,17 @@ test application. Back up saves before installing experimental packages.
 
 ## Trusted execution and credentials
 
-Private build, signing and publication jobs accept `workflow_dispatch` only in
-`TeamGDB/Yakumo` on `refs/heads/main`. Source is pinned to the dispatch commit,
+Private build, signing and publication jobs accept `schedule` and
+`workflow_dispatch` only in `TeamGDB/Yakumo` on `refs/heads/main`. Source is pinned
+to the event's immutable commit,
 not a movable user-supplied ref. Do not add `pull_request_target`, an untrusted
-checkout or feature-branch access to any credentialed job. Keep scheduling off.
+checkout or feature-branch access to any credentialed job. Main changes follow
+the maintainer-reviewed pull-request process in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
-Use three GitHub environments restricted to the `main` branch and reviewed by a
-maintainer:
+Use three GitHub environments restricted to the `main` branch. For unattended
+nightlies, omit required reviewers and wait timers on these environments;
+retain the custom branch policy allowing only the `main` branch. This changes
+per-run approval, not the main-only source boundary or separation of secrets:
 
 | Environment | Secrets | Purpose |
 | --- | --- | --- |
@@ -109,46 +121,62 @@ real overlay execution or establish device/gameplay compatibility. Inspect the
 actual probe results before merging; adding the jobs alone is not evidence that
 they passed. Keep those limits in the PR and release-testing record.
 
-## Running the manual rollout
+## Scheduled and manual runs
 
-The dispatch becomes available after the workflow is reviewed and merged into
-`main`. It deliberately cannot retrieve private inputs from a feature branch.
-First run all platforms without release publication:
+The workflow runs daily with `0 0 * * *` (00:00 UTC) after merge into `main`.
+GitHub may queue a scheduled run after that time; see its
+[schedule documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
+
+A secret-free planning job checks public metadata of the channel's latest
+published release. It verifies its source, four-platform completeness and
+GitHub asset digests before deciding whether that exact commit was already
+published. If unchanged, it skips builds before any private input retrieval.
+Missing releases permit the first build; API errors or invalid/incomplete
+metadata fail planning and leave credentialed jobs blocked. Manual runs can
+repair or rebuild a release without this deduplication check.
+
+Scheduled and manual runs share one concurrency group, so they cannot publish
+in parallel. In-progress trusted builds are not cancelled by a later trigger.
+Pull-request probes have separate concurrency and receive no private secrets.
+
+Manual dispatch defaults to publication. For an audit without publication:
 
 ```sh
 gh workflow run nightly.yml --repo TeamGDB/Yakumo --ref main -f publish=false
 ```
 
-Approve `nightly-build-inputs` only after reviewing the exact dispatch commit.
 Builds use bounded jobs, low compiler parallelism and verified overlay reuse.
 Linux needs at least 25 GiB free after pulling its SDK. A full main executable
 still requires generation and compilation; the first original-game builds can
 take hours despite the small public probe completing quickly. Game-derived
 objects and inputs never enter a shared Actions cache.
 
-Approve `nightly-android-signing` after reviewing the successful Android build
-and its inspected intermediate. `publish=false` still produces the final signed
-APK for audit and device tests; it does not create a GitHub release.
+Isolated Android signing starts after all four builds and content inspections
+succeed. `publish=false` still produces the final signed APK for audit and device
+tests; it does not create a GitHub release.
 
 Download each successful final artifact, named
 `nightly-final-<run-id>-<platform>` with the platform keys from the manifest
-below. Audit public logs, verify `SHA256SUMS`, inspect the exact packages and
-test them on the corresponding devices before the first publication. Final
+below. Audit public logs, verify `SHA256SUMS` and inspect the exact packages.
+Use the corresponding devices for gameplay testing and record that evidence
+separately; nightly publication does not claim it was performed. Final
 artifacts expire after one day. Raw private build logs are intentionally
 unavailable from Actions, including on failure.
 
 For publication, the fine-grained `NIGHTLY_PUBLISH_TOKEN` must select resource
 owner `TeamGDB` and repository `Yakumo-nightly` only, with Contents read/write.
-After the build-only audit, dispatch with `-f publish=true` and approve the
-separate publication environment. The publisher creates one new pre-release
+Dispatch with `-f publish=true`, or let the daily schedule publish automatically.
+The publisher creates one new normal GitHub Release marked Latest
 containing the validated final platform packages and required source/checksums;
-it neither replaces stable downloads nor overwrites an earlier nightly.
+it does not overwrite an earlier nightly or publish into the stable repository.
 
-Configuration of R2, environments and signing credentials does not establish
-that a hosted original-game build has succeeded. Record the first complete
-build-only run, package inspection and device results before enabling public
-nightly distribution. Full gameplay and stable-release sign-off remain separate
-requirements under [RELEASING.md](RELEASING.md).
+The first complete original-input build and publication succeeded in
+[run 39109539747](https://github.com/TeamGDB/Yakumo/actions/runs/39109539747),
+from source `2f829071d8c3b7081cfcebd08b7ef0326c530e03`. All four package
+inspections and the production Android signature/payload checks passed; all
+eight published asset digests were verified. This is packaging evidence, not
+a claim of full device/gameplay testing. Stable-release sign-off remains a
+separate requirement under [RELEASING.md](RELEASING.md).
 
 ## Private input manifest
 
@@ -251,8 +279,9 @@ platform policy before constructing any distributable directory:
   `SHA256SUMS`, public build metadata and experimental-release notes. Invalid
   input or a failed copy leaves no partial publication directory.
 
-The publisher rechecks transferred filenames and SHA-256 values. New immutable
-pre-releases in `Yakumo-nightly` are never marked stable or Latest. Release notes
+The publisher rechecks transferred filenames and SHA-256 values. Every nightly
+gets a unique release tag in `Yakumo-nightly`; the latest successful publication
+is marked Latest there. Release notes retain the experimental warning and
 identify the main repository's actual source commit and testing limitations.
 
 These checks protect a defined packaging boundary for reviewed source. They are
@@ -269,11 +298,11 @@ architectures, resource/signature seals, cache isolation and private-log canarie
 The public full-build probes complement those tests; no game data is a public
 fixture.
 
-Before the first private run, verify bucket privacy and scoped read/write
-denial, review the exact dispatch commit, then run with publication disabled.
-Audit its public outputs and test final packages on real devices. Retain the
-source commit and platform-specific gaps in the verification record; synthetic
-probes and package inspection cannot replace gameplay testing.
+When changing private storage or credentials, verify bucket privacy and scoped
+read/write denial before dispatching. Audit public outputs and use final
+packages for device tests. Retain the source commit and platform-specific gaps
+in the verification record; synthetic probes and package inspection cannot
+replace gameplay testing or stable-release sign-off.
 
 References: [R2 access policies](https://developers.cloudflare.com/r2/api/tokens/),
 [GitHub cache access](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching),
