@@ -111,7 +111,9 @@ Observation requests also work while the test session is held in photo mode.
 target copies and requested/running presentation rates. These share the existing
 `perf_second` window: repeated reads of the same window are not new samples.
 `frame_ms` is a rolling presentation history, so overlapping readbacks must not
-be concatenated as independent frames. Use guest speed and the 30 Hz game clock
+be concatenated as independent frames. `frame_sequence` counts actual presents
+monotonically, including across pauses, and permits collecting each new frame
+exactly once. Use guest speed and the 30 Hz game clock
 alongside presentation FPS when investigating combat slowdowns such as #330.
 
 `MHP3RD_DEVICE_TEST_RTC_US` optionally pins the boot RTC to a Unix timestamp in
@@ -144,6 +146,9 @@ echo "quest list hall 8" >> cmd.txt  # the Guild Hall's 8-star quests
 | `quest` | Time left, the hunter's health, each large monster's health |
 | `quest list [village\|hall] [STARS]` | The village and Guild Hall quests (id, board, stars, name, main monsters, fee), or those of one board or star level |
 | `quest start ID` | Leave for quest ID (village or Hall) as its gate does after its counter (see *Starting a quest* below) |
+| `encounter start barioth` | Prepare original quest 507 in Barioth's Tundra area, then relocate the hunter near the actual loaded monster and focus the normal camera |
+| `encounter status` | Structured phase, actor/model addresses, actor population, projection, quest ticks and failure reason |
+| `encounter cancel` | Cancel pending setup and release its camera lock; the ordinary quest continues |
 | `monsterhp N` | Every large monster's health to N (at least 1) |
 | `find8`/`find16`/`find32 V [LO HI]` | Every place in user memory holding V; narrowed with `next V`, `changed`, `unchanged`, `delta D`; `list` shows them |
 | `findbytes HEX` | Every place holding that byte string |
@@ -155,6 +160,47 @@ The writing commands are refused during ad hoc play like the page's.
 `quest start` answers `started quest ...` or `not started, <why>: ...`; a
 script waits for the quest's `[overlay] installed game_task` line (or polls
 `quest`) before it goes on.
+
+### Fast Barioth encounter
+
+In an isolated developer session with **both** `MHP3RD_DEBUG_MENU=1` and
+`MHP3RD_DEVICE_TEST=1`, choose **Debug → Barioth encounter**, or append
+`encounter start barioth` to the command file. Use copied saves/settings.
+The original village quest 507 pays its normal fee and loads its own resources.
+After continuously stable village readiness, the preset wraps the game's traced
+initial-area choice (`0x088BDEEC`, returning to `0x088C1EDC`) and selects the area
+declared by its original Barioth spawn record. The map remains the original
+Tundra, including its snow, effects and small monsters.
+
+Setup validates the active/accepted quest IDs, executable signature, original
+spawn record and empty twenty-slot actor manager before changing the initial
+area. The real quest creates Barioth and loads `em005m0.ovl`. Once its vtable's
+model accessor resolves a complete PMO 1.02 model, its health/area/coordinates
+are valid, its landing has settled and the quest clock advances, the hunter is
+relocated to the verified flat lake near it. World, physics and previous
+positions are updated together at a guest frame boundary. The ordinary follow
+camera locks on; three subsequent in-frustum observations and an advancing
+clock precede `"phase":"ready"`. AI, attacks, monster health and game timing
+remain the game's own. Inspect the resulting capture: a projected point alone
+does not establish unoccluded pixels.
+
+The state machine has finite preparation/camera deadlines and reports unknown
+actors, models or terrain instead of guessing. DATA.BIN mods and held quest
+cheats are refused. Existing ad hoc guards apply before the queued request,
+the native initialization callback and every subsequent mutation. Target death,
+quest exit/completion or model lifetime changes end the temporary setup state.
+No gallery/progress flags, saves, actor IDs or actor health are written.
+
+This is a narrow **teleport/encounter preset**, not arbitrary spawning or live
+despawning. Original quest initialization owns the population and normal quest
+teardown owns its removal. The preset does not support an arena, other monsters,
+modified spawn tables or arbitrary terrain. `monsterhp` remains a health tool.
+The shared runner closes only its owned process/copies after the finite run;
+`cancel` alone does not abandon the player's ordinary quest. All encounter code
+and commands are compiled out with `MHP3RD_RELEASE=ON`.
+
+For repeated fixed-tick measurements and baseline/candidate comparisons, use
+the [one-command private benchmark](DEVICE_TESTING.md#barioth-encounter-performance).
 
 ## What the game keeps where
 

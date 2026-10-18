@@ -225,6 +225,14 @@ void page() {
         }
     }
 
+    if (value_row("Barioth encounter", "Tundra",
+            write_row("Prepare original quest 507, enter Barioth's area and move the hunter near the loaded monster. "
+                      "AI and attacks stay active. Requires an isolated developer device-test session; "
+                      "DATA.BIN mods and held quest cheats must be off. Progress appears in the debug log."))) {
+        debug::request_encounter_start();
+        s.resume = true;
+    }
+
     section("On a quest");
     {
         debug::HeldCheats held = n.held;

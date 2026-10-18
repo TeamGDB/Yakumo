@@ -129,6 +129,17 @@ std::vector<std::string> run_command(Ram &ram, const std::string &line) {
     const auto arg = [&](std::size_t i) { return i < args.size() ? number(args[i]) : 0u; };
 
     if (command.empty() || command[0] == '#') return out;
+    if (command == "encounter") {
+        if (args == std::vector<std::string>{"start", "barioth"} ||
+            args == std::vector<std::string>{"start", "barioth-tundra"}) {
+            request_encounter_start();
+        } else if (args == std::vector<std::string>{"cancel"}) {
+            request_encounter_cancel();
+        } else if (!args.empty() && args != std::vector<std::string>{"status"}) {
+            return {"usage: encounter start barioth | status | cancel"};
+        }
+        return {encounter_status()};
+    }
     if (command == "observe") {
         const char *mode = std::getenv("MHP3RD_DEVICE_TEST");
         if (mode == nullptr || std::string(mode) != "1")
@@ -209,7 +220,8 @@ std::vector<std::string> run_command(Ram &ram, const std::string &line) {
                     ",\"render_passes\":" + std::to_string(summary.passes) +
                     ",\"target_copies\":" + std::to_string(summary.copies) +
                     ",\"requested_rate\":" + std::to_string(summary.requested_rate) +
-                    ",\"running_rate\":" + std::to_string(summary.frame_rate) + ",\"frame_ms\":[";
+                    ",\"running_rate\":" + std::to_string(summary.frame_rate) +
+                    ",\"frame_sequence\":" + std::to_string(perf::history_sequence()) + ",\"frame_ms\":[";
                 const auto &history = perf::frame_history();
                 for (std::size_t i = 0; i < history.size(); ++i) {
                     if (i) json += ',';

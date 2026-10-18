@@ -6062,7 +6062,8 @@ int run_contracts(int scripts) {
             "readbacks report actual kernel clocks and photo state rather than command acknowledgement");
         result = debug::run_command(ram, "observe 43 perf");
         expect(result[0].find("\"frame_ms\":[") != std::string::npos &&
-                result[0].find("\"speed_percent\":") != std::string::npos,
+                result[0].find("\"speed_percent\":") != std::string::npos &&
+                result[0].find("\"frame_sequence\":" + std::to_string(perf::history_sequence())) != std::string::npos,
             "explicit performance readback includes measured frame history and guest speed");
         const auto &measured = perf::last_second();
         for (const auto &[name, value] :

@@ -2,6 +2,16 @@
 
 ## Automated
 
+- **Barioth encounter tools** (`mhp3rd_debug_tools_tests` and
+  `scripts/ci/test_encounter_benchmark.py`) use synthetic RAM, model headers,
+  observations and bounded owned child processes. They cover real quest
+  departure contracts, initial-area/capacity/lifetime guards, valid and invalid
+  model/actor/camera state, landing/relocation, stable readiness, deadlines,
+  cancellation, network guard closure, cleanup and non-overlapping frame
+  collection. The private [combat benchmark](DEVICE_TESTING.md#barioth-encounter-performance)
+  supplies separate real-game evidence. Public tests contain no game models,
+  archives, saves or performance pass/fail thresholds.
+
 - **GPU compatibility notification** (`mhp3rd_gpu_compat_notice_*`) uses the real SDL/Vulkan/ImGui renderer with public triangles. Cases cover explicit On, healthy Auto, Off, automatic fallback after a failed startup self-test or pipeline and after a refused pipeline in play, plain-shader retry under Off, and notification opt-out. Tests inspect rendered text and geometry, input/focus flags, single consumption and expiry; startup notifications are included in diagnostic window captures. The main menu suite verifies the restart marker, performance warning, active-mode description and unchanged runtime mode when editing the saved choice. No game data is needed.
 
 - **Editable PSP touch controls** (`mhp3rd_touch_tests`, `mhp3rd_settings_tests` and `mhp3rd_touch_ui_tests`) use synthetic placements and SDL fingers to check safe-area coordinates, relative size percentages across screen shapes/insets, click-versus-drag preservation, visibility, independent PSP/Action settings, combination insertion/removal and capacity, simultaneous button ownership, D-pad toggling and release, virtual R3 button/movement/camera bindings in Camera/D-Pad/Off modes and cancellation, and floating/fixed sticks. The UI mode also exercises both editors and retains a synthetic window capture in the printed temporary directory. These public tests require no game data. Actual Android touch hardware, haptics and gameplay remain separate manual checks.
