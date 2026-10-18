@@ -21,6 +21,10 @@
 #   --skip-build       package the staged build from a previous run as it is
 #   --no-flatpak       do not build the Flatpak bundle
 #   --no-tarball       do not build the tarball
+# YAKUMO_PRIVATE_INPUTS optionally supplies verified cached overlays; see
+# docs/NIGHTLY_BUILDS.md. A mismatch fails instead of rebuilding the cache.
+# YAKUMO_CONTAINER=docker|podman selects the engine explicitly, including when
+# both are installed. Without it, prefer podman as in ordinary local releases.
 set -euo pipefail
 
 profile_dir="$(cd "$(dirname "$0")/.." && pwd)"
@@ -34,6 +38,10 @@ work="${YAKUMO_WORK:-$repo_dir/out/release-linux}"
 dist="$work/dist"
 stage="$work/stage/yakumo"
 expected_executable_sha256=55c0598436c0753b04331f8e95d406f832d9217806e3a896fed0e88b33637d8c
+# Only the exact original public toy ELF is accepted in the secret-free PR job.
+if [[ "${NIGHTLY_PROBE:-0}" == 1 ]]; then
+    expected_executable_sha256=6f9a8bc6132d28d811c775d7bce00d46c5b83da08f774e64161f7ae0e589a3d1
+fi
 
 version=""
 jobs=4
@@ -86,8 +94,8 @@ grep -qF "runtime-version: '$FLATPAK_RUNTIME_VERSION'" "$packaging/$app_id.yml" 
     fail "the Flatpak manifest does not use runtime $FLATPAK_RUNTIME_VERSION from sources.sh"
 
 # ---------------------------------------------------------------------------
-# The game data never leaves this machine. Every artifact is checked by file
-# name and by content before it is published.
+# The game data stays in the private build workspace. Every artifact is checked
+# by file name and by content before it is published.
 # ---------------------------------------------------------------------------
 check_no_game_data() {
     local root="$1" what="$2" bad=()
@@ -130,21 +138,35 @@ if [[ -n "$(git -C "$repo_dir" status --porcelain --untracked-files=no)" ]]; the
 fi
 
 if [[ $skip_build -eq 0 ]]; then
+    if [[ -n "${YAKUMO_CONTAINER:-}" ]]; then
+        case "$YAKUMO_CONTAINER" in
+            docker|podman) container="$YAKUMO_CONTAINER" ;;
+            *) fail "YAKUMO_CONTAINER must be docker or podman" ;;
+        esac
+        container_path="$(command -v "$container" || true)"
+        [[ -f "$container_path" && -x "$container_path" ]] ||
+            fail "$container requested by YAKUMO_CONTAINER is not installed"
+    elif command -v podman > /dev/null; then container=podman
+    elif command -v docker > /dev/null; then container=docker
+    else fail "podman or docker is needed to run the build SDK"; fi
+
     game_dir="$profile_dir/game"
     [[ -e "$game_dir/EBOOT.ELF" && -e "$game_dir/disc.iso" ]] ||
         fail "$game_dir needs EBOOT.ELF and disc.iso; run scripts/prepare_game.sh first"
     [[ "$(sha256 "$game_dir/EBOOT.ELF")" == "$expected_executable_sha256" ]] ||
         fail "$game_dir/EBOOT.ELF is not the supported executable"
 
-    if command -v podman > /dev/null; then container=podman
-    elif command -v docker > /dev/null; then container=docker
-    else fail "podman or docker is needed to run the build SDK"; fi
-
     # The checkout and the work directory appear at the same paths inside the
     # container. Game files linked from elsewhere are mounted read-only where
     # their links point, so the links resolve there too.
     mounts=(-v "$repo_dir:$repo_dir")
     [[ "$work" == "$repo_dir"/* ]] || mounts+=(-v "$work:$work")
+    private_args=()
+    if [[ -n "${YAKUMO_PRIVATE_INPUTS:-}" ]]; then
+        python3 "$repo_dir/scripts/ci/nightly.py" verify-overlays --inputs "$YAKUMO_PRIVATE_INPUTS"
+        mounts+=(-v "$YAKUMO_PRIVATE_INPUTS:$YAKUMO_PRIVATE_INPUTS:ro")
+        private_args=(-e "YAKUMO_PRIVATE_INPUTS=$YAKUMO_PRIVATE_INPUTS")
+    fi
     for file in EBOOT.ELF disc.iso; do
         link="$game_dir/$file"
         while [[ -L "$link" ]]; do
@@ -160,7 +182,7 @@ if [[ $skip_build -eq 0 ]]; then
     step "Building in $SDK_IMAGE"
     mkdir -p "$work/home"
     "$container" run --rm "${user_args[@]}" --security-opt label=disable \
-        "${mounts[@]}" -w "$repo_dir" \
+        "${mounts[@]}" "${private_args[@]}" -w "$repo_dir" \
         -e HOME="$work/home" -e YAKUMO_WORK="$work" -e YAKUMO_JOBS="$jobs" \
         "$SDK_IMAGE" bash "$packaging/build_in_sdk.sh"
 fi

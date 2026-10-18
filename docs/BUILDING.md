@@ -18,7 +18,7 @@ The game's executable and its 355 code overlays are MIPS code for the PSP. The b
 
 The installer accepts only `NPJB-40001`: the disc id in `PARAM.SFO` must match, and so must the SHA-256 of the encrypted `EBOOT.BIN`. Fan translation patches that change only `USRDIR/DATA.BIN` keep that executable and are accepted. The English patch v6.1.0 has been checked: its `EBOOT.BIN` and all 355 code overlays are identical to the original's.
 
-The generated code and the overlays are derived from your copy of the game. They stay on your machine: `generated/`, `overlays/`, `analysis/` and `game/` are ignored by Git.
+The generated code and the overlays are derived from your copy of the game. Local builds keep `generated/`, `overlays/`, `analysis/` and `game/` outside Git. The explicitly approved [nightly workflow](NIGHTLY_BUILDS.md) may retrieve originals from private R2 into trusted ephemeral runners; inputs, generated source, caches and raw private logs never become public outputs. Public CI packaging probes use tiny original synthetic fixtures instead of game files.
 
 ### Where the time goes
 
@@ -44,6 +44,8 @@ brew install cmake ninja python ccache pkg-config sdl3 molten-vk vulkan-loader v
 ```
 
 MoltenVK provides Vulkan on top of Metal. FFmpeg is not needed: the build makes its own; see [FFmpeg](#ffmpeg).
+
+The [nightly builder](NIGHTLY_BUILDS.md) uses source-pinned SDL3, Vulkan headers/loader and glslang, plus pinned MoltenVK, rather than Homebrew runtime dependencies. It compiles for ARM64 and macOS 13 with the maintained Xcode SDK, then reuses compatible native overlays. Packaging needs a macOS 13 SDK only when lowering the deployment target of an existing binary; see [Releasing](RELEASING.md#macos).
 
 ## Linux
 

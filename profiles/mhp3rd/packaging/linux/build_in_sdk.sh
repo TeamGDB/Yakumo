@@ -14,6 +14,7 @@
 #
 # Environment: YAKUMO_WORK (required) is the work directory; YAKUMO_JOBS the
 # number of parallel jobs (default 4).
+# YAKUMO_PRIVATE_INPUTS optionally reuses a verified private overlay seed.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -29,6 +30,15 @@ deps="$work/deps"
 deps_build="$work/deps-build"
 build="$work/build"
 stage="$work/stage/yakumo"
+prebuilt="${YAKUMO_PRIVATE_INPUTS:-}"
+prefix_args=()
+if [[ -n "$prebuilt" ]]; then
+    python3 "$repo_dir/scripts/ci/nightly.py" verify-overlays --inputs "$prebuilt"
+    # Keep existing local release/compiler caches intact. Nightlies use fresh
+    # workspaces and verified overlays, so these flags do not rebuild overlays.
+    prefix_args=("-DCMAKE_C_FLAGS=-ffile-prefix-map=$repo_dir=/src/yakumo -ffile-prefix-map=$work=/build"
+                 "-DCMAKE_CXX_FLAGS=-ffile-prefix-map=$repo_dir=/src/yakumo -ffile-prefix-map=$work=/build")
+fi
 
 export CC=gcc-14 CXX=g++-14
 export CCACHE_DIR="$work/ccache" CCACHE_MAXSIZE=20G
@@ -73,6 +83,7 @@ fi
 step "Configuring Yakumo (release)"
 cmake -S "$repo_dir" -B "$build" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
+    "${prefix_args[@]}" \
     -DPSPRECOMP_PROFILE=mhp3rd \
     -DMHP3RD_RELEASE=ON \
     -DMHP3RD_FFMPEG=bundled \
@@ -94,12 +105,17 @@ step "Building Yakumo"
 cmake --build "$build" -j "$jobs" --target Yakumo mhp3rd_savedata_tests
 "$build/bin/mhp3rd_savedata_tests"
 
-step "Building the overlay libraries"
-"$profile_dir/scripts/build_overlays.sh" "$build" "$jobs"
-# build_overlays.sh skips libraries that already exist. A library left from an
-# earlier run must still match this executable's headers and flags, which only
-# Ninja's dependency tracking can tell: bring every target up to date.
-cmake --build "$build" -j "$jobs"
+if [[ -n "$prebuilt" ]]; then
+    step "Reusing verified native overlays"
+    mkdir -p "$build/bin/overlays"
+    cp "$prebuilt/overlays/"*.so "$build/bin/overlays/"
+else
+    step "Building the overlay libraries"
+    "$profile_dir/scripts/build_overlays.sh" "$build" "$jobs"
+    # Existing libraries must still match this executable's headers and flags;
+    # bring every target up to date using Ninja's dependency tracking.
+    cmake --build "$build" -j "$jobs"
+fi
 
 step "Staging"
 rm -rf "$stage"

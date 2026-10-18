@@ -22,6 +22,13 @@ VULKAN_LOADER_SHA256=54f2537df22313768da0317dda2abdaaab7711b4081c48c869a79db343d
 VULKAN_HEADERS_URL="https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/${VULKAN_SDK_TAG}.tar.gz"
 VULKAN_HEADERS_SHA256=e87dce08116151f6b6d7de6b6faf41498e87e6cf848ff16fa3bd5402190ad4a3
 
+# Shader compiler used only by the trusted nightly builder, not bundled. This
+# commit is the glslang revision of the Vulkan SDK tag above. Disable external
+# dependencies and SPIR-V optimization rather than fetching unpinned sources.
+GLSLANG_COMMIT=168d452a4f460d24b588fed08477a81c44ee27a1
+GLSLANG_URL="https://github.com/KhronosGroup/glslang/archive/${GLSLANG_COMMIT}.tar.gz"
+GLSLANG_SHA256=c167b2474af06cbab93abae8249efaf88fb79a09f30488e2a24d399e4258ce7a
+
 # MoltenVK, Vulkan on Metal: the Khronos release build, unmodified except that
 # only its arm64 slice is kept.
 MOLTENVK_VERSION=1.4.2

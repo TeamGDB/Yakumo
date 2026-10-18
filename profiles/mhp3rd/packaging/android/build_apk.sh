@@ -24,6 +24,10 @@
 # KEYSTORE (with KEYSTORE_PASS and KEY_ALIAS) signs with a key of your own, so
 # that later builds install over earlier ones and keep the player's data;
 # without it a throwaway key is made in the build directory.
+# NIGHTLY_UNSIGNED=1 writes an aligned, unsigned release APK and exits before
+# reading or generating a signing key. Signing belongs in its separate job.
+# ANDROID_BUILD_TOOLS_VERSION and ANDROID_COMPILE_SDK_VERSION optionally select
+# installed SDK versions explicitly instead of the newest installed versions.
 #
 # The app needs Android 10 (API 29), where every 64-bit device has Vulkan
 # 1.1: build the native code for android-29 (ANDROID_PLATFORM), or it may
@@ -40,27 +44,55 @@ sdl_lib="$3"
 output="$4"
 overlay_limit="${5:-}"
 here="$(cd "$(dirname "$0")" && pwd)"
+repo="$(cd "$here/../../../.." && pwd)"
+case "${NIGHTLY_UNSIGNED:-0}" in
+    0|1) ;;
+    *) echo 'NIGHTLY_UNSIGNED must be 0 or 1' >&2; exit 1 ;;
+esac
 
 sdk="${ANDROID_HOME:?set ANDROID_HOME to the Android SDK}"
-build_tools="$(ls -d "$sdk"/build-tools/* | sort -V | tail -1)"
-platform="$(ls -d "$sdk"/platforms/android-* | sort -V | tail -1)"
+if [[ -n "${ANDROID_BUILD_TOOLS_VERSION:-}" ]]; then
+    [[ "$ANDROID_BUILD_TOOLS_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'invalid Android build-tools version' >&2; exit 1; }
+    build_tools="$sdk/build-tools/$ANDROID_BUILD_TOOLS_VERSION"
+else
+    build_tools="$(ls -d "$sdk"/build-tools/* | sort -V | tail -1)"
+fi
+if [[ -n "${ANDROID_COMPILE_SDK_VERSION:-}" ]]; then
+    [[ "$ANDROID_COMPILE_SDK_VERSION" =~ ^[0-9]+$ ]] || { echo 'invalid Android compile SDK version' >&2; exit 1; }
+    platform="$sdk/platforms/android-$ANDROID_COMPILE_SDK_VERSION"
+else
+    platform="$(ls -d "$sdk"/platforms/android-* | sort -V | tail -1)"
+fi
 android_jar="$platform/android.jar"
+[[ -d "$build_tools" && -f "$android_jar" ]] || { echo 'requested Android SDK components are not installed' >&2; exit 1; }
+if [[ "${NIGHTLY_UNSIGNED:-0}" == 1 ]]; then
+    [[ -z "${DEBUGGABLE:-}" && -z "${DEVICE_TEST_PACKAGE:-}" ]] || { echo 'unsigned nightlies require the production release identity' >&2; exit 1; }
+fi
 work="$build_dir/apk"
 rm -rf "$work"
 mkdir -p "$work/classes" "$work/dex" "$work/lib/arm64-v8a"
 
 echo "compiling SDL's Java activity and the app's own"
+java_sources=()
+while IFS= read -r -d '' file; do java_sources+=("$file"); done < <(
+    find "$sdl_dir/android-project/app/src/main/java" "$here/java" -name '*.java' -print0)
 javac -nowarn --release 11 -classpath "$android_jar" -d "$work/classes" \
-    $(find "$sdl_dir/android-project/app/src/main/java" "$here/java" -name '*.java') 2> "$work/javac.log"
+    "${java_sources[@]}" 2> "$work/javac.log"
 min_sdk=29
+class_files=()
+while IFS= read -r -d '' file; do class_files+=("$file"); done < <(find "$work/classes" -name '*.class' -print0)
 "$build_tools/d8" --release --min-api "$min_sdk" --lib "$android_jar" --output "$work/dex" \
-    $(find "$work/classes" -name '*.class')
+    "${class_files[@]}"
 
 echo "linking resources"
 # The licences of what the APK carries: the third-party notices, SDL's and
 # FFmpeg's (with where its source is), and the font's when it is packed.
 mkdir -p "$work/assets/licenses"
+cp "$repo/LICENSE" "$work/assets/licenses/Yakumo-LICENSE.txt"
 cp "$here/../THIRD_PARTY_NOTICES.md" "$work/assets/licenses/"
+cp "$repo/profiles/mhp3rd/third_party/imgui/LICENSE.txt" "$work/assets/licenses/DearImGui-LICENSE.txt"
+cp "$repo/profiles/mhp3rd/third_party/tiny_aes/UNLICENSE" "$work/assets/licenses/tiny-AES-c-UNLICENSE.txt"
+cp "$repo/profiles/mhp3rd/third_party/xxhash/LICENSE" "$work/assets/licenses/xxHash-LICENSE.txt"
 cp "$sdl_dir/LICENSE.txt" "$work/assets/licenses/SDL3-LICENSE.txt"
 cp "$build_dir"/bin/lib/FFmpeg-COPYING.LGPLv2.1.txt "$build_dir"/bin/lib/FFmpeg-SOURCE.txt "$work/assets/licenses/"
 if [[ -n "${FONT_DIR:-}" ]]; then
@@ -84,11 +116,10 @@ if [[ -n "${DEVICE_TEST_PACKAGE:-}" ]]; then
         --contract "$work/assets/device-testing.json"
 fi
 assets=(-A "$work/assets")
-"$build_tools/aapt2" compile --dir "$here/res" -o "$work/res.zip"
+"$build_tools/aapt2" compile --no-crunch --dir "$here/res" -o "$work/res.zip"
 # The version: `git describe` of the checkout, and the number of commits as
 # the code Android compares, so a later build is always an update
 # (VERSION_NAME and VERSION_CODE override them).
-repo="$(cd "$here/../../../.." && pwd)"
 version_name="${VERSION_NAME:-$(git -C "$repo" describe --tags --always --dirty 2>/dev/null || echo 0.0)}"
 version_code="${VERSION_CODE:-$(git -C "$repo" rev-list --count HEAD 2>/dev/null || echo 1)}"
 "$build_tools/aapt2" link -I "$android_jar" --manifest "$manifest" \
@@ -110,7 +141,15 @@ strip="$(ls -d "$ANDROID_NDK"/toolchains/llvm/prebuilt/*/bin/llvm-strip | head -
 # manager unpacks them at install time.
 (cd "$work" && cp dex/classes.dex . && zip -q unsigned.apk classes.dex && zip -q -r -9 unsigned.apk lib)
 
-echo "aligning and signing"
+echo "aligning"
+"$build_tools/zipalign" -f -P 16 4 "$work/unsigned.apk" "$work/aligned.apk"
+if [[ "${NIGHTLY_UNSIGNED:-0}" == 1 ]]; then
+    cp "$work/aligned.apk" "$output"
+    echo 'wrote aligned unsigned APK; signing is a separate protected step'
+    exit 0
+fi
+
+echo "signing"
 keystore="${KEYSTORE:-$build_dir/apk-research.keystore}"
 password="${KEYSTORE_PASS:-research}"
 alias="${KEY_ALIAS:-research}"
@@ -119,7 +158,8 @@ if [[ ! -f "$keystore" ]]; then
     keytool -genkeypair -keystore "$keystore" -storepass research -keypass research -alias research \
         -keyalg RSA -keysize 2048 -validity 3650 -dname "CN=Yakumo research build" > /dev/null 2>&1
 fi
-"$build_tools/zipalign" -f -P 16 4 "$work/unsigned.apk" "$work/aligned.apk"
-"$build_tools/apksigner" sign --ks "$keystore" --ks-pass "pass:$password" --key-pass "pass:$password" \
+export YAKUMO_APK_KEY_PASSWORD="$password"
+"$build_tools/apksigner" sign --ks "$keystore" --ks-pass env:YAKUMO_APK_KEY_PASSWORD --key-pass env:YAKUMO_APK_KEY_PASSWORD \
     --ks-key-alias "$alias" --out "$output" "$work/aligned.apk"
+unset YAKUMO_APK_KEY_PASSWORD password
 echo "wrote $output ($(du -h "$output" | cut -f1), ${#overlays[@]} overlay libraries, version $version_name ($version_code))"

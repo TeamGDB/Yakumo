@@ -4,6 +4,7 @@
 #
 #   release_macos.sh [--version VERSION] [--executable FILE] [--jobs N]
 #                    [--zip] [--no-dmg] BUILD_DIR
+#   release_macos.sh --prepare-deps [--jobs N]
 #
 # BUILD_DIR is a build of this checkout configured with -DMHP3RD_RELEASE=ON
 # whose Yakumo and overlay libraries are built (bin/Yakumo, bin/overlays,
@@ -21,9 +22,10 @@
 # data or a path of this machine, and prints their SHA-256 checksums. Everything lands in
 # out/release-macos; the artifacts in out/release-macos/dist.
 #
-# Needs Xcode or the Command Line Tools with the SDK of the deployment target
-# (e.g. MacOSX13.1.sdk in /Library/Developer/CommandLineTools/SDKs), CMake,
-# Ninja and curl.
+# Needs Xcode or the Command Line Tools, CMake, Ninja and curl. Retargeting a
+# binary built for a newer system additionally requires the deployment target's
+# SDK (e.g. MacOSX13.1.sdk in /Library/Developer/CommandLineTools/SDKs). Binaries
+# compiled for the deployment target do not need a second, older SDK.
 #
 #   --version VERSION  name the artifacts after VERSION instead of git describe
 #   --executable FILE  package FILE, a Yakumo built with -DMHP3RD_RELEASE=ON,
@@ -32,6 +34,8 @@
 #   --jobs N           parallel compile jobs for SDL3 and the loader (default 4)
 #   --zip              also pack Yakumo.app as a zip archive
 #   --no-dmg           do not build the disk image
+#   --prepare-deps     build/fetch the pinned dependencies only, before building
+#                      Yakumo; reuse the same YAKUMO_WORK when packaging it
 set -euo pipefail
 # Byte-wise text tools: the checks read binary files.
 export LC_ALL=C
@@ -55,6 +59,7 @@ executable=""
 jobs=4
 make_dmg=1
 make_zip=0
+prepare_deps=0
 build_dir=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -63,14 +68,22 @@ while [[ $# -gt 0 ]]; do
         --jobs) jobs="${2:?--jobs needs a value}"; shift 2 ;;
         --no-dmg) make_dmg=0; shift ;;
         --zip) make_zip=1; shift ;;
+        --prepare-deps) prepare_deps=1; shift ;;
         -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
         -*) echo "unknown option $1" >&2; exit 2 ;;
         *) [[ -z "$build_dir" ]] || { echo "only one build directory" >&2; exit 2; }; build_dir="$1"; shift ;;
     esac
 done
-[[ -n "$build_dir" ]] || { echo "usage: $0 [options] BUILD_DIR (see --help)" >&2; exit 2; }
-build_dir="$(cd "$build_dir" && pwd)"
-[[ -n "$executable" ]] || executable="$build_dir/bin/Yakumo"
+if [[ $prepare_deps -eq 1 ]]; then
+    [[ -z "$build_dir" && -z "$executable" && $make_dmg -eq 1 && $make_zip -eq 0 ]] || {
+        echo "--prepare-deps accepts only --jobs and --version" >&2; exit 2;
+    }
+else
+    [[ -n "$build_dir" ]] || { echo "usage: $0 [options] BUILD_DIR (see --help)" >&2; exit 2; }
+    build_dir="$(cd "$build_dir" && pwd)"
+    [[ -n "$executable" ]] || executable="$build_dir/bin/Yakumo"
+fi
+[[ "$jobs" =~ ^[1-9][0-9]*$ ]] || { echo "--jobs must be a positive integer" >&2; exit 2; }
 if [[ -z "$version" ]]; then
     version="$(git -C "$repo_dir" describe --tags --always --dirty)"
     version="${version#v}"
@@ -189,6 +202,24 @@ check_system_imports() {
     echo "all $(cut -d' ' -f1 "$imports" | sort -u | wc -l | tr -d ' ') system imports exist in $(basename "$sdk")"
 }
 
+# Resolve the SDK only when a binary actually needs its deployment target
+# lowered. Building with the target's availability flags needs no obsolete SDK.
+retarget_sdk() {
+    local sdk_dir="${YAKUMO_CHECK_SDK:-}" candidate sdk_version
+    if [[ -z "$sdk_dir" ]]; then
+        for candidate in /Library/Developer/CommandLineTools/SDKs/MacOSX"${target%%.*}".*.sdk \
+                         "$(xcode-select -p)"/Platforms/MacOSX.platform/Developer/SDKs/MacOSX"${target%%.*}".*.sdk; do
+            [[ -d "$candidate" ]] && sdk_dir="$candidate"
+        done
+    fi
+    [[ -d "$sdk_dir" ]] ||
+        fail "retargeting requires the macOS ${target%%.*} SDK; install one or set YAKUMO_CHECK_SDK"
+    sdk_version="$(xcrun --sdk "$sdk_dir" --show-sdk-version)"
+    [[ "${sdk_version%%.*}" == "${target%%.*}" ]] ||
+        fail "retargeting requires the macOS ${target%%.*} SDK, not $sdk_version"
+    printf '%s\n' "$sdk_dir"
+}
+
 # ---------------------------------------------------------------------------
 step "Yakumo $version for macOS (arm64, macOS $target or newer)"
 if [[ -n "$(git -C "$repo_dir" status --porcelain --untracked-files=no)" ]]; then
@@ -196,33 +227,25 @@ if [[ -n "$(git -C "$repo_dir" status --porcelain --untracked-files=no)" ]]; the
 fi
 [[ "$(uname -s)" == Darwin ]] || fail "run this on macOS"
 
-[[ -x "$executable" ]] || fail "no Yakumo at $executable"
-lipo -archs "$executable" | grep -qx arm64 || fail "$executable is not an arm64 executable"
-# A developer build falls back to its checkout's game directory; a release
-# must not depend on the machine it was built on.
-if strings -a "$executable" | grep -q '/profiles/mhp3rd/game$'; then
-    fail "$executable is a developer build; configure with -DMHP3RD_RELEASE=ON, build Yakumo and pass it with --executable"
-fi
-overlay_count="$(find "$build_dir/bin/overlays" -name '*.dylib' | wc -l | tr -d ' ')"
-[[ "$overlay_count" -eq 355 ]] || fail "expected 355 overlay libraries in $build_dir/bin/overlays, found $overlay_count"
-for file in "libavcodec.61.dylib" "libavutil.59.dylib" "FFmpeg-COPYING.LGPLv2.1.txt" "FFmpeg-SOURCE.txt"; do
-    [[ -e "$build_dir/bin/lib/$file" ]] || fail "$build_dir/bin/lib/$file is missing; configure with -DMHP3RD_FFMPEG=bundled"
-done
-grep -qF -- "$FFMPEG_FLAGS" "$build_dir/bin/lib/FFmpeg-SOURCE.txt" ||
-    fail "the build's FFmpeg was not configured as cmake/FFmpeg.cmake pins it"
-# Overlays newer than the executable may have been linked against another one.
-newer="$(find "$build_dir/bin/overlays" -name '*.dylib' -newer "$executable" | head -1)"
-[[ -z "$newer" ]] || echo "note: overlays such as $(basename "$newer") are newer than the executable"
-
-sdk_dir="${YAKUMO_CHECK_SDK:-}"
-if [[ -z "$sdk_dir" ]]; then
-    for candidate in /Library/Developer/CommandLineTools/SDKs/MacOSX"${target%%.*}".*.sdk \
-                     "$(xcode-select -p)"/Platforms/MacOSX.platform/Developer/SDKs/MacOSX"${target%%.*}".*.sdk; do
-        [[ -d "$candidate" ]] && sdk_dir="$candidate"
+if [[ $prepare_deps -eq 0 ]]; then
+    [[ -x "$executable" ]] || fail "no Yakumo at $executable"
+    lipo -archs "$executable" | grep -qx arm64 || fail "$executable is not an arm64 executable"
+    # A developer build falls back to its checkout's game directory; a release
+    # must not depend on the machine it was built on.
+    if strings -a "$executable" | grep -q '/profiles/mhp3rd/game$'; then
+        fail "$executable is a developer build; configure with -DMHP3RD_RELEASE=ON, build Yakumo and pass it with --executable"
+    fi
+    overlay_count="$(find "$build_dir/bin/overlays" -name '*.dylib' | wc -l | tr -d ' ')"
+    [[ "$overlay_count" -eq 355 ]] || fail "expected 355 overlay libraries in $build_dir/bin/overlays, found $overlay_count"
+    for file in "libavcodec.61.dylib" "libavutil.59.dylib" "FFmpeg-COPYING.LGPLv2.1.txt" "FFmpeg-SOURCE.txt"; do
+        [[ -e "$build_dir/bin/lib/$file" ]] || fail "$build_dir/bin/lib/$file is missing; configure with -DMHP3RD_FFMPEG=bundled"
     done
+    grep -qF -- "$FFMPEG_FLAGS" "$build_dir/bin/lib/FFmpeg-SOURCE.txt" ||
+        fail "the build's FFmpeg was not configured as cmake/FFmpeg.cmake pins it"
+    # Overlays newer than the executable may have been linked against another one.
+    newer="$(find "$build_dir/bin/overlays" -name '*.dylib' -newer "$executable" | head -1)"
+    [[ -z "$newer" ]] || echo "note: overlays such as $(basename "$newer") are newer than the executable"
 fi
-[[ -d "$sdk_dir" ]] ||
-    fail "no macOS ${target%%.*} SDK to check the imports against; install one or set YAKUMO_CHECK_SDK"
 
 mkdir -p "$sources" "$deps" "$deps_build"
 
@@ -239,8 +262,15 @@ fetch "ffmpeg-$FFMPEG_VERSION.tar.xz" "$FFMPEG_URL" "$FFMPEG_SHA256"
 cmake_common=(-G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$deps" -DCMAKE_INSTALL_LIBDIR=lib
               -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET="$target"
               -DCMAKE_INSTALL_NAME_DIR=@rpath)
+# Hosted nightly dependencies must not retain paths to their private workspace.
+# Keep ordinary release dependency settings/stamps unchanged.
+prefix_maps=""
+if [[ "${YAKUMO_PRIVATE_PATH_MAPS:-0}" == 1 ]]; then
+    prefix_maps="-ffile-prefix-map=$repo_dir=/yakumo/source -ffile-prefix-map=$work=/yakumo/work"
+    cmake_common+=("-DCMAKE_C_FLAGS=$prefix_maps" "-DCMAKE_CXX_FLAGS=$prefix_maps")
+fi
 
-sdl_stamp="$SDL3_VERSION $SDL3_SHA256 $target"
+sdl_stamp="$SDL3_VERSION $SDL3_SHA256 $target${prefix_maps:+ private-path-maps}"
 if ! stamp_matches sdl3 "$sdl_stamp"; then
     step "Building SDL3 $SDL3_VERSION"
     rm -rf "$deps_build/SDL3-$SDL3_VERSION" "$deps_build/sdl3-build"
@@ -252,7 +282,7 @@ if ! stamp_matches sdl3 "$sdl_stamp"; then
     echo "$sdl_stamp" > "$deps/.sdl3.stamp"
 fi
 
-loader_stamp="$VULKAN_SDK_TAG $VULKAN_LOADER_SHA256 $VULKAN_HEADERS_SHA256 $target sysconfdir=/etc"
+loader_stamp="$VULKAN_SDK_TAG $VULKAN_LOADER_SHA256 $VULKAN_HEADERS_SHA256 $target sysconfdir=/etc${prefix_maps:+ private-path-maps}"
 if ! stamp_matches vulkan-loader "$loader_stamp"; then
     step "Building the Vulkan loader ($VULKAN_SDK_TAG)"
     rm -rf "$deps_build/Vulkan-Headers-$VULKAN_SDK_TAG" "$deps_build/Vulkan-Loader-$VULKAN_SDK_TAG" \
@@ -281,6 +311,11 @@ if ! stamp_matches moltenvk "$moltenvk_stamp"; then
     lipo "$dylib" -thin arm64 -output "$deps/lib/libMoltenVK.dylib" 2>/dev/null || cp "$dylib" "$deps/lib/libMoltenVK.dylib"
     cp "$(find "$deps_build/moltenvk" -name LICENSE | head -1)" "$deps/MoltenVK-LICENSE.txt"
     echo "$moltenvk_stamp" > "$deps/.moltenvk.stamp"
+fi
+
+if [[ $prepare_deps -eq 1 ]]; then
+    echo "Pinned macOS dependencies are ready in YAKUMO_WORK."
+    exit 0
 fi
 
 # ---------------------------------------------------------------------------
@@ -373,12 +408,18 @@ retarget=()
 while IFS= read -r file; do
     machos+=("$file")
     lipo -archs "$file" | grep -qx arm64 || fail "$file is not arm64"
-    newer_than_target "$(minos_of "$file")" && retarget+=("$file")
+    minimum="$(minos_of "$file")"
+    [[ -n "$minimum" ]] || fail "$file has no macOS deployment target"
+    newer_than_target "$minimum" && retarget+=("$file")
 done < <(macho_files "$app")
 # What the build made on this Mac (the executable, the overlays, FFmpeg) is
 # marked for this Mac's macOS. SDL3, the loader and MoltenVK are built for the
 # target already.
 if [[ ${#retarget[@]} -gt 0 ]]; then
+    # A new build compiled with -mmacosx-version-min needs no retargeting or
+    # obsolete SDK. Older locally built binaries retain the stricter import
+    # check before their deployment target can be lowered.
+    sdk_dir="$(retarget_sdk)"
     check_system_imports "$sdk_dir" "${retarget[@]}"
     for file in "${retarget[@]}"; do
         sdk="$(otool -l "$file" | awk '$1 == "sdk" { print $2; exit }')"

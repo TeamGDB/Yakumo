@@ -1,0 +1,19 @@
+Yakumo v@VERSION@ for Windows x86-64
+
+1. Extract the entire folder.
+2. Run Yakumo.exe.
+3. On first start, choose the disc image from your own legally obtained copy of
+   Monster Hunter Portable 3rd HD Ver.
+
+This is the portable version: because of portable.txt, Yakumo keeps its
+settings, saves and game data in the data folder next to Yakumo.exe, and
+nothing in %APPDATA%. Keep the folder somewhere you can write to (not in
+Program Files); a USB drive works. Saves are under data\ms0\PSP\SAVEDATA.
+If Yakumo is already set up on this computer, the first start offers to copy
+that data here; the original stays where it is.
+Delete portable.txt and move the data folder away to use %APPDATA% instead.
+Press Esc, or L3+R3 on a gamepad, to open the Yakumo menu.
+
+A Vulkan-capable graphics driver is required. SDL3, FFmpeg and the Microsoft
+Visual C++ runtime DLLs are included.
+This archive contains no game assets, disc image, executable from the game or saves.

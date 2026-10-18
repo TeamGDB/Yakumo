@@ -27,6 +27,8 @@
 #   --version VERSION  name the artifacts after VERSION instead of git describe
 #   --no-portable      do not pack the portable zip
 #   --no-installed     do not pack the normal zip
+# YAKUMO_PRIVATE_INPUTS optionally substitutes a verified nightly overlay cache
+# for local overlay corpora. Every packaged DLL must match that cache exactly.
 set -euo pipefail
 export LC_ALL=C
 
@@ -57,6 +59,7 @@ if [[ -z "$version" ]]; then
     version="$(git -C "$repo_dir" describe --tags --always --dirty)"
     version="${version#v}"
 fi
+[[ "$version" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]] || { echo 'error: invalid release version' >&2; exit 2; }
 name="yakumo-$version-windows-x86_64"
 
 step() { printf '\n=== %s\n' "$*"; }
@@ -76,9 +79,18 @@ step "Checking the build in $build_dir"
 [[ "$(cache_value MHP3RD_RELEASE)" == ON ]] || fail "$build_dir is not configured with -DMHP3RD_RELEASE=ON"
 bin="$build_dir/bin"
 [[ -f "$bin/Yakumo.exe" ]] || fail "$bin/Yakumo.exe is missing: build the Yakumo target"
-expected_overlays=$(find "$profile_dir/overlays" -mindepth 2 -maxdepth 2 -name meta.txt 2> /dev/null | wc -l)
+if [[ -n "${YAKUMO_PRIVATE_INPUTS:-}" ]]; then
+    prebuilt="$(cygpath -u "$YAKUMO_PRIVATE_INPUTS")"
+    python3 "$repo_dir/scripts/ci/nightly.py" verify-overlays --platform windows-x86_64 --inputs "$prebuilt"
+    expected_overlays=355
+    for overlay in "$prebuilt/overlays/"*.dll; do
+        cmp -s "$overlay" "$bin/overlays/$(basename "$overlay")" || fail "a built overlay differs from the verified cache"
+    done
+else
+    expected_overlays=$(find "$profile_dir/overlays" -mindepth 2 -maxdepth 2 -name meta.txt 2> /dev/null | wc -l)
+    (( expected_overlays > 0 )) || fail "no overlay corpora in $profile_dir/overlays"
+fi
 built_overlays=$(find "$bin/overlays" -maxdepth 1 -name 'ovl*.dll' 2> /dev/null | wc -l)
-(( expected_overlays > 0 )) || fail "no overlay corpora in $profile_dir/overlays"
 (( built_overlays == expected_overlays )) ||
     fail "$built_overlays overlay DLLs in $bin/overlays, but $expected_overlays corpora: build them all first"
 [[ ! "$bin/Yakumo.exe" -ot "$(ls -t "$bin"/overlays/ovl*.dll | tail -1)" ]] ||
@@ -139,14 +151,16 @@ packaged[yakumo.exe]=1
 system32="$(cygpath -u "${SYSTEMROOT:-C:\\Windows}")/System32"
 missing=0
 while IFS= read -r -d '' binary; do
+    dumpbin -nologo -dependents "$(cygpath -w "$binary")" > "$work/imports.txt" || fail "DLL import inspection failed"
     while IFS= read -r import; do
         key="$(lower "$import")"
         [[ -n "${packaged[$key]:-}" ]] && continue
         [[ "$key" == api-ms-win-* || "$key" == ext-ms-* ]] && continue
+        [[ "$key" == vulkan-1.dll ]] && continue # Supplied by the player's Vulkan graphics driver.
         [[ -f "$system32/$import" ]] && continue
         echo "  $(basename "$binary") imports $import, which is neither packaged nor in System32" >&2
         missing=1
-    done < <(dumpbin -nologo -dependents "$(cygpath -w "$binary")" | tr -d '\r' |
+    done < <(tr -d '\r' < "$work/imports.txt" |
                  sed -n 's/^ *\([A-Za-z0-9_.+-]*\.[Dd][Ll][Ll]\)$/\1/p')
 done < <(find "$root" -type f \( -name '*.exe' -o -name '*.dll' \) -print0)
 (( missing == 0 )) || fail "unresolved imports"
@@ -183,6 +197,11 @@ check_tree() {
 
 write_readme() {
     local file="$1" portable="$2"
+    if [[ "$portable" == 1 ]]; then
+        tr -d '\r' < "$profile_dir/packaging/windows/README-portable.txt.in" |
+            sed "s/@VERSION@/$version/g; s/\$/\\r/" > "$file"
+        return
+    fi
     {
         echo "Yakumo v$version for Windows x86-64"
         echo
@@ -191,20 +210,10 @@ write_readme() {
         echo "3. On first start, choose the disc image from your own legally obtained copy of"
         echo "   Monster Hunter Portable 3rd HD Ver."
         echo
-        if [[ "$portable" == 1 ]]; then
-            echo "This is the portable version: because of portable.txt, Yakumo keeps its"
-            echo "settings, saves and game data in the data folder next to Yakumo.exe, and"
-            echo "nothing in %APPDATA%. Keep the folder somewhere you can write to (not in"
-            echo "Program Files); a USB drive works. Saves are under data\\ms0\\PSP\\SAVEDATA."
-            echo "If Yakumo is already set up on this computer, the first start offers to copy"
-            echo "that data here; the original stays where it is."
-            echo "Delete portable.txt and move the data folder away to use %APPDATA% instead."
-        else
-            echo "Yakumo stores settings and game data in %APPDATA%\\Yakumo\\MHP3rd."
-            echo "Saves are under ms0\\PSP\\SAVEDATA in that directory."
-            echo "For a portable copy that keeps everything next to Yakumo.exe, use the"
-            echo "-portable zip, or create an empty file named portable.txt here."
-        fi
+        echo "Yakumo stores settings and game data in %APPDATA%\\Yakumo\\MHP3rd."
+        echo "Saves are under ms0\\PSP\\SAVEDATA in that directory."
+        echo "For a portable copy that keeps everything next to Yakumo.exe, use the"
+        echo "-portable zip, or create an empty file named portable.txt here."
         echo "Press Esc, or L3+R3 on a gamepad, to open the Yakumo menu."
         echo
         echo "A Vulkan-capable graphics driver is required. SDL3, FFmpeg and the Microsoft"

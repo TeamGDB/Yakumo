@@ -2,7 +2,9 @@
 
 A release gives players the program ready to run: the executable with the recompiled game code built in and the 355 overlay libraries. Like the repository, it does not include any game assets or original game files: no disc image, no copy of the game's executable or data, and no textures, models, audio or video from the game. On first start it asks for the files from the player's own legally obtained copy, the disc image, checks it, accepts only the original release, and prepares the game from it (see [Installer](../profiles/mhp3rd/README.md#installer)).
 
-Releases are built by maintainers, not by CI: the recompiled code is generated from the game's executable, so a build needs a copy of the game. The game data stays on the maintainer's machine. Every artifact is checked for it before it is published.
+Stable release preparation is maintainer-controlled: the recompiled code is generated from the game's executable, so a build needs a private copy of the game. The optional [trusted nightly pipeline](NIGHTLY_BUILDS.md) retrieves approved inputs from private R2; game inputs, generated source, caches and raw diagnostics never become public CI outputs. Every package is checked before publication. Nightlies are distributed separately in [Yakumo-nightly](https://github.com/TeamGDB/Yakumo-nightly/releases); stable releases remain here and require maintainer approval.
+
+The manual nightly workflow covers Linux portable tarballs, Windows portable ZIPs, macOS ARM64 ZIPs and Android ARM64 APKs. Android uses the production application ID and signing key, so a nightly updates the ordinary Yakumo installation. Public pull-request probes exercise the build/packaging paths with tiny synthetic inputs and never execute or publish their applications. They do not establish original-game build success or gameplay compatibility; the first trusted build-only run and device audit are required before nightly publication. Flatpak, DMG and stable-release automation are not part of this workflow.
 
 ## Stable releases and test builds
 
@@ -174,7 +176,7 @@ The app is signed **ad hoc**: no Apple Developer ID, no notarization. Gatekeeper
 1. Checks the build directory: an arm64 `Yakumo` built with `-DMHP3RD_RELEASE=ON` (a developer build, which names its checkout's game directory, is refused), 355 overlay libraries in `bin/overlays`, and the bundled LGPL FFmpeg in `bin/lib` configured as `cmake/FFmpeg.cmake` pins it. Nothing in the build directory is rebuilt or changed.
 2. Fetches the pinned sources in `packaging/macos/sources.sh` (which takes SDL3 and the font from `packaging/linux/sources.sh`) and builds SDL3 and the Vulkan loader for arm64 and the deployment target, macOS 13. MoltenVK is the Khronos release build, thinned to arm64.
 3. Assembles `Yakumo.app`, points every library reference at `@rpath` with the single rpath `@executable_path/../Frameworks`, and strips local symbols (the symbols the executable exports to the overlays stay).
-4. Checks that every symbol the binaries import from the C and C++ runtime exists in the macOS 13 SDK, then marks the binaries that were built for a newer macOS (the build machine's) for macOS 13 with `vtool`. This is what lets a build made on the newest macOS run on older ones without recompiling the game code.
+4. If an existing binary was built for a newer macOS, requires a matching macOS 13 SDK, checks its imported system symbols against that SDK, then lowers its deployment target with `vtool`. A new binary compiled explicitly for macOS 13 already uses the compiler's availability checks and needs no older SDK or retargeting. Missing deployment metadata or a missing/wrong SDK when retargeting is required stops packaging.
 5. Signs every library, then the app, ad hoc, and checks the signature (`codesign --verify --deep --strict`), that no library reference or rpath leads outside the bundle, that no binary needs a newer macOS, and that no file in the app names the home directory, the user name, the checkout or the build directory.
 6. Packs the disk image (APFS, LZMA-compressed) and, with `--zip`, the zip, opens them again, checks their signatures and refuses them if any file looks like game data, as the Linux script does.
 7. Prints the checksums.
@@ -182,7 +184,7 @@ The app is signed **ad hoc**: no Apple Developer ID, no notarization. Gatekeeper
 ### Requirements
 
 - A Mac with Apple Silicon, Xcode or the Command Line Tools, CMake, Ninja and curl.
-- The macOS 13 SDK for the import check: the Command Line Tools keep older SDKs in `/Library/Developer/CommandLineTools/SDKs` (for example `MacOSX13.1.sdk`); `YAKUMO_CHECK_SDK=/path/to/MacOSX13.x.sdk` points at another one.
+- If any finished binary targets a newer system and needs retargeting: a macOS 13 SDK for the import check. Existing Command Line Tools installations may retain one in `/Library/Developer/CommandLineTools/SDKs` (for example `MacOSX13.1.sdk`); `YAKUMO_CHECK_SDK=/path/to/MacOSX13.x.sdk` selects another matching SDK. Builds compiled for macOS 13 with a maintained current SDK do not require an obsolete SDK. Do not download unofficial SDK archives or bypass the import check to retarget a newer binary.
 - A finished release build. From a checkout with the game data, as in the [build instructions](../profiles/mhp3rd/README.md):
 
   ```bash
@@ -244,7 +246,9 @@ As for Linux: attach every file from `out/release-macos/dist/` except `BUILDINFO
 
 ### Updating a bundled component
 
-SDL3 and the font are pinned in `packaging/linux/sources.sh` for both systems; the Vulkan loader, MoltenVK and the deployment target in `packaging/macos/sources.sh`. Update the matching entry in `THIRD_PARTY_NOTICES.md` as well; the script refuses to pack when they disagree. Raising the deployment target needs that release's SDK for the import check.
+SDL3 and the font are pinned in `packaging/linux/sources.sh` for both systems; the Vulkan loader, MoltenVK and the deployment target in `packaging/macos/sources.sh`. The same file pins the nightly build's glslang tool, which is not bundled. Update the matching bundled-component entry in `THIRD_PARTY_NOTICES.md` as well; the script refuses to pack when they disagree. Any binary that needs retargeting requires the new target's SDK for its import check.
+
+For a fresh build, `profiles/mhp3rd/scripts/release_macos.sh --prepare-deps --jobs 2` builds/fetches the same pinned packaging dependencies before compiling Yakumo. Reuse the same `YAKUMO_WORK` when packaging the finished build. `scripts/ci/nightly_macos.sh` performs this bootstrap, compiles the host and main AOT corpus for macOS 13, and copies verified cached overlays; it does not rebuild them. The ordinary finished-build packaging path remains available.
 
 ## Windows
 

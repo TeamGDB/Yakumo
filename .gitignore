@@ -1,5 +1,6 @@
 # Build output
 /out/
+/.cloudflare/
 /build/
 CMakeUserPresets.json
 

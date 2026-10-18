@@ -1,0 +1,1141 @@
+name: Nightly builds
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the four validated packages as a new Yakumo-nightly pre-release
+        type: boolean
+        default: false
+        required: true
+  pull_request:
+    paths:
+      - '.github/workflows/nightly.yml'
+      - 'scripts/ci/nightly*'
+      - 'scripts/ci/test_nightly*'
+      - 'requirements/nightly.txt'
+      - 'profiles/mhp3rd/packaging/**'
+      - 'profiles/mhp3rd/scripts/release_*'
+      - 'profiles/mhp3rd/CMakeLists.txt'
+      - 'CMakeLists.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  probe:
+    name: Public packaging probe (${{ matrix.platform }})
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-24.04
+          - platform: windows-x86_64
+            runner: windows-2022
+          - platform: macos-arm64
+            runner: macos-15
+          - platform: android-arm64
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
+    # No protected environment, original game files or production secrets.
+    steps:
+      - name: Checkout the immutable workflow commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Set up Android Java
+        if: matrix.platform == 'android-arm64'
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Prepare fresh isolated directories
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          private = Path(os.environ['RUNNER_TEMP']) / 'yakumo-private-nightly'
+          public = Path(os.environ['RUNNER_TEMP']) / 'yakumo-public-nightly'
+          assert not private.exists() and not private.is_symlink()
+          assert not public.exists() and not public.is_symlink()
+          private.mkdir(mode=0o700)
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as stream:
+              stream.write('PRIVATE_ROOT=' + private.as_posix() + '\n')
+              stream.write('PUBLIC_ROOT=' + public.as_posix() + '\n')
+      - name: Install the checksum-pinned input SDK
+        run: |
+          python -m pip install --disable-pip-version-check --only-binary=:all: --require-hashes -r requirements/nightly.txt
+      - name: Prepare the pinned Linux SDK before any private download
+        if: matrix.platform == 'linux-x86_64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          source profiles/mhp3rd/packaging/linux/sources.sh
+          docker pull "$SDK_IMAGE"
+          available=$(df -Pk "$RUNNER_TEMP" | awk 'NR==2 {print $4}')
+          test "$available" -ge 26214400
+      - name: Install the pinned Android toolchain
+        if: matrix.platform == 'android-arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            'ndk;28.2.13676358' 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Require a native ARM64 Mac
+        if: matrix.platform == 'macos-arm64'
+        shell: bash
+        run: test "$(uname -m)" = arm64
+      - name: Build and inspect using only synthetic public inputs
+        env:
+          NIGHTLY_PLATFORM: ${{ matrix.platform }}
+        shell: bash
+        run: |
+          python scripts/ci/nightly.py build-platform --probe \
+            --platform "$NIGHTLY_PLATFORM" --inputs "$PRIVATE_ROOT/inputs" \
+            --work "$PRIVATE_ROOT/work" --output "$PUBLIC_ROOT" --source-sha "$GITHUB_SHA"
+      - name: Upload only public synthetic probe diagnostics on failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: public-packaging-probe-${{ github.run_id }}-${{ matrix.platform }}
+          path: ${{ env.PRIVATE_ROOT }}/*.log
+          if-no-files-found: ignore
+          retention-days: 1
+          overwrite: true
+      - name: Remove ephemeral inputs, sources and private diagnostics
+        if: always()
+        shell: python
+        run: |
+          import os, shutil
+          from pathlib import Path
+          shutil.rmtree(Path(os.environ['RUNNER_TEMP']) / 'yakumo-private-nightly', ignore_errors=True)
+          for name in ['generated', 'analysis']:
+              shutil.rmtree(Path('profiles/mhp3rd') / name, ignore_errors=True)
+          for name in ['EBOOT.ELF', 'disc.iso']:
+              (Path('profiles/mhp3rd/game') / name).unlink(missing_ok=True)
+
+  build:
+    name: Private build and inspection (${{ matrix.platform }})
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'TeamGDB/Yakumo' && github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-24.04
+          - platform: windows-x86_64
+            runner: windows-2022
+          - platform: macos-arm64
+            runner: macos-15
+          - platform: android-arm64
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 300
+    environment: nightly-build-inputs
+    steps:
+      - name: Checkout the immutable workflow commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Set up Android Java
+        if: matrix.platform == 'android-arm64'
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Prepare fresh isolated directories
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          private = Path(os.environ['RUNNER_TEMP']) / 'yakumo-private-nightly'
+          public = Path(os.environ['RUNNER_TEMP']) / 'yakumo-public-nightly'
+          assert not private.exists() and not private.is_symlink()
+          assert not public.exists() and not public.is_symlink()
+          private.mkdir(mode=0o700)
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as stream:
+              stream.write('PRIVATE_ROOT=' + private.as_posix() + '\n')
+              stream.write('PUBLIC_ROOT=' + public.as_posix() + '\n')
+      - name: Install the checksum-pinned input SDK
+        run: |
+          python -m pip install --disable-pip-version-check --only-binary=:all: --require-hashes -r requirements/nightly.txt
+      - name: Prepare the pinned Linux SDK before any private download
+        if: matrix.platform == 'linux-x86_64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          source profiles/mhp3rd/packaging/linux/sources.sh
+          docker pull "$SDK_IMAGE"
+          available=$(df -Pk "$RUNNER_TEMP" | awk 'NR==2 {print $4}')
+          test "$available" -ge 26214400
+      - name: Install the pinned Android toolchain
+        if: matrix.platform == 'android-arm64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            'ndk;28.2.13676358' 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Require a native ARM64 Mac
+        if: matrix.platform == 'macos-arm64'
+        shell: bash
+        run: test "$(uname -m)" = arm64
+      - name: Retrieve and verify approved private inputs
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          NIGHTLY_PLATFORM: ${{ matrix.platform }}
+        shell: bash
+        run: |
+          python scripts/ci/nightly.py fetch-inputs --platform "$NIGHTLY_PLATFORM" --output "$PRIVATE_ROOT/inputs"
+      - name: Build with private logs and inspect the actual package
+        env:
+          NIGHTLY_PLATFORM: ${{ matrix.platform }}
+        shell: bash
+        run: |
+          python scripts/ci/nightly.py build-platform \
+            --platform "$NIGHTLY_PLATFORM" --inputs "$PRIVATE_ROOT/inputs" \
+            --work "$PRIVATE_ROOT/work" --output "$PUBLIC_ROOT" --source-sha "$GITHUB_SHA"
+      - name: Upload only the inspected publication directory
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nightly-${{ matrix.platform == 'android-arm64' && 'unsigned' || 'final' }}-${{ github.run_id }}-${{ matrix.platform }}
+          path: ${{ env.PUBLIC_ROOT }}/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+          overwrite: true
+      - name: Remove ephemeral inputs, sources and private diagnostics
+        if: always()
+        shell: python
+        run: |
+          import os, shutil
+          from pathlib import Path
+          shutil.rmtree(Path(os.environ['RUNNER_TEMP']) / 'yakumo-private-nightly', ignore_errors=True)
+          for name in ['generated', 'analysis']:
+              shutil.rmtree(Path('profiles/mhp3rd') / name, ignore_errors=True)
+          for name in ['EBOOT.ELF', 'disc.iso']:
+              (Path('profiles/mhp3rd/game') / name).unlink(missing_ok=True)
+
+  sign:
+    name: Sign the inspected Android APK
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'TeamGDB/Yakumo' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: nightly-android-signing
+    # No checkout, project execution or private-storage credentials.
+    steps:
+      - name: Prepare isolated signing paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in nightly-android-sign-input nightly-android-sign-private nightly-android-sign-public; do
+            test ! -e "$RUNNER_TEMP/$name"
+          done
+          printf 'SIGN_INPUT=%s\nSIGN_PRIVATE=%s\nSIGNED_ROOT=%s\n' \
+            "$RUNNER_TEMP/nightly-android-sign-input" "$RUNNER_TEMP/nightly-android-sign-private" \
+            "$RUNNER_TEMP/nightly-android-sign-public" >> "$GITHUB_ENV"
+      - name: Download the exact unsigned Android artifact from this run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: nightly-unsigned-${{ github.run_id }}-android-arm64
+          path: ${{ env.SIGN_INPUT }}
+      - name: Set up Java for the pinned official Android signer
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install the pinned official Android signer before exposing signing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'build-tools;35.0.0'
+          test -x "$ANDROID_HOME/build-tools/35.0.0/apksigner"
+      - name: Verify the unsigned Android transfer
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          # nightly-transfer:verify-unsigned
+          import hashlib
+
+          import json
+
+          import os
+
+          from pathlib import Path
+
+          import re
+
+          import stat
+
+          import struct
+
+          import zipfile
+
+          CERTIFICATE = '1ca2f27cfbcd9ea7d875a8ca002f57866037b19f43aaf449ce87739aee868570'
+
+          SOURCE_PINS = {
+              'ffmpeg-7.1.5.tar.xz': 'de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f',
+              'ffmpeg-7d0e8420048cffd0ca3883b877ead2390496d0b2.tar.gz': '2caafb2bbfb69c0518470651640e71ac7f5fb3117d188bf6ea2d909307a02b1d',
+          }
+
+          PLATFORMS = ('linux-x86_64', 'macos-arm64', 'windows-x86_64', 'android-arm64')
+
+          MAX_FILE = 2 * 1024 ** 3
+
+          def require(condition):
+              if not condition:
+                  raise ValueError('Transferred artifact failed validation.')
+
+          def checksum(path, start=0, end=None):
+              result = hashlib.sha256()
+              with Path(path).open('rb') as stream:
+                  stream.seek(start)
+                  remaining = Path(path).stat().st_size - start if end is None else end - start
+                  require(remaining >= 0)
+                  while remaining:
+                      data = stream.read(min(1024 * 1024, remaining))
+                      require(bool(data))
+                      result.update(data)
+                      remaining -= len(data)
+              return result.hexdigest()
+
+          def package_name(platform, source):
+              require(platform in PLATFORMS and re.fullmatch('[0-9a-f]{40}', source))
+              suffix = {'linux-x86_64': '.tar.gz', 'macos-arm64': '.zip',
+                        'windows-x86_64': '-portable.zip', 'android-arm64': '.apk'}[platform]
+              return 'yakumo-nightly-' + source[:12] + '-' + platform + suffix
+
+          def notes(platform, source):
+              return ('> **Experimental nightly build, not a stable release. Back up your saves and settings.**\n\n'
+                      'For regular play use https://github.com/TeamGDB/Yakumo/releases/latest.\n\n'
+                      'Source: https://github.com/TeamGDB/Yakumo/commit/' + source + '\n\n'
+                      'Platform: ' + platform + '.\n\n'
+                      'Packaging and privacy checks passed. Full device/gameplay testing is not claimed. '
+                      'Use SHA256SUMS to verify downloads. No game files are included.\n')
+
+          def unique_object(pairs):
+              result = {}
+              for key, value in pairs:
+                  require(key not in result)
+                  result[key] = value
+              return result
+
+          def validate_bundle(root, platform, source, signing):
+              require(platform in PLATFORMS and re.fullmatch('[0-9a-f]{40}', source))
+              root = Path(root)
+              require(root.is_dir() and not root.is_symlink())
+              paths = list(root.iterdir())
+              require(len(paths) == 5 and all(p.is_file() and not p.is_symlink() for p in paths))
+              for name in ('build.json', 'SHA256SUMS', 'release-notes.md'):
+                  require(0 < (root / name).stat().st_size < 16384)
+              record = json.loads((root / 'build.json').read_text(), object_pairs_hook=unique_object)
+              expected_keys = {'schema', 'source', 'platform', 'files', 'android_signing'}
+              if signing == 'verified':
+                  expected_keys.add('certificate_sha256')
+              require(set(record) == expected_keys and type(record['schema']) is int and record['schema'] == 1)
+              require(record['source'] == source and record['platform'] == platform and record['android_signing'] == signing)
+              if signing == 'verified':
+                  require(platform == 'android-arm64' and record['certificate_sha256'] == CERTIFICATE)
+              elif platform == 'android-arm64':
+                  require(signing == 'required')
+              else:
+                  require(signing == 'not-applicable')
+              source_name = 'ffmpeg-7d0e8420048cffd0ca3883b877ead2390496d0b2.tar.gz' if platform == 'windows-x86_64' else 'ffmpeg-7.1.5.tar.xz'
+              expected = [package_name(platform, source), source_name]
+              require(type(record['files']) is list and len(record['files']) == 2)
+              require({p.name for p in paths} == {*expected, 'build.json', 'SHA256SUMS', 'release-notes.md'})
+              sums = ''
+              for entry, name in zip(record['files'], expected):
+                  require(type(entry) is dict and set(entry) == {'name', 'size', 'sha256'})
+                  require(entry['name'] == name and type(entry['size']) is int and 0 < entry['size'] <= MAX_FILE)
+                  require(type(entry['sha256']) is str and re.fullmatch('[0-9a-f]{64}', entry['sha256']))
+                  path = root / name
+                  require(path.stat().st_size == entry['size'] and checksum(path) == entry['sha256'])
+                  if name == source_name:
+                      require(entry['sha256'] == SOURCE_PINS[source_name])
+                  sums += entry['sha256'] + '  ' + name + '\n'
+              require((root / 'SHA256SUMS').read_text() == sums)
+              require((root / 'release-notes.md').read_text() == notes(platform, source))
+              return record
+
+          def apk_layout(path, signed):
+              path = Path(path)
+              require(path.is_file() and not path.is_symlink() and 22 <= path.stat().st_size <= MAX_FILE)
+              with path.open('rb') as raw:
+                  raw.seek(-22, 2)
+                  end = raw.read(22)
+                  require(end[:4] == b'PK\x05\x06' and end[20:] == b'\0\0')
+                  _, disk, directory_disk, count, count2, directory_size, directory_start, comment = struct.unpack('<4s4H2LH', end)
+                  require(not disk and not directory_disk and not comment and count == count2 and 0 < count <= 1500)
+                  require(directory_start + directory_size == path.stat().st_size - 22)
+                  with zipfile.ZipFile(path) as archive:
+                      infos = archive.infolist()
+                      require(len(infos) == count and not archive.comment)
+                      entries, folded, cursor, total = {}, set(), 0, 0
+                      for info in sorted(infos, key=lambda item: item.header_offset):
+                          name = info.filename
+                          require(name and '\\' not in name and len(name) <= 1024
+                                  and all(part not in ('', '.', '..') for part in name.rstrip('/').split('/')))
+                          require(not any(ord(c) < 32 or ord(c) == 127 for c in name))
+                          require(name.casefold() not in folded and not info.comment and not info.flag_bits & 1)
+                          folded.add(name.casefold())
+                          require(stat.S_IFMT(info.external_attr >> 16) in (0, stat.S_IFREG, stat.S_IFDIR))
+                          require(info.header_offset == cursor and 0 <= info.file_size <= 512 * 1024 ** 2)
+                          total += info.file_size
+                          require(total <= 4 * 1024 ** 3 and info.compress_type in (0, 8))
+                          raw.seek(cursor)
+                          header = raw.read(30)
+                          require(len(header) == 30 and header[:4] == b'PK\x03\x04')
+                          fields = struct.unpack('<4s5H3L2H', header)
+                          local_name = raw.read(fields[-2])
+                          extra = raw.read(fields[-1])
+                          encoding = 'utf-8' if fields[2] & 0x800 else 'cp437'
+                          require(local_name.decode(encoding) == name and fields[2] == info.flag_bits and fields[3] == info.compress_type)
+                          cursor += 30 + len(local_name) + len(extra) + info.compress_size
+                          if info.flag_bits & 8:
+                              raw.seek(cursor)
+                              descriptor = raw.read(16)
+                              if descriptor[:4] == b'PK\x07\x08':
+                                  descriptor, amount = descriptor[4:], 16
+                              else:
+                                  descriptor, amount = descriptor[:12], 12
+                              require(len(descriptor) == 12 and struct.unpack('<3L', descriptor) == (info.CRC, info.compress_size, info.file_size))
+                              cursor += amount
+                          else:
+                              require(fields[6:9] == (info.CRC, info.compress_size, info.file_size))
+                          result = hashlib.sha256()
+                          read = 0
+                          with archive.open(info) as stream:
+                              while True:
+                                  chunk = stream.read(1024 * 1024)
+                                  if not chunk:
+                                      break
+                                  read += len(chunk)
+                                  require(read <= info.file_size)
+                                  result.update(chunk)
+                          require(read == info.file_size)
+                          entries[name] = {'sha256': result.hexdigest(), 'size': read, 'crc': info.CRC,
+                                           'compressed': info.compress_size, 'method': info.compress_type}
+                  require(cursor <= directory_start)
+                  if signed:
+                      require(directory_start >= 24)
+                      raw.seek(directory_start - 24)
+                      footer = raw.read(24)
+                      require(footer[8:] == b'APK Sig Block 42')
+                      size = struct.unpack_from('<Q', footer)[0] + 8
+                      require(32 <= size <= 1024 * 1024)
+                      block_start = directory_start - size
+                      padding = block_start - cursor
+                      require(0 <= padding <= 4095)
+                      if padding:
+                          require(block_start % 4096 == 0)
+                          raw.seek(cursor)
+                          require(not any(raw.read(padding)))
+                      raw.seek(block_start)
+                      block = raw.read(size)
+                      require(len(block) == size and block[-16:] == b'APK Sig Block 42')
+                      require(struct.unpack_from('<Q', block)[0] == size - 8 == struct.unpack_from('<Q', block, size - 24)[0])
+                      position, ids = 8, set()
+                      while position < size - 24:
+                          require(position + 12 <= size - 24)
+                          pair_size, identity = struct.unpack_from('<QI', block, position)
+                          require(4 <= pair_size <= 512 * 1024 and position + 8 + pair_size <= size - 24)
+                          require(identity in (0x7109871a, 0xf05368c0, 0x42726577) and identity not in ids)
+                          ids.add(identity)
+                          payload = block[position + 12:position + 8 + pair_size]
+                          if identity == 0x42726577:
+                              require(len(payload) <= 4096 and not any(payload))
+                          else:
+                              require(bool(payload))
+                          position += 8 + pair_size
+                      require(position == size - 24 and {0x7109871a, 0xf05368c0} <= ids)
+                  else:
+                      require(cursor == directory_start)
+                  adjusted = bytearray(end)
+                  struct.pack_into('<I', adjusted, 16, cursor)
+              return {'entries': entries, 'prefix_sha256': checksum(path, 0, cursor),
+                      'central_sha256': checksum(path, directory_start, directory_start + directory_size),
+                      'normalized_eocd': adjusted.hex()}
+
+          def main():
+              root = Path(os.environ['SIGN_INPUT'])
+              source = os.environ['GITHUB_SHA']
+              validate_bundle(root, 'android-arm64', source, 'required')
+              apk_layout(root / package_name('android-arm64', source), signed=False)
+              print('Unsigned Android artifact verified.')
+
+          if __name__ == '__main__':
+              try:
+                  main()
+              except Exception:
+                  raise SystemExit('Unsigned Android transfer validation failed.')
+          PY
+      - name: Sign with the protected release key
+        env:
+          ANDROID_RELEASE_KEYSTORE_B64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_B64 }}
+          ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          ulimit -c 0
+          python3 - <<'PY'
+          # nightly-transfer:sign-with-key
+          import base64
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+
+          def main():
+              source = os.environ['GITHUB_SHA']
+              if not re.fullmatch('[0-9a-f]{40}', source):
+                  raise ValueError()
+              private = Path(os.environ['SIGN_PRIVATE'])
+              if private.exists() or private.is_symlink():
+                  raise ValueError()
+              private.mkdir(mode=0o700)
+              encoded = os.environ['ANDROID_RELEASE_KEYSTORE_B64']
+              if not 1 <= len(encoded) <= 2 * 1024 * 1024:
+                  raise ValueError()
+              data = base64.b64decode(encoded, validate=True)
+              if not 1 <= len(data) <= 1024 * 1024:
+                  raise ValueError()
+              if not os.environ['ANDROID_RELEASE_KEYSTORE_PASSWORD'] or not os.environ['ANDROID_RELEASE_KEY_ALIAS']:
+                  raise ValueError()
+              key = private / 'release.keystore'
+              with key.open('xb') as stream:
+                  os.chmod(key, 0o600)
+                  stream.write(data)
+              apk = Path(os.environ['SIGN_INPUT']) / ('yakumo-nightly-' + source[:12] + '-android-arm64.apk')
+              tool = Path(os.environ['ANDROID_HOME']) / 'build-tools/35.0.0/apksigner'
+              with (private / 'signer.log').open('xb') as log:
+                  os.chmod(log.name, 0o600)
+                  subprocess.run([str(tool), 'sign', '--ks', str(key),
+                                  '--ks-key-alias', os.environ['ANDROID_RELEASE_KEY_ALIAS'],
+                                  '--ks-pass', 'env:ANDROID_RELEASE_KEYSTORE_PASSWORD',
+                                  '--key-pass', 'env:ANDROID_RELEASE_KEYSTORE_PASSWORD',
+                                  '--v1-signing-enabled', 'false', '--v2-signing-enabled', 'true',
+                                  '--v3-signing-enabled', 'true', '--v4-signing-enabled', 'false',
+                                  '--alignment-preserved', 'true',
+                                  '--min-sdk-version', '29', '--out', str(private / 'signed.apk'), str(apk)],
+                                 stdout=log, stderr=subprocess.STDOUT, timeout=600, check=True)
+
+          if __name__ == '__main__':
+              try:
+                  main()
+              except Exception:
+                  raise SystemExit('Android signing failed; private diagnostics were not published.')
+          PY
+      - name: Verify signed payload identity and the release certificate
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          # nightly-transfer:verify-signed
+          import hashlib
+
+          import json
+
+          import os
+
+          from pathlib import Path
+
+          import re
+
+          import shutil
+
+          import stat
+
+          import struct
+
+          import subprocess
+
+          import zipfile
+
+          CERTIFICATE = '1ca2f27cfbcd9ea7d875a8ca002f57866037b19f43aaf449ce87739aee868570'
+
+          SOURCE_PINS = {
+              'ffmpeg-7.1.5.tar.xz': 'de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f',
+              'ffmpeg-7d0e8420048cffd0ca3883b877ead2390496d0b2.tar.gz': '2caafb2bbfb69c0518470651640e71ac7f5fb3117d188bf6ea2d909307a02b1d',
+          }
+
+          PLATFORMS = ('linux-x86_64', 'macos-arm64', 'windows-x86_64', 'android-arm64')
+
+          MAX_FILE = 2 * 1024 ** 3
+
+          def require(condition):
+              if not condition:
+                  raise ValueError('Transferred artifact failed validation.')
+
+          def checksum(path, start=0, end=None):
+              result = hashlib.sha256()
+              with Path(path).open('rb') as stream:
+                  stream.seek(start)
+                  remaining = Path(path).stat().st_size - start if end is None else end - start
+                  require(remaining >= 0)
+                  while remaining:
+                      data = stream.read(min(1024 * 1024, remaining))
+                      require(bool(data))
+                      result.update(data)
+                      remaining -= len(data)
+              return result.hexdigest()
+
+          def package_name(platform, source):
+              require(platform in PLATFORMS and re.fullmatch('[0-9a-f]{40}', source))
+              suffix = {'linux-x86_64': '.tar.gz', 'macos-arm64': '.zip',
+                        'windows-x86_64': '-portable.zip', 'android-arm64': '.apk'}[platform]
+              return 'yakumo-nightly-' + source[:12] + '-' + platform + suffix
+
+          def notes(platform, source):
+              return ('> **Experimental nightly build, not a stable release. Back up your saves and settings.**\n\n'
+                      'For regular play use https://github.com/TeamGDB/Yakumo/releases/latest.\n\n'
+                      'Source: https://github.com/TeamGDB/Yakumo/commit/' + source + '\n\n'
+                      'Platform: ' + platform + '.\n\n'
+                      'Packaging and privacy checks passed. Full device/gameplay testing is not claimed. '
+                      'Use SHA256SUMS to verify downloads. No game files are included.\n')
+
+          def unique_object(pairs):
+              result = {}
+              for key, value in pairs:
+                  require(key not in result)
+                  result[key] = value
+              return result
+
+          def validate_bundle(root, platform, source, signing):
+              require(platform in PLATFORMS and re.fullmatch('[0-9a-f]{40}', source))
+              root = Path(root)
+              require(root.is_dir() and not root.is_symlink())
+              paths = list(root.iterdir())
+              require(len(paths) == 5 and all(p.is_file() and not p.is_symlink() for p in paths))
+              for name in ('build.json', 'SHA256SUMS', 'release-notes.md'):
+                  require(0 < (root / name).stat().st_size < 16384)
+              record = json.loads((root / 'build.json').read_text(), object_pairs_hook=unique_object)
+              expected_keys = {'schema', 'source', 'platform', 'files', 'android_signing'}
+              if signing == 'verified':
+                  expected_keys.add('certificate_sha256')
+              require(set(record) == expected_keys and type(record['schema']) is int and record['schema'] == 1)
+              require(record['source'] == source and record['platform'] == platform and record['android_signing'] == signing)
+              if signing == 'verified':
+                  require(platform == 'android-arm64' and record['certificate_sha256'] == CERTIFICATE)
+              elif platform == 'android-arm64':
+                  require(signing == 'required')
+              else:
+                  require(signing == 'not-applicable')
+              source_name = 'ffmpeg-7d0e8420048cffd0ca3883b877ead2390496d0b2.tar.gz' if platform == 'windows-x86_64' else 'ffmpeg-7.1.5.tar.xz'
+              expected = [package_name(platform, source), source_name]
+              require(type(record['files']) is list and len(record['files']) == 2)
+              require({p.name for p in paths} == {*expected, 'build.json', 'SHA256SUMS', 'release-notes.md'})
+              sums = ''
+              for entry, name in zip(record['files'], expected):
+                  require(type(entry) is dict and set(entry) == {'name', 'size', 'sha256'})
+                  require(entry['name'] == name and type(entry['size']) is int and 0 < entry['size'] <= MAX_FILE)
+                  require(type(entry['sha256']) is str and re.fullmatch('[0-9a-f]{64}', entry['sha256']))
+                  path = root / name
+                  require(path.stat().st_size == entry['size'] and checksum(path) == entry['sha256'])
+                  if name == source_name:
+                      require(entry['sha256'] == SOURCE_PINS[source_name])
+                  sums += entry['sha256'] + '  ' + name + '\n'
+              require((root / 'SHA256SUMS').read_text() == sums)
+              require((root / 'release-notes.md').read_text() == notes(platform, source))
+              return record
+
+          def apk_layout(path, signed):
+              path = Path(path)
+              require(path.is_file() and not path.is_symlink() and 22 <= path.stat().st_size <= MAX_FILE)
+              with path.open('rb') as raw:
+                  raw.seek(-22, 2)
+                  end = raw.read(22)
+                  require(end[:4] == b'PK\x05\x06' and end[20:] == b'\0\0')
+                  _, disk, directory_disk, count, count2, directory_size, directory_start, comment = struct.unpack('<4s4H2LH', end)
+                  require(not disk and not directory_disk and not comment and count == count2 and 0 < count <= 1500)
+                  require(directory_start + directory_size == path.stat().st_size - 22)
+                  with zipfile.ZipFile(path) as archive:
+                      infos = archive.infolist()
+                      require(len(infos) == count and not archive.comment)
+                      entries, folded, cursor, total = {}, set(), 0, 0
+                      for info in sorted(infos, key=lambda item: item.header_offset):
+                          name = info.filename
+                          require(name and '\\' not in name and len(name) <= 1024
+                                  and all(part not in ('', '.', '..') for part in name.rstrip('/').split('/')))
+                          require(not any(ord(c) < 32 or ord(c) == 127 for c in name))
+                          require(name.casefold() not in folded and not info.comment and not info.flag_bits & 1)
+                          folded.add(name.casefold())
+                          require(stat.S_IFMT(info.external_attr >> 16) in (0, stat.S_IFREG, stat.S_IFDIR))
+                          require(info.header_offset == cursor and 0 <= info.file_size <= 512 * 1024 ** 2)
+                          total += info.file_size
+                          require(total <= 4 * 1024 ** 3 and info.compress_type in (0, 8))
+                          raw.seek(cursor)
+                          header = raw.read(30)
+                          require(len(header) == 30 and header[:4] == b'PK\x03\x04')
+                          fields = struct.unpack('<4s5H3L2H', header)
+                          local_name = raw.read(fields[-2])
+                          extra = raw.read(fields[-1])
+                          encoding = 'utf-8' if fields[2] & 0x800 else 'cp437'
+                          require(local_name.decode(encoding) == name and fields[2] == info.flag_bits and fields[3] == info.compress_type)
+                          cursor += 30 + len(local_name) + len(extra) + info.compress_size
+                          if info.flag_bits & 8:
+                              raw.seek(cursor)
+                              descriptor = raw.read(16)
+                              if descriptor[:4] == b'PK\x07\x08':
+                                  descriptor, amount = descriptor[4:], 16
+                              else:
+                                  descriptor, amount = descriptor[:12], 12
+                              require(len(descriptor) == 12 and struct.unpack('<3L', descriptor) == (info.CRC, info.compress_size, info.file_size))
+                              cursor += amount
+                          else:
+                              require(fields[6:9] == (info.CRC, info.compress_size, info.file_size))
+                          result = hashlib.sha256()
+                          read = 0
+                          with archive.open(info) as stream:
+                              while True:
+                                  chunk = stream.read(1024 * 1024)
+                                  if not chunk:
+                                      break
+                                  read += len(chunk)
+                                  require(read <= info.file_size)
+                                  result.update(chunk)
+                          require(read == info.file_size)
+                          entries[name] = {'sha256': result.hexdigest(), 'size': read, 'crc': info.CRC,
+                                           'compressed': info.compress_size, 'method': info.compress_type}
+                  require(cursor <= directory_start)
+                  if signed:
+                      require(directory_start >= 24)
+                      raw.seek(directory_start - 24)
+                      footer = raw.read(24)
+                      require(footer[8:] == b'APK Sig Block 42')
+                      size = struct.unpack_from('<Q', footer)[0] + 8
+                      require(32 <= size <= 1024 * 1024)
+                      block_start = directory_start - size
+                      padding = block_start - cursor
+                      require(0 <= padding <= 4095)
+                      if padding:
+                          require(block_start % 4096 == 0)
+                          raw.seek(cursor)
+                          require(not any(raw.read(padding)))
+                      raw.seek(block_start)
+                      block = raw.read(size)
+                      require(len(block) == size and block[-16:] == b'APK Sig Block 42')
+                      require(struct.unpack_from('<Q', block)[0] == size - 8 == struct.unpack_from('<Q', block, size - 24)[0])
+                      position, ids = 8, set()
+                      while position < size - 24:
+                          require(position + 12 <= size - 24)
+                          pair_size, identity = struct.unpack_from('<QI', block, position)
+                          require(4 <= pair_size <= 512 * 1024 and position + 8 + pair_size <= size - 24)
+                          require(identity in (0x7109871a, 0xf05368c0, 0x42726577) and identity not in ids)
+                          ids.add(identity)
+                          payload = block[position + 12:position + 8 + pair_size]
+                          if identity == 0x42726577:
+                              require(len(payload) <= 4096 and not any(payload))
+                          else:
+                              require(bool(payload))
+                          position += 8 + pair_size
+                      require(position == size - 24 and {0x7109871a, 0xf05368c0} <= ids)
+                  else:
+                      require(cursor == directory_start)
+                  adjusted = bytearray(end)
+                  struct.pack_into('<I', adjusted, 16, cursor)
+              return {'entries': entries, 'prefix_sha256': checksum(path, 0, cursor),
+                      'central_sha256': checksum(path, directory_start, directory_start + directory_size),
+                      'normalized_eocd': adjusted.hex()}
+
+          def verify_tool_output(text):
+              require(type(text) is str and len(text) <= 65536)
+              certs = re.findall(r'^Signer #([0-9]+) certificate SHA-256 digest: ([0-9a-fA-F]{64})$', text, re.M)
+              require([(number, digest.lower()) for number, digest in certs] == [('1', CERTIFICATE)])
+              require(re.search(r'^Number of signers: 1$', text, re.M))
+              for scheme, expected in (('v1', 'false'), ('v2', 'true'), ('v3', 'true')):
+                  require(re.search(r'^Verified using ' + scheme + r' scheme .*: ' + expected + '$', text, re.M))
+
+          def write_record(root, platform, source, files, signed=False):
+              record = {'schema': 1, 'source': source, 'platform': platform, 'files': files,
+                        'android_signing': 'verified' if signed else 'not-applicable'}
+              if signed:
+                  record['certificate_sha256'] = CERTIFICATE
+              (root / 'build.json').write_text(json.dumps(record, indent=2) + '\n')
+              (root / 'SHA256SUMS').write_text(''.join(item['sha256'] + '  ' + item['name'] + '\n' for item in files))
+              (root / 'release-notes.md').write_text(notes(platform, source))
+
+          def validate_signed_pair(unsigned, signed, verification):
+              before = apk_layout(unsigned, signed=False)
+              after = apk_layout(signed, signed=True)
+              require(before == after)
+              verify_tool_output(verification)
+
+          def main():
+              source = os.environ['GITHUB_SHA']
+              root = Path(os.environ['SIGN_INPUT'])
+              private = Path(os.environ['SIGN_PRIVATE'])
+              output = Path(os.environ['SIGNED_ROOT'])
+              record = validate_bundle(root, 'android-arm64', source, 'required')
+              name = package_name('android-arm64', source)
+              candidate = private / 'signed.apk'
+              tool = Path(os.environ['ANDROID_HOME']) / 'build-tools/35.0.0/apksigner'
+              result = subprocess.run([str(tool), 'verify', '--verbose', '--print-certs',
+                                       '--min-sdk-version', '24', '--max-sdk-version', '35', str(candidate)],
+                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=600, check=True)
+              verification = result.stdout.decode('utf-8')
+              validate_signed_pair(root / name, candidate, verification)
+              require(not output.exists() and not output.is_symlink())
+              output.mkdir(mode=0o700)
+              files = []
+              for original, filename in ((candidate, name), (root / record['files'][1]['name'], record['files'][1]['name'])):
+                  target = output / filename
+                  shutil.copyfile(original, target)
+                  files.append({'name': filename, 'size': target.stat().st_size, 'sha256': checksum(target)})
+              write_record(output, 'android-arm64', source, files, signed=True)
+              validate_bundle(output, 'android-arm64', source, 'verified')
+              print('Android payload unchanged; release certificate and v2/v3 signatures verified.')
+
+          if __name__ == '__main__':
+              try:
+                  main()
+              except Exception:
+                  raise SystemExit('Signed Android transfer validation failed.')
+          PY
+      - name: Upload only the verified signed Android publication directory
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nightly-final-${{ github.run_id }}-android-arm64
+          path: ${{ env.SIGNED_ROOT }}/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+          overwrite: true
+      - name: Remove signing material and transferred files
+        if: always()
+        shell: bash
+        run: rm -rf -- "$SIGN_PRIVATE" "$SIGN_INPUT" "$SIGNED_ROOT"
+
+  publish:
+    name: Publish the four validated platform packages
+    needs: [build, sign]
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.repository == 'TeamGDB/Yakumo' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: nightly-publication
+    # No checkout, project execution, build inputs or signing credentials.
+    steps:
+      - name: Prepare isolated publication paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e "$RUNNER_TEMP/nightly-publish-input"
+          test ! -e "$RUNNER_TEMP/nightly-publish-public"
+          printf 'TRANSFER_ROOT=%s\nPUBLIC_ROOT=%s\n' \
+            "$RUNNER_TEMP/nightly-publish-input" "$RUNNER_TEMP/nightly-publish-public" >> "$GITHUB_ENV"
+      - name: Download only final artifacts from this run into separate directories
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: nightly-final-${{ github.run_id }}-*
+          path: ${{ env.TRANSFER_ROOT }}
+          merge-multiple: false
+      - name: Recheck all four transferred platform artifacts
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          # nightly-transfer:publish
+          import hashlib
+
+          import json
+
+          import os
+
+          from pathlib import Path
+
+          import re
+
+          import shutil
+
+          import stat
+
+          import struct
+
+          import zipfile
+
+          CERTIFICATE = '1ca2f27cfbcd9ea7d875a8ca002f57866037b19f43aaf449ce87739aee868570'
+
+          SOURCE_PINS = {
+              'ffmpeg-7.1.5.tar.xz': 'de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f',
+              'ffmpeg-7d0e8420048cffd0ca3883b877ead2390496d0b2.tar.gz': '2caafb2bbfb69c0518470651640e71ac7f5fb3117d188bf6ea2d909307a02b1d',
+          }
+
+          PLATFORMS = ('linux-x86_64', 'macos-arm64', 'windows-x86_64', 'android-arm64')
+
+          MAX_FILE = 2 * 1024 ** 3
+
+          def require(condition):
+              if not condition:
+                  raise ValueError('Transferred artifact failed validation.')
+
+          def checksum(path, start=0, end=None):
+              result = hashlib.sha256()
+              with Path(path).open('rb') as stream:
+                  stream.seek(start)
+                  remaining = Path(path).stat().st_size - start if end is None else end - start
+                  require(remaining >= 0)
+                  while remaining:
+                      data = stream.read(min(1024 * 1024, remaining))
+                      require(bool(data))
+                      result.update(data)
+                      remaining -= len(data)
+              return result.hexdigest()
+
+          def package_name(platform, source):
+              require(platform in PLATFORMS and re.fullmatch('[0-9a-f]{40}', source))
+              suffix = {'linux-x86_64': '.tar.gz', 'macos-arm64': '.zip',
+                        'windows-x86_64': '-portable.zip', 'android-arm64': '.apk'}[platform]
+              return 'yakumo-nightly-' + source[:12] + '-' + platform + suffix
+
+          def notes(platform, source):
+              return ('> **Experimental nightly build, not a stable release. Back up your saves and settings.**\n\n'
+                      'For regular play use https://github.com/TeamGDB/Yakumo/releases/latest.\n\n'
+                      'Source: https://github.com/TeamGDB/Yakumo/commit/' + source + '\n\n'
+                      'Platform: ' + platform + '.\n\n'
+                      'Packaging and privacy checks passed. Full device/gameplay testing is not claimed. '
+                      'Use SHA256SUMS to verify downloads. No game files are included.\n')
+
+          def unique_object(pairs):
+              result = {}
+              for key, value in pairs:
+                  require(key not in result)
+                  result[key] = value
+              return result
+
+          def validate_bundle(root, platform, source, signing):
+              require(platform in PLATFORMS and re.fullmatch('[0-9a-f]{40}', source))
+              root = Path(root)
+              require(root.is_dir() and not root.is_symlink())
+              paths = list(root.iterdir())
+              require(len(paths) == 5 and all(p.is_file() and not p.is_symlink() for p in paths))
+              for name in ('build.json', 'SHA256SUMS', 'release-notes.md'):
+                  require(0 < (root / name).stat().st_size < 16384)
+              record = json.loads((root / 'build.json').read_text(), object_pairs_hook=unique_object)
+              expected_keys = {'schema', 'source', 'platform', 'files', 'android_signing'}
+              if signing == 'verified':
+                  expected_keys.add('certificate_sha256')
+              require(set(record) == expected_keys and type(record['schema']) is int and record['schema'] == 1)
+              require(record['source'] == source and record['platform'] == platform and record['android_signing'] == signing)
+              if signing == 'verified':
+                  require(platform == 'android-arm64' and record['certificate_sha256'] == CERTIFICATE)
+              elif platform == 'android-arm64':
+                  require(signing == 'required')
+              else:
+                  require(signing == 'not-applicable')
+              source_name = 'ffmpeg-7d0e8420048cffd0ca3883b877ead2390496d0b2.tar.gz' if platform == 'windows-x86_64' else 'ffmpeg-7.1.5.tar.xz'
+              expected = [package_name(platform, source), source_name]
+              require(type(record['files']) is list and len(record['files']) == 2)
+              require({p.name for p in paths} == {*expected, 'build.json', 'SHA256SUMS', 'release-notes.md'})
+              sums = ''
+              for entry, name in zip(record['files'], expected):
+                  require(type(entry) is dict and set(entry) == {'name', 'size', 'sha256'})
+                  require(entry['name'] == name and type(entry['size']) is int and 0 < entry['size'] <= MAX_FILE)
+                  require(type(entry['sha256']) is str and re.fullmatch('[0-9a-f]{64}', entry['sha256']))
+                  path = root / name
+                  require(path.stat().st_size == entry['size'] and checksum(path) == entry['sha256'])
+                  if name == source_name:
+                      require(entry['sha256'] == SOURCE_PINS[source_name])
+                  sums += entry['sha256'] + '  ' + name + '\n'
+              require((root / 'SHA256SUMS').read_text() == sums)
+              require((root / 'release-notes.md').read_text() == notes(platform, source))
+              return record
+
+          def apk_layout(path, signed):
+              path = Path(path)
+              require(path.is_file() and not path.is_symlink() and 22 <= path.stat().st_size <= MAX_FILE)
+              with path.open('rb') as raw:
+                  raw.seek(-22, 2)
+                  end = raw.read(22)
+                  require(end[:4] == b'PK\x05\x06' and end[20:] == b'\0\0')
+                  _, disk, directory_disk, count, count2, directory_size, directory_start, comment = struct.unpack('<4s4H2LH', end)
+                  require(not disk and not directory_disk and not comment and count == count2 and 0 < count <= 1500)
+                  require(directory_start + directory_size == path.stat().st_size - 22)
+                  with zipfile.ZipFile(path) as archive:
+                      infos = archive.infolist()
+                      require(len(infos) == count and not archive.comment)
+                      entries, folded, cursor, total = {}, set(), 0, 0
+                      for info in sorted(infos, key=lambda item: item.header_offset):
+                          name = info.filename
+                          require(name and '\\' not in name and len(name) <= 1024
+                                  and all(part not in ('', '.', '..') for part in name.rstrip('/').split('/')))
+                          require(not any(ord(c) < 32 or ord(c) == 127 for c in name))
+                          require(name.casefold() not in folded and not info.comment and not info.flag_bits & 1)
+                          folded.add(name.casefold())
+                          require(stat.S_IFMT(info.external_attr >> 16) in (0, stat.S_IFREG, stat.S_IFDIR))
+                          require(info.header_offset == cursor and 0 <= info.file_size <= 512 * 1024 ** 2)
+                          total += info.file_size
+                          require(total <= 4 * 1024 ** 3 and info.compress_type in (0, 8))
+                          raw.seek(cursor)
+                          header = raw.read(30)
+                          require(len(header) == 30 and header[:4] == b'PK\x03\x04')
+                          fields = struct.unpack('<4s5H3L2H', header)
+                          local_name = raw.read(fields[-2])
+                          extra = raw.read(fields[-1])
+                          encoding = 'utf-8' if fields[2] & 0x800 else 'cp437'
+                          require(local_name.decode(encoding) == name and fields[2] == info.flag_bits and fields[3] == info.compress_type)
+                          cursor += 30 + len(local_name) + len(extra) + info.compress_size
+                          if info.flag_bits & 8:
+                              raw.seek(cursor)
+                              descriptor = raw.read(16)
+                              if descriptor[:4] == b'PK\x07\x08':
+                                  descriptor, amount = descriptor[4:], 16
+                              else:
+                                  descriptor, amount = descriptor[:12], 12
+                              require(len(descriptor) == 12 and struct.unpack('<3L', descriptor) == (info.CRC, info.compress_size, info.file_size))
+                              cursor += amount
+                          else:
+                              require(fields[6:9] == (info.CRC, info.compress_size, info.file_size))
+                          result = hashlib.sha256()
+                          read = 0
+                          with archive.open(info) as stream:
+                              while True:
+                                  chunk = stream.read(1024 * 1024)
+                                  if not chunk:
+                                      break
+                                  read += len(chunk)
+                                  require(read <= info.file_size)
+                                  result.update(chunk)
+                          require(read == info.file_size)
+                          entries[name] = {'sha256': result.hexdigest(), 'size': read, 'crc': info.CRC,
+                                           'compressed': info.compress_size, 'method': info.compress_type}
+                  require(cursor <= directory_start)
+                  if signed:
+                      require(directory_start >= 24)
+                      raw.seek(directory_start - 24)
+                      footer = raw.read(24)
+                      require(footer[8:] == b'APK Sig Block 42')
+                      size = struct.unpack_from('<Q', footer)[0] + 8
+                      require(32 <= size <= 1024 * 1024)
+                      block_start = directory_start - size
+                      padding = block_start - cursor
+                      require(0 <= padding <= 4095)
+                      if padding:
+                          require(block_start % 4096 == 0)
+                          raw.seek(cursor)
+                          require(not any(raw.read(padding)))
+                      raw.seek(block_start)
+                      block = raw.read(size)
+                      require(len(block) == size and block[-16:] == b'APK Sig Block 42')
+                      require(struct.unpack_from('<Q', block)[0] == size - 8 == struct.unpack_from('<Q', block, size - 24)[0])
+                      position, ids = 8, set()
+                      while position < size - 24:
+                          require(position + 12 <= size - 24)
+                          pair_size, identity = struct.unpack_from('<QI', block, position)
+                          require(4 <= pair_size <= 512 * 1024 and position + 8 + pair_size <= size - 24)
+                          require(identity in (0x7109871a, 0xf05368c0, 0x42726577) and identity not in ids)
+                          ids.add(identity)
+                          payload = block[position + 12:position + 8 + pair_size]
+                          if identity == 0x42726577:
+                              require(len(payload) <= 4096 and not any(payload))
+                          else:
+                              require(bool(payload))
+                          position += 8 + pair_size
+                      require(position == size - 24 and {0x7109871a, 0xf05368c0} <= ids)
+                  else:
+                      require(cursor == directory_start)
+                  adjusted = bytearray(end)
+                  struct.pack_into('<I', adjusted, 16, cursor)
+              return {'entries': entries, 'prefix_sha256': checksum(path, 0, cursor),
+                      'central_sha256': checksum(path, directory_start, directory_start + directory_size),
+                      'normalized_eocd': adjusted.hex()}
+
+          def aggregate(root, output, source, run_id):
+              root, output = Path(root), Path(output)
+              require(re.fullmatch('[0-9a-f]{40}', source) and re.fullmatch('[1-9][0-9]*', run_id))
+              require(root.is_dir() and not root.is_symlink())
+              expected = {'nightly-final-' + run_id + '-' + platform for platform in PLATFORMS}
+              dirs = list(root.iterdir())
+              require({p.name for p in dirs} == expected and all(p.is_dir() and not p.is_symlink() for p in dirs))
+              records = []
+              payloads = {}
+              for platform in PLATFORMS:
+                  directory = root / ('nightly-final-' + run_id + '-' + platform)
+                  signing = 'verified' if platform == 'android-arm64' else 'not-applicable'
+                  record = validate_bundle(directory, platform, source, signing)
+                  if platform == 'android-arm64':
+                      apk_layout(directory / package_name(platform, source), signed=True)
+                  records.append(record)
+                  for entry in record['files']:
+                      name = entry['name']
+                      if name in payloads:
+                          require(payloads[name][0] == entry)
+                      else:
+                          payloads[name] = (entry, directory / name)
+              require(len(payloads) == 6 and not output.exists() and not output.is_symlink())
+              output.mkdir(mode=0o700)
+              files = []
+              for name, (entry, path) in sorted(payloads.items()):
+                  shutil.copyfile(path, output / name)
+                  require(checksum(output / name) == entry['sha256'])
+                  files.append(entry)
+              (output / 'SHA256SUMS').write_text(''.join(entry['sha256'] + '  ' + entry['name'] + '\n' for entry in files))
+              (output / 'build.json').write_text(json.dumps({'schema': 1, 'source': source, 'files': files, 'platforms': records}, indent=2) + '\n')
+              release_notes = ('> **Experimental nightly builds, not a stable release. Back up your saves and settings.**\n\n'
+                               'For regular play use https://github.com/TeamGDB/Yakumo/releases/latest.\n\n'
+                               'Source: https://github.com/TeamGDB/Yakumo/commit/' + source + '\n\n'
+                               'Packages: Linux/Steam Deck x86-64, Windows x86-64 portable, macOS arm64 and Android arm64.\n\n'
+                               'Automated packaging and privacy checks passed. The Android APK uses the existing release '
+                               'certificate with verified v2/v3 signatures. Full device/gameplay testing is not claimed.\n\n'
+                               'Use SHA256SUMS to verify downloads. The two FFmpeg archives contain the corresponding '
+                               'unmodified library sources. No game files are included.\n')
+              (output / 'release-notes.md').write_text(release_notes)
+              require(len(list(output.iterdir())) == 9)
+              return files
+
+          def main():
+              aggregate(os.environ['TRANSFER_ROOT'], os.environ['PUBLIC_ROOT'], os.environ['GITHUB_SHA'], os.environ['GITHUB_RUN_ID'])
+              print('Four platform artifacts and both corresponding source offers verified.')
+
+          if __name__ == '__main__':
+              try:
+                  main()
+              except Exception:
+                  raise SystemExit('Nightly publication transfer validation failed.')
+          PY
+      - name: Create a unique nightly pre-release in Yakumo-nightly
+        env:
+          GH_TOKEN: ${{ secrets.NIGHTLY_PUBLISH_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          tag="nightly-$(date -u +%Y%m%d)-${GITHUB_SHA:0:12}-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          packages=(
+            "$PUBLIC_ROOT/yakumo-nightly-${GITHUB_SHA:0:12}-linux-x86_64.tar.gz"
+            "$PUBLIC_ROOT/yakumo-nightly-${GITHUB_SHA:0:12}-macos-arm64.zip"
+            "$PUBLIC_ROOT/yakumo-nightly-${GITHUB_SHA:0:12}-windows-x86_64-portable.zip"
+            "$PUBLIC_ROOT/yakumo-nightly-${GITHUB_SHA:0:12}-android-arm64.apk"
+            "$PUBLIC_ROOT/ffmpeg-7.1.5.tar.xz"
+            "$PUBLIC_ROOT/ffmpeg-7d0e8420048cffd0ca3883b877ead2390496d0b2.tar.gz"
+            "$PUBLIC_ROOT/SHA256SUMS" "$PUBLIC_ROOT/build.json"
+          )
+          gh release create "$tag" --repo TeamGDB/Yakumo-nightly --target main \
+            --prerelease --latest=false --title "Nightly ${GITHUB_SHA:0:12} (all platforms)" \
+            --notes-file "$PUBLIC_ROOT/release-notes.md" "${packages[@]}"
+      - name: Remove transferred publication files
+        if: always()
+        shell: bash
+        run: rm -rf -- "$TRANSFER_ROOT" "$PUBLIC_ROOT"
