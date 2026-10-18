@@ -126,6 +126,9 @@ def abi_fingerprint(root=ROOT, source=None):
                                               stderr=subprocess.DEVNULL)
         else:
             content = regular(root / path).read_bytes()
+        # Compare source text independently of Git's checkout line endings.
+        # Preserve every other byte so real ABI/generator edits still invalidate.
+        content = content.replace(b'\r\n', b'\n')
         h.update(path.encode() + b'\0' + hashlib.sha256(content).digest())
     return h.hexdigest()
 

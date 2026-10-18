@@ -348,6 +348,34 @@ class PrivateInputTests(Fixture):
 
 
 class AbiTests(unittest.TestCase):
+    def test_crlf_checkout_matches_frozen_lf_source_and_real_changes_still_invalidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(['git', 'init', '-q', str(root)], check=True)
+            subprocess.run(['git', '-C', str(root), 'config', 'core.autocrlf', 'true'], check=True)
+            subprocess.run(['git', '-C', str(root), 'config', 'core.safecrlf', 'false'], check=True)
+            header = root / 'include/psprecomp/abi.hpp'
+            header.parent.mkdir(parents=True)
+            content = b'#pragma once\nstruct PublicAbi { int value; };\n'
+            header.write_bytes(content)
+            subprocess.run(['git', '-C', str(root), 'add', '.'], check=True)
+            subprocess.run(['git', '-C', str(root), '-c', 'user.name=Synthetic Test', '-c',
+                            'user.email=test@example.invalid', 'commit', '-qm', 'Synthetic LF fixture'], check=True)
+            source = subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
+            expected = nightly.abi_fingerprint(root, source)
+            self.assertEqual(nightly.abi_fingerprint(root), expected)
+            header.unlink()
+            subprocess.run(['git', '-C', str(root), 'checkout', '--', 'include/psprecomp/abi.hpp'], check=True)
+            self.assertEqual(header.read_bytes(), content.replace(b'\n', b'\r\n'))
+            self.assertEqual(nightly.abi_fingerprint(root), expected)
+            header.write_bytes(content.replace(b'int value', b'long value').replace(b'\n', b'\r\n'))
+            self.assertNotEqual(nightly.abi_fingerprint(root), expected)
+            self.assertEqual(nightly.abi_fingerprint(root, source), expected)
+            header.write_bytes(content.replace(b'\n', b'\r\n', 1))
+            self.assertEqual(nightly.abi_fingerprint(root), expected)
+            (header.parent / 'new.hpp').write_bytes(b'struct AddedAbi {};\r\n')
+            self.assertNotEqual(nightly.abi_fingerprint(root), expected)
+
     def test_source_changes_invalidate_cache_but_unrelated_docs_do_not(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

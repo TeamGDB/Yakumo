@@ -205,6 +205,8 @@ modules, never game data or generated source. The seed's source and current
 source must have the same compatibility fingerprint over runtime headers,
 profile/overlay ABI declarations, the overlay entry point, generator/parser
 sources, overlay/wrapper and DATA.BIN tools, CMake configuration and SDK pins.
+Source fingerprints normalize CRLF to LF so Windows checkouts match immutable
+Git snapshots; other content changes and added inputs still invalidate reuse.
 Each restored file has a full SHA-256 in `overlay-files.json`, alongside the
 platform, toolchain and ABI identity. Local uncommitted changes and new ABI
 headers also invalidate reuse.
