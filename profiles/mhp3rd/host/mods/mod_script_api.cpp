@@ -300,6 +300,34 @@ int api_symbol_name(lua_State *state) {
 }
 
 // The overlay loaded now over an address: its name and load address, or nil.
+// A game table's address now, its rows and its row size; nil when unknown.
+int api_table(lua_State *state) {
+    Script &script = self(state);
+    ymod_table found{sizeof(ymod_table)};
+    if (script.tables == nullptr || script.tables->find(luaL_checkstring(state, 1), &found) != 0) {
+        lua_pushnil(state);
+        return 1;
+    }
+    lua_pushnumber(state, found.address);
+    lua_pushnumber(state, found.rows);
+    lua_pushnumber(state, found.row);
+    return 3;
+}
+
+// Gives a table at least that many rows: where they are, or nil.
+int api_extend_table(lua_State *state) {
+    Script &script = self(state);
+    const double rows = luaL_checknumber(state, 2);
+    const std::uint32_t address = script.tables != nullptr && rows >= 0.0 && rows <= 65536.0
+        ? script.tables->extend(script.mod, luaL_checkstring(state, 1), static_cast<std::uint32_t>(rows))
+        : 0u;
+    if (address == 0u)
+        lua_pushnil(state);
+    else
+        lua_pushnumber(state, address);
+    return 1;
+}
+
 int api_overlay_at(lua_State *state) {
     Script &script = self(state);
     char name[64]{};
@@ -487,6 +515,8 @@ void install_api(Script &script) {
         {"symbol", &api_symbol},
         {"symbol_name", &api_symbol_name},
         {"overlay_at", &api_overlay_at},
+        {"table", &api_table},
+        {"extend_table", &api_extend_table},
         {"panel", &api_panel},
         {"overlay", &api_overlay},
     };

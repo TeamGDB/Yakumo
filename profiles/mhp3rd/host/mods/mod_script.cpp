@@ -293,6 +293,7 @@ void start(psprecomp::Runtime &runtime, const std::vector<Resolution::Source> &s
         s.files = static_cast<const ymod_files *>(s.host->service(s.mod, YMOD_FILES, 1u));
         s.settings = static_cast<const ymod_settings *>(s.host->service(s.mod, YMOD_SETTINGS, 1u));
         s.symbols = static_cast<const ymod_symbols *>(s.host->service(s.mod, YMOD_SYMBOLS, 1u));
+        s.tables = static_cast<const ymod_tables *>(s.host->service(s.mod, YMOD_TABLES, 1u));
         s.ui = static_cast<const ymod_ui *>(s.host->service(s.mod, YMOD_UI, 1u));
         s.state = lua_newstate(&allocate, &s);
         if (s.state == nullptr) {

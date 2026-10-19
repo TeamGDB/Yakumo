@@ -3,6 +3,7 @@
 #include "mods/mhp3rd_code_mods.hpp"
 #include "mods/mhp3rd_mods.hpp"
 #include "mods/mhp3rd_symbols.hpp"
+#include "mods/mhp3rd_tables.hpp"
 #include "mods/mod_ini.hpp"
 
 #include "install/user_data.hpp"
@@ -231,7 +232,43 @@ void ui_remove(ymod_mod *mod, ymod_draw_fn draw, void *user) {
         [&](const Drawing &drawing) { return drawing.mod == mod && drawing.draw == draw && drawing.user == user; });
 }
 
+// Fills in as much of `out` as the mod's struct holds, by its size.
+void give_table(const tables::Table &table, ymod_table *out) {
+    if (out == nullptr || out->size < sizeof(std::uint32_t)) return;
+    const std::optional<tables::Placement> now = tables::placement(table.name);
+    const ymod_table entry{sizeof(ymod_table), table.name.c_str(),
+        table.overlay.empty() ? nullptr : table.overlay.c_str(), now ? now->address : table.address, table.row,
+        now ? now->rows : table.rows, table.rows};
+    const std::uint32_t size = out->size;
+    std::memcpy(static_cast<void *>(out), &entry, std::min<std::size_t>(size, sizeof(ymod_table)));
+    out->size = size;
+}
+
+int tables_find(const char *name, ymod_table *out) {
+    const tables::Table *table = name != nullptr ? tables::find(name) : nullptr;
+    if (table == nullptr) return -1;
+    give_table(*table, out);
+    return 0;
+}
+
+int tables_get(std::uint32_t index, ymod_table *out) {
+    if (index >= tables::all().size()) return -1;
+    give_table(tables::all()[index], out);
+    return 0;
+}
+
+std::uint32_t tables_extend(ymod_mod *mod, const char *name, std::uint32_t rows) {
+    Runtime *runtime = state().runtime;
+    if (runtime == nullptr || name == nullptr || mod->failed) return 0u;
+    std::string why;
+    const std::optional<std::uint32_t> address = tables::extend(*runtime, name, rows, &why);
+    if (!address) report(mod, std::string("table ") + name + " is not extended: " + why, true);
+    return address.value_or(0u);
+}
+
 } // namespace
+
+const ymod_tables kTables{1u, sizeof(ymod_tables), &tables_find, &tables_get, &tables_extend};
 
 const ymod_memory kMemory{
     1u, sizeof(ymod_memory), &memory_read, &memory_write, &memory_allocate, &memory_release, &memory_code_changed};

@@ -246,6 +246,8 @@ The script's main chunk runs once at start, before the game's first frame; it se
 | `symbol(name)` | A known function's or data's address and its overlay (or `nil` for the executable); `nil` when the name is not known |
 | `symbol_name(address)` | The name of what is known at exactly `address`, or `nil` |
 | `overlay_at(address)` | The code overlay loaded now over `address`, by name, and its load address; `nil` when none is |
+| `table(name)` | A [game table](#game-tables)'s address now, its rows and its bytes per row; `nil` when the name is not known |
+| `extend_table(name, rows)` | Gives a game table at least `rows` rows: its new address, or `nil` (the reason is in the log) |
 | `on(event, function)` | `"frame"` between frames, `"start"` before the first, `"file"` when the game has read a whole file (with its id), `"overlay"` when a code overlay is copied to its slot and `"overlay_unloaded"` when it leaves it (with its load address), `"quest_started"` and `"quest_ended"` (with the quest's id) |
 | `panel(title, function)`, `overlay(title, function)` | Draws in Yakumo's interface: see [Panels and overlays](#panels-and-overlays) |
 | `setting_switch(key, label, fallback)`, `setting_number(key, label, min, max, fallback)`, `setting_choice(key, label, {choices}, fallback)` | Declares a setting on the mod's page and returns its value. Choices count from 1 |
@@ -298,6 +300,7 @@ Yakumo calls `yakumo_mod_main` once at start. Everything else is a *service*, a 
 | `yakumo.settings` | Switches, numbers and choices on the mod's page, kept in `mods.ini` |
 | `yakumo.services` | Tables a mod publishes for others to import: a native mod can be a library for other mods |
 | `yakumo.symbols` | [The game's functions and data by name](#the-games-functions-by-name), and the overlay loaded over an address |
+| `yakumo.tables` | [Game tables](#game-tables) by name, and making them longer |
 | `yakumo.ui` | [Panels on the mod's page and overlays over the game](#panels-and-overlays), added and removed |
 
 `mod.h` documents each function. Callbacks run on the game's thread between guest instructions; they must not block or keep pointers into guest memory. A callback may add and remove hooks, its own among them; a hook removed inside a callback stops from the next call. A service's version and size only grow, so a mod built against an older SDK keeps working with newer Yakumo releases; a mod that needs a newer service gets `NULL` on an older Yakumo and decides itself whether it can run without it. `YAKUMO_MOD_API_VERSION()` tells Yakumo which interface the mod was built for, and a Yakumo older than that refuses the mod instead of starting it. A struct the host fills in, such as `ymod_symbol`, starts with its size, which the mod sets.
@@ -313,6 +316,27 @@ Native code runs with the player's rights, like any program they install. The Mo
 Each function's entry has the hash of its first 16 bytes as the game ships them. Yakumo checks the executable's functions at start, before any mod writes code, and an overlay's function when it is looked up while its overlay is loaded. A function whose bytes differ, on another version of the game, is not given out: the lookup fails and the mod can say so instead of hooking the wrong code. Data has no check. "On a quest" addresses hold other things outside one; read them only while `overlay_at(0x0A05E600)` is `game_task` or between the `quest_started` and `quest_ended` events.
 
 A name keeps its meaning once it is in the table. To add one, trace the function in this project (a script hook that logs its arguments is often enough), say how in the document for its subsystem, and add a line with its check; the table's header explains the columns.
+
+## Game tables
+
+Some of the game's tables have one row for each of something the game has a fixed number of: the kinds of large monster, the model sets their files come from. A new monster needs a row of its own in each. A mod asks for more rows, `yakumo.extend_table("monster.kinds", 76)` in a script or `extend` of `yakumo.tables` in a native mod, and Yakumo:
+
+1. checks that every instruction pair forming the table's address, and every comparison of an index with its row count, is as traced on NPJB-40001;
+2. moves the table to guest memory of its own, with the game's rows copied and the new rows zeroed;
+3. points those instructions at the copy and raises the counts. The units they lie in run through the JIT from then on.
+
+The mod then writes its rows with the memory functions, at the address `table()` gives. A table inside a code overlay (`game_task`, on a quest) moves with no rows until the overlay first loads: write its rows from the `"overlay"` event, once `overlay_at(base)` is the overlay. Each time the overlay loads again, its code is pointed at the copy again, and the copy keeps what mods wrote. Several mods may extend one table; it is as long as the longest asked for, and rows already written move with it. On another executable, or over code another mod changed there, nothing moves and `extend_table` returns `nil`.
+
+| Table | Where | Row | What a row is |
+| --- | --- | --- | --- |
+| `monster.kinds` | `game_task` | 8 bytes, by kind | The kind's AI overlays and how many slots it takes |
+| `monster.constructors` | `game_task` | 4 bytes, by kind | The code that builds the kind's object |
+| `monster.sizes` | `game_task` | 4 bytes, by kind | The code that gives the size of its object |
+| `monster.carves` | `game_task` | 4 bytes, by kind | Its carving points, read when it is killed |
+| `monster.files` | `game_task` | 8 bytes, by kind | Four more files loaded with it (u16, `0xFFFF` for none) |
+| `monster.models`, `.second`, `.third` | executable | 2 bytes, by model set from 1 | The model set's three files |
+
+A kind's model set has the kind's number. A new kind made as a copy of the Tigrex (58), with rows copied from 58 in each of these tables and quest files naming it, loads, plays and moves as the Tigrex does: [MONSTERS.md](MONSTERS.md) says how they were traced, what a new kind still lacks, and how to test one.
 
 ## Panels and overlays
 

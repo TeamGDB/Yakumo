@@ -258,6 +258,7 @@ set(MHP3RD_HOST_SOURCES
     host/mods/mhp3rd_mods.cpp
     host/mods/mhp3rd_quests.cpp
     host/mods/mhp3rd_symbols.cpp
+    host/mods/mhp3rd_tables.cpp
     host/mods/mod_import.cpp
     host/mods/mod_ini.cpp
     host/mods/mod_library.cpp

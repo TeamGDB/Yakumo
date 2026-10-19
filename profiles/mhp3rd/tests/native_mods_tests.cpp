@@ -6,6 +6,7 @@
 #include "mods/mod_native.hpp"
 #include "mods/mhp3rd_quests.hpp"
 #include "mods/mhp3rd_symbols.hpp"
+#include "mods/mhp3rd_tables.hpp"
 
 #include "yakumo/mod.h"
 
@@ -472,6 +473,111 @@ void test_quests(psprecomp::Runtime &runtime) {
     std::filesystem::remove_all(folder, ec);
 }
 
+// Game tables made longer, on stand-ins for the code that reads them: the
+// executable's first model file of each set, and the quest overlay's kinds.
+void test_tables(psprecomp::Runtime &runtime) {
+    namespace tables = mhp3rd::mods::tables;
+    tables::reset_for_tests();
+    check(tables::find("monster.models") != nullptr && tables::find("monster.models")->row == 2u &&
+            tables::find("no.such") == nullptr && tables::all().size() >= 2u,
+        "tables: known by name");
+    check(tables::placement("monster.models")->address == 0x08982DD0u &&
+            tables::placement("monster.models")->rows == 74u && !tables::placement("no.such"),
+        "tables: one not extended is where the game keeps it");
+    std::string why;
+    check(
+        !tables::extend(runtime, "no.such", 80u, &why) && why == "no such table", "tables: an unknown one is refused");
+    check(!tables::extend(runtime, "monster.models", 75u, &why) && why.find("not as traced") != std::string::npos,
+        "tables: not moved when the code that reads it is not the game's");
+    check(tables::extend(runtime, "monster.models", 20u) == 0x08982DD0u,
+        "tables: no more rows than the game has leaves it where it is");
+
+    // model(set): the game's 0x088564E4, set from 1; the search's address
+    // and count at 0x08856684.
+    store(runtime, 0x088564E4u, {0x00042040u, 0x3C020898u, 0x24422DD0u, 0x00441021u, 0x9442FFFEu, 0x03E00008u, 0u});
+    store(runtime, 0x08856684u, {0x3C020898u, 0u, 0x24452DD0u, 0u, 0x2407004Au});
+    for (std::uint32_t set = 1u; set <= 74u; ++set)
+        runtime.memory().store16(0x08982DD0u + (set - 1u) * 2u, 5000u + set);
+    check(call(runtime, 0x088564E4u, 58u) == 5058u, "tables: the stand-in reads the game's table");
+    check(!tables::extend(runtime, "monster.models", 256u, &why) && why.find("reaches 255") != std::string::npos,
+        "tables: no more rows than the game's index can reach");
+    const std::optional<std::uint32_t> copy = tables::extend(runtime, "monster.models", 75u);
+    check(copy && *copy != 0x08982DD0u && tables::placement("monster.models")->address == *copy &&
+            tables::placement("monster.models")->rows == 75u,
+        "tables: extended, the table moves to memory of its own");
+    check(copy && runtime.memory().load16(*copy + 57u * 2u) == 5058u && runtime.memory().load16(*copy + 74u * 2u) == 0u,
+        "tables: the copy has the game's rows, and the new row starts at zero");
+    if (copy) runtime.memory().store16(*copy + 74u * 2u, 9075u);
+    check(call(runtime, 0x088564E4u, 75u) == 9075u && call(runtime, 0x088564E4u, 58u) == 5058u,
+        "tables: the game's code reads the copy, the new row too");
+    check(runtime.memory().load32(0x08856694u) == 0x2407004Bu && runtime.memory().load32(0x0885668Cu) != 0x24452DD0u,
+        "tables: every reference and the count follow the table");
+    check(tables::extend(runtime, "monster.models", 75u) == copy, "tables: asked again, it stays where it is");
+    const std::optional<std::uint32_t> longer = tables::extend(runtime, "monster.models", 90u);
+    check(longer && longer != copy && call(runtime, 0x088564E4u, 75u) == 9075u &&
+            runtime.memory().load32(0x08856694u) == 0x2407005Au,
+        "tables: made longer again, the rows mods wrote go with it");
+    runtime.memory().store32(0x0885668Cu, 0x24450000u);
+    check(!tables::extend(runtime, "monster.models", 100u, &why) && why.find("not as traced") != std::string::npos,
+        "tables: not moved again over another mod's change to its code");
+
+    // The kinds, in the quest overlay: extended before the overlay loads.
+    constexpr std::uint32_t kSlot = 0x0A05E600u;
+    place_overlay(runtime, kSlot, "lobby_task.ovl", 0x00200000u);
+    const std::optional<std::uint32_t> kinds = tables::extend(runtime, "monster.kinds", 76u);
+    check(kinds && *kinds != 0x0A17FE84u && runtime.memory().load32(*kinds + 58u * 8u) == 0u,
+        "tables: an overlay's table moves before its overlay is there, with no rows yet");
+    const auto load_game_task = [&runtime, kSlot] {
+        place_overlay(runtime, kSlot, "game_task.ovl", 0x00200000u);
+        store(runtime, 0x0A08CC64u, {0x3C020A18u, 0u, 0x2442FE84u});
+        store(runtime, 0x0A08CE38u, {0x3C030A18u, 0x2463FE84u});
+        store(runtime, 0x0A08CF10u, {0x28A2004Bu});
+        for (std::uint32_t kind = 0u; kind < 75u; ++kind) runtime.memory().store32(0x0A17FE84u + kind * 8u, kind);
+        tables::overlay_loaded(runtime);
+    };
+    load_game_task();
+    check(kinds && runtime.memory().load32(*kinds + 58u * 8u) == 58u &&
+            runtime.memory().load32(0x0A08CF10u) == 0x28A2004Cu &&
+            runtime.memory().load32(0x0A08CC64u) == (0x3C020000u | ((*kinds + 0x8000u) >> 16u)) &&
+            runtime.memory().load32(0x0A08CC6Cu) == (0x24420000u | (*kinds & 0xFFFFu)),
+        "tables: when the overlay loads, its rows are copied and its code points at the copy");
+    if (kinds) runtime.memory().store32(*kinds + 75u * 8u, 0x75u);
+    load_game_task();
+    check(kinds && runtime.memory().load32(*kinds + 75u * 8u) == 0x75u &&
+            runtime.memory().load32(0x0A08CF10u) == 0x28A2004Cu,
+        "tables: loaded again, the overlay's code points at the copy, which keeps the mods' rows");
+    place_overlay(runtime, kSlot, "game_task.ovl", 0x00200000u);
+    store(runtime, 0x0A08CC64u, {0x3C020A18u, 0u, 0x2442FE84u});
+    store(runtime, 0x0A08CE38u, {0x3C030A18u, 0x12345678u});
+    std::ostringstream said;
+    std::streambuf *previous = std::cerr.rdbuf(said.rdbuf());
+    tables::overlay_loaded(runtime);
+    tables::overlay_loaded(runtime);
+    std::cerr.rdbuf(previous);
+    check(runtime.memory().load32(0x0A08CC64u) == 0x3C020A18u &&
+            said.str() ==
+                "[mods] table monster.kinds is not moved: the overlay's code that reads it is not as traced\n",
+        "tables: an overlay whose code is not as traced is left alone, and said once");
+
+    // The same through the mods' service.
+    mhp3rd::mods::native::attach(runtime);
+    ymod_mod *host = mhp3rd::mods::native::add_mod("yakumo.tables_test", "Tables test", "");
+    const auto *service =
+        static_cast<const ymod_tables *>(mhp3rd::mods::native::host()->service(host, YMOD_TABLES, 1u));
+    ymod_table entry{sizeof(ymod_table)};
+    check(service != nullptr && service->find("monster.kinds", &entry) == 0 && entry.address == *kinds &&
+            entry.rows == 76u && entry.game_rows == 75u && entry.row == 8u && std::string(entry.overlay) == "game_task",
+        "tables: the service gives a table where it is now");
+    ymod_table first{sizeof(ymod_table)};
+    check(service != nullptr && service->get(0u, &first) == 0 && service->get(1000u, &first) != 0 &&
+            service->find("no.such", &entry) != 0,
+        "tables: the service lists every table");
+    check(service != nullptr && service->extend(host, "monster.kinds", 76u) == *kinds &&
+            service->extend(host, "no.such", 2u) == 0u && logged("table no.such is not extended: no such table"),
+        "tables: the service extends, and says why it cannot");
+    tables::reset_for_tests();
+}
+
 int main() {
     psprecomp::Runtime runtime(64u * 1024u * 1024u);
     mhp3rd::kernel().install(runtime, 0u, 0x08900000u);
@@ -532,6 +638,7 @@ int main() {
     test_symbols(runtime);
     test_hook_changes(runtime);
     test_quests(runtime);
+    test_tables(runtime);
 
     std::printf("%s\n", failures == 0 ? "all native mod checks passed" : "native mod checks FAILED");
     return failures == 0 ? 0 : 1;

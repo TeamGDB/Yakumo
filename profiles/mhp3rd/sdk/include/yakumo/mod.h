@@ -307,6 +307,36 @@ typedef struct ymod_ui {
     void (*remove)(ymod_mod *mod, ymod_draw_fn draw, void *user);
 } ymod_ui;
 
+/* --------------------------------------------------------------------------
+ * "yakumo.tables" 1: game tables mods can make longer, such as the kinds of
+ * large monster and the model sets (docs/MODDING.md, "Game tables"). A table
+ * extended is moved to memory of its own, with the game's rows copied in and
+ * the game's code pointed at it; rows past the game's start at zero, and a
+ * mod writes its own there through "yakumo.memory". A table inside a code
+ * overlay keeps its rows while the overlay comes and goes.
+ */
+#define YMOD_TABLES "yakumo.tables"
+typedef struct ymod_table {
+    uint32_t size; /* set to sizeof(ymod_table) before passing one */
+    const char *name;
+    const char *overlay; /* NULL: the executable; otherwise the code overlay it lies in */
+    uint32_t address;    /* where it is now */
+    uint32_t row;        /* bytes per row */
+    uint32_t rows;       /* rows it has now */
+    uint32_t game_rows;  /* rows the game has */
+} ymod_table;
+typedef struct ymod_tables {
+    uint32_t version;
+    uint32_t size;
+    /* 0 and the table's entry in `out`, or -1 for a name not known. */
+    int (*find)(const char *name, ymod_table *out);
+    /* Every table, from index 0 until get() fails. */
+    int (*get)(uint32_t index, ymod_table *out);
+    /* Gives the table at least `rows` rows: where they are now, or 0 when the
+     * table cannot grow that far or the game's code is not as traced. */
+    uint32_t (*extend)(ymod_mod *mod, const char *name, uint32_t rows);
+} ymod_tables;
+
 #ifdef __cplusplus
 }
 #endif

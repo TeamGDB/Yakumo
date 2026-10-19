@@ -29,6 +29,7 @@ Read the documents relevant to the task before changing code, testing, packaging
 | [SOURCE_PROVENANCE.md](docs/SOURCE_PROVENANCE.md) | License boundaries, independently written implementations and third-party notices |
 | [DATA_BIN.md](docs/DATA_BIN.md) | Archive layout, obfuscation, overlay entries, file IDs and mod I/O |
 | [QUESTS.md](docs/QUESTS.md) | Quest files, their cipher and payload, how a quest id finds its file, and quests mods add |
+| [MONSTERS.md](docs/MONSTERS.md) | Large monster kinds, the tables indexed by kind and model set, and adding a kind |
 | [MODDING.md](docs/MODDING.md) | Making mods: Yakumo's mod format, files added and changed, memory and code edits, the JIT, script and native mods and their API, .ymod packages, testing |
 | [EQUIPMENT_MODS.md](docs/EQUIPMENT_MODS.md) | Equipment model/file lookup, traced tables and mod targets |
 | [LAYERED_ARMOR.md](docs/LAYERED_ARMOR.md) | Appearance overrides, model hooks, reload behavior and multiplayer visibility |

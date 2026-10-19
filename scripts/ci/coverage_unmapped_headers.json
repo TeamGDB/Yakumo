@@ -124,11 +124,11 @@
     "reason": "Script mod host declarations. mod_script*.cpp is covered by mhp3rd_script_mods_tests through the real Luau engine."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.h": {
-    "sha256": "efa755ee1b646845ece8769d961824a8088bcc24f824160fbb0e27a868dd5dfa",
+    "sha256": "a487d30d52c37b72f17fc5e84f5376ab760b6864c9b75470f9b3a8dffab81958",
     "reason": "The C ABI of native mods: types, constants, function-pointer tables and the interface-version macro, no host code. The host implementation in mod_native*.cpp is covered by mhp3rd_native_mods_tests, which also loads a test mod declaring a newer interface."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.hpp": {
-    "sha256": "86cca8798ea9018fc3e3d6f96c86d29df0caf8cf5d7ea7145e42bfdc48f97ce2",
+    "sha256": "7e2a12c416eaa273f01f531c04257de7271ff404d0d750bd1efc7cf37feaaa30",
     "reason": "Header-only C++ wrapper compiled into mod libraries, not into the host. It is exercised by the test mod and the SDK's native template, which mhp3rd_native_mods_tests loads and checks."
   },
   "src/allegrex_semantics.hpp": {
@@ -144,11 +144,11 @@
     "reason": "Declarations of the drawing of mods' panels and overlays. mod_panels.cpp is covered by mhp3rd_renderer_ui_tests through the real interface."
   },
   "profiles/mhp3rd/host/mods/mod_native_internal.hpp": {
-    "sha256": "538d37fe0cea3cddecfc831e5b6b895e0b02dd5185e41b11356e6006f8202a32",
+    "sha256": "2af85933ac0ec3a8cc52a7a39d9f17cb3cf2cfc85e17a8fcbea95abb09410110",
     "reason": "The native mod host's internal state: aggregates, one inline cast and declarations shared by mod_native.cpp, mod_native_hooks.cpp and mod_native_services.cpp, which mhp3rd_native_mods_tests covers through real shared libraries."
   },
   "profiles/mhp3rd/host/mods/mod_script_internal.hpp": {
-    "sha256": "255962b61d1178f223bcbf513c9ee17c15c946545dcf8b9f9bb27f8b09767ca7",
+    "sha256": "929e98ac4ea2b4d88598047c527e498b8ba10ec32de00aa021c4b152259f9b4c",
     "reason": "The script mod host's internal Script and Callback aggregates and declarations shared by mod_script.cpp and mod_script_api.cpp, which mhp3rd_script_mods_tests covers through the real Luau engine."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_game_events.hpp": {
@@ -170,6 +170,10 @@
   "profiles/mhp3rd/host/mods/mhp3rd_quests.hpp": {
     "sha256": "591b1cdaba09f4eb42339959417363de37ef8b6f0a58b2fdd8ef5e878a06d040",
     "reason": "Declarations and the Quest aggregate. mhp3rd_quests.cpp is covered by mhp3rd_native_mods_tests (keys and stand-in code in memory, a refused executable, the hook giving a mod's quest its file)."
+  },
+  "profiles/mhp3rd/host/mods/mhp3rd_tables.hpp": {
+    "sha256": "1d99a144ac489e15de02a2532a4c01a65aab1062008353158dbc769070a3a370",
+    "reason": "Declarations and the Table and Placement aggregates. mhp3rd_tables.cpp is covered by mhp3rd_native_mods_tests (stand-in code that reads a table in the executable and one in a code overlay, refused and moved tables, the yakumo.tables service) and mhp3rd_script_mods_tests."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_mod_format.hpp": {
     "sha256": "9ee2825c27a855ab18876213e05d20200b62ff1573e8761d2f85fe0b5b22c572",

@@ -159,6 +159,11 @@ yakumo.log("symbols", yakumo.symbol("armor.model_of_part") == 0x08869778, quest_
 yakumo.log("unknown hook", yakumo.hook("no.such", "before", function() end) == nil,
     yakumo.hook_instruction("no.such", function() end) == nil)
 yakumo.log("overlay at", yakumo.overlay_at(0x08A00000) == nil)
+local base, rows, row = yakumo.table("monster.models.second")
+local moved = yakumo.extend_table("monster.models.second", 80)
+local now, more = yakumo.table("monster.models.second")
+yakumo.log("tables", base == 0x08982E64, rows, row, moved ~= nil and moved == now, more, yakumo.table("no.such") == nil,
+    yakumo.extend_table("no.such", 3) == nil, yakumo.extend_table("monster.models.second", -1) == nil)
 yakumo.on("quest_started", function(id) yakumo.log("quest started", id) end)
 yakumo.on("quest_ended", function(id) yakumo.log("quest ended", id) end)
 yakumo.on("overlay_unloaded", function(base) yakumo.log("overlay gone", base) end)
@@ -201,6 +206,9 @@ yakumo.on("frame", function() if kept_ui then yakumo.log("widgets outside a draw
 #include "example_script.inc"
     );
 
+    // The game's code that reads the second model file of each set.
+    store(runtime, 0x08856668u, {0x3C020898u, 0x24422E64u});
+
     mhp3rd::mods::scripts::start(runtime,
         {{"script", main, {}}, {"loop", loop, {}}, {"broken", broken, {}}, {"gone", folder / "x.luau", {}},
             {"example", example, {}}});
@@ -238,6 +246,8 @@ yakumo.on("frame", function() if kept_ui then yakumo.log("widgets outside a draw
         "scripts: the game's functions and data by name and by address");
     check(logged("unknown hook true true") && logged("no known function called no.such"),
         "scripts: a hook on an unknown name is refused and said");
+    check(logged("tables true 74 2 true 80 true true true") && logged("table no.such is not extended: no such table"),
+        "scripts: a game table where it is, made longer; an unknown one is nil");
     check(logged("overlay at true") && logged("bad event true"),
         "scripts: no overlay there; an unknown event is an error");
 

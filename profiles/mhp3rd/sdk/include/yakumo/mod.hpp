@@ -33,6 +33,7 @@ public:
     const ymod_services *services() const { return service<ymod_services>(YMOD_SERVICES, 1u); }
     const ymod_symbols *symbols() const { return service<ymod_symbols>(YMOD_SYMBOLS, 1u); }
     const ymod_ui *ui() const { return service<ymod_ui>(YMOD_UI, 1u); }
+    const ymod_tables *tables() const { return service<ymod_tables>(YMOD_TABLES, 1u); }
 
     // A known function or data by name (sdk/symbols.txt), or nothing.
     [[nodiscard]] std::optional<ymod_symbol> symbol(const char *name) const {

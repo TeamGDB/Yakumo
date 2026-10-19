@@ -143,5 +143,6 @@ extern const ymod_settings kSettings;
 extern const ymod_services kServices;
 extern const ymod_symbols kSymbols;
 extern const ymod_ui kUi;
+extern const ymod_tables kTables;
 
 } // namespace mhp3rd::mods::native

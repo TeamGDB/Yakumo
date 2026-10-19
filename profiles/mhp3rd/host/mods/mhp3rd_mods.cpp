@@ -6,6 +6,7 @@
 #include "mods/mhp3rd_data_bin.hpp"
 #include "mods/mhp3rd_mod_format.hpp"
 #include "mods/mhp3rd_quests.hpp"
+#include "mods/mhp3rd_tables.hpp"
 #include "mods/mod_ini.hpp"
 #include "mods/mod_native.hpp"
 #include "mods/mod_script.hpp"
@@ -442,6 +443,8 @@ std::vector<std::uint32_t> code_loaded(psprecomp::Runtime &runtime) {
         }
     }
     s.loaded_code.clear();
+    // Tables mods made longer, in the overlays that have just loaded.
+    tables::overlay_loaded(runtime);
     // Code mods' blocks from the start, and the loaded files': the game is
     // running and at a point where it expects code to have changed.
     std::vector<std::uint32_t> run = std::move(s.pending_runs);
