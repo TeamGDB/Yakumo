@@ -1,6 +1,8 @@
 #include "psprecomp/runtime.hpp"
 #include "psprecomp/common.hpp"
+#include "psprecomp/function_observer.hpp"
 #include "psprecomp/interpreter.hpp"
+#include "psprecomp/jit.hpp"
 
 #include <algorithm>
 #include <array>
@@ -23,6 +25,7 @@ std::uint64_t g_runtime_thread_switch_generation_fast = 0u;
 namespace {
 using RuntimePostImportHook = void (*)(Runtime &, AllegrexContext &);
 RuntimePostImportHook g_post_import_hook = nullptr;
+FunctionObserver g_function_observer = nullptr;
 std::int32_t g_runtime_thread_uid = -1;
 std::array<char, 64> g_runtime_thread_name{};
 std::uint32_t g_runtime_dispatch_pc = 0u;
@@ -156,6 +159,8 @@ bool runtime_thread_switch_generation_matches(std::uint64_t generation) noexcept
 }
 
 Runtime::Runtime(std::uint32_t ram_size) : memory_(ram_size) {
+    // A runtime that used to live at this address left compiled code behind.
+    jit_forget(*this);
     // Most commercial PSP titles use a few hundred import stubs. Seed a small
     // binding table so first use of a late-numbered import does not reallocate
     // in the middle of guest execution; larger profiles can still grow it.
@@ -211,6 +216,8 @@ bool Runtime::run_starvation_boundary(AllegrexContext &ctx) {
 }
 
 bool Runtime::run_interpreter_fallback(AllegrexContext &ctx) {
+    // Native code first: compiled and registered, the dispatch retries.
+    if (jit_compile(*this, ctx.pc)) return true;
     if (!interpreter_fallback_enabled()) return false;
     // Each entry is bounded, so a long interpreted stretch still returns to the
     // dispatcher often enough for the starvation hook to preempt the thread.
@@ -413,9 +420,17 @@ const NidRegistry &Runtime::nids() const noexcept {
     return nids_;
 }
 
+void set_function_observer(FunctionObserver observer) noexcept {
+    g_function_observer = observer;
+}
+
 void Runtime::register_function(std::uint32_t address, RecompiledFunction function, std::string name) {
     if (!function) throw Error("Attempted to register a null recompiled function");
-    functions_[address] = FunctionEntry{function, std::move(name)};
+    // Something else takes over this address: compiled code that ran through
+    // it would bypass that.
+    if (!name.starts_with("jit_")) jit_invalidate(*this, address, address + 4u);
+    const FunctionEntry &entry = functions_[address] = FunctionEntry{function, std::move(name)};
+    if (g_function_observer != nullptr) g_function_observer(*this, address, function, entry.name);
     const std::uint32_t c = memory_.canonical(address);
     if ((c & 3u) != 0u || c < GuestMemory::kPhysicalBase) return;
 
@@ -661,6 +676,7 @@ void Runtime::run(std::uint32_t entry, std::uint64_t max_dispatches) {
         // Says which guest addresses ran without a recompiled function, so a
         // profile can see what is worth adding to its corpus.
         report_interpreter_stats();
+        report_jit_stats();
         if (!stopped_) stop("Dispatch profile window complete at " + hex32(cpu_.pc));
         return;
     }
@@ -739,6 +755,7 @@ void Runtime::run(std::uint32_t entry, std::uint64_t max_dispatches) {
         // Says which guest addresses ran without a recompiled function, so a
         // profile can see what is worth adding to its corpus.
         report_interpreter_stats();
+        report_jit_stats();
         if (!stopped_ && max_dispatches != 0u) stop("Dispatch limit reached at " + hex32(cpu_.pc));
         return;
     }
@@ -1093,6 +1110,7 @@ void Runtime::run(std::uint32_t entry, std::uint64_t max_dispatches) {
     // Says which guest addresses ran without a recompiled function, so a
     // profile can see what is worth adding to its corpus.
     report_interpreter_stats();
+    report_jit_stats();
 }
 
 void Runtime::stop(std::string reason) {
@@ -1120,22 +1138,76 @@ void Runtime::arithmetic_overflow(std::uint32_t pc, std::uint32_t instruction) {
     stop("Allegrex arithmetic overflow for " + hex32(instruction) + " at " + hex32(pc));
 }
 
-void Runtime::unregister_functions(std::uint32_t start, std::uint32_t end) {
-    for (auto it = functions_.begin(); it != functions_.end();) {
-        if (it->first < start || it->first >= end) {
+namespace {
+
+// Erases the entries `drop` selects and returns the distinct functions they
+// held, clearing their slots in the direct tables.
+template <typename Map, typename Drop>
+std::vector<Runtime::RecompiledFunction> erase_entries(Map &functions, const GuestMemory &memory,
+    std::uint32_t direct_base, std::vector<Runtime::RecompiledFunction> &direct_functions,
+    std::vector<Runtime::RecompiledFunction> &direct_chainable, Drop drop) {
+    std::vector<Runtime::RecompiledFunction> dropped;
+    for (auto it = functions.begin(); it != functions.end();) {
+        if (!drop(it->first, it->second)) {
             ++it;
             continue;
         }
-        const std::uint32_t c = memory_.canonical(it->first);
-        if (c >= direct_base_) {
-            const std::size_t index = static_cast<std::size_t>(c - direct_base_) / 4u;
-            if (index < direct_functions_.size()) {
-                direct_functions_[index] = nullptr;
-                direct_chainable_[index] = nullptr;
+        const std::uint32_t c = memory.canonical(it->first);
+        if (c >= direct_base) {
+            const std::size_t index = static_cast<std::size_t>(c - direct_base) / 4u;
+            if (index < direct_functions.size()) {
+                direct_functions[index] = nullptr;
+                direct_chainable[index] = nullptr;
             }
         }
-        it = functions_.erase(it);
+        if (std::find(dropped.begin(), dropped.end(), it->second.function) == dropped.end())
+            dropped.push_back(it->second.function);
+        it = functions.erase(it);
     }
+    return dropped;
+}
+
+} // namespace
+
+void Runtime::unregister_functions(std::uint32_t start, std::uint32_t end) {
+    jit_invalidate(*this, start, end);
+    const std::vector<RecompiledFunction> dropped =
+        erase_entries(functions_, memory_, direct_base_, direct_functions_, direct_chainable_,
+            [start, end](std::uint32_t address, const FunctionEntry &) { return address >= start && address < end; });
+    // A unit with entries gone must not be entered through a direct chain.
+    for (std::size_t unit = 0; unit < kGeneratedUnitFastCapacity; ++unit) {
+        if (generated_units_[unit] == nullptr ||
+            std::find(dropped.begin(), dropped.end(), generated_units_[unit]) == dropped.end())
+            continue;
+        generated_unit_disabled_[unit] = 1u;
+        generated_units_[unit] = nullptr;
+    }
+}
+
+std::size_t Runtime::retire_generated_code(std::uint32_t start, std::uint32_t end) {
+    // A generated unit registers one function for every instruction it covers,
+    // so its function pointer names the unit.
+    std::vector<RecompiledFunction> units;
+    for (const auto &[address, entry] : functions_) {
+        if (address < start || address >= end || !entry.name.starts_with("recomp_unit_")) continue;
+        if (std::find(units.begin(), units.end(), entry.function) == units.end()) units.push_back(entry.function);
+    }
+    if (units.empty()) return 0u;
+    (void)erase_entries(functions_, memory_, direct_base_, direct_functions_, direct_chainable_,
+        [&units](std::uint32_t, const FunctionEntry &entry) {
+            return entry.name.starts_with("recomp_unit_") &&
+                std::find(units.begin(), units.end(), entry.function) != units.end();
+        });
+    // A unit a host override poisoned already has no fast-table entry; its
+    // exact-PC chain slots went with the erased entries above.
+    for (std::size_t unit = 0; unit < kGeneratedUnitFastCapacity; ++unit) {
+        if (generated_units_[unit] == nullptr ||
+            std::find(units.begin(), units.end(), generated_units_[unit]) == units.end())
+            continue;
+        generated_unit_disabled_[unit] = 1u;
+        generated_units_[unit] = nullptr;
+    }
+    return units.size();
 }
 
 void Runtime::register_native_fast_path(std::uint32_t address, NativeFastPath function) {

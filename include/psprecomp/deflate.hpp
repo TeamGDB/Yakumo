@@ -3,6 +3,8 @@
 #include "psprecomp/guest_memory.hpp"
 
 #include <cstdint>
+#include <span>
+#include <vector>
 
 namespace psprecomp {
 
@@ -25,5 +27,11 @@ struct RawDeflateResult {
 // Linux and MSVC builds.
 [[nodiscard]] RawDeflateResult inflate_raw_deflate(
     GuestMemory &memory, std::uint32_t output_address, std::uint32_t output_capacity, std::uint32_t input_address);
+
+// The same decoder between host buffers: `output` gets the decoded bytes, at
+// most `output_capacity` of them (OutputOverflow past that), for reading
+// archives such as .zip without a guest in the way.
+[[nodiscard]] RawDeflateResult inflate_raw_deflate(
+    std::span<const std::uint8_t> input, std::vector<std::uint8_t> &output, std::uint32_t output_capacity);
 
 } // namespace psprecomp

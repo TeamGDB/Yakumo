@@ -73,6 +73,43 @@ void fault(psprecomp::Runtime &, psprecomp::AllegrexContext &) {
     throw psprecomp::Error("synthetic guest memory fault");
 }
 void stay(psprecomp::Runtime &, psprecomp::AllegrexContext &) {}
+void next_other(psprecomp::Runtime &, psprecomp::AllegrexContext &cpu) {
+    cpu.gpr[3]++;
+    cpu.pc += 4;
+}
+void host_override(psprecomp::Runtime &, psprecomp::AllegrexContext &cpu) {
+    cpu.gpr[4]++;
+    cpu.pc += 4;
+}
+// Code changed in memory after recompilation: its unit is dropped whole, the
+// rest stays native, and nothing chains into the dropped unit any more.
+void retire_contracts() {
+    psprecomp::Runtime runtime;
+    runtime.register_generated_unit(0, base, 0x4000, next);
+    runtime.register_generated_unit(1, base + 0x4000, 0x4000, next_other);
+    for (std::uint32_t at = 0; at < 0x40; at += 4) {
+        runtime.register_function(base + at, next, "recomp_unit_0000");
+        runtime.register_function(base + 0x4000 + at, next_other, "recomp_unit_0001");
+    }
+    runtime.register_function(base + 0x20, host_override, "public_host_override");
+    check(runtime.retire_generated_code(base + 0x1000, base + 0x2000) == 0u,
+        "Retiring a range without generated entries must drop nothing");
+    check(runtime.retire_generated_code(base + 4, base + 8) == 1u, "Retiring must drop exactly the touched unit");
+    check(!runtime.has_function(base) && !runtime.has_function(base + 0x3C),
+        "A retired unit must lose every entry, not only the written range");
+    check(runtime.has_function(base + 0x20), "Retiring must keep host overrides inside the unit");
+    check(runtime.has_function(base + 0x4000), "Retiring must keep neighbouring units");
+    auto cpu = runtime.cpu();
+    cpu.pc = base + 4;
+    check(!runtime.invoke_chained_unit(cpu, 0), "A retired unit must not be entered through a direct chain");
+    cpu.pc = base + 4;
+    check(!runtime.invoke_chained_call(cpu), "A retired unit must not be entered through an indirect chain");
+    cpu.pc = base + 0x4000;
+    check(runtime.invoke_chained_unit(cpu, 1) && cpu.gpr[3] == 1, "A neighbouring unit must still chain");
+    runtime.unregister_functions(base + 0x4000, base + 0x4040);
+    cpu.pc = base + 0x4000;
+    check(!runtime.invoke_chained_unit(cpu, 1), "An unregistered unit must not be entered through a direct chain");
+}
 void entry(
     psprecomp::Runtime &, psprecomp::AllegrexContext &cpu, std::uint16_t, psprecomp::GuestMemory::AotFastView &memory) {
     cpu.gpr[2] = memory.aot_load32(scratch);
@@ -950,6 +987,26 @@ void format_contracts() {
             "Dynamic Huffman repeat codes and overlapping matches must reconstruct exact independent plaintext");
         check(decode(dynamic, 4).status == psprecomp::RawDeflateStatus::OutputOverflow,
             "Dynamic match expansion must respect output capacity");
+
+        // The same streams between host buffers.
+        std::vector<std::uint8_t> out;
+        result = psprecomp::inflate_raw_deflate(dynamic, out, 4096);
+        check(result.status == psprecomp::RawDeflateStatus::Ok && out.size() == 4096 &&
+                result.input_consumed == dynamic.size() &&
+                std::all_of(out.begin(), out.end(), [](auto byte) { return byte == 'a'; }),
+            "Host buffers decode dynamic blocks and overlapping matches exactly as guest memory does");
+        result = psprecomp::inflate_raw_deflate(stored, out, 2);
+        check(result.status == psprecomp::RawDeflateStatus::Ok && out == std::vector<std::uint8_t>{'A', 'B'},
+            "Host buffers concatenate stored blocks");
+        check(
+            psprecomp::inflate_raw_deflate(dynamic, out, 4095).status == psprecomp::RawDeflateStatus::OutputOverflow &&
+                psprecomp::inflate_raw_deflate(stored, out, 1).status == psprecomp::RawDeflateStatus::OutputOverflow,
+            "Host output stops at its capacity");
+        check(psprecomp::inflate_raw_deflate(std::span(dynamic).first(10), out, 4096).status ==
+                    psprecomp::RawDeflateStatus::InvalidData &&
+                psprecomp::inflate_raw_deflate(std::span<const std::uint8_t>(), out, 16).status ==
+                    psprecomp::RawDeflateStatus::InvalidData,
+            "Truncated and empty host input is invalid");
     }
 }
 void diagnostic_contracts() {
@@ -1212,6 +1269,7 @@ int main(int argc, char **argv) {
         tool_contracts();
         elf_contracts();
         dispatch_contracts();
+        retire_contracts();
         diagnostic_contracts();
         format_contracts();
         integer_contracts();

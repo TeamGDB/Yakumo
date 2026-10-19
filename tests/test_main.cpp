@@ -3,6 +3,7 @@
 #include "psprecomp/elf32.hpp"
 #include "psprecomp/guest_memory.hpp"
 #include "psprecomp/interpreter.hpp"
+#include "psprecomp/jit.hpp"
 #include "psprecomp/deflate.hpp"
 #include "psprecomp/nid_registry.hpp"
 #include "psprecomp/program_analysis.hpp"
@@ -356,10 +357,12 @@ static void test_interpreter_dispatch_fallback() {
             0u,                                 // nop
         });
 
+    psprecomp::set_jit_enabled(false);
     interpreter_exit_hits = 0u;
     interpreter_exit_ra = 0u;
     psprecomp::reset_interpreter_stats();
     runtime.run(kInterpreterBase, 8u);
+    psprecomp::set_jit_enabled(true);
     require(interpreter_exit_hits == 1u, "Dispatch loop did not interpret its way into the registered function");
     require(interpreter_exit_ra == kInterpreterBase + 0x0Cu, "Interpreted JAL stored the wrong return address");
     require(runtime.cpu().gpr[2] == 0x1234u && runtime.cpu().gpr[3] == 7u, "Interpreted JAL delay slot did not run");
@@ -368,6 +371,18 @@ static void test_interpreter_dispatch_fallback() {
     const auto stats = psprecomp::interpreter_stats();
     require(stats.instructions == 3u && stats.entries == 1u && stats.distinct_entry_addresses == 1u,
         "Interpreter did not report what it executed");
+
+    // With the JIT on, it compiles the code instead and the interpreter idles.
+    runtime.cpu().gpr[2] = runtime.cpu().gpr[3] = 0u;
+    interpreter_exit_hits = 0u;
+    psprecomp::reset_interpreter_stats();
+    const auto jit_before = psprecomp::jit_stats();
+    runtime.run(kInterpreterBase, 8u);
+    require(interpreter_exit_hits == 1u && runtime.cpu().gpr[2] == 0x1234u && runtime.cpu().gpr[3] == 7u,
+        "JIT fallback did not run the code into the registered function");
+    require(psprecomp::jit_stats().compiled == jit_before.compiled + 1u &&
+            psprecomp::interpreter_stats().instructions == 0u,
+        "JIT fallback left the code to the interpreter");
 }
 
 static void test_interpreter_budget_and_disable() {
@@ -385,7 +400,9 @@ static void test_interpreter_budget_and_disable() {
     require(ctx.pc == kInterpreterBase, "Budgeted interpreter exit left the wrong guest PC");
 
     psprecomp::set_interpreter_fallback_enabled(false);
+    psprecomp::set_jit_enabled(false);
     runtime.run(kInterpreterBase, 4u);
+    psprecomp::set_jit_enabled(true);
     psprecomp::set_interpreter_fallback_enabled(true);
     require(runtime.stop_reason() == "No recompiled function registered at 0x08810000",
         "PSPRECOMP_NO_INTERPRETER did not restore the strict dispatch stop");

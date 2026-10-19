@@ -5,14 +5,35 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <span>
 #include <vector>
 
 namespace psprecomp {
 namespace {
 
-class BitReader {
+// Where the compressed bytes come from: guest memory, or a host buffer.
+struct GuestSource {
+    const GuestMemory &memory;
+    std::uint32_t base{};
+    [[nodiscard]] bool byte(std::uint32_t index, std::uint8_t &out) const {
+        if (index == std::numeric_limits<std::uint32_t>::max() || !memory.contains(base + index, 1u)) return false;
+        out = memory.aot_load8(base + index);
+        return true;
+    }
+};
+
+struct HostSource {
+    std::span<const std::uint8_t> bytes;
+    [[nodiscard]] bool byte(std::uint32_t index, std::uint8_t &out) const {
+        if (index >= bytes.size()) return false;
+        out = bytes[index];
+        return true;
+    }
+};
+
+template <typename Source> class BitReader {
 public:
-    BitReader(const GuestMemory &memory, std::uint32_t base) : memory_(memory), base_(base) {}
+    explicit BitReader(Source source) : source_(source) {}
 
     [[nodiscard]] bool read(std::uint32_t count, std::uint32_t &value) {
         if (count > 24u || !ensure(count)) return false;
@@ -37,18 +58,16 @@ public:
 private:
     [[nodiscard]] bool ensure(std::uint32_t count) {
         while (bit_count_ < count) {
-            if (loaded_bytes_ == std::numeric_limits<std::uint32_t>::max() ||
-                !memory_.contains(base_ + loaded_bytes_, 1u))
-                return false;
-            bits_ |= static_cast<std::uint64_t>(memory_.aot_load8(base_ + loaded_bytes_)) << bit_count_;
+            std::uint8_t byte{};
+            if (!source_.byte(loaded_bytes_, byte)) return false;
+            bits_ |= static_cast<std::uint64_t>(byte) << bit_count_;
             ++loaded_bytes_;
             bit_count_ += 8u;
         }
         return true;
     }
 
-    const GuestMemory &memory_;
-    std::uint32_t base_{};
+    Source source_;
     std::uint32_t loaded_bytes_{};
     std::uint64_t consumed_bits_{};
     std::uint64_t bits_{};
@@ -100,7 +119,7 @@ struct HuffmanTree {
         return true;
     }
 
-    [[nodiscard]] bool decode(BitReader &reader, std::uint32_t &symbol) const {
+    template <typename Reader> [[nodiscard]] bool decode(Reader &reader, std::uint32_t &symbol) const {
         std::uint32_t code = 0u;
         for (std::uint32_t length = 1u; length <= max_length; ++length) {
             std::uint32_t bit{};
@@ -126,7 +145,8 @@ bool build_fixed_trees(HuffmanTree &literal_length, HuffmanTree &distance) {
     return literal_length.build(literal_lengths) && distance.build(distance_lengths);
 }
 
-bool build_dynamic_trees(BitReader &reader, HuffmanTree &literal_length, HuffmanTree &distance) {
+template <typename Reader>
+bool build_dynamic_trees(Reader &reader, HuffmanTree &literal_length, HuffmanTree &distance) {
     std::uint32_t hlit_bits{}, hdist_bits{}, hclen_bits{};
     if (!reader.read(5u, hlit_bits) || !reader.read(5u, hdist_bits) || !reader.read(4u, hclen_bits)) return false;
     const std::uint32_t literal_count = hlit_bits + 257u;
@@ -189,84 +209,121 @@ constexpr std::array<std::uint16_t, 30> distance_base{1u, 2u, 3u, 4u, 5u, 7u, 9u
 constexpr std::array<std::uint8_t, 30> distance_extra{0u, 0u, 0u, 0u, 1u, 1u, 2u, 2u, 3u, 3u, 4u, 4u, 5u, 5u, 6u, 6u,
     7u, 7u, 8u, 8u, 9u, 9u, 10u, 10u, 11u, 11u, 12u, 12u, 13u, 13u};
 
-} // namespace
+// Where the decoded bytes go: guest memory, or a host buffer. `room` says
+// whether `length` more bytes fit; `copy` repeats bytes from `distance` back,
+// forward, so a match may overlap what it writes.
+struct GuestSink {
+    GuestMemory &memory;
+    std::uint32_t base{};
+    std::uint32_t capacity{};
+    std::uint32_t produced{};
+    [[nodiscard]] bool room(std::uint32_t length) const {
+        return length <= capacity - produced && memory.contains(base + produced, length);
+    }
+    void put(std::uint8_t byte) { memory.aot_store8(base + produced++, byte); }
+    void copy(std::uint32_t distance, std::uint32_t length) {
+        memory.aot_copy_lz_match(base + produced, base + produced - distance, length);
+        produced += length;
+    }
+};
 
-RawDeflateResult inflate_raw_deflate(
-    GuestMemory &memory, std::uint32_t output_address, std::uint32_t output_capacity, std::uint32_t input_address) {
-    BitReader reader(memory, input_address);
-    std::uint32_t produced = 0u;
+struct HostSink {
+    std::vector<std::uint8_t> &out;
+    std::uint32_t capacity{};
+    std::uint32_t produced{};
+    [[nodiscard]] bool room(std::uint32_t length) const { return length <= capacity - produced; }
+    void put(std::uint8_t byte) {
+        out.push_back(byte);
+        ++produced;
+    }
+    void copy(std::uint32_t distance, std::uint32_t length) {
+        for (std::uint32_t i = 0u; i < length; ++i) out.push_back(out[out.size() - distance]);
+        produced += length;
+    }
+};
+
+template <typename Source, typename Sink> RawDeflateResult inflate(BitReader<Source> &reader, Sink &sink) {
     bool final_block = false;
+    const auto result = [&](RawDeflateStatus status) {
+        return RawDeflateResult{status, sink.produced, reader.consumed_bytes()};
+    };
 
     while (!final_block) {
         std::uint32_t final_bit{}, block_type{};
-        if (!reader.read(1u, final_bit) || !reader.read(2u, block_type))
-            return {RawDeflateStatus::InvalidData, produced, reader.consumed_bytes()};
+        if (!reader.read(1u, final_bit) || !reader.read(2u, block_type)) return result(RawDeflateStatus::InvalidData);
         final_block = final_bit != 0u;
 
         if (block_type == 0u) {
-            if (!reader.align_byte()) return {RawDeflateStatus::InvalidData, produced, reader.consumed_bytes()};
+            if (!reader.align_byte()) return result(RawDeflateStatus::InvalidData);
             std::uint32_t length{}, complement{};
             if (!reader.read(16u, length) || !reader.read(16u, complement) || (length ^ 0xFFFFu) != complement)
-                return {RawDeflateStatus::InvalidData, produced, reader.consumed_bytes()};
-            if (length > output_capacity - produced || !memory.contains(output_address + produced, length))
-                return {RawDeflateStatus::OutputOverflow, produced, reader.consumed_bytes()};
+                return result(RawDeflateStatus::InvalidData);
+            if (!sink.room(length)) return result(RawDeflateStatus::OutputOverflow);
             for (std::uint32_t index = 0u; index < length; ++index) {
                 std::uint32_t byte{};
-                if (!reader.read(8u, byte)) return {RawDeflateStatus::InvalidData, produced, reader.consumed_bytes()};
-                memory.aot_store8(output_address + produced++, static_cast<std::uint8_t>(byte));
+                if (!reader.read(8u, byte)) return result(RawDeflateStatus::InvalidData);
+                sink.put(static_cast<std::uint8_t>(byte));
             }
             continue;
         }
-        if (block_type == 3u) return {RawDeflateStatus::InvalidData, produced, reader.consumed_bytes()};
+        if (block_type == 3u) return result(RawDeflateStatus::InvalidData);
 
         HuffmanTree literal_length;
         HuffmanTree distance;
         const bool trees_ok = block_type == 1u ? build_fixed_trees(literal_length, distance)
                                                : build_dynamic_trees(reader, literal_length, distance);
-        if (!trees_ok) return {RawDeflateStatus::InvalidData, produced, reader.consumed_bytes()};
+        if (!trees_ok) return result(RawDeflateStatus::InvalidData);
 
         for (;;) {
             std::uint32_t symbol{};
-            if (!literal_length.decode(reader, symbol))
-                return {RawDeflateStatus::InvalidData, produced, reader.consumed_bytes()};
+            if (!literal_length.decode(reader, symbol)) return result(RawDeflateStatus::InvalidData);
             if (symbol < 256u) {
-                if (produced >= output_capacity || !memory.contains(output_address + produced, 1u))
-                    return {RawDeflateStatus::OutputOverflow, produced, reader.consumed_bytes()};
-                memory.aot_store8(output_address + produced++, static_cast<std::uint8_t>(symbol));
+                if (!sink.room(1u)) return result(RawDeflateStatus::OutputOverflow);
+                sink.put(static_cast<std::uint8_t>(symbol));
                 continue;
             }
             if (symbol == 256u) break;
-            if (symbol < 257u || symbol > 285u)
-                return {RawDeflateStatus::InvalidData, produced, reader.consumed_bytes()};
+            if (symbol < 257u || symbol > 285u) return result(RawDeflateStatus::InvalidData);
 
             const std::uint32_t length_index = symbol - 257u;
             std::uint32_t length = length_base[length_index];
             std::uint32_t extra{};
             if (length_extra[length_index] != 0u) {
-                if (!reader.read(length_extra[length_index], extra))
-                    return {RawDeflateStatus::InvalidData, produced, reader.consumed_bytes()};
+                if (!reader.read(length_extra[length_index], extra)) return result(RawDeflateStatus::InvalidData);
                 length += extra;
             }
 
             std::uint32_t distance_symbol{};
             if (!distance.decode(reader, distance_symbol) || distance_symbol >= distance_base.size())
-                return {RawDeflateStatus::InvalidData, produced, reader.consumed_bytes()};
+                return result(RawDeflateStatus::InvalidData);
             std::uint32_t match_distance = distance_base[distance_symbol];
             if (distance_extra[distance_symbol] != 0u) {
-                if (!reader.read(distance_extra[distance_symbol], extra))
-                    return {RawDeflateStatus::InvalidData, produced, reader.consumed_bytes()};
+                if (!reader.read(distance_extra[distance_symbol], extra)) return result(RawDeflateStatus::InvalidData);
                 match_distance += extra;
             }
-            if (match_distance == 0u || match_distance > produced)
-                return {RawDeflateStatus::InvalidData, produced, reader.consumed_bytes()};
-            if (length > output_capacity - produced || !memory.contains(output_address + produced, length))
-                return {RawDeflateStatus::OutputOverflow, produced, reader.consumed_bytes()};
-            memory.aot_copy_lz_match(output_address + produced, output_address + produced - match_distance, length);
-            produced += length;
+            if (match_distance == 0u || match_distance > sink.produced) return result(RawDeflateStatus::InvalidData);
+            if (!sink.room(length)) return result(RawDeflateStatus::OutputOverflow);
+            sink.copy(match_distance, length);
         }
     }
+    return result(RawDeflateStatus::Ok);
+}
 
-    return {RawDeflateStatus::Ok, produced, reader.consumed_bytes()};
+} // namespace
+
+RawDeflateResult inflate_raw_deflate(
+    GuestMemory &memory, std::uint32_t output_address, std::uint32_t output_capacity, std::uint32_t input_address) {
+    BitReader<GuestSource> reader(GuestSource{memory, input_address});
+    GuestSink sink{memory, output_address, output_capacity, 0u};
+    return inflate(reader, sink);
+}
+
+RawDeflateResult inflate_raw_deflate(
+    std::span<const std::uint8_t> input, std::vector<std::uint8_t> &output, std::uint32_t output_capacity) {
+    output.clear();
+    BitReader<HostSource> reader(HostSource{input});
+    HostSink sink{output, output_capacity, 0u};
+    return inflate(reader, sink);
 }
 
 } // namespace psprecomp
