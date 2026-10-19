@@ -191,3 +191,27 @@ The game's mod community numbers the files of `DATA.BIN` by their entry index, w
 Do not trust those lists' HD ids for armour without checking. Traced on NPJB-40001 with a male hunter wearing nothing, the game reads head `0503` and waist `0409`, which the male armour list gives, but body `034B`, arms `03C8` and legs `04C2`, where the list gives `030F`, `038C` and `0486`: an empty body, arms or legs slot shows the hunter's inner wear, not the part's first model ([EQUIPMENT_MODS.md](EQUIPMENT_MODS.md) has the tables). The Mods page's *Use My Current Armor* and *No Armor* work the ids out from the game itself. `MHP3RD_TRACE_DATA_BIN=1` (with any mod on) logs every file the game reads, which is how to check an id: change the equipment on screen and note the new ids.
 
 Yakumo serves mods' files through the file I/O (`profiles/mhp3rd/host/mods/`). A replaced or patched entry is encrypted for the block it starts at. An entry that no longer fits its blocks grows; every entry after it then starts that many blocks later, and its bytes are re-keyed from its block on the disc to its new block as they are read (decrypt with the one keystream, encrypt with the other; verbatim entries are served as they are). The block table and the size table the game reads say the same. The size table has a fixed number of rows (the game reads exactly 10,312 bytes), so an entry keeps or lacks its row as on the disc; a new size that is not a whole number of blocks for an entry without a row is padded with zeros to its blocks. The trailer after the tables is served unchanged.
+
+## Files mods add
+
+New entries cannot be appended to the archive, because every loader table indexed by file id is sized for the disc's 6,043 entries. They all live in one loader object at `0x08B3F040`:
+
+- the size table at `+0x11C0` (room for `0x2880` bytes);
+- the block table at `+0x3A40` (room for `0x5E80` bytes, four entries more than the disc's);
+- the 128 KiB bounce buffer at `+0x98C0`;
+- a 4-byte record per entry at `+0x298E8`, which the request handler checks for a cached copy.
+
+The accessors reach them as `offset(object + id * 4)` with 16-bit offsets, so a table cannot move out of reach, and `0x088641A8` builds the per-entry records in a loop that counts to 6,043.
+
+A whole-file load passes through two functions, traced with a script mod's hooks:
+
+| Function | What it does |
+| --- | --- |
+| `0x08864E8C` size(loader, id) | Takes the id as 16 bits (`0xFFFF` is no file). Searches the 1,289 size rows, otherwise `(block[id + 1] - block[id]) * 2048`. The game calls it through the loader's vtable (`+0x14`), from the submit and before it allocates a buffer. |
+| `0x08863CDC` submit(loader, id, destination, …) | Asks the size, splits the file into requests of at most 128 KiB in a ring of 128 at `+0x8C`, wakes the loader thread and returns 1. No caller seen passes a done pointer; callers wait for the queue to drain. |
+
+A mod gives a new file an id from `179B` to `FFFE` in its `[Add]` section. When one does, Yakumo takes both functions over for those ids only. The size lookup answers the file's size; the submit copies the file to the destination at once and queues nothing, so the game's wait sees the load finished. Every other id runs the game's own code, compiled by the JIT from memory. The takeover is installed at start, after a check of the first instructions of both functions, and only while a mod adds a file.
+
+Checked on macOS: a script mod redirected the game's load of `0B13` at the title to an added copy as `2000`. The copy arrived at the game's buffer byte for byte, and the boot went on as without the mod.
+
+Only whole-file loads are served. Paths that read a file a piece at a time by id (`0x08863FE8`, streamed music and movies) still use the game's tables, and an added id there reads past them.

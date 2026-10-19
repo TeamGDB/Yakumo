@@ -168,7 +168,7 @@ A released build is tested the same way. Note its version and which download it 
 
 ### What to watch for throughout
 
-- Any line reading `[interpreter] no recompiled function at …` — that code runs about twenty times slower. Note the address.
+- Any line reading `[jit] compiling guest code that has no recompiled function, first at …` or `[interpreter] no recompiled function at …` — that code has no generated function: compiled at run time it is slower than the generated code, interpreted about twenty times slower. With no code mod on, note the address.
 - Missing, torn or flickering geometry, and black or white patches where effects should be.
 - The console's last lines if the game stops or crashes.
 
@@ -273,7 +273,7 @@ is required before marking the reported device restriction verified.
 
 ### Mods (#79, #80, #82)
 
-`mhp3rd_mods_tests` (CTest) needs no game data: `mod.ini` reading (quoted values, lists, a quote left open, `Version` and the PSP default, `FilesHD`/`TargetHD`, packs, pseudo packs, equipment slots, code mods refused, missing files and bad targets), mhp3reload's files named by id, priority and conflicts, packs and dependencies, the saved choices, import and its backup, the `DATA.BIN` obfuscation from any byte, and a small archive served with a grown replacement, a smaller one, a patch and a moved verbatim entry, read whole and in pieces. `mhp3rd_mods_tests --check-disc <image.iso>` reads the real directory (only that) and checks that it encodes back to the disc's bytes.
+The mod tests need no game data. `mhp3rd_mods_tests`: `mod.ini` reading (quoted values, lists, a quote left open, `Version` and the PSP default, `FilesHD`/`TargetHD`, packs, pseudo packs, equipment slots, missing files, paths that leave the mod's folder and bad targets), Yakumo's own format, mhp3reload's files named by id, priority and conflicts, packs and dependencies, the saved choices, import and its backup, the `DATA.BIN` obfuscation from any byte, and a small archive served with a grown replacement, a smaller one, a patch and a moved verbatim entry, read whole and in pieces. `mhp3rd_mods_tests --check-disc <image.iso>` reads the real directory (only that) and checks that it encodes back to the disc's bytes. `mhp3rd_code_mods_tests`: code mods' block files, typed blocks, and writing them before the game's first instruction. `mhp3rd_mod_package_tests`: `.ymod` packages, what unpacks and what is refused. `mhp3rd_native_mods_tests` loads test mods built as shared libraries and the SDK's native template; `mhp3rd_script_mods_tests` runs scripts, the SDK's script template among them, through Luau: hooks, events, settings, symbols, panels and the sandbox. `psprecomp_jit_tests` compares the JIT with the interpreter on generated programs and checks instruction hooks and dropping compiled code. Docs for making mods are in [MODDING.md](MODDING.md).
 
 For the manual check, never use downloaded mods for a regression you cannot undo: use a throwaway data folder (`MHP3RD_DATA_DIR`, with copies of `settings.ini`, the saves, `EBOOT.ELF` and the disc image) and `MHP3RD_MODS_DIR` pointing at a scratch folder, and make test mods from the game's own files with `profiles/mhp3rd/tools/databin.py … extract`: for example file `0FEE` (the game menu's textures) with part of each texture's pixels overwritten, in a folder with a `mod.ini` of `Type="File"`, `Version="HD"`, `Files`, `Target="0FEE"`. Run with `MHP3RD_TRACE_MODS=1`.
 
@@ -282,7 +282,7 @@ For the manual check, never use downloaded mods for a regression you cannot undo
 - A copy of the same file 300 KiB larger (zeros appended): *Restart to apply* and *Restart Now*; after the restart the log says `DATA.BIN grows from 1208858624 to …` and the title screen, its music and the intro movie, all read from entries after the grown one, are as before.
 - A patch mod (`Type="Patch"`) for `0FEF` with blocks of `(offset, length, bytes)` into its textures and `FFFFFFFF00000000` at the end: stripes on the title screen. Together with the grown `0FEE`, which moves `0FEF`, the same.
 - Two mods on the same file: *Conflicts* names the winner; *Priority* left and right changes it (after the next load or a restart).
-- A `mod.ini` without `Version`, a `Type="Code"` mod and one with a missing file show as *Cannot be used* with the reason.
+- A `mod.ini` without `Version` and one with a missing file show as *Cannot be used* with the reason.
 - *Import Mod…* with the gamepad only, then with the mouse and by dropping a folder on the window: a single mod folder, a folder holding two, and a mod already installed (it moves to `mods/.backup/<name>-<time>`). The imported mods are off. A preview.png shows on the mod's screen.
 - An equipment mod: type the target file id on the on-screen keyboard; the row shows it and `mods.ini` has `slot1=`.
 
