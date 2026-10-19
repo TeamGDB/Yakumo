@@ -156,11 +156,23 @@
     "reason": "The GameWatch class declaration with one inline accessor. mhp3rd_game_events.cpp is covered by mhp3rd_native_mods_tests and mhp3rd_script_mods_tests (overlays leaving their slot, a quest between two village overlays)."
   },
   "profiles/mhp3rd/host/mods/mod_library.hpp": {
-    "sha256": "a7b54922e6d514944f0f014396d1d831cf0db08d9b720352f2cbfaf8e7e0ec94",
+    "sha256": "03bb278df13c740e5fd14a09ad5e8b7956cfb5965364d37ce5f9b98bcd6e80ed",
     "reason": "ModLibrary and its aggregates, with the setting-key check declared. mod_library.cpp is covered by mhp3rd_mods_tests and the script tests (a refused setting key), under the normal diff gate."
   },
   "src/jit_compiler.hpp": {
     "sha256": "6f0761051a4ca87ada431ce843fbda9b844dfc7f7aadd59651c132d0c67fbfb7",
     "reason": "Private declarations between src/jit.cpp and src/jit_compiler.cpp: the Compiled and Settings aggregates and the compile entry point. Both files are covered by psprecomp_jit_tests."
+  },
+  "profiles/mhp3rd/host/game/quest_file.hpp": {
+    "sha256": "e0f2147fe473e46c6c9e2e2bad42537a4a8613b6df631b8959cd20089b8633bd",
+    "reason": "Quest file constants, the QuestKeys and QuestRecord aggregates, declarations and one constexpr range check. quest_file.cpp is covered by mhp3rd_quest_file_tests on made-up keys and by the quest tests in mhp3rd_native_mods_tests."
+  },
+  "profiles/mhp3rd/host/mods/mhp3rd_quests.hpp": {
+    "sha256": "591b1cdaba09f4eb42339959417363de37ef8b6f0a58b2fdd8ef5e878a06d040",
+    "reason": "Declarations and the Quest aggregate. mhp3rd_quests.cpp is covered by mhp3rd_native_mods_tests (keys and stand-in code in memory, a refused executable, the hook giving a mod's quest its file)."
+  },
+  "profiles/mhp3rd/host/mods/mhp3rd_mod_format.hpp": {
+    "sha256": "9ee2825c27a855ab18876213e05d20200b62ff1573e8761d2f85fe0b5b22c572",
+    "reason": "The mod format class, its block aggregates, quest file constants and declarations. mhp3rd_mod_format.cpp, quest_file() and quest_of_file() included, is covered by mhp3rd_mods_tests and mhp3rd_code_mods_tests."
   }
 }

@@ -98,9 +98,25 @@ Each line replaces the file with that id with a file from the mod. A replacement
 2001 = monster/textures.tm2
 ```
 
-Each line adds a file under a new id, from `179B` (the disc's 6,043 files are `0000` to `179A`) to `FFFE`. The game loads it like one of its own once something asks for that id: a table the mod patches, or its code. Choose ids well away from `179B` that other mods are unlikely to use; two mods adding the same id conflict like two replacing one file.
+Each line adds a file under a new id, from `179B` (the disc's 6,043 files are `0000` to `179A`) to `FFFE`, except `6000` to `759F`, which serve the quests mods add. The game loads it like one of its own once something asks for that id: a table the mod patches, or its code. Choose ids well away from `179B` that other mods are unlikely to use; two mods adding the same id conflict like two replacing one file.
 
 Added files are served for whole-file loads, the way the game loads models, textures, quests and overlays. Streamed music and movies are read a piece at a time and cannot be added. [DATA_BIN.md](DATA_BIN.md#files-mods-add) explains how they are served.
+
+### [Quests]: new quests
+
+```ini
+[Quests]
+60001 = quests/tigrex_peaks.bin
+```
+
+Each line adds a quest under an id from 60000 to 65535. The file is the quest as the game holds it once decrypted, and its record must carry the same id; Yakumo encrypts it with the game's keys and serves it. Make one from a quest of your own disc image with `profiles/mhp3rd/tools/quests.py`:
+
+```sh
+python3 profiles/mhp3rd/tools/quests.py extract game.iso EBOOT.ELF 204 quest.bin
+python3 profiles/mhp3rd/tools/quests.py edit quest.bin tigrex_peaks.bin --id 60001 --name "Tigrex Peaks" --monster 42=58
+```
+
+`--monster OLD=NEW` changes a large monster's kind wherever the quest names it: the kinds it loads, its spawn records, the objective and the main monsters. Mods' quests are not on the counter yet; the developer tools list them, and `quest start 60001` departs on one. Two mods adding the same id conflict like two replacing one file. [QUESTS.md](QUESTS.md) describes the quest file and how the game finds and decrypts it.
 
 ### [Patch <file>]: changing bytes in a file
 

@@ -5,6 +5,7 @@
 #include "mods/mhp3rd_code_mods.hpp"
 #include "mods/mhp3rd_data_bin.hpp"
 #include "mods/mhp3rd_mod_format.hpp"
+#include "mods/mhp3rd_quests.hpp"
 #include "mods/mod_ini.hpp"
 #include "mods/mod_native.hpp"
 #include "mods/mod_script.hpp"
@@ -159,8 +160,9 @@ bool can_switch(const Resolution &next) {
     if (!s.directory) return false;
     // Code is in memory since the start; it cannot be taken back out.
     if (s.overlay && next.code != s.overlay->resolution().code) return false;
-    // Added files are taken over at start.
-    if (s.overlay && next.added != s.overlay->resolution().added) return false;
+    // Added files and quests are taken over at start.
+    if (s.overlay && (next.added != s.overlay->resolution().added || next.quests != s.overlay->resolution().quests))
+        return false;
     const std::shared_ptr<const Layout> wanted = layout_for(next);
     const Layout disc = Layout::build(*s.directory, {});
     const Layout &now = s.layout ? *s.layout : disc;
@@ -535,7 +537,16 @@ void write_code(psprecomp::Runtime &runtime) {
 void start_native(psprecomp::Runtime &runtime) {
     State &s = state();
     if (!s.overlay) return;
-    (void)added::install(runtime, s.overlay->resolution().added);
+    std::map<FileId, Resolution::Source> files = s.overlay->resolution().added;
+    if (!s.overlay->resolution().quests.empty()) {
+        try {
+            const fs::path cache = install::user_data_directory() / "mods-cache" / "quests";
+            (void)quests::install(runtime, s.overlay->resolution().quests, files, cache);
+        } catch (const std::exception &error) {
+            problem(std::string("Quests from mods cannot be prepared: ") + error.what());
+        }
+    }
+    (void)added::install(runtime, files);
     native::start(runtime, s.overlay->resolution().native);
     scripts::start(runtime, s.overlay->resolution().scripts);
 }

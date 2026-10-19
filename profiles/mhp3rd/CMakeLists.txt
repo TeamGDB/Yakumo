@@ -256,6 +256,7 @@ set(MHP3RD_HOST_SOURCES
     host/mods/mhp3rd_game_events.cpp
     host/mods/mhp3rd_mod_format.cpp
     host/mods/mhp3rd_mods.cpp
+    host/mods/mhp3rd_quests.cpp
     host/mods/mhp3rd_symbols.cpp
     host/mods/mod_import.cpp
     host/mods/mod_ini.cpp
@@ -270,6 +271,7 @@ set(MHP3RD_HOST_SOURCES
     host/game/audio_settings.cpp
     host/game/guest_ram.cpp
     host/game/game_data.cpp
+    host/game/quest_file.cpp
     host/game/equipment_models.cpp
     host/game/layered_armor.cpp
     host/game/layered_armor_hook.cpp
@@ -736,6 +738,15 @@ target_include_directories(mhp3rd_equipment_models_tests PRIVATE "${MHP3RD_PROFI
 set_target_properties(mhp3rd_equipment_models_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 if(PSPRECOMP_BUILD_TESTS)
     add_test(NAME mhp3rd_equipment_models_tests COMMAND mhp3rd_equipment_models_tests)
+endif()
+
+# The game's quest file cipher and record, on made-up keys. No game data.
+add_executable(mhp3rd_quest_file_tests tests/quest_file_tests.cpp host/game/quest_file.cpp host/game/guest_ram.cpp)
+target_include_directories(mhp3rd_quest_file_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+target_link_libraries(mhp3rd_quest_file_tests PRIVATE psprecomp_core)
+set_target_properties(mhp3rd_quest_file_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_quest_file_tests COMMAND mhp3rd_quest_file_tests)
 endif()
 
 # Original game sound options and live music gain on synthetic guest memory.

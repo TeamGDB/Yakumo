@@ -273,8 +273,9 @@ Resolution ModLibrary::resolve() const {
         }
         for (const FileChange &change : changes) {
             Touch &touch = touches[change.file];
-            if (change.kind == FileChange::Kind::Add) {
-                result.added[change.file] = {mod.id, change.source};
+            if (change.kind == FileChange::Kind::Add || change.kind == FileChange::Kind::Quest) {
+                (change.kind == FileChange::Kind::Add ? result.added : result.quests)[change.file] = {
+                    mod.id, change.source};
                 std::erase(touch.replaced, mod.id);
                 touch.replaced.push_back(mod.id);
             } else if (change.kind == FileChange::Kind::Replace) {

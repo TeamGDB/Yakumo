@@ -55,7 +55,9 @@ function(mhp3rd_add_mod_tests)
         host/mods/mod_ini.cpp
         host/mods/mod_library.cpp
         host/mods/mod_package.cpp
-        host/mods/mod_session.cpp)
+        host/mods/mod_session.cpp
+        host/game/quest_file.cpp
+        host/game/guest_ram.cpp)
     foreach(test mods_tests code_mods_tests mod_package_tests)
         add_executable(mhp3rd_${test} tests/${test}.cpp ${mod_sources})
         target_include_directories(mhp3rd_${test} PRIVATE "${MHP3RD_PROFILE_DIR}/host")

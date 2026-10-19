@@ -34,7 +34,9 @@ struct Edit {
 
 // One thing a mod does to one game file.
 struct FileChange {
-    enum class Kind { Replace, Patch, Add }; // Add: a new file, under an id past the disc's
+    // Add: a new file, under an id past the disc's. Quest: a new quest, served
+    // as a new file under `file`, the id the format gives that quest.
+    enum class Kind { Replace, Patch, Add, Quest };
     Kind kind{Kind::Replace};
     FileId file{};
     std::filesystem::path source; // the mod's own file; empty for a patch given as `edits`
@@ -146,6 +148,7 @@ struct Resolution {
     std::map<FileId, Source> replacements;         // the winning replacement per file
     std::map<FileId, std::vector<Source>> patches; // applied in this order: the last wins
     std::map<FileId, Source> added;                // new files, the winning one per id
+    std::map<FileId, Source> quests;               // new quests, by the file each is served as
     // Code written at start, by Mod::priority (0 first), then lowest rank
     // first: where two write the same bytes, the last wins.
     std::vector<Source> code;
@@ -156,13 +159,13 @@ struct Resolution {
     std::vector<Conflict> conflicts;
 
     [[nodiscard]] bool empty() const {
-        return replacements.empty() && patches.empty() && added.empty() && code.empty() && native.empty() &&
-            scripts.empty();
+        return replacements.empty() && patches.empty() && added.empty() && quests.empty() && code.empty() &&
+            native.empty() && scripts.empty();
     }
     // Same files from the same sources; conflicts are not compared.
     [[nodiscard]] bool same_files(const Resolution &other) const {
         return replacements == other.replacements && patches == other.patches && added == other.added &&
-            code == other.code && native == other.native && scripts == other.scripts;
+            quests == other.quests && code == other.code && native == other.native && scripts == other.scripts;
     }
 };
 

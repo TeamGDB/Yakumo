@@ -4,10 +4,13 @@
 #include "mods/mod_library.hpp"
 #include "mods/mhp3rd_added_files.hpp"
 #include "mods/mod_native.hpp"
+#include "mods/mhp3rd_quests.hpp"
 #include "mods/mhp3rd_symbols.hpp"
 
 #include "yakumo/mod.h"
 
+#include "game/guest_ram.hpp"
+#include "game/quest_file.hpp"
 #include "kernel/kernel.hpp"
 
 #include "psprecomp/jit.hpp"
@@ -17,6 +20,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
+#include <map>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -405,6 +411,67 @@ void test_hook_changes(psprecomp::Runtime &runtime) {
         "native: the log keeps its latest lines and every problem");
 }
 
+// Quests mods add: encrypted with the keys in memory, served as files, and
+// the game's id-to-file code given the file for a mod's quest id.
+void test_quests(psprecomp::Runtime &runtime) {
+    namespace quests = mhp3rd::mods::quests;
+    mhp3rd::game::GuestRam ram(runtime.memory());
+    const std::uint32_t multipliers[4] = {5897u, 15859u, 29819u, 45953u};
+    const std::uint32_t moduli[4] = {65437u, 65449u, 65479u, 65521u};
+    for (std::uint32_t i = 0; i < 4u; ++i) {
+        ram.store32(mhp3rd::game::kQuestMultipliers + i * 4u, multipliers[i]);
+        ram.store32(mhp3rd::game::kQuestModuli + i * 4u, moduli[i]);
+    }
+    for (std::uint32_t i = 0; i < 16u; ++i) ram.store8(mhp3rd::game::kQuestSalt + i, static_cast<std::uint8_t>(i));
+
+    const std::filesystem::path folder = std::filesystem::temp_directory_path() / "yakumo_native_quests";
+    std::error_code cleared;
+    std::filesystem::remove_all(folder, cleared);
+    std::filesystem::create_directories(folder);
+    std::vector<std::uint8_t> payload(0x100u, 0u);
+    payload[0] = 0x10u;
+    payload[0x10u + 0x1Cu] = 0x61u; // 60001
+    payload[0x10u + 0x1Du] = 0xEAu;
+    std::ofstream(folder / "q.bin", std::ios::binary)
+        .write(reinterpret_cast<const char *>(payload.data()), static_cast<std::streamsize>(payload.size()));
+    const std::map<mhp3rd::mods::FileId, mhp3rd::mods::Resolution::Source> wanted{
+        {0x6001u, {"quest_mod", folder / "q.bin", {}}}};
+
+    std::map<mhp3rd::mods::FileId, mhp3rd::mods::Resolution::Source> files{{0x2000u, {"other", "x", {}}}};
+    check(!quests::install(runtime, wanted, files, folder / "cache") && files.size() == 1u,
+        "quests: not served on code other than the traced");
+
+    // The game's id-to-file code where it finds no file, standing in.
+    store(runtime, 0x088C1778u, {0x30A9FFFFu});
+    store(runtime, 0x088C18B4u, {0x3410FFFFu, 0x3402FFFFu, 0x120200ACu, 0u, 0x966221B2u, 0x03E00008u, 0u});
+    store(runtime, 0x088C1B70u, {0x03E00008u, 0u});
+    const std::size_t mods_before = mhp3rd::mods::native::running();
+    check(quests::install(runtime, wanted, files, folder / "cache") && files.size() == 2u && files.contains(0x6001u) &&
+            quests::find(60001u) != nullptr && quests::served().size() == 1u,
+        "quests: a mod's quest is served as a new file");
+    std::vector<std::uint8_t> file;
+    {
+        // Closed before the folder is removed: Windows keeps an open file.
+        std::ifstream in(files.at(0x6001u).path, std::ios::binary);
+        file.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    const std::optional<mhp3rd::game::QuestKeys> keys = mhp3rd::game::read_quest_keys(ram);
+    check(keys && mhp3rd::game::decrypt_quest(file, *keys) == payload,
+        "quests: the served file decrypts with the game's keys to the mod's quest");
+
+    const auto file_for = [&runtime](std::uint32_t quest) {
+        runtime.cpu().gpr[9] = quest;        // t1
+        runtime.cpu().gpr[19] = 0x08A00000u; // s3, read by the stand-in
+        (void)call(runtime, 0x088C18B4u, 0u);
+        return runtime.cpu().gpr[16]; // s0
+    };
+    check(file_for(60001u) == 0x6001u && runtime.cpu().pc == kSentinel, "quests: the mod's quest id loads its file");
+    check(file_for(60002u) == 0xFFFFu && runtime.cpu().pc == kSentinel, "quests: another id still finds no file");
+    check(mhp3rd::mods::native::running() == mods_before, "quests: Yakumo's own hook is not counted as a mod");
+    std::error_code ec;
+    std::filesystem::remove_all(folder, ec);
+}
+
 int main() {
     psprecomp::Runtime runtime(64u * 1024u * 1024u);
     mhp3rd::kernel().install(runtime, 0u, 0x08900000u);
@@ -464,6 +531,7 @@ int main() {
     test_ui();
     test_symbols(runtime);
     test_hook_changes(runtime);
+    test_quests(runtime);
 
     std::printf("%s\n", failures == 0 ? "all native mod checks passed" : "native mod checks FAILED");
     return failures == 0 ? 0 : 1;

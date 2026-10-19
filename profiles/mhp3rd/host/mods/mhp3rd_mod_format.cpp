@@ -2,6 +2,8 @@
 
 #include "mods/mod_ini.hpp"
 
+#include "game/quest_file.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <charconv>
@@ -251,9 +253,42 @@ public:
                     " to FFFE; the ids below are the game's own files.");
                 return;
             }
+            if (quest_of_file(*file)) {
+                unusable("[Add] " + trim(id) + ": ids from " + format_.file_name(kFirstQuestFile) + " to " +
+                    format_.file_name(kFirstQuestFile + kQuestFiles - 1u) + " are kept for the quests mods add.");
+                return;
+            }
             const std::optional<fs::path> source = source_file(name);
             if (!source) return;
             mod_.changes.push_back({FileChange::Kind::Add, *file, *source, {}});
+        }
+        // New quests: `60001 = quest.bin`, the quest as the game holds it once
+        // decrypted, its record carrying the same id.
+        for (const auto &[id, name] : ini.entries("Quests")) {
+            std::uint32_t quest = 0u;
+            const std::string text = trim(id);
+            const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), quest);
+            if (error != std::errc{} || end != text.data() + text.size() || !game::is_mod_quest(quest)) {
+                unusable("[Quests] " + text + ": a new quest needs an id from 60000 to 65535.");
+                return;
+            }
+            const std::optional<fs::path> source = source_file(name);
+            if (!source) return;
+            std::ifstream in(*source, std::ios::binary);
+            const std::vector<std::uint8_t> payload{
+                std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+            const std::optional<game::QuestRecord> record =
+                payload.size() <= game::kQuestMaxPayload ? game::read_quest_record(payload) : std::nullopt;
+            if (!record) {
+                unusable("[Quests] " + text + ": \"" + trim(name) + "\" is not a quest the game can read.");
+                return;
+            }
+            if (record->id != quest) {
+                unusable("[Quests] " + text + ": \"" + trim(name) + "\" is quest " + std::to_string(record->id) +
+                    "; the id in mod.ini and the quest's own must be the same.");
+                return;
+            }
+            mod_.changes.push_back({FileChange::Kind::Quest, *quest_file(quest), *source, {}});
         }
         for (const auto &[id, name] : ini.entries("Patches")) {
             const std::optional<FileId> file = target(id);
@@ -318,8 +353,8 @@ public:
         }
         if (mod_.changes.empty() && mod_.code.empty() && mod_.memory.empty() && mod_.native.empty() &&
             mod_.script.empty())
-            unusable("It changes nothing: it has no [Files], [Add], [Patches], [Patch <file>], [Code], [Memory], "
-                     "[Native] or [Script] lines.");
+            unusable("It changes nothing: it has no [Files], [Add], [Quests], [Patches], [Patch <file>], [Code], "
+                     "[Memory], [Native] or [Script] lines.");
     }
 
     // `parts`: the manager's key for what each file stands in for (HEAD, GS).
@@ -555,6 +590,16 @@ std::optional<OverlayImage> overlay_image(const std::vector<std::uint8_t> &bytes
     image.code_end = image.load + static_cast<std::uint32_t>(kHeader) + load32(bytes, 12u);
     image.size = static_cast<std::uint32_t>(bytes.size());
     return image;
+}
+
+std::optional<FileId> quest_file(std::uint32_t quest) {
+    if (!game::is_mod_quest(quest)) return std::nullopt;
+    return static_cast<FileId>(kFirstQuestFile + (quest - game::kFirstModQuest));
+}
+
+std::optional<std::uint32_t> quest_of_file(FileId file) {
+    if (file < kFirstQuestFile || file >= kFirstQuestFile + kQuestFiles) return std::nullopt;
+    return game::kFirstModQuest + (file - kFirstQuestFile);
 }
 
 std::optional<std::uint32_t> ram_range(std::uint32_t address, std::size_t length) {

@@ -241,9 +241,10 @@ void withdraw(ymod_mod *mod) {
 }
 
 std::size_t running() {
+    // Yakumo's own users of the API ("yakumo." ids, such as quests) are not mods.
     const std::vector<std::unique_ptr<ymod_mod>> &mods = state().mods;
-    return static_cast<std::size_t>(
-        std::count_if(mods.begin(), mods.end(), [](const auto &mod) { return !mod->failed; }));
+    return static_cast<std::size_t>(std::count_if(
+        mods.begin(), mods.end(), [](const auto &mod) { return !mod->failed && !mod->id.starts_with("yakumo."); }));
 }
 
 void reset_for_tests() {

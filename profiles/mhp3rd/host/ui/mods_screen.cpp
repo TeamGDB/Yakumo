@@ -201,13 +201,16 @@ std::string changes_text(ModSession &session, const Mod &mod) {
     std::size_t replaced = 0u;
     std::size_t patched = 0u;
     std::size_t added = 0u;
+    std::size_t quests = 0u;
     for (const mods::FileChange &change : mod.changes)
-        (change.kind == mods::FileChange::Kind::Replace      ? replaced
-                : change.kind == mods::FileChange::Kind::Add ? added
-                                                             : patched) += 1u;
+        (change.kind == mods::FileChange::Kind::Replace        ? replaced
+                : change.kind == mods::FileChange::Kind::Add   ? added
+                : change.kind == mods::FileChange::Kind::Quest ? quests
+                                                               : patched) += 1u;
     if (replaced > 0u) text = "Replaces " + count(replaced, "file", "files");
     if (patched > 0u) text += (text.empty() ? "Patches " : ", patches ") + count(patched, "file", "files");
     if (added > 0u) text += (text.empty() ? "Adds " : ", adds ") + count(added, "new file", "new files");
+    if (quests > 0u) text += (text.empty() ? "Adds " : ", adds ") + count(quests, "quest", "quests");
     if (!mod.code.empty() || !mod.memory.empty())
         text += text.empty() ? "Changes the game's code or memory at start"
                              : ", changes the game's code or memory at start";

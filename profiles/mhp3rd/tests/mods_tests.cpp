@@ -647,6 +647,39 @@ void test_yakumo_format(const fs::path &root) {
     refused("elsewhere", "[Native]\nLibrary=example_mod\n", "no native code for this platform");
     refused("script_missing", "[Script]\nFile=gone.luau\n", "missing from the folder");
 
+    // Quests: the payload as the game holds it, its record naming the same id.
+    const auto quest_payload = [](std::uint16_t id) {
+        Bytes payload(0x100u, 0u);
+        payload[0] = 0x10u;
+        payload[0x10u + 0x1Cu] = static_cast<std::uint8_t>(id);
+        payload[0x10u + 0x1Du] = static_cast<std::uint8_t>(id >> 8u);
+        const std::string name = "A quest";
+        std::copy(name.begin(), name.end(), payload.begin() + 0x10 + 0x48);
+        return payload;
+    };
+    write(mods / "quests" / "mod.ini", "[MOD INFO]\nType=Yakumo\n[Quests]\n60001 = q1.bin\n65535 = q2.bin\n");
+    write(mods / "quests" / "q1.bin", quest_payload(60001u));
+    write(mods / "quests" / "q2.bin", quest_payload(65535u));
+    mod = format.read(mods / "quests");
+    check(mod && mod->unusable.empty() && mod->changes.size() == 2u &&
+            mod->changes[0].kind == FileChange::Kind::Quest && mod->changes[0].file == 0x6001u &&
+            mod->changes[1].file == 0x759Fu,
+        "yakumo: quests from 60000 up, served as files from 6000 up");
+    check(p3::quest_file(60000u) == 0x6000u && !p3::quest_file(59999u) && p3::quest_of_file(0x759Fu) == 65535u &&
+            !p3::quest_of_file(0x75A0u) && !p3::quest_of_file(0x5FFFu),
+        "yakumo: quest ids and their files map both ways");
+    write(mods / "quest_other" / "q.bin", quest_payload(60002u));
+    refused("quest_other", "[Quests]\n60001 = q.bin\n", "is quest 60002");
+    write(mods / "quest_low" / "q.bin", quest_payload(204u));
+    refused("quest_low", "[Quests]\n204 = q.bin\n", "[Quests] 204: a new quest needs an id from 60000");
+    refused("quest_word", "[Quests]\nnew = q.bin\n", "[Quests] new");
+    write(mods / "quest_junk" / "q.bin", Bytes{1u, 2u, 3u});
+    refused("quest_junk", "[Quests]\n60003 = q.bin\n", "not a quest the game can read");
+    write(mods / "quest_huge" / "q.bin", Bytes(30000u, 0u));
+    refused("quest_huge", "[Quests]\n60004 = q.bin\n", "not a quest the game can read");
+    refused("quest_missing", "[Quests]\n60005 = gone.bin\n", "missing from the folder");
+    refused("add_in_quests", "[Add]\n6100 = a.pac\n", "kept for the quests mods add");
+
     // Resolved: the mod's memory edits come after its code files.
     ModLibrary library(format);
     library.scan(mods);
@@ -655,7 +688,11 @@ void test_yakumo_format(const fs::path &root) {
     library.set_enabled("script", true);
     library.set_enabled("adds", true);
     library.set_enabled("adds_too", true);
+    library.set_enabled("quests", true);
     const Resolution resolution = library.resolve();
+    check(resolution.quests.size() == 2u && resolution.quests.at(0x6001u).path.filename() == "q1.bin" &&
+            resolution.added.size() == 2u,
+        "yakumo: quests reach the resolution apart from added files");
     const auto added_conflict = std::find_if(resolution.conflicts.begin(), resolution.conflicts.end(),
         [](const Resolution::Conflict &c) { return c.file == 0x2000u; });
     check(resolution.added.size() == 2u && resolution.added.contains(0x179Bu) &&
