@@ -102,6 +102,7 @@ def collect(session, frames, start_tick, deadline):
         raise checks.CheckFailed('Barioth is outside the camera frustum before warmup')
     sample = session.snapshot(performance=True)
     identity = live(sample, ready)
+    state = ready
     if sample['quest_ticks'] <= start_tick:
         raise checks.CheckFailed('Setup missed the declared measurement start tick')
     # Warmup ends at a fixed original quest tick, not a different AI age on
@@ -110,7 +111,10 @@ def collect(session, frames, start_tick, deadline):
         runner.remaining(deadline)
         time.sleep(.1)
         sample = session.snapshot(performance=True)
-        live(sample, encounter(session), identity)
+        state = encounter(session)
+        live(sample, state, identity)
+    if state.get('in_view') is not True:
+        raise checks.CheckFailed('Barioth left the camera frustum during warmup')
     first = sample
     history = Frames(first)
     seconds, seen = [], set()
@@ -138,6 +142,7 @@ def collect(session, frames, start_tick, deadline):
 
 
 def run(device, root, seconds, frames, start_tick):
+    runner.validate_device(device)
     if device['adapter'] not in ('local', 'adb'):
         raise runner.NotTested('Use a local/ADB device; invoke this command on the SSH host for remote native testing')
     if device['build'] != 'dev' or not device.get('observations') or 'rtc_epoch_us' not in device:

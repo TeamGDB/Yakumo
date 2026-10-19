@@ -47,7 +47,8 @@ while True:
  for line in text[offset:].splitlines():
   if line=='encounter start barioth':phase='quest'
   if line.startswith('encounter '):
-   print('[debug] encounter '+json.dumps(ready),flush=True)
+   observed={**ready,'in_view':not(mode=='invisible' and ticks<=89890)}
+   print('[debug] encounter '+json.dumps(observed),flush=True)
   if line.startswith('observe '):
    request=int(line.split()[1]);second+=1;sequence+=5
    if phase=='quest':ticks-=10
@@ -113,7 +114,7 @@ class EncounterBenchmarkTests(unittest.TestCase):
         self.assertGreater(session.adapter.reads,2)
 
     def test_owned_synthetic_session_and_failure_cleanup(self):
-        for mode in ('', 'online', 'rtc'):
+        for mode in ('', 'online', 'rtc', 'invisible'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
                 base = Path(temporary)
                 (base/'game').mkdir(); (base/'saves').mkdir(); (base/'evidence').mkdir()
