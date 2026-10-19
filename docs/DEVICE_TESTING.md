@@ -211,7 +211,9 @@ NOT TESTED. Use local translation scenarios or normal manual APK checks instead.
 No APK modification is used to certify a final release artifact.
 
 ADB startup/cleanup has a PID-guarded device watchdog and explicit host cleanup.
-Logs come from the app's actual `files/yakumo.log`; logcat and Vulkan diagnostics
+Logs come from the app's actual `files/yakumo.log`; polling transfers only new
+bytes, preserving partial UTF-8 and resetting on launch or observed truncation.
+The complete cached log remains bounded by the evidence limit. Logcat and Vulkan diagnostics
 are retained separately. Different physical GPUs require separate rows: emulator
 or old PowerVR results do not establish support for every Dimensity/PowerVR GPU.
 
@@ -313,6 +315,21 @@ quest tick 89550 (15 emulated seconds into quest 507), then measures 300 origina
 game ticks (10 emulated seconds). `--frames`, `--start-tick` and `--seconds`
 select other finite intervals. A setup that misses the chosen interval fails.
 Baseline/candidate order reverses on alternating repetitions.
+
+For intermittent attacks such as Barioth's takeoff, use a longer finite window
+so whole-fight averages do not hide frame-time spikes:
+
+```sh
+python3 profiles/mhp3rd/tools/encounter_benchmark.py \
+  --config device-testing.local.json --baseline phone-baseline --device phone \
+  --repeat 3 --frames 1800 --seconds 600
+```
+
+This retains individual present durations over 60 emulated seconds, alongside
+the per-second contributions. Associate a suspected attack with separately
+reviewed captures; endpoint screenshots alone cannot identify the attack behind
+a spike. Record video or frequent captures in a separate diagnostic run, since
+readback/encoding can change the measured workload.
 
 The original quest initializes Barioth and its model before relocating the
 hunter; all normal AI and attacks stay active. Readiness checks the real

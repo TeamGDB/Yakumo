@@ -510,6 +510,7 @@ class Adb:
         self.pid = None
         self.log_process = None
         self.log_file = None
+        self._log_cache = b''
 
     def adb(self, *args, data=None, check=True):
         return command(self.prefix + list(args), self.deadline, data=data, check=check)
@@ -712,6 +713,7 @@ class Adb:
     def launch(self):
         if self.pids():
             raise NotTested('Dedicated package started after preparation; refusing to interfere')
+        self._log_cache = b''
         self.log_file = (self.root / 'logcat.log').open('wb')
         self.log_process = subprocess.Popen(self.prefix + ['logcat', '-T', '1'],
                                             stdout=self.log_file, stderr=subprocess.STDOUT)
@@ -743,7 +745,23 @@ class Adb:
         self.watchdog_pid = watchdog_pid
 
     def text(self):
-        text = self.app('cat files/yakumo.log', check=False).decode(errors='replace')
+        # Transfer only new bytes: repeatedly downloading the entire combat log
+        # makes polling progressively slower over remote ADB. Preserve partial UTF-8
+        # sequences in the byte cache, and reset on launch or observed truncation.
+        offset = len(self._log_cache)
+        command = (f'offset={offset}; size=0; '
+                   'if [ -f files/yakumo.log ]; then size=$(wc -c < files/yakumo.log); fi; '
+                   '[ "$size" -ge "$offset" ] || offset=0; '
+                   'printf "%s\\n" "$offset"; '
+                   '[ "$size" -eq 0 ] || tail -c +$((offset + 1)) files/yakumo.log')
+        header, separator, payload = self.app(command).partition(b'\n')
+        if not separator or header not in (b'0', str(offset).encode()):
+            raise RuntimeError('Invalid Android log offset response')
+        previous = self._log_cache if header != b'0' else b''
+        if len(previous) + len(payload) > EVIDENCE_LIMIT:
+            raise ValueError('Android log exceeds evidence limit')
+        self._log_cache = previous + payload
+        text = self._log_cache.decode(errors='replace')
         (self.root / 'run.log').write_text(text)
         return text
 
