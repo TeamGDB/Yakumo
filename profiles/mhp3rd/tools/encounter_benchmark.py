@@ -178,7 +178,8 @@ def run(device, root, seconds, frames, start_tick):
             raise runner.NotTested('Actual GPU/driver or resolved GPU compatibility mode is unavailable')
         report['language'] = device.get('env', {}).get('MHP3RD_LANGUAGE', '')
         report['performance_environment'] = {key: value for key, value in device.get('env', {}).items()
-                                             if key != 'MHP3RD_NO_SPARSE_VERTEX_DECODE'}
+                                             if key not in ('MHP3RD_NO_SPARSE_VERTEX_DECODE',
+                                                            'MHP3RD_NO_PLAIN_ALPHA_VARIANTS')}
         report['settings_sha256'] = runner.fingerprint(session.file('data/settings.ini'))
         report['status'] = 'COLLECTED'
     except Exception as error:

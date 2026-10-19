@@ -109,7 +109,8 @@ if(MHP3RD_RENDERER)
             "kGeRawVertexShader=GE_RAW_VERTICES@${MHP3RD_PROFILE_DIR}/host/gpu/shaders/ge.vert"
             "kGeCheckVertexShader=GE_RAW_VERTICES,GE_CHECK_DECODE@${MHP3RD_PROFILE_DIR}/host/gpu/shaders/ge.vert"
             "kGeFragmentShader=${MHP3RD_PROFILE_DIR}/host/gpu/shaders/ge.frag"
-            "kGeFragmentShaderPlain=GE_NO_SPECIALIZATION@${MHP3RD_PROFILE_DIR}/host/gpu/shaders/ge.frag")
+            "kGeFragmentShaderPlain=GE_NO_SPECIALIZATION@${MHP3RD_PROFILE_DIR}/host/gpu/shaders/ge.frag"
+            "kGeFragmentShaderPlainAlphaFree=GE_NO_SPECIALIZATION,GE_NO_ALPHA_TEST@${MHP3RD_PROFILE_DIR}/host/gpu/shaders/ge.frag")
         if(ANDROID)
             # Pre-rotation of the finished frame for a display turned sideways.
             list(APPEND MHP3RD_SHADERS
@@ -1232,6 +1233,20 @@ if(MHP3RD_RENDERER_TESTS)
             COMMAND mhp3rd_renderer_ui_tests --primitives)
         set_tests_properties(mhp3rd_renderer_trivial_alpha_legacy_tests PROPERTIES
             TIMEOUT 90 ENVIRONMENT "MHP3RD_NO_TRIVIAL_ALPHA_VARIANTS=1")
+        # Compatibility keeps specialization constants disabled. Exercise its
+        # alpha-free shader, exact rollback and rejected-pipeline fallback on
+        # the same independent alpha/depth/texture pixel contracts.
+        foreach(plain_case IN ITEMS normal legacy refused)
+            set(plain_test "mhp3rd_renderer_plain_alpha_${plain_case}_tests")
+            add_custom_target(${plain_test} DEPENDS mhp3rd_renderer_ui_tests)
+            add_test(NAME ${plain_test} COMMAND mhp3rd_renderer_ui_tests --primitives)
+            set_tests_properties(${plain_test} PROPERTIES TIMEOUT 45 ENVIRONMENT "MHP3RD_GPU_COMPAT=on")
+        endforeach()
+        set_tests_properties(mhp3rd_renderer_plain_alpha_legacy_tests PROPERTIES
+            ENVIRONMENT "MHP3RD_GPU_COMPAT=on;MHP3RD_NO_PLAIN_ALPHA_VARIANTS=1")
+        set_tests_properties(mhp3rd_renderer_plain_alpha_refused_tests PROPERTIES
+            ENVIRONMENT "MHP3RD_GPU_COMPAT=on;MHP3RD_GPU_FAIL_PIPELINES=plain-alpha-free"
+            PASS_REGULAR_EXPRESSION "alpha-free plain pipeline refused.*using the original plain shader")
         # Documented rollback paths must preserve the same independent pixel contracts.
         add_custom_target(mhp3rd_renderer_ui_legacy_tests DEPENDS mhp3rd_renderer_ui_tests)
         add_test(NAME mhp3rd_renderer_ui_legacy_tests COMMAND mhp3rd_renderer_ui_tests)

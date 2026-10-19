@@ -567,3 +567,11 @@ shortcuts are diagnostic only.
 The font-spacing contracts in `mhp3rd_kernel_hle_tests` use an independently authored narrow glyph with Latin, Cyrillic and Japanese mappings. They verify wider half-width ink, unchanged full-width metrics/line height, cell bounds, bitmap/metric agreement, Sharp Text cell generation and the diagnostic opt-out. Manual comparisons must use the same font, text, internal resolution and game frame.
 
 - Touch menu footer: real SDL finger and touch-emulated mouse events replace the menu's bottom key hints with a bottom-right Close Menu button and hide the tab-switch caps, allowing the tab strip to fill the row. Renderer/UI contracts verify its bounds, cancelled drags, tap-to-resume, and restoration of keyboard/mouse/gamepad hints. The touch UI mode retains a window capture for inspection. Actual Android display and input hardware remain a manual check.
+
+The three `mhp3rd_renderer_plain_alpha_{normal,legacy,refused}_tests` reuse the
+bounded primitive/opacity contracts in forced compatibility mode. They cover
+alpha rejection, exact RGBA, sampled textures, depth writes/occlusion, rollback
+and rejection of the optional alpha-free pipeline. The refused case must log
+its fallback to the original plain shader. Public shader-tool tests inspect
+SPIR-V instructions: the alpha-free variant contains neither `OpKill` nor
+specialization constants, while the tested plain variant retains `OpKill`.

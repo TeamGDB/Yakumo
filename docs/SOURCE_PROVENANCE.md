@@ -82,3 +82,14 @@ Released builds carry these notices in `profiles/mhp3rd/packaging/THIRD_PARTY_NO
 ## Contribution rule
 
 Do not paste or adapt source from a project whose license is incompatible with the destination file. Reimplement required behavior from specifications, observations or independently documented semantics, and record the source of third-party material when it is intentionally included under a compatible license.
+
+## Plain fragment alpha variants
+
+The compatibility alpha-free shader independently modifies this repository's
+`ge.frag`; no external implementation was copied. Khronos SPIR-V instruction
+facts (`OpKill` and specialization constants) are used by the binary regression
+check. Arm's [Bifrost performance-counter documentation](https://developer.arm.com/community/arm-community-blogs/b/mobile-graphics-and-gaming-blog/posts/mali-bifrost-family-performance-counters)
+explains why shader-dependent coverage can prevent an early depth/stencil
+update. This motivates testing a no-discard variant; actual device measurements
+and their limits belong in [COMPATIBILITY.md](COMPATIBILITY.md). Hardware counter
+behavior is not inferred solely from a shader's source.

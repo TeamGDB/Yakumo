@@ -352,8 +352,10 @@ correctness. Keep reports, captures, paths, raw logs and game data ignored/local
 
 For a same-binary rollback, a native local device entry may set
 `env: {"MHP3RD_NO_SPARSE_VERTEX_DECODE": "1"}`. The comparison permits this
-single optimization selector to differ; other diagnostic environment overrides
-must match too. `MHP3RD_PERF_ALTERNATE=sparse` is available for a separate
+optimization selector to differ. A compatibility-path rollback may instead set
+`MHP3RD_NO_PLAIN_ALPHA_VARIANTS=1`; all other diagnostic environment overrides
+must match too. Compare the same selected and resolved compatibility mode in
+both runs, and report GPU timing as unavailable when that mode disables it. `MHP3RD_PERF_ALTERNATE=sparse` is available for a separate
 continuous-scene diagnostic, whose `alt on/off` log windows must be analyzed
 separately rather than pooled as a fixed-mode result.
 

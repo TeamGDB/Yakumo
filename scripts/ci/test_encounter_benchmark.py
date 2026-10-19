@@ -125,7 +125,8 @@ class EncounterBenchmarkTests(unittest.TestCase):
                           'commit': 'a'*40, 'binary': sys.executable, 'args': [str(base/'fake.py'), mode],
                           'game_dir': str(base/'game'), 'saves': str(base/'saves'),
                           'settings': str(base/'settings.ini'),
-                          'env': {'MHP3RD_NO_AUDIO': '1', 'MHP3RD_NO_SPARSE_VERTEX_DECODE': '1'},
+                          'env': {'MHP3RD_NO_AUDIO': '1', 'MHP3RD_NO_SPARSE_VERTEX_DECODE': '1',
+                                  'MHP3RD_NO_PLAIN_ALPHA_VARIANTS': '1'},
                           'suite_fixtures': {'load-character': [{'action': 'input', 'value': '0:pad b 4'}]}}
                 sessions = []
                 original = bench.suite.Session
