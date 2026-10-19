@@ -3,10 +3,12 @@
 // part of sceUtility. sceWlanDrv is with the ad hoc calls in hle_adhoc.cpp.
 #include "hle_common.hpp"
 #include "mods/mhp3rd_mods.hpp"
+#include "mods/mod_native.hpp"
 
 #include "overlays.hpp"
 
 #include "psprecomp/common.hpp"
+#include "psprecomp/jit.hpp"
 
 #include <array>
 #include <chrono>
@@ -15,7 +17,9 @@
 #include <cstring>
 #include <ctime>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
+#include <vector>
 
 namespace mhp3rd {
 namespace {
@@ -51,6 +55,17 @@ void success(Runtime &, AllegrexContext &ctx) {
     kernel().finish(ctx, 0u);
 }
 
+// Calls the mods' code that runs as it loads, one function after another on
+// the thread that flushed the cache, then finishes the flush.
+void run_mod_code(AllegrexContext &ctx, std::shared_ptr<const std::vector<std::uint32_t>> code, std::size_t next) {
+    if (next >= code->size()) {
+        kernel().finish(ctx, 0u);
+        return;
+    }
+    kernel().call_guest(ctx, (*code)[next], {0u, 0u, 0u, 0u},
+        [code, next](AllegrexContext &ctx, std::uint32_t) { run_mod_code(ctx, code, next + 1u); });
+}
+
 void register_utils(HleRegistrar &hle) {
     for (const char *name : {"sceKernelDcacheWritebackAll", "sceKernelDcacheWritebackInvalidateAll",
              "sceKernelDcacheInvalidateRange", "sceKernelDcacheWritebackRange", "sceKernelSetGPO"})
@@ -59,13 +74,23 @@ void register_utils(HleRegistrar &hle) {
     // slot, which is the profile's cue to re-check which overlay is loaded.
     const auto flush_icache = [](Runtime &rt, AllegrexContext &ctx) {
         // An overlay has finished loading: patches that write outside it go in first.
-        mods::code_loaded(rt);
+        std::vector<std::uint32_t> run = mods::code_loaded(rt);
         forget_unmatched_overlays();
         revalidate_overlays(rt);
-        kernel().finish(ctx, 0u);
+        mods::native::overlay_loaded(rt, arg(ctx, 0));
+        run_mod_code(ctx, std::make_shared<const std::vector<std::uint32_t>>(std::move(run)), 0u);
     };
-    hle.add("UtilsForUser", "sceKernelIcacheInvalidateAll", flush_icache);
-    hle.add("UtilsForUser", "sceKernelIcacheInvalidateRange", flush_icache);
+    // Code the JIT compiled from memory the game rewrote is stale: what of it
+    // changed, anywhere or in the range flushed.
+    hle.add("UtilsForUser", "sceKernelIcacheInvalidateAll", [flush_icache](Runtime &rt, AllegrexContext &ctx) {
+        psprecomp::jit_memory_changed(rt, 0u, 0xFFFFFFFFu);
+        flush_icache(rt, ctx);
+    });
+    hle.add("UtilsForUser", "sceKernelIcacheInvalidateRange", [flush_icache](Runtime &rt, AllegrexContext &ctx) {
+        const std::uint32_t start = psprecomp::GuestMemory::canonical(arg(ctx, 0));
+        psprecomp::jit_memory_changed(rt, start, start + arg(ctx, 1));
+        flush_icache(rt, ctx);
+    });
     hle.add("UtilsForUser", "sceKernelLibcTime", [](Runtime &rt, AllegrexContext &ctx) {
         const auto seconds = static_cast<std::uint32_t>(guest_unix_us() / 1'000'000u);
         if (arg(ctx, 0) != 0u) rt.memory().store32(arg(ctx, 0), seconds);

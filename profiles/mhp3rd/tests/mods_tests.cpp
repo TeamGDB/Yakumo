@@ -10,12 +10,15 @@
 // only) and checks that it parses and encodes back to the same bytes, and that
 // a layout with a grown entry re-keys the entries after it consistently.
 #include "mods/file_overlay.hpp"
+#include "mods/mhp3rd_code_mods.hpp"
 #include "mods/mhp3rd_data_bin.hpp"
 #include "mods/mhp3rd_mod_format.hpp"
 #include "mods/mod_import.hpp"
 #include "mods/mod_ini.hpp"
 #include "mods/mod_library.hpp"
 #include "mods/mod_session.hpp"
+
+#include "psprecomp/runtime.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -24,6 +27,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <random>
 #include <string>
 #include <vector>
@@ -133,19 +137,51 @@ void test_format(const fs::path &root) {
     check(!format.read(mods / "missing")->unusable.empty(), "format: a missing file makes the mod unusable");
     make_mod(mods / "range", "Files=\"a.pac\"\nTarget=\"FFFF\"\nType=\"File\"\nVersion=\"HD\"\n", {"a.pac"});
     check(!format.read(mods / "range")->unusable.empty(), "format: a target past the archive is refused");
-    make_mod(mods / "code", "Name=\"Code\"\nFiles=\"c.bin\"\nType=\"Code\"\nVersion=\"HD\"\n", {"c.bin"});
-    check(!format.read(mods / "code")->unusable.empty(), "format: code mods are listed but cannot be used");
+    make_mod(
+        mods / "code", "Name=\"Code\"\nFiles=\"c.bin;D.BIN\"\nType=\"Code\"\nVersion=\"HD\"\n", {"c.bin", "d.bin"});
+    mod = format.read(mods / "code");
+    check(mod && mod->unusable.empty() && mod->changes.empty() && mod->code.size() == 2u &&
+            iequals(to_utf8(mod->code[1].filename()), "d.bin"),
+        "format: a code mod's files, in order, found without case");
+    make_mod(mods / "code_both", "Files=\"psp.bin\"\nFilesHD=\"hd.bin\"\nType=\"Code\"\nVersion=\"BOTH\"\n",
+        {"psp.bin", "hd.bin"});
+    mod = format.read(mods / "code_both");
+    check(mod && mod->code.size() == 1u && mod->code[0].filename() == "hd.bin",
+        "format: a code mod for both uses FilesHD");
+    make_mod(mods / "code_psp", "Files=\"c.bin\"\nType=\"Code\"\n", {"c.bin"});
+    check(!format.read(mods / "code_psp")->unusable.empty(), "format: a code mod without Version is for the PSP");
+    make_mod(mods / "code_missing", "Files=\"gone.bin\"\nType=\"Code\"\nVersion=\"HD\"\n");
+    check(!format.read(mods / "code_missing")->unusable.empty(), "format: a code mod's missing file is reported");
+    make_mod(mods / "code_empty", "Type=\"Code\"\nVersion=\"HD\"\n");
+    check(!format.read(mods / "code_empty")->unusable.empty(), "format: a code mod without files cannot be used");
     make_mod(mods / "pack", "Name=\"Pack\"\nType=\"Pack\"\nModList=\"file_hd;both\n");
     mod = format.read(mods / "pack");
     check(mod && mod->members == std::vector<std::string>{"file_hd", "both"}, "format: a pack lists its mods");
+    make_mod(mods / "pack_depends", "Name=\"Pack\"\nType=\"Pack\"\nDepends=\"file_hd;both\"\n");
+    mod = format.read(mods / "pack_depends");
+    check(mod && mod->unusable.empty() && mod->members == std::vector<std::string>{"file_hd", "both"},
+        "format: a pack that names its mods only in Depends");
+    make_mod(mods / "added_file",
+        "Files=\"a.pac\"\nTarget=\"1508Q\"\nType=\"File\"\nVersion=\"HD\"\nDepends=\"monster_expansion\"\n", {"a.pac"});
+    mod = format.read(mods / "added_file");
+    check(mod && mod->unusable.find("another mod adds (it needs monster_expansion)") != std::string::npos,
+        "format: a target another mod adds says so");
     make_mod(mods / "pseudo",
         "Name=\"Pseudo\"\nType=\"PseudoPack\"\nVersion=\"HD\"\nSubModList=\"one;two;three\"\n"
         "[one]\nFiles=\"a.pac\"\nTarget=\"0010\"\nType=\"File\"\n[two]\nFiles=\"p.bin\"\n"
-        "Target=\"0011\"\nType=\"Patch\"\n[three]\nFiles=\"c.bin\"\nType=\"Code\"\n",
+        "Target=\"0011\"\nType=\"Patch\"\n[three]\nFiles=\"c.bin\"\nType=\"Code\"\n[four]\nType=\"EquipGS\"\n",
         {"a.pac", "p.bin", "c.bin"});
     mod = format.read(mods / "pseudo");
-    check(mod && mod->unusable.empty() && mod->changes.size() == 2u && mod->notes.size() == 1u,
-        "format: a pseudo pack takes its file and patch parts and reports the rest");
+    // SubModList names three; [four] is not listed and so not read.
+    check(mod && mod->unusable.empty() && mod->changes.size() == 2u && mod->code.size() == 1u && mod->notes.empty(),
+        "format: a pseudo pack takes its file, patch and code parts");
+    make_mod(mods / "pseudo_equip",
+        "Type=\"PseudoPack\"\nVersion=\"HD\"\nSubModList=\"one;two\"\n[one]\nFiles=\"c.bin\"\nType=\"Code\"\n"
+        "[two]\nType=\"EquipGS\"\nFiles=\"c.bin\"\n",
+        {"c.bin"});
+    mod = format.read(mods / "pseudo_equip");
+    check(mod && mod->unusable.empty() && mod->code.size() == 1u && mod->notes.size() == 1u,
+        "format: a pseudo pack reports the parts it cannot take");
     make_mod(mods / "set", "Name=\"Set\"\nType=\"EquipSET\"\nFiles=\"h.pac;null;b.pac;null;l.pac\"\n",
         {"h.pac", "b.pac", "l.pac"});
     mod = format.read(mods / "set");
@@ -162,6 +198,26 @@ void test_format(const fs::path &root) {
     write(mods / "withpreview" / "PREVIEW.PNG", "x");
     make_mod(mods / "withpreview", "Name=\"P\"\nType=\"Pack\"\nModList=\"a\"\n");
     check(!format.read(mods / "withpreview")->preview.empty(), "format: the preview is found without case");
+
+    // The author in a section of its own, as published armour sets give it,
+    // and a dependency on the loader's file replacer, which Yakumo is.
+    write(mods / "author_section" / "mod.ini",
+        "[MOD INFO]\r\nName=\"Set\"\r\nFiles=\"h.pac;null;null;null;null\"\r\nType=\"EquipSET\"\r\nVersion=\"BOTH\"\r\n"
+        "Depends=\"file_replacer\"\r\n\r\n[Author]\r\nName=\"Someone\"\r\n");
+    write(mods / "author_section" / "h.pac", pattern(16, 3));
+    mod = format.read(mods / "author_section");
+    check(mod && mod->unusable.empty() && mod->author == "Someone", "format: the author from an [Author] section");
+    check(mod && mod->depends == std::vector<std::string>{"file_replacer"} && format.built_in("file_replacer") &&
+            format.built_in(" FILE_REPLACER") && !format.built_in("wpn_anim_expansion"),
+        "format: the loader's file replacer is built in, other dependencies are not");
+    make_mod(mods / "priority", "Name=\"P\"\nType=\"Pack\"\nModList=\"a\"\nPriority=\"0\"\n");
+    mod = format.read(mods / "priority");
+    check(mod && mod->priority == 0 && mod->notes.empty(), "format: Priority 0 to 5 is read");
+    make_mod(mods / "bad_priority", "Name=\"P\"\nType=\"Pack\"\nModList=\"a\"\nPriority=\"9\"\n");
+    mod = format.read(mods / "bad_priority");
+    check(mod && mod->priority == 3 && mod->notes.size() == 1u, "format: a Priority out of range keeps 3, with a note");
+    make_mod(mods / "no_priority", "Name=\"P\"\nType=\"Pack\"\nModList=\"a\"\n");
+    check(format.read(mods / "no_priority")->priority == 3, "format: no Priority means 3");
 
     // mhp3reload's own files folder: files named by id, patches with P.
     write(mods / "raw" / "files" / "0601", pattern(16, 1));
@@ -187,7 +243,8 @@ void test_library(const fs::path &root) {
         {"p.bin"});
     make_mod(mods / "d", "Name=\"D\"\nFiles=\"p.bin\"\nTarget=\"0003\"\nType=\"Patch\"\nVersion=\"HD\"\n", {"p.bin"});
     make_mod(mods / "pack", "Name=\"Pack\"\nType=\"Pack\"\nModList=\"a;b\"\n");
-    make_mod(mods / "code", "Name=\"Code\"\nFiles=\"c.bin\"\nType=\"Code\"\nVersion=\"HD\"\n", {"c.bin"});
+    // For the PSP version only: listed, but it cannot be turned on.
+    make_mod(mods / "code", "Name=\"Code\"\nFiles=\"c.bin\"\nType=\"Code\"\nVersion=\"NOHD\"\n", {"c.bin"});
 
     ModLibrary library(format);
     library.load_choices(root / "none.ini");
@@ -386,7 +443,9 @@ void test_archive(const fs::path &root) {
     r.patches[2] = {{"m", root / "archive" / "patch"}};
     FileOverlay overlay(
         {[&view](FileId file) { return view.original(file); }, [&disc](FileId file) { return disc.size(file); },
-            [](FileId, Bytes &bytes, const fs::path &path) { return p3::apply_patch(bytes, path); }});
+            [](FileId, Bytes &bytes, const Resolution::Source &patch) {
+                return p3::apply_patch(bytes, p3::read_blocks(patch));
+            }});
     overlay.set(r);
     const auto layout = std::make_shared<const p3::Layout>(p3::Layout::build(disc, overlay.sizes()));
     const p3::Directory &d = layout->directory;
@@ -444,21 +503,203 @@ void test_patches(const fs::path &root) {
     write(root / "patches" / "p", patch);
     PatchOutcome outcome = p3::apply_patch(overlay, root / "patches" / "p");
     check(overlay[64u + 0x100u + 4u] == 1u && overlay[64u + 0x103u + 4u] == 4u, "patch: an overlay's data by address");
-    check(overlay[64u] == 9u, "patch: its code, through a mirror address");
-    check(outcome.applied == 2u && outcome.after_load.size() == 1u && outcome.after_load[0].address == 0x08801000u,
+    // The overlay keeps the code its recompiled corpus was made from; the
+    // change to its code is written to memory once that corpus is installed.
+    check(overlay[64u] == 0u && outcome.after_load.size() == 3u && outcome.after_load[0].address == 0x0A055E80u + 64u &&
+            outcome.after_load[0].bytes == Bytes{9, 9, 9, 9},
+        "patch: its code, through a mirror address, is written to memory after the load");
+    check(outcome.applied == 1u && outcome.after_load[1].address == 0x08801000u,
         "patch: memory outside the overlay is written after it loads");
-    check(outcome.problems.size() == 2u, "patch: code to run and code changed are reported");
+    check(outcome.run == std::vector<std::uint32_t>{0x08900000u} && outcome.after_load[2].address == 0x08900000u,
+        "patch: code to run is written after the load, then called");
+    check(outcome.problems.empty(), "patch: nothing is reported for an overlay patch that applies");
 
     Bytes data = pattern(256, 5);
     patch.clear();
     block(0x20u, {0xAB, 0xCD});
     block(0x08801000u, {1});
+    block(0x0BFF3800u, {2}, true);
     block(0x1000u, {1});
+    block(0x40u, {3}, true);
     write(root / "patches" / "q", patch); // no end marker, as the manager installs it
     outcome = p3::apply_patch(data, root / "patches" / "q");
     check(data[0x20] == 0xABu && data[0x21] == 0xCDu && outcome.applied == 1u, "patch: an offset into a data file");
-    check(outcome.problems.size() == 2u && outcome.after_load.empty(),
-        "patch: memory writes and blocks past the end of a data file are refused");
+    // The loader's patches are code loaded with a file: memory blocks go in
+    // once the game has read it.
+    check(outcome.after_load.size() == 2u && outcome.after_load[0].address == 0x08801000u &&
+            outcome.run == std::vector<std::uint32_t>{0x0BFF3800u},
+        "patch: a data file's patch writes memory and runs code after the file is read");
+    check(outcome.problems.size() == 2u, "patch: a block past the end, and code to run inside the file, are refused");
+}
+
+void test_yakumo_format(const fs::path &root) {
+    // Bytes and edits as a mod.ini writes them.
+    std::string error;
+    check(parse_bytes("27 BD FF F0", error) == Bytes{0x27, 0xBD, 0xFF, 0xF0} &&
+            parse_bytes(" 27BDFFF0 ", error) == Bytes{0x27, 0xBD, 0xFF, 0xF0},
+        "edits: hex bytes in order, spaced or not");
+    check(parse_bytes("0x24020001 0x1234 0xAB", error) == Bytes{0x01, 0x00, 0x02, 0x24, 0x34, 0x12, 0xAB},
+        "edits: 0x numbers are words, halfwords and bytes, low byte first");
+    for (const char *bad : {"0x123", "G1", "", "0x", "ABC", "0x1234567890"}) {
+        error.clear();
+        check(!parse_bytes(bad, error) && !error.empty(), std::string("edits: \"") + bad + "\" is refused");
+    }
+    std::optional<Edit> edit = parse_edit(" 0x08A00010 ", "00 00 -> 0x1234 ; a comment", error);
+    check(edit && edit->address == 0x08A00010u && edit->expect == Bytes{0, 0} && edit->bytes == Bytes{0x34, 0x12},
+        "edits: address, expected bytes and bytes, with a comment");
+    edit = parse_edit("120", "01 # comment", error);
+    check(edit && edit->address == 0x120u && edit->expect.empty() && edit->bytes == Bytes{1},
+        "edits: an offset without 0x, and nothing expected");
+    check(!parse_edit("zz", "01", error) && !parse_edit("123456789", "01", error) &&
+            !parse_edit("10", "00 -> 01 02", error) && !parse_edit("10", "-> 01", error) &&
+            !parse_edit("10", "01 ->", error),
+        "edits: a bad address, a length mismatch and a missing side are refused");
+
+    // A mod in Yakumo's own format.
+    const p3::ModFolderFormat format(6043u);
+    const fs::path mods = root / "yakumo";
+    write(mods / "full" / "mod.ini",
+        "[MOD INFO]\nName=\"Full\"\nType=\"Yakumo\"\nModVersion=\"1.2\"\nPriority=\"1\"\n"
+        "[Files]\n0601 = armour.pac\n05D2 = sub/HELM.pac\n"
+        "[Patches]\n0700 = fix.bin\n"
+        "[Patch 0702]\n; a comment line\n0x10 = 01 02\n0x20 = 00 -> FF\n"
+        "[Patch 0703]\n"
+        "[Code]\nFiles=\"hook.bin;more.bin\"\n0x08B00000 = image.bin\n"
+        "[Memory]\n0x08A00000 = 0x03E00008\n0x08A00004 = 00000000 -> 0x24020001\n");
+    for (const char *name : {"armour.pac", "sub/helm.pac", "fix.bin", "hook.bin", "more.bin"})
+        write(mods / "full" / name, pattern(16, 4));
+    write(mods / "full" / "image.bin", Bytes{0x08, 0x00, 0xE0, 0x03, 0, 0, 0, 0});
+    std::optional<Mod> mod = format.read(mods / "full");
+    check(mod && mod->unusable.empty() && mod->type == "Yakumo mod" && mod->priority == 1 &&
+            mod->version.find("1.2") != std::string::npos,
+        "yakumo: a mod in Yakumo's format, with its own version");
+    check(mod && mod->changes.size() == 4u && mod->changes[0].kind == FileChange::Kind::Replace &&
+            mod->changes[1].file == 0x5D2u && mod->changes[2].kind == FileChange::Kind::Patch &&
+            !mod->changes[2].source.empty() && mod->changes[3].file == 0x702u && mod->changes[3].source.empty() &&
+            mod->changes[3].edits.size() == 2u && mod->changes[3].edits[1].expect == Bytes{0},
+        "yakumo: files, patch files and a patch written as edits; an empty patch section adds nothing");
+    check(mod && mod->code.size() == 2u && mod->memory.size() == 3u && mod->memory[0].address == 0x08B00000u &&
+            mod->memory[0].bytes.size() == 8u && mod->memory[0].expect.empty() &&
+            mod->memory[1].bytes == Bytes{8, 0, 0xE0, 3},
+        "yakumo: code files, a raw image at its address, then memory edits");
+
+    const auto refused = [&](const std::string &name, const std::string &ini, const std::string &why) {
+        write(mods / name / "mod.ini", "[MOD INFO]\nType=\"Yakumo\"\n" + ini);
+        const std::optional<Mod> read = format.read(mods / name);
+        check(read && read->unusable.find(why) != std::string::npos, "yakumo: " + name + " is refused: " + why);
+    };
+    refused("newer", "Format=\"2\"\n[Memory]\n08A00000=00\n", "newer Yakumo");
+    refused("psp", "Version=\"NOHD\"\n[Memory]\n08A00000=00\n", "PSP version");
+    refused("nothing", "Name=\"N\"\n", "changes nothing");
+    refused("bad_edit", "[Memory]\n08A00000 = 0x123\n", "[Memory] 08A00000");
+    refused("bad_patch_edit", "[Patch 0601]\n10 = zz\n", "[Patch 0601] 10");
+    refused("bad_id", "[Files]\nnope = a.pac\n", "not a file id");
+    refused("past_end", "[Patch FFFF]\n10 = 00\n", "not a file of this game");
+    refused("missing", "[Code]\nFiles=\"gone.bin\"\n", "missing from the folder");
+    refused("missing_patch", "[Patches]\n0601 = gone.bin\n", "missing from the folder");
+    refused("image_address", "[Code]\nsomewhere = image.bin\n", "[Code] somewhere");
+    refused("image_missing", "[Code]\n08B00000 = gone.bin\n", "missing from the folder");
+    // Nothing outside the mod's folder, however it is named.
+    write(mods / "secret.bin", pattern(16, 4));
+    refused("dot_dot", "[Code]\nFiles=\"../secret.bin\"\n", "missing from the folder");
+    refused("dot_dot_inside", "[Code]\nFiles=\"sub/../../secret.bin\"\n", "missing from the folder");
+    refused("absolute", "[Code]\nFiles=\"" + to_utf8(mods / "secret.bin") + "\"\n", "missing from the folder");
+    refused("drive", "[Code]\nFiles=\"C:secret.bin\"\n", "missing from the folder");
+#if !defined(_WIN32)
+    write(mods / "link_out" / "placeholder", pattern(4, 1));
+    std::error_code link_error;
+    fs::create_symlink(mods / "secret.bin", mods / "link_out" / "linked.bin", link_error);
+    if (!link_error) refused("link_out", "[Code]\nFiles=\"linked.bin\"\n", "missing from the folder");
+#endif
+    write(mods / "image_empty" / "empty.bin", std::string());
+    refused("image_empty", "[Code]\n08B00000 = empty.bin\n", "empty, unreadable or larger");
+
+    // Native code for the running platform, and a script.
+    const std::string library_name = std::string("example_mod") + native_extension();
+    write(mods / "native" / "mod.ini",
+        "[MOD INFO]\nName=Armor Model Log\nType=Yakumo\nVersion=HD\nFormat=1\n[Native]\nLibrary=example_mod\n");
+    write(mods / "native" / "native" / native_platform() / library_name, pattern(16, 1));
+    write(mods / "native" / "native" / "other-platform" / library_name, pattern(16, 2));
+    mod = format.read(mods / "native");
+    check(mod && mod->unusable.empty() && mod->native.filename() == library_name &&
+            mod->native.parent_path().filename() == native_platform() &&
+            std::any_of(mod->notes.begin(), mod->notes.end(),
+                [](const std::string &note) { return note.find("people you trust") != std::string::npos; }),
+        "yakumo: native code for this platform, with a warning");
+    write(mods / "script" / "mod.ini", "[MOD INFO]\nType=Yakumo\n[Script]\nFile=main.luau\n");
+    write(mods / "script" / "main.luau", std::string("yakumo.log('hi')\n"));
+    mod = format.read(mods / "script");
+    check(mod && mod->unusable.empty() && mod->script.filename() == "main.luau", "yakumo: a script");
+    // New files, under ids past the disc's.
+    write(mods / "adds" / "mod.ini", "[MOD INFO]\nType=Yakumo\n[Add]\n2000 = new/model.pac\n179B = first.bin\n");
+    write(mods / "adds" / "new" / "model.pac", pattern(40, 3));
+    write(mods / "adds" / "first.bin", pattern(8, 4));
+    mod = format.read(mods / "adds");
+    check(mod && mod->unusable.empty() && mod->changes.size() == 2u && mod->changes[0].kind == FileChange::Kind::Add &&
+            mod->changes[0].file == 0x2000u && mod->changes[1].file == 0x179Bu,
+        "yakumo: new files under ids from the disc's count up");
+    refused("add_existing", "[Add]\n0601 = a.pac\n", "[Add] 0601: a new file needs an id from 179B");
+    refused("add_none", "[Add]\nFFFF = a.pac\n", "[Add] FFFF");
+    refused("add_missing", "[Add]\n2000 = gone.pac\n", "missing from the folder");
+    write(mods / "adds_too" / "mod.ini", "[MOD INFO]\nType=Yakumo\n[Add]\n2000 = other.pac\n");
+    write(mods / "adds_too" / "other.pac", pattern(8, 5));
+    write(mods / "elsewhere" / "native" / "other-platform" / library_name, pattern(16, 2));
+    refused("elsewhere", "[Native]\nLibrary=example_mod\n", "no native code for this platform");
+    refused("script_missing", "[Script]\nFile=gone.luau\n", "missing from the folder");
+
+    // Resolved: the mod's memory edits come after its code files.
+    ModLibrary library(format);
+    library.scan(mods);
+    library.set_enabled("full", true);
+    library.set_enabled("native", true);
+    library.set_enabled("script", true);
+    library.set_enabled("adds", true);
+    library.set_enabled("adds_too", true);
+    const Resolution resolution = library.resolve();
+    const auto added_conflict = std::find_if(resolution.conflicts.begin(), resolution.conflicts.end(),
+        [](const Resolution::Conflict &c) { return c.file == 0x2000u; });
+    check(resolution.added.size() == 2u && resolution.added.contains(0x179Bu) &&
+            added_conflict != resolution.conflicts.end() && added_conflict->overridden.size() == 1u &&
+            resolution.added.at(0x2000u).mod == added_conflict->winner,
+        "yakumo: added files reach the resolution; two mods adding one id conflict, the higher rank wins");
+    check(!resolution.empty(), "yakumo: a resolution with only added files is not empty");
+    check(resolution.native.size() == 1u && resolution.native[0].path.filename() == library_name &&
+            resolution.scripts.size() == 1u && resolution.scripts[0].path.filename() == "main.luau",
+        "yakumo: native code and scripts of mods that are on reach the resolution");
+    check(resolution.code.size() == 3u && resolution.code[2].path.empty() && resolution.code[2].edits.size() == 3u &&
+            resolution.patches.at(0x702u).front().edits.size() == 2u,
+        "yakumo: memory edits follow the code files, and patch edits reach the resolution");
+
+    // Expected bytes in a file: written where they match, skipped otherwise.
+    Bytes data(64u, 0u);
+    data[0x20] = 0x11u;
+    p3::Blocks blocks;
+    blocks.blocks.push_back({0x10u, {1, 2}, false, {0, 0}});
+    blocks.blocks.push_back({0x20u, {0xFF}, false, {0x00}});
+    PatchOutcome outcome = p3::apply_patch(data, blocks);
+    check(data[0x10] == 1u && data[0x11] == 2u && data[0x20] == 0x11u && outcome.applied == 1u &&
+            outcome.problems.size() == 1u && outcome.problems[0].find("expected 00, found 11") != std::string::npos,
+        "yakumo: an edit over other bytes than it expects is skipped and reported");
+    Bytes overlay(64u + 0x10u, 0u);
+    std::memcpy(overlay.data(), "MWo3", 4u);
+    put32(overlay, 8u, 0x0A000000u);
+    p3::Blocks outside;
+    outside.blocks.push_back({0x08A00000u, {1}, false, {7}});
+    outcome = p3::apply_patch(overlay, outside);
+    check(outcome.after_load.size() == 1u && outcome.after_load[0].expect == Bytes{7},
+        "yakumo: an edit to memory after an overlay loads keeps what it expects");
+
+    // Expected bytes in memory at start.
+    psprecomp::Runtime runtime(64u * 1024u * 1024u);
+    runtime.memory().store32(0x08A00000u, 0x11111111u);
+    Resolution::Source edits{"m", {}, {}};
+    edits.edits.push_back({0x08A00000u, {0xAA}, {0x11}});
+    edits.edits.push_back({0x08A00001u, {0xBB}, {0x22}});
+    const p3::CodeReport report = p3::write_code(runtime, {{"Edits", edits}});
+    check(runtime.memory().load8(0x08A00000u) == 0xAAu && runtime.memory().load8(0x08A00001u) == 0x11u &&
+            report.blocks == 1u && report.problems.size() == 1u &&
+            report.problems[0].find("expected 22, found 11") != std::string::npos,
+        "yakumo: a memory edit over other bytes than it expects is skipped and reported");
 }
 
 int check_disc(const char *image) {
@@ -531,6 +772,7 @@ int main(int argc, char **argv) {
     test_cipher();
     test_archive(scratch.root);
     test_patches(scratch.root);
+    test_yakumo_format(scratch.root);
     std::printf("%s\n", failures == 0 ? "all mod checks passed" : "mod checks FAILED");
     return failures == 0 ? 0 : 1;
 }

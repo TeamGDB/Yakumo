@@ -138,6 +138,7 @@ if(MHP3RD_RENDERER)
             host/ui/layer.cpp
             host/ui/menu.cpp
             host/ui/layered_armor_screen.cpp
+            host/ui/mod_panels.cpp
             host/ui/mods_screen.cpp
             host/ui/save_screen.cpp
             host/ui/setup_screens.cpp
@@ -176,6 +177,7 @@ add_custom_target(mhp3rd_version
 # FFmpeg decodes the game's music and its movies; by default it is built with
 # the project (see cmake/FFmpeg.cmake).
 include("${MHP3RD_PROFILE_DIR}/cmake/FFmpeg.cmake")
+include("${MHP3RD_PROFILE_DIR}/cmake/Mods.cmake")
 
 # GE parsing, texture decoding and the audio mixer are backend independent and
 # always built; only the device the sink opens depends on SDL.
@@ -248,13 +250,23 @@ set(MHP3RD_HOST_SOURCES
     host/text/language.cpp
     host/text/translation.cpp
     host/mods/file_overlay.cpp
+    host/mods/mhp3rd_added_files.cpp
+    host/mods/mhp3rd_code_mods.cpp
+    host/mods/mhp3rd_data_bin.cpp
+    host/mods/mhp3rd_game_events.cpp
+    host/mods/mhp3rd_mod_format.cpp
+    host/mods/mhp3rd_mods.cpp
+    host/mods/mhp3rd_symbols.cpp
     host/mods/mod_import.cpp
     host/mods/mod_ini.cpp
     host/mods/mod_library.cpp
+    host/mods/mod_native.cpp
+    host/mods/mod_native_hooks.cpp
+    host/mods/mod_native_services.cpp
+    host/mods/mod_package.cpp
+    host/mods/mod_script.cpp
+    host/mods/mod_script_api.cpp
     host/mods/mod_session.cpp
-    host/mods/mhp3rd_data_bin.cpp
-    host/mods/mhp3rd_mod_format.cpp
-    host/mods/mhp3rd_mods.cpp
     host/game/audio_settings.cpp
     host/game/guest_ram.cpp
     host/game/game_data.cpp
@@ -322,7 +334,7 @@ target_include_directories(Yakumo PRIVATE
     "${MHP3RD_PROFILE_DIR}/host"
     "${MHP3RD_PROFILE_DIR}/third_party"
     "${MHP3RD_PROFILE_DIR}/generated")
-target_link_libraries(Yakumo PRIVATE psprecomp_core ${CMAKE_DL_LIBS})
+target_link_libraries(Yakumo PRIVATE psprecomp_core mhp3rd_mod_api ${CMAKE_DL_LIBS})
 if(WIN32)
     # The ad hoc client's and server's sockets, and the list of interfaces;
     # CommandLineToArgvW for the arguments as UTF-8.
@@ -713,23 +725,6 @@ if(PSPRECOMP_BUILD_TESTS)
     add_test(NAME mhp3rd_gamepad_mapping_tests COMMAND mhp3rd_gamepad_mapping_tests)
 endif()
 
-# Mods: the community's mod folders, choices, conflicts and import, the
-# DATA.BIN obfuscation and an archive served with mods' files. No game data.
-add_executable(mhp3rd_mods_tests
-    tests/mods_tests.cpp
-    host/mods/file_overlay.cpp
-    host/mods/mhp3rd_data_bin.cpp
-    host/mods/mhp3rd_mod_format.cpp
-    host/mods/mod_import.cpp
-    host/mods/mod_ini.cpp
-    host/mods/mod_library.cpp
-    host/mods/mod_session.cpp)
-target_include_directories(mhp3rd_mods_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
-set_target_properties(mhp3rd_mods_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-if(PSPRECOMP_BUILD_TESTS)
-    add_test(NAME mhp3rd_mods_tests COMMAND mhp3rd_mods_tests)
-endif()
-
 # Which file holds a piece of equipment's model, read from the game's tables
 # as equipment mods need it, on a buffer standing for guest memory. No game data.
 add_executable(mhp3rd_equipment_models_tests
@@ -1059,11 +1054,13 @@ target_compile_definitions(mhp3rd_test_host PRIVATE MHP3RD_DEVICE_CLOCK_TEST=1)
 target_include_directories(mhp3rd_test_host PUBLIC
     "${MHP3RD_PROFILE_DIR}/host" "${MHP3RD_PROFILE_DIR}/third_party"
     "${CMAKE_CURRENT_BINARY_DIR}/generated_nids")
-target_link_libraries(mhp3rd_test_host PUBLIC psprecomp_core Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(mhp3rd_test_host PUBLIC psprecomp_core mhp3rd_mod_api Threads::Threads ${CMAKE_DL_LIBS})
 mhp3rd_use_ffmpeg(mhp3rd_test_host)
 if(WIN32)
     target_link_libraries(mhp3rd_test_host PUBLIC ws2_32 iphlpapi shell32)
 endif()
+
+mhp3rd_add_mod_tests()
 
 # Both performance overlays and their mode/log contracts, without a GPU or game data.
 add_executable(mhp3rd_perf_overlay_tests tests/perf_overlay_tests.cpp)
@@ -1151,7 +1148,7 @@ if(MHP3RD_RENDERER_TESTS)
         "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders"
         "${CMAKE_CURRENT_BINARY_DIR}/generated_version"
         "${CMAKE_CURRENT_BINARY_DIR}/generated_nids")
-    target_link_libraries(mhp3rd_renderer_ui_tests PRIVATE psprecomp_core SDL3::SDL3 Vulkan::Vulkan Threads::Threads ${CMAKE_DL_LIBS})
+    target_link_libraries(mhp3rd_renderer_ui_tests PRIVATE psprecomp_core mhp3rd_mod_api SDL3::SDL3 Vulkan::Vulkan Threads::Threads ${CMAKE_DL_LIBS})
     mhp3rd_use_ffmpeg(mhp3rd_renderer_ui_tests)
     if(WIN32)
         target_link_libraries(mhp3rd_renderer_ui_tests PRIVATE ws2_32 iphlpapi shell32)

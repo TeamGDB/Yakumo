@@ -1,15 +1,23 @@
 #include "mods/mhp3rd_mods.hpp"
 
+#include "mods/mhp3rd_added_files.hpp"
 #include "mods/file_overlay.hpp"
+#include "mods/mhp3rd_code_mods.hpp"
 #include "mods/mhp3rd_data_bin.hpp"
 #include "mods/mhp3rd_mod_format.hpp"
 #include "mods/mod_ini.hpp"
+#include "mods/mod_native.hpp"
+#include "mods/mod_script.hpp"
 
 #include "install/user_data.hpp"
 #include "kernel/iso_image.hpp"
+#include "kernel/kernel.hpp"
+#include "mhp3rd_profile.hpp"
+#include "overlays.hpp"
 
 #include "psprecomp/runtime.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
@@ -26,6 +34,8 @@ using p3rd::Directory;
 using p3rd::Layout;
 
 constexpr const char *kDataBin = "PSP_GAME/USRDIR/DATA.BIN";
+// Yakumo's own stubs at the bottom of user memory (kernel.hpp): mods must not overwrite them.
+constexpr std::uint32_t kHostStubsEnd = kGuestCallReturnStub + 4u;
 
 bool trace() {
     static const bool enabled = std::getenv("MHP3RD_TRACE_MODS") != nullptr;
@@ -53,11 +63,14 @@ struct State {
     std::unique_ptr<ModSession> session;
     std::shared_ptr<const Layout> layout; // null: the disc's own archive
     bool serving{};
-    bool switched_live{};              // a change was applied while running
-    std::optional<Resolution> waiting; // a switch waiting for a file's load to end
-    std::optional<FileId> partial;     // a file the game has begun but not finished reading
-    std::set<FileId> loaded_code;      // overlays read in full with memory writes due
-    std::set<FileId> reported;         // files whose problems were logged
+    bool switched_live{};                        // a change was applied while running
+    std::optional<Resolution> waiting;           // a switch waiting for a file's load to end
+    std::optional<FileId> partial;               // a file the game has begun but not finished reading
+    std::set<FileId> loaded_code;                // overlays read in full with memory writes due
+    std::set<FileId> reported;                   // files whose problems were logged
+    std::set<std::uint32_t> reserved;            // pages of guest memory held for mods' code
+    std::map<std::string, std::uint32_t> placed; // code blocks with no address: where each went
+    std::vector<std::uint32_t> pending_runs;     // mods' code to run at the next code load
     std::vector<std::string> problems;
 };
 
@@ -144,6 +157,10 @@ void activate_now(const Resolution &resolution) {
 bool can_switch(const Resolution &next) {
     State &s = state();
     if (!s.directory) return false;
+    // Code is in memory since the start; it cannot be taken back out.
+    if (s.overlay && next.code != s.overlay->resolution().code) return false;
+    // Added files are taken over at start.
+    if (s.overlay && next.added != s.overlay->resolution().added) return false;
     const std::shared_ptr<const Layout> wanted = layout_for(next);
     const Layout disc = Layout::build(*s.directory, {});
     const Layout &now = s.layout ? *s.layout : disc;
@@ -172,6 +189,11 @@ void activate(const Resolution &next) {
     activate_now(next);
 }
 
+void problem(const std::string &line) {
+    std::cout << "[mods] " << line << "\n";
+    state().problems.push_back(line);
+}
+
 void note_problems(FileId file) {
     State &s = state();
     if (s.reported.contains(file)) return;
@@ -186,6 +208,12 @@ void note_problems(FileId file) {
 }
 
 } // namespace
+
+// A loaded file's memory blocks and code to run (defined below).
+void write_after_load(psprecomp::Runtime &runtime, FileId file, const FileContent &content);
+
+// Where a mod file's code blocks without an address go (defined below).
+p3rd::Place placer(const fs::path &file);
 
 fs::path mods_directory() {
     if (fs::path dir = environment_path("MHP3RD_MODS_DIR"); !dir.empty()) return dir;
@@ -226,8 +254,8 @@ void attach_disc(IsoImage *disc) {
     s.view = std::make_unique<ArchiveView>(*s.directory, &raw_read);
     s.overlay = std::make_unique<FileOverlay>(FileOverlay::Game{[&s](FileId file) { return s.view->original(file); },
         [&s](FileId file) { return s.directory->size(file); },
-        [](FileId, std::vector<std::uint8_t> &bytes, const fs::path &patch) {
-            return p3rd::apply_patch(bytes, patch);
+        [](FileId, std::vector<std::uint8_t> &bytes, const Resolution::Source &patch) {
+            return p3rd::apply_patch(bytes, p3rd::read_blocks(patch, placer(patch.path)));
         }});
 
     ModSession::Paths paths;
@@ -289,11 +317,26 @@ std::optional<ArchiveEntry> read_archive_entry(std::uint32_t entry, std::size_t 
     return result;
 }
 
+// A read of the disc's own archive: native and script mods still hear of
+// each whole file the game reads.
+std::size_t unserved_read(std::uint64_t offset, std::span<std::uint8_t> out) {
+    State &s = state();
+    const std::size_t count = raw_read(offset, out);
+    if (count == 0u || !s.directory || native::running() == 0u) return count;
+    const Directory &d = *s.directory;
+    const std::uint64_t end = offset + count;
+    if (const std::int64_t last = d.entry_at(static_cast<std::uint32_t>((end - 1u) / p3rd::kBlock)); last >= 0) {
+        const auto file = static_cast<FileId>(last);
+        if (end >= static_cast<std::uint64_t>(d.blocks[file]) * p3rd::kBlock + d.size(file)) native::file_loaded(file);
+    }
+    return count;
+}
+
 std::size_t read_data_bin(std::uint64_t offset, std::span<std::uint8_t> out) {
     State &s = state();
-    if (!s.serving || !s.view) return raw_read(offset, out);
+    if (!s.serving || !s.view) return unserved_read(offset, out);
     if (s.waiting && !switch_waits(*s.waiting)) activate_now(*s.waiting);
-    if (!s.serving) return raw_read(offset, out);
+    if (!s.serving) return unserved_read(offset, out);
 
     std::vector<FileId> touched;
     const std::size_t count = s.view->read(offset, out, &touched);
@@ -309,11 +352,19 @@ std::size_t read_data_bin(std::uint64_t offset, std::span<std::uint8_t> out) {
         static const bool trace_reads = std::getenv("MHP3RD_TRACE_DATA_BIN") != nullptr;
         if (trace_reads) std::cout << "[mods] data " << s.format.file_name(file) << " (" << d.size(file) << " bytes)\n";
         const std::uint64_t file_end = static_cast<std::uint64_t>(d.blocks[file]) * p3rd::kBlock + d.size(file);
+        if (end >= file_end) native::file_loaded(file);
         if (end < file_end)
             s.partial = file;
         else if (s.overlay->touches(file)) {
             const auto content = s.overlay->content(file);
-            if (content && !content->after_load.empty()) s.loaded_code.insert(file);
+            // An overlay's writes wait for the cache flush that ends its
+            // load; any other file is in memory now that it is read.
+            if (content && (!content->after_load.empty() || !content->run.empty())) {
+                if (p3rd::overlay_image(content->bytes))
+                    s.loaded_code.insert(file);
+                else
+                    write_after_load(kernel().runtime(), file, *content);
+            }
         }
     }
     if (!touched.empty()) {
@@ -341,27 +392,158 @@ std::size_t read_data_bin(std::uint64_t offset, std::span<std::uint8_t> out) {
     return count;
 }
 
-void code_loaded(psprecomp::Runtime &runtime) {
+// Writes a loaded file's memory blocks (FileContent::after_load) and queues
+// its code to run. An overlay must be the one in its slot now, and its
+// recompiled code goes in before any of it changes, so that only the units
+// the mods change leave native code.
+void write_after_load(psprecomp::Runtime &runtime, FileId file, const FileContent &content) {
     State &s = state();
-    if (s.loaded_code.empty() || !s.overlay) return;
-    for (const FileId file : s.loaded_code) {
-        const std::shared_ptr<const FileContent> content = s.overlay->content(file);
-        if (!content) continue;
-        const std::optional<p3rd::OverlayImage> image = p3rd::overlay_image(content->bytes);
-        if (!image) continue;
-        // Only if that overlay is the one in its slot now.
-        auto &memory = runtime.memory();
-        bool present = true;
-        for (std::uint32_t i = 0; i < 8u && present; ++i) present = memory.load8(image->load + i) == content->bytes[i];
-        if (!present) continue;
-        for (const MemoryWrite &write : content->after_load) {
-            memory.copy_in(write.address, write.bytes);
-            if (trace())
-                std::cout << "[mods] after loading " << s.format.file_name(file) << ": wrote " << write.bytes.size()
-                          << " bytes at 0x" << hex(write.address) << "\n";
+    auto &memory = runtime.memory();
+    if (const std::optional<p3rd::OverlayImage> image = p3rd::overlay_image(content.bytes)) {
+        for (std::uint32_t i = 0; i < 8u; ++i) {
+            if (memory.load8(image->load + i) != content.bytes[i]) return;
+        }
+        const bool changes_code =
+            std::any_of(content.after_load.begin(), content.after_load.end(), [&image](const MemoryWrite &write) {
+                return write.address >= image->load && write.address < image->code_end;
+            });
+        if (changes_code && !install_overlay_at(runtime, image->load))
+            problem(s.format.file_name(file) + ": its overlay has no recompiled code; it runs in the interpreter");
+    }
+    for (const MemoryWrite &write : content.after_load) {
+        if (!write.expect.empty()) {
+            std::vector<std::uint8_t> found(write.expect.size());
+            for (std::size_t i = 0; i < found.size(); ++i)
+                found[i] = memory.load8(write.address + static_cast<std::uint32_t>(i));
+            if (const auto wrong = p3rd::mismatch(write.expect, found)) {
+                problem(s.format.file_name(file) + ": the write at 0x" + hex(write.address) + " is skipped: " + *wrong);
+                continue;
+            }
+        }
+        memory.copy_in(write.address, write.bytes);
+        std::vector<std::string> lines;
+        p3rd::retire_code(runtime, write.address, write.bytes.size(), s.format.file_name(file) + "P", lines);
+        for (const std::string &line : lines) problem(line);
+        if (trace())
+            std::cout << "[mods] after loading " << s.format.file_name(file) << ": wrote " << write.bytes.size()
+                      << " bytes at 0x" << hex(write.address) << "\n";
+    }
+    s.pending_runs.insert(s.pending_runs.end(), content.run.begin(), content.run.end());
+}
+
+std::vector<std::uint32_t> code_loaded(psprecomp::Runtime &runtime) {
+    State &s = state();
+    if (s.overlay) {
+        for (const FileId file : s.loaded_code) {
+            if (const std::shared_ptr<const FileContent> content = s.overlay->content(file))
+                write_after_load(runtime, file, *content);
         }
     }
     s.loaded_code.clear();
+    // Code mods' blocks from the start, and the loaded files': the game is
+    // running and at a point where it expects code to have changed.
+    std::vector<std::uint32_t> run = std::move(s.pending_runs);
+    s.pending_runs.clear();
+    return run;
+}
+
+// Memory a mod's code was written to, kept from the game's allocator: each
+// run of free pages is allocated at its address. The executable's own image
+// needs nothing; memory already in use is reported, since the game may
+// overwrite the code there.
+//
+// The 16 KiB below the executable are where the community loader keeps mods'
+// code, and plain code files put it there at fixed addresses. No allocator
+// hands that memory out, so it needs no reserving, except the first bytes,
+// which hold Yakumo's own stubs.
+p3rd::Reservation reserve_memory(std::uint32_t address, std::uint32_t size) {
+    constexpr std::uint32_t kPage = 0x100u;
+    State &s = state();
+    Kernel &k = kernel();
+    const std::uint32_t image_end = k.user_memory_start();
+    const std::uint64_t end = static_cast<std::uint64_t>(address) + size;
+    if (address < kHostStubsEnd && end > kThreadExitStub)
+        return {false, "would overwrite Yakumo's own code at 0x" + hex(kThreadExitStub) + "; it is skipped"};
+    const auto needs = [&](std::uint32_t page) {
+        return !s.reserved.contains(page) && !(page >= kThreadExitStub && page + kPage <= image_end);
+    };
+    for (std::uint32_t page = address & ~(kPage - 1u); page < end;) {
+        if (!needs(page)) {
+            page += kPage;
+            continue;
+        }
+        std::uint32_t run = page;
+        while (run < end && needs(run)) run += kPage;
+        if (k.allocate_block("mod code", 2u, run - page, page) < 0)
+            return {true,
+                "is in memory the game or Yakumo already uses (0x" + hex(page) + " to 0x" + hex(run) +
+                    "); the game may overwrite it"};
+        for (std::uint32_t at = page; at < run; at += kPage) s.reserved.insert(at);
+        page = run;
+    }
+    return {};
+}
+
+// A code block that names no address, a main block of the loader's typed
+// files: allocated once per file and id from the top of free memory, and
+// reused each time the file is read again.
+std::optional<std::uint32_t> place_code(const fs::path &file, const std::string &id, std::uint32_t size) {
+    State &s = state();
+    const std::string key = to_utf8(file) + "|" + id;
+    if (const auto found = s.placed.find(key); found != s.placed.end()) return found->second;
+    Kernel &k = kernel();
+    const std::int32_t uid = k.allocate_block("mod code " + id, 4u, size == 0u ? 1u : size, 16u);
+    if (uid < 0) return std::nullopt;
+    const MemoryBlock *block = k.find_block(uid);
+    if (block == nullptr) return std::nullopt;
+    for (std::uint32_t at = block->address & ~0xFFu; at < block->address + block->size; at += 0x100u)
+        s.reserved.insert(at);
+    s.placed[key] = block->address;
+    if (trace())
+        std::cout << "[mods] " << id << " from " << to_utf8(file.filename()) << " placed at 0x" << hex(block->address)
+                  << "\n";
+    return block->address;
+}
+
+p3rd::Place placer(const fs::path &file) {
+    return [file](const std::string &id, std::uint32_t size) { return place_code(file, id, size); };
+}
+
+void write_code(psprecomp::Runtime &runtime) {
+    State &s = state();
+    if (!s.overlay || s.overlay->resolution().code.empty()) return;
+    std::vector<p3rd::CodeFile> files;
+    for (const Resolution::Source &source : s.overlay->resolution().code)
+        files.push_back({mod_name(source.mod) + " (" +
+                (source.edits.empty() ? to_utf8(source.path.filename()) : std::string("[Memory]")) + ")",
+            source});
+    p3rd::CodeReport report;
+    for (const p3rd::CodeFile &file : files) {
+        p3rd::CodeReport one = p3rd::write_code(runtime, {file}, &reserve_memory, placer(file.source.path), trace());
+        report.blocks += one.blocks;
+        report.bytes += one.bytes;
+        report.units += one.units;
+        report.run.insert(report.run.end(), one.run.begin(), one.run.end());
+        report.problems.insert(report.problems.end(), one.problems.begin(), one.problems.end());
+    }
+    s.pending_runs = report.run;
+    for (const std::string &line : report.problems) problem(line);
+    std::cout << "[mods] code: " << report.blocks << " block(s), " << report.bytes << " bytes written; " << report.units
+              << " unit(s) of recompiled code retired, compiled again from memory by the JIT\n";
+}
+
+void start_native(psprecomp::Runtime &runtime) {
+    State &s = state();
+    if (!s.overlay) return;
+    (void)added::install(runtime, s.overlay->resolution().added);
+    native::start(runtime, s.overlay->resolution().native);
+    scripts::start(runtime, s.overlay->resolution().scripts);
+}
+
+std::optional<std::vector<std::uint8_t>> original_file(FileId file) {
+    State &s = state();
+    if (!s.view || !s.directory || file >= s.directory->entries()) return std::nullopt;
+    return s.view->original(file);
 }
 
 ModSession *session() {

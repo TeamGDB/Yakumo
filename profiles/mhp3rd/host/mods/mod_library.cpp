@@ -18,6 +18,34 @@ constexpr const char *kModPrefix = "mod ";
 
 } // namespace
 
+const char *native_platform() noexcept {
+#if defined(__ANDROID__) && defined(__aarch64__)
+    return "android-arm64";
+#elif defined(_WIN32) && (defined(_M_X64) || defined(__x86_64__))
+    return "windows-x64";
+#elif defined(__APPLE__) && defined(__aarch64__)
+    return "macos-arm64";
+#elif defined(__APPLE__) && defined(__x86_64__)
+    return "macos-x64";
+#elif defined(__linux__) && defined(__aarch64__)
+    return "linux-arm64";
+#elif defined(__linux__) && defined(__x86_64__)
+    return "linux-x64";
+#else
+    return "unknown";
+#endif
+}
+
+const char *native_extension() noexcept {
+#if defined(_WIN32)
+    return ".dll";
+#elif defined(__APPLE__)
+    return ".dylib";
+#else
+    return ".so";
+#endif
+}
+
 void ModLibrary::scan(const fs::path &folder) {
     mods_.clear();
     std::error_code ec;
@@ -78,6 +106,13 @@ void ModLibrary::load_choices(const fs::path &file) {
             if (value == nullptr) break;
             c.slots.push_back(format_->parse_file(*value));
         }
+        for (const auto &[key, value] : ini->entries(section)) {
+            if (!iequals(std::string_view(key).substr(0, 8), "setting.") || key.size() <= 8u) continue;
+            try {
+                c.settings[key.substr(8)] = std::stoll(value);
+            } catch (const std::exception &) {
+            }
+        }
         choices_[id] = std::move(c);
     }
 }
@@ -96,6 +131,7 @@ bool ModLibrary::save_choices(const fs::path &file, std::string &error) const {
             out << "\n[" << kModPrefix << id << "]\nenabled=" << (c.enabled ? 1 : 0) << "\nrank=" << c.rank << "\n";
             for (std::size_t slot = 0; slot < c.slots.size(); ++slot)
                 out << "slot" << slot + 1u << "=" << (c.slots[slot] ? format_->file_name(*c.slots[slot]) : "") << "\n";
+            for (const auto &[key, value] : c.settings) out << "setting." << key << "=" << value << "\n";
         }
         if (!out) {
             error = "cannot write " + to_utf8(partial);
@@ -149,6 +185,56 @@ void ModLibrary::set_slot(const std::string &id, std::size_t slot, std::optional
     c.slots[slot] = file;
 }
 
+bool valid_setting_key(std::string_view key) noexcept {
+    if (key.empty() || key.size() > 64u) return false;
+    return std::all_of(key.begin(), key.end(), [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' ||
+            c == '-';
+    });
+}
+
+std::int64_t ModLibrary::declare_setting(const std::string &id, const ModSetting &setting) {
+    if (!valid_setting_key(setting.key)) return setting.fallback;
+    std::vector<ModSetting> &declared = declared_[id];
+    const auto same = std::find_if(
+        declared.begin(), declared.end(), [&setting](const ModSetting &s) { return s.key == setting.key; });
+    if (same != declared.end())
+        *same = setting;
+    else
+        declared.push_back(setting);
+    const std::int64_t value = this->setting(id, setting.key, setting.fallback);
+    const std::int64_t maximum = setting.kind == ModSetting::Kind::Choice
+        ? static_cast<std::int64_t>(setting.choices.empty() ? 0u : setting.choices.size() - 1u)
+        : setting.kind == ModSetting::Kind::Switch ? 1
+                                                   : setting.maximum;
+    const std::int64_t minimum = setting.kind == ModSetting::Kind::Number ? setting.minimum : 0;
+    return std::clamp(value, minimum, std::max(minimum, maximum));
+}
+
+const std::vector<ModSetting> &ModLibrary::settings_of(const std::string &id) const {
+    static const std::vector<ModSetting> kNone;
+    const auto found = declared_.find(id);
+    return found != declared_.end() ? found->second : kNone;
+}
+
+std::int64_t ModLibrary::setting(const std::string &id, const std::string &key, std::int64_t fallback) const {
+    const auto found = choices_.find(id);
+    if (found == choices_.end()) return fallback;
+    const auto value = found->second.settings.find(key);
+    return value != found->second.settings.end() ? value->second : fallback;
+}
+
+void ModLibrary::set_setting(const std::string &id, const std::string &key, std::int64_t value) {
+    if (!valid_setting_key(key)) return;
+    choice_for(id).settings[key] = value;
+}
+
+void ModLibrary::add_runtime_change(const std::string &id, const FileChange &change) {
+    std::vector<FileChange> &changes = runtime_changes_[id];
+    std::erase_if(changes, [&change](const FileChange &c) { return c.file == change.file && c.kind == change.kind; });
+    changes.push_back(change);
+}
+
 void ModLibrary::move(const std::string &id, int delta) {
     const auto it = std::find_if(mods_.begin(), mods_.end(), [&id](const Mod &m) { return m.id == id; });
     if (it == mods_.end()) return;
@@ -180,20 +266,40 @@ Resolution ModLibrary::resolve() const {
         const ModChoice c = choice(mod.id);
         if (!c.enabled || !mod.unusable.empty()) continue;
         std::vector<FileChange> changes = mod.changes;
+        if (const auto extra = runtime_changes_.find(mod.id); extra != runtime_changes_.end())
+            changes.insert(changes.end(), extra->second.begin(), extra->second.end());
         for (std::size_t slot = 0; slot < mod.slots.size() && slot < c.slots.size(); ++slot) {
             if (c.slots[slot]) changes.push_back({FileChange::Kind::Replace, *c.slots[slot], mod.slots[slot].source});
         }
         for (const FileChange &change : changes) {
             Touch &touch = touches[change.file];
-            if (change.kind == FileChange::Kind::Replace) {
+            if (change.kind == FileChange::Kind::Add) {
+                result.added[change.file] = {mod.id, change.source};
+                std::erase(touch.replaced, mod.id);
+                touch.replaced.push_back(mod.id);
+            } else if (change.kind == FileChange::Kind::Replace) {
                 result.replacements[change.file] = {mod.id, change.source};
                 std::erase(touch.replaced, mod.id);
                 touch.replaced.push_back(mod.id);
             } else {
-                result.patches[change.file].push_back({mod.id, change.source});
+                result.patches[change.file].push_back({mod.id, change.source, change.edits});
                 touch.patched.push_back(mod.id);
             }
         }
+    }
+    // Code: by priority, then in the order above (lowest rank first).
+    std::vector<std::pair<int, const Mod *>> coders;
+    for (auto it = mods_.rbegin(); it != mods_.rend(); ++it) {
+        if ((!it->code.empty() || !it->memory.empty() || !it->native.empty() || !it->script.empty()) &&
+            choice(it->id).enabled && it->unusable.empty())
+            coders.emplace_back(it->priority, &*it);
+    }
+    std::stable_sort(coders.begin(), coders.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
+    for (const auto &[priority, mod] : coders) {
+        for (const std::filesystem::path &file : mod->code) result.code.push_back({mod->id, file, {}});
+        if (!mod->memory.empty()) result.code.push_back({mod->id, {}, mod->memory});
+        if (!mod->native.empty()) result.native.push_back({mod->id, mod->native, {}});
+        if (!mod->script.empty()) result.scripts.push_back({mod->id, mod->script, {}});
     }
     for (const auto &[file, touch] : touches) {
         const bool several = touch.replaced.size() > 1u;

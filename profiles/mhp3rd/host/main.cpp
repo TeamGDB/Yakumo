@@ -12,6 +12,8 @@
 #include "install/installer.hpp"
 #include "install/user_data.hpp"
 #include "kernel/kernel.hpp"
+#include "mods/mhp3rd_mods.hpp"
+#include "mods/mhp3rd_symbols.hpp"
 #include "camera/game_aspect.hpp"
 #include "camera/game_camera.hpp"
 #include "settings/settings.hpp"
@@ -493,6 +495,11 @@ int main(int argc, char **argv) {
             return 3;
         }
 
+        // The functions mods may look up by name are checked against the
+        // executable as it loaded, before any mod writes code into it.
+        (void)mhp3rd::mods::symbols::verify(runtime.memory());
+        mhp3rd::mods::write_code(runtime);
+        mhp3rd::mods::start_native(runtime);
         mhp3rd::text::set_language(mhp3rd::settings::current().language, translation_directories());
         runtime.run(elf.runtime_entry(mhp3rd::kLoadBase), configured_max_dispatches());
         std::cout << "Runtime stopped: " << runtime.stop_reason() << "\n";

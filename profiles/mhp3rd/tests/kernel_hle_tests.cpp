@@ -12,6 +12,7 @@
 #include "hle/utility_dialog.hpp"
 #include <thread>
 #include "kernel/kernel.hpp"
+#include "overlays.hpp"
 #include "psprecomp/common.hpp"
 
 #include <array>
@@ -34,6 +35,7 @@ void memory_contracts() {
     kernel.install(runtime, 0u, 0x08804123u);
     const auto total = kernel.free_memory();
     check(total == mhp3rd::kUserMemoryEnd - 0x08805000u, "image end rounds up to page");
+    check(kernel.user_memory_start() == 0x08805000u, "user memory starts at the rounded image end");
     check(static_cast<unsigned>(kernel.allocate_block("zero", 0, 0, 0)) == mhp3rd::error::kIllegalArgument,
         "zero allocation rejected");
     check(static_cast<unsigned>(kernel.allocate_block("bad", 5, 256, 0)) == mhp3rd::error::kIllegalMemblockType,
@@ -1058,6 +1060,12 @@ void system_contracts() {
              "sceKernelDcacheInvalidateRange", "sceKernelDcacheWritebackRange", "sceKernelSetGPO",
              "sceKernelIcacheInvalidateAll", "sceKernelIcacheInvalidateRange"})
         check(f.call("UtilsForUser", name) == 0, "cache maintenance completes on public host");
+    // No overlay libraries in the public host: an overlay copied to its slot
+    // has no recompiled code to install before a mod changes it.
+    check(!mhp3rd::install_overlay_at(f.runtime, 0x0A001780u), "an overlay without a corpus installs nothing");
+    // A guest call would point ra at the kernel's return stub.
+    check(f.call("UtilsForUser", "sceKernelIcacheInvalidateAll") == 0 && f.ctx.gpr[31] == f.return_address,
+        "a cache flush with no mod code to run calls no guest code");
     const auto seconds = f.call("UtilsForUser", "sceKernelLibcTime", {Fixture::output});
     check(seconds == f.runtime.memory().load32(Fixture::output), "libc time return and output agree");
     check(f.call("UtilsForUser", "sceKernelLibcTime") != 0, "libc time accepts optional output");

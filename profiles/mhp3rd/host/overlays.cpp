@@ -265,6 +265,11 @@ void dump_slot(const psprecomp::GuestMemory &memory, std::uint32_t slot_start, s
 bool install_overlay_for(Runtime &runtime, std::uint32_t pc) {
     const auto [slot_start, slot_end] = slot_of(pc);
     if (slot_start == 0u) return false;
+    // The overlay installed here is still the one in the slot: an address its
+    // corpus does not cover, such as code a mod changed, runs interpreted.
+    if (const auto installed = installed_headers().find(slot_start);
+        installed != installed_headers().end() && installed->second == header_hash(runtime.memory(), slot_start))
+        return false;
     if (const auto unmatched = unmatched_slots().find(slot_start);
         unmatched != unmatched_slots().end() && unmatched->second == header_hash(runtime.memory(), slot_start))
         return false;
@@ -345,6 +350,28 @@ void revalidate_overlays(Runtime &runtime) {
         installed_headers().erase(slot_start);
         it = installed_overlays().erase(it);
     }
+}
+
+std::optional<LoadedOverlay> overlay_at(const psprecomp::GuestMemory &memory, std::uint32_t address) {
+    // A big overlay runs past the next slot's base: the nearest slot below
+    // with an image covering the address.
+    for (std::size_t i = std::size(kOverlaySlots); i-- > 0u;) {
+        const std::uint32_t base = kOverlaySlots[i];
+        if (base > address) continue;
+        const std::optional<OverlayHeader> header = read_overlay_header(memory, base);
+        if (!header) continue;
+        if (address - base >= header->image_size) return std::nullopt;
+        std::string name = header->name;
+        if (const auto dot = name.rfind('.'); dot != std::string::npos) name.erase(dot);
+        return LoadedOverlay{name, base};
+    }
+    return std::nullopt;
+}
+
+bool install_overlay_at(Runtime &runtime, std::uint32_t base) {
+    revalidate_overlays(runtime);
+    (void)install_overlay_for(runtime, base);
+    return installed_overlays().contains(base);
 }
 
 void forget_unmatched_overlays() {

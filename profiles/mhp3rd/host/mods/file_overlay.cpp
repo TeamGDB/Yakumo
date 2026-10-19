@@ -54,9 +54,10 @@ std::shared_ptr<const FileContent> FileOverlay::content(FileId file) {
     if (!content->replaced) content->bytes = game_.original(file);
     if (const auto found = resolution_.patches.find(file); found != resolution_.patches.end()) {
         for (const Resolution::Source &source : found->second) {
-            PatchOutcome outcome = game_.patch(file, content->bytes, source.path);
+            PatchOutcome outcome = game_.patch(file, content->bytes, source);
             if (outcome.applied > 0u || !outcome.after_load.empty()) ++content->patches;
             for (MemoryWrite &write : outcome.after_load) content->after_load.push_back(std::move(write));
+            content->run.insert(content->run.end(), outcome.run.begin(), outcome.run.end());
             for (std::string &problem : outcome.problems)
                 content->problems.push_back(source.mod + ": " + std::move(problem));
         }

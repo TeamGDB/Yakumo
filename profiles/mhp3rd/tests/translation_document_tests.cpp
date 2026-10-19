@@ -157,6 +157,35 @@ void folder_tests(const std::filesystem::path &dir) {
     selected_tree.reset();
 }
 }
+// A .ymod picked in the provider keeps its name, which names a mod packed
+// without a folder; an unsafe or missing name gets a plain one.
+void package_tests(const std::filesystem::path &dir) {
+    namespace fs = std::filesystem;
+    using mhp3rd::android::pick_package_to_import;
+    document = dir / "provider.ymod";
+    std::ofstream(document, std::ios::binary) << "PK package bytes";
+    const auto staging = dir / "packages";
+    folder_name = "Cool Mod.ymod";
+    auto picked = pick_package_to_import(staging, 1024u);
+    require(picked && picked->error.empty() && picked->staged.filename() == "Cool Mod.ymod" &&
+            fs::file_size(picked->staged) == 16u,
+        "a package keeps its provider name");
+    folder_name = "Cool Mod";
+    picked = pick_package_to_import(staging, 1024u);
+    require(picked && picked->staged.filename() == "Cool Mod.ymod", "a package name without .ymod gets it");
+    for (const char *unsafe : {"../evil.ymod", "a/b.ymod", ".."}) {
+        folder_name = unsafe;
+        picked = pick_package_to_import(staging, 1024u);
+        require(picked && picked->staged.filename() == "Package.ymod", "an unsafe provider name is replaced");
+    }
+    folder_name.reset();
+    picked = pick_package_to_import(staging, 1024u);
+    require(picked && picked->staged.filename() == "Package.ymod", "a missing provider name is replaced");
+    picked = pick_package_to_import(staging, 8u);
+    require(picked && !picked->error.empty() && picked->staged.empty(), "a package over the limit is refused");
+    folder_name = "my-pack";
+}
+
 int main() {
     namespace fs = std::filesystem;
     using mhp3rd::android::pick_translation_to_import;
@@ -207,6 +236,7 @@ int main() {
         auto blocked = pick_translation_to_import(dir / "blocked");
         require(blocked && !blocked->error.empty(), "unwritable staging is reported");
         folder_tests(dir);
+        package_tests(dir);
         std::cout << "translation document tests passed\n";
     } catch (const std::exception &error) {
         std::cerr << error.what() << '\n';

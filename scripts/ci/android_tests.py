@@ -49,6 +49,11 @@ def main():
         test["remote_environment"] = environment
         names.add(name)
         binaries.add(binary)
+    # Libraries a test loads at run time, such as the native test mod; the test
+    # finds them in its working directory on the device.
+    modules = sorted(path for path in (build / "bin").glob("lib*_test_mod.so")
+                     if path.is_file() and not path.is_symlink()
+                     and re.fullmatch(r"lib[A-Za-z0-9_]+\.so", path.name))
     remote = "/data/local/tmp/yakumo-unit-tests"
     diagnostics = build / "android-results"
     diagnostics.mkdir(exist_ok=True)
@@ -57,7 +62,7 @@ def main():
     try:
         subprocess.run(["adb", "shell", f"rm -rf {remote} && mkdir -p {remote}/tmp {remote}/home"],
                        check=True, timeout=120)
-        for binary in sorted(binaries):
+        for binary in [*sorted(binaries), *modules]:
             subprocess.run(["adb", "push", str(binary), remote + "/"], check=True, timeout=120)
         subprocess.run(["adb", "push", str(stl), remote + "/libc++_shared.so"], check=True, timeout=120)
         subprocess.run(["adb", "push", str(nids), remote + "/nids.csv"], check=True, timeout=120)

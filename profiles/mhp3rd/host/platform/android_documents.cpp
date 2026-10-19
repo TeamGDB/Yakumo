@@ -8,11 +8,13 @@
 
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <limits>
 #include <fstream>
+#include <functional>
 #include <future>
 #include <set>
 #include <vector>
@@ -322,20 +324,26 @@ std::optional<PickedImport> FolderImport::take() {
     return impl_->work.get();
 }
 
-std::optional<PickedImport> pick_translation_to_import(const fs::path &staging) {
+namespace {
+
+// A picked document copied to <staging>/<kind>-<stamp>/<name>, at most
+// `limit` bytes; the caller removes that folder when done. `name` gets the
+// document's URI.
+std::optional<PickedImport> pick_document_to_import(const fs::path &staging, const std::string &kind,
+    const std::function<std::string(const std::string &)> &name, std::size_t limit) {
     const auto document = pick_document();
     if (!document) return std::nullopt;
     PickedImport result;
     std::error_code ec;
     fs::create_directories(staging, ec);
     if (ec) {
-        result.error = "cannot create translation transfer folder";
+        result.error = "cannot create " + kind + " transfer folder";
         return result;
     }
     fs::path folder;
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
     for (unsigned attempt = 0; attempt < 64; ++attempt) {
-        auto candidate = staging / ("translation-" + std::to_string(stamp) + "-" + std::to_string(attempt));
+        auto candidate = staging / (kind + "-" + std::to_string(stamp) + "-" + std::to_string(attempt));
         if (fs::create_directory(candidate, ec)) {
             folder = std::move(candidate);
             break;
@@ -343,15 +351,40 @@ std::optional<PickedImport> pick_translation_to_import(const fs::path &staging) 
         if (ec) break;
     }
     if (folder.empty()) {
-        result.error = "cannot stage translation document";
+        result.error = "cannot stage " + kind + " document";
         return result;
     }
-    result.staged = folder / "selected.lang";
-    if (!copy_document_to_file(*document, result.staged, result.error, text::kMaxTranslationBytes)) {
+    result.staged = folder / name(*document);
+    if (!copy_document_to_file(*document, result.staged, result.error, limit)) {
         fs::remove_all(folder, ec);
         result.staged.clear();
     }
     return result;
+}
+
+} // namespace
+
+std::optional<PickedImport> pick_translation_to_import(const fs::path &staging) {
+    return pick_document_to_import(
+        staging, "translation", [](const std::string &) { return std::string("selected.lang"); },
+        text::kMaxTranslationBytes);
+}
+
+// Keeps the package's own name, which names a mod packed without a folder.
+std::optional<PickedImport> pick_package_to_import(const fs::path &staging, std::size_t limit) {
+    const auto name = [](const std::string &uri) {
+        std::string shown = document_name(uri).value_or("");
+        const bool plain = !shown.empty() && shown.find_first_of("/\\:") == std::string::npos && shown != "." &&
+            shown != ".." && shown.size() <= 200u;
+        if (!plain) return std::string("Package.ymod");
+        // The importer recognises a package by this extension.
+        const bool named = shown.size() > 5u && std::equal(shown.end() - 5, shown.end(), ".ymod", [](char a, char b) {
+            return std::tolower(static_cast<unsigned char>(a)) == b;
+        });
+        if (!named) shown += ".ymod";
+        return shown;
+    };
+    return pick_document_to_import(staging, "package", name, limit);
 }
 
 std::optional<PickedImport> pick_saves_to_import(const fs::path &staging) {

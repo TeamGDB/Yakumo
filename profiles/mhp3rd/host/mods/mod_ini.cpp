@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <fstream>
 #include <iterator>
 
@@ -93,6 +94,73 @@ IniFile IniFile::parse(std::string_view text) {
             trim(std::string_view(line).substr(0u, equals)), unquote(std::string_view(line).substr(equals + 1u)));
     }
     return file;
+}
+
+std::optional<std::vector<std::uint8_t>> parse_bytes(std::string_view text, std::string &error) {
+    std::vector<std::uint8_t> bytes;
+    std::size_t at = 0u;
+    while (at < text.size()) {
+        if (std::isspace(static_cast<unsigned char>(text[at])) != 0) {
+            ++at;
+            continue;
+        }
+        std::size_t end = at;
+        while (end < text.size() && std::isspace(static_cast<unsigned char>(text[end])) == 0) ++end;
+        std::string_view token = text.substr(at, end - at);
+        at = end;
+        const bool number = token.size() > 2u && token[0] == '0' && (token[1] == 'x' || token[1] == 'X');
+        if (number) token.remove_prefix(2);
+        if (!std::all_of(token.begin(), token.end(), [](unsigned char c) { return std::isxdigit(c) != 0; }) ||
+            token.size() % 2u != 0u || (number && token.size() != 2u && token.size() != 4u && token.size() != 8u)) {
+            error = "\"" + std::string(number ? "0x" : "") + std::string(token) +
+                "\" is not bytes: write pairs of hex digits, or 0x and 2, 4 or 8 hex digits";
+            return std::nullopt;
+        }
+        const auto digit = [](char c) {
+            return static_cast<std::uint8_t>(std::isdigit(static_cast<unsigned char>(c)) != 0
+                    ? c - '0'
+                    : std::tolower(static_cast<unsigned char>(c)) - 'a' + 10);
+        };
+        std::vector<std::uint8_t> parsed;
+        for (std::size_t i = 0; i < token.size(); i += 2u)
+            parsed.push_back(static_cast<std::uint8_t>(digit(token[i]) << 4u | digit(token[i + 1u])));
+        if (number) std::reverse(parsed.begin(), parsed.end()); // a number is stored low byte first
+        bytes.insert(bytes.end(), parsed.begin(), parsed.end());
+    }
+    if (bytes.empty()) {
+        error = "no bytes given";
+        return std::nullopt;
+    }
+    return bytes;
+}
+
+std::optional<Edit> parse_edit(std::string_view key, std::string_view value, std::string &error) {
+    if (const auto comment = value.find_first_of(";#"); comment != std::string_view::npos)
+        value = value.substr(0, comment);
+    std::string address = trim(key);
+    if (address.size() > 2u && address[0] == '0' && (address[1] == 'x' || address[1] == 'X')) address.erase(0, 2);
+    Edit edit;
+    const auto [end, ec] = std::from_chars(address.data(), address.data() + address.size(), edit.address, 16);
+    if (address.empty() || address.size() > 8u || ec != std::errc{} || end != address.data() + address.size()) {
+        error = "\"" + trim(key) + "\" is not an address: write it in hex";
+        return std::nullopt;
+    }
+    std::string_view written = value;
+    if (const auto arrow = value.find("->"); arrow != std::string_view::npos) {
+        std::optional<std::vector<std::uint8_t>> expect = parse_bytes(value.substr(0, arrow), error);
+        if (!expect) return std::nullopt;
+        edit.expect = std::move(*expect);
+        written = value.substr(arrow + 2u);
+    }
+    std::optional<std::vector<std::uint8_t>> bytes = parse_bytes(written, error);
+    if (!bytes) return std::nullopt;
+    edit.bytes = std::move(*bytes);
+    if (!edit.expect.empty() && edit.expect.size() != edit.bytes.size()) {
+        error = "it expects " + std::to_string(edit.expect.size()) + " bytes but writes " +
+            std::to_string(edit.bytes.size());
+        return std::nullopt;
+    }
+    return edit;
 }
 
 std::optional<IniFile> IniFile::load(const std::filesystem::path &path) {

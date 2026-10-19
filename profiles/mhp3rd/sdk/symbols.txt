@@ -1,0 +1,98 @@
+# The game's known functions and data, by name, for mods (NPJB-40001).
+#
+# Yakumo reads this file at build time; mods look the names up at run time
+# through the "yakumo.symbols" service, yakumo.symbol() in scripts, or any
+# hook that takes a name in place of an address. A name stays when Yakumo
+# learns more; new names are added, none is reused for something else.
+#
+# Columns: kind, name, address, overlay ("-" for the executable, otherwise
+# the code overlay the address belongs to, without ".ovl"), check, and what
+# it is. A function's check is the FNV-1a hash (32-bit) of its first 16 bytes
+# as the game ships them: on an executable whose bytes differ, the name is
+# not given out. Data has no check. "On a quest" addresses hold other things
+# outside one; read them only while game_task is in overlay.task_slot.
+#
+# Register names follow the MIPS convention: arguments in a0..a3, the result
+# in v0. Every entry was traced in this project; docs/DATA_BIN.md,
+# docs/LAYERED_ARMOR.md, docs/EQUIPMENT_MODS.md and docs/DEBUG_MENU.md say how.
+#
+function loader.size                  0x08864E8C -          e3655011 size(loader a0, id a1 as u16) -> bytes in v0. 0xFFFF is no file. Called through the loader's vtable (+0x14)
+function loader.submit                0x08863CDC -          42f664e2 submit(loader a0, id a1, destination a2, ...) -> 1. Queues a whole-file load in requests of at most 128 KiB
+function loader.read_pieces           0x08863FE8 -          03152a47 Reads a file a piece at a time by id: streamed music and movies
+function loader.build_records         0x088641A8 -          83e30efc Builds the loader's per-entry records at start, one per disc entry
+function armor.model_of_part          0x08869778 -          f5cdbb57 model(block a0, record a1, part a2 0..6) -> model number. Only reads memory; everything that draws a hunter asks it
+function armor.model_by_id            0x08869564 -          bd7b61aa A second model lookup, by armor id rather than by hunter record
+function armor.inner_wear             0x088A51E4 -          a1c16f5e Turns model 0 of the chest, arms or legs into the hunter's inner wear
+function armor.file_of_part           0x088A58DC -          5dd7c620 A hunter's file function (vtable +0xA8): the DATA.BIN file a part loads
+function armor.keep_models            0x088A5B20 -          037d57c8 Keeps the seven models at the hunter's +0x4F6, which choose the parts' colours
+function hunter.load_step             0x088A5564 -          2bbf8920 The state machine that loads a hunter's part models (vtable +0x94); state at +0xB80
+function hunter.reload                0x088A53C8 -          291c8ffe Asks a hunter to load its part models again
+function hunter.step_loads            0x088BD1CC -          983beefb Steps every hunter's loading once a frame while the game loads
+function hunter.fill_records          0x08872DC8 -          a2c2dcd0 Fills hunter records 1 to 3 from the other players' data in ad hoc play
+function display.file_packet          0x08876874 -          fe58946d Files a packet into the display list's ordering table: list a0, packet a1, length in words a2, bucket a3
+function text.character_class         0x088E8B18 -          9f5cbae0 Classifies a character (a1) for centring and cell counts
+function text.draw_queue              0x088EE17C -          b52aeb51 Draws a queue of text
+function text.draw_glyph              0x088ED984 -          cf432943 Draws one queued glyph and files its packet
+function text.character_drawn         0x088EA9B0 -          8dcbcef4 Called after each character a text queue draws
+function hud.hub                      0x08945D78 -          69a4b9e4 Draws the village's and the Guild Hall's HUD
+function hud.quest                    0x0A17370C game_task  dc1374f8 Draws the quest's HUD: bars, clock, map
+function camera.rotation              0x08878B70 -          86fde414 The camera's rotation helper, called by the camera update with the camera in s1 and the angles at a1
+function village.depart               0x0A09CE6C lobby_task 9756826b Leaves the village or the Hall for the accepted quest by a gate: sets the gate, the next scene and ends the scene
+function quest.initial_area           0x088BDEEC -          414f1f1a Chooses the area a quest starts in; once it returns to 0x088C1EDC, the area byte of game.map_state_pointer can be changed before the area loads
+function pac.entry                    0x088661C8 -          b8b98b04 entry(pack a0, index a1) -> the entry's address, 0 for none. A pack is a u32 count, then an offset and a size per entry
+function joint.init                   0x08881CA8 -          d5c016f3 init(joint a0, bone a1): copies a skeleton bone's scale, rotation, position and name into a 640-byte joint
+function model.compile                0x0889E144 -          988bd038 compile(model a0, buffer a1, PMO a2, GE data a3): materials 16 bytes each, then meshes 8 bytes each, into the buffer
+function model.forward_kinematics     0x0887A91C -          f999beac Computes the joints' world matrices (+144) from the model's roots
+function model.skin_matrices          0x0887AA0C -          0c891044 Computes each joint's skinning matrix (+80) as its +16 by its +144, from the model's roots
+function model.bone_lists             0x0887AA94 -          bbcdee63 Writes a 52-byte GE bone list per joint, in joint order, into the display list; the model keeps the first at +124
+function model.draw_mesh              0x0889ED4C -          be96b2bd Draws a mesh's vertex groups; skips a group whose material's first colour has zero alpha
+function monster.build_model          0x0A08FDB0 game_task  11f35c01 build(monster a1, model set a2): the model, skeleton, joints and textures from the model set's first file
+data     loader.object                0x08B3F040 -          -        The DATA.BIN loader: size table +0x11C0, block table +0x3A40, bounce buffer +0x98C0, per-entry records +0x298E8
+data     game.character_pointer       0x08AB3640 -          -        Pointer to the block of hunter records (+0x30, 252 bytes each, record 0 the hunter played) and the character (+0x85C)
+data     game.scene_pointer           0x08ABAE14 -          -        Pointer to the village scene object; bit 4 of its flags at +0x20 ends the scene
+data     game.next_scene_pointer      0x0A25DD28 -          -        Pointer to the next scene word: 0 while walking around, 30 when the scene ends in a quest
+data     game.text_context_pointer    0x09FF0C28 -          -        Pointer to the text context: queue lengths (u8) at +308, entries at +324
+data     camera.pointer               0x08A2F958 -          -        Pointer to the camera object
+data     game.map_state_pointer       0x09FBEBA0 -          -        Pointer to the map state: the map (u8) at +0x9A30, the area the hunter is in (u8) at +0x9A31
+data     overlay.task_slot            0x0A05E600 -          -        The task overlay's slot: game_task.ovl on a quest, lobby_task.ovl in the village and the Hall
+data     overlay.map_slot             0x0A055E80 -          -        The map overlay's slot: P_v00a00d.ovl the village, P_v00a01d.ovl the Guild Hall
+data     text.main_block              0x08A40640 -          -        The game's main text block
+data     text.quest_block             0x08A3A630 -          -        The text block of the active quest
+data     items.data                   0x089D0FA0 -          -        Item records, 20 bytes each, by item id
+data     items.box                    0x09F52CF4 -          -        The item box: 1000 slots of {u16 item id, u16 count}; id 0 is empty
+data     hunter.name                  0x09F4FCAC -          -        The hunter's name, 12 UTF-16 characters
+data     hunter.zenny                 0x09FAC8D4 -          -        Zenny (u32)
+data     hunter.yukumo_points         0x09FAC8CC -          -        Yukumo Points (u32)
+data     hunter.guild_points          0x09FAC8D0 -          -        Guild Points (u32)
+data     hunter.health                0x09649B16 -          -        On a quest: health now (s16)
+data     hunter.recoverable_health    0x09649B56 -          -        On a quest: the red part of the health bar (s16)
+data     hunter.most_health           0x09649B58 -          -        On a quest: most health (s16)
+data     hunter.stamina               0x09649DF0 -          -        On a quest: stamina now (float, 6 units per point shown)
+data     hunter.most_stamina          0x0964A49A -          -        On a quest: most stamina (u16)
+data     quest.accepted_id            0x09FAF8C2 -          -        The accepted quest's id (u16); the village writes 1 when it loads
+data     quest.time_limit             0x09FB4E64 -          -        On a quest: the time limit in frames at 30 a second (u32)
+data     quest.time_left              0x09FB4E68 -          -        On a quest: the time left in frames at 30 a second (u32)
+data     quest.monsters               0x0A1B0AE0 game_task  -        Pointers to the quest's large monsters: kind u8 at +0x62, health s16 at +0x246, most health s16 at +0x288
+data     armor.chest_data             0x08985A7C -          -        Chest armor records by id
+data     armor.arms_data              0x08983934 -          -        Arms armor records by id
+data     armor.waist_data             0x0898A6E4 -          -        Waist armor records by id
+data     armor.legs_data              0x0898C854 -          -        Legs armor records by id
+data     armor.head_data              0x08987EE4 -          -        Head armor records by id
+data     armor.file_base              0x089E892C -          -        u16 [sex][part]: the first file of each part's models
+data     armor.inner_wear_chest       0x089E8704 -          -        The chest's inner wear models
+data     armor.inner_wear_arms        0x089E86EC -          -        The arms' inner wear models
+data     armor.inner_wear_legs        0x089E871C -          -        The legs' inner wear models
+data     weapon.file_base             0x089CD22C -          -        u16 by weapon class (kind - 5): the first file of each class's models
+data     weapon.model_count           0x089CD1F8 -          -        u16 every 4 bytes by weapon class: how many models each class has
+data     weapon.great_sword_data      0x08997AA0 -          -        Great sword records, 28 bytes each
+data     weapon.sword_and_shield_data 0x089953B0 -          -        Sword and shield records, 28 bytes each
+data     weapon.hammer_data           0x08994054 -          -        Hammer records, 28 bytes each
+data     weapon.lance_data            0x0899669C -          -        Lance records, 28 bytes each
+data     weapon.heavy_bowgun_data     0x08990464 -          -        Heavy bowgun records, 80 bytes each
+data     weapon.light_bowgun_data     0x08991954 -          -        Light bowgun records, 80 bytes each
+data     weapon.long_sword_data       0x08997138 -          -        Long sword records, 28 bytes each
+data     weapon.switch_axe_data       0x08992F0C -          -        Switch axe records, 28 bytes each
+data     weapon.gunlance_data         0x08995E14 -          -        Gunlance records, 28 bytes each
+data     weapon.bow_data              0x0898EB14 -          -        Bow records, 80 bytes each
+data     weapon.dual_blades_data      0x08994A9C -          -        Dual blades records, 28 bytes each
+data     weapon.hunting_horn_data     0x089936EC -          -        Hunting horn records, 28 bytes each

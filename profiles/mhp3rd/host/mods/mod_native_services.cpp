@@ -1,0 +1,260 @@
+#include "mods/mod_native_internal.hpp"
+
+#include "mods/mhp3rd_code_mods.hpp"
+#include "mods/mhp3rd_mods.hpp"
+#include "mods/mhp3rd_symbols.hpp"
+#include "mods/mod_ini.hpp"
+
+#include "install/user_data.hpp"
+#include "kernel/kernel.hpp"
+#include "overlays.hpp"
+
+#include <algorithm>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+
+// The services besides hooks: guest memory, events, files, settings,
+// services between mods, the game's symbols and drawing in the interface.
+namespace mhp3rd::mods::native {
+namespace {
+
+namespace fs = std::filesystem;
+
+int memory_read(std::uint32_t address, void *out, std::uint32_t length) {
+    Runtime *runtime = state().runtime;
+    if (runtime == nullptr || length == 0u || !runtime->memory().contains(address, length)) return -1;
+    runtime->memory().copy_out(address, {static_cast<std::uint8_t *>(out), length});
+    return 0;
+}
+
+int memory_write(std::uint32_t address, const void *data, std::uint32_t length) {
+    Runtime *runtime = state().runtime;
+    if (runtime == nullptr || length == 0u || !runtime->memory().contains(address, length)) return -1;
+    runtime->memory().copy_in(address, {static_cast<const std::uint8_t *>(data), length});
+    return 0;
+}
+
+std::uint32_t memory_allocate(ymod_mod *mod, std::uint32_t size, std::uint32_t alignment) {
+    if (size == 0u || alignment < 16u || (alignment & (alignment - 1u)) != 0u) return 0u;
+    const std::int32_t uid = kernel().allocate_block("mod " + mod->id, 4u, size, alignment);
+    if (uid < 0) return 0u;
+    const MemoryBlock *block = kernel().find_block(uid);
+    if (block == nullptr) return 0u;
+    mod->allocations.push_back(static_cast<std::uint32_t>(uid));
+    return block->address;
+}
+
+void memory_release(ymod_mod *mod, std::uint32_t address) {
+    for (auto it = mod->allocations.begin(); it != mod->allocations.end(); ++it) {
+        const MemoryBlock *block = kernel().find_block(static_cast<std::int32_t>(*it));
+        if (block == nullptr || block->address != address) continue;
+        (void)kernel().free_block(static_cast<std::int32_t>(*it));
+        mod->allocations.erase(it);
+        return;
+    }
+}
+
+void memory_code_changed(std::uint32_t address, std::uint32_t length) {
+    Runtime *runtime = state().runtime;
+    if (runtime == nullptr) return;
+    std::vector<std::string> problems;
+    (void)p3rd::retire_code(*runtime, address, length, "a native mod", problems);
+    for (const std::string &line : problems) report(nullptr, line, true);
+}
+
+int events_subscribe(ymod_mod *mod, int event, ymod_event_fn callback, void *user) {
+    if (callback == nullptr || event < YMOD_EVENT_FRAME || event > YMOD_EVENT_QUEST_ENDED || mod->failed) return -1;
+    state().subscribers.push_back({mod, event, callback, user});
+    return 0;
+}
+
+void events_unsubscribe(ymod_mod *mod, int event, ymod_event_fn callback, void *user) {
+    std::erase_if(state().subscribers, [&](const Subscriber &subscriber) {
+        return subscriber.mod == mod && subscriber.event == event && subscriber.callback == callback &&
+            subscriber.user == user;
+    });
+}
+
+int files_replace(ymod_mod *mod, std::uint32_t file, const void *data, std::uint32_t length) {
+    ModSession *session = mods::session();
+    if (session == nullptr || data == nullptr || length == 0u) return -1;
+    fs::path folder;
+    try {
+        folder = install::user_data_directory() / "mods-cache" / from_utf8(mod->id);
+    } catch (const std::exception &) {
+        return -1;
+    }
+    std::error_code ec;
+    fs::create_directories(folder, ec);
+    const fs::path path = folder / from_utf8(session->library().format().file_name(file) + ".bin");
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out.write(static_cast<const char *>(data), static_cast<std::streamsize>(length));
+        if (!out) return -1;
+    }
+    session->library().add_runtime_change(mod->id, FileChange{FileChange::Kind::Replace, file, path, {}});
+    session->commit();
+    return 0;
+}
+
+std::int64_t files_read_original(std::uint32_t file, void *out, std::uint32_t capacity) {
+    const std::optional<std::vector<std::uint8_t>> bytes = mods::original_file(file);
+    if (!bytes) return -1;
+    if (out != nullptr) std::memcpy(out, bytes->data(), std::min<std::size_t>(capacity, bytes->size()));
+    return static_cast<std::int64_t>(bytes->size());
+}
+
+std::int64_t declare(ymod_mod *mod, ModSetting setting) {
+    ModSession *session = mods::session();
+    if (!valid_setting_key(setting.key)) {
+        report(mod,
+            "a setting key must be 1 to 64 letters, digits, '_', '.' or '-': \"" + setting.key.substr(0, 64) +
+                "\" refused",
+            true);
+        return setting.fallback;
+    }
+    mod->fallbacks[setting.key] = setting.fallback;
+    if (session == nullptr) return setting.fallback;
+    return session->library().declare_setting(mod->id, setting);
+}
+
+std::int64_t settings_switch(ymod_mod *mod, const char *key, const char *label, int fallback) {
+    return declare(mod,
+        ModSetting{key != nullptr ? key : "", label != nullptr ? label : "", ModSetting::Kind::Switch, 0, 1,
+            fallback != 0 ? 1 : 0, {}});
+}
+
+std::int64_t settings_number(ymod_mod *mod, const char *key, const char *label, std::int64_t minimum,
+    std::int64_t maximum, std::int64_t fallback) {
+    return declare(mod,
+        ModSetting{key != nullptr ? key : "", label != nullptr ? label : "", ModSetting::Kind::Number, minimum, maximum,
+            fallback, {}});
+}
+
+std::int64_t settings_choice(
+    ymod_mod *mod, const char *key, const char *label, const char *choices, std::int64_t fallback) {
+    return declare(mod,
+        ModSetting{key != nullptr ? key : "", label != nullptr ? label : "", ModSetting::Kind::Choice, 0, 0, fallback,
+            split_list(choices != nullptr ? choices : "")});
+}
+
+std::int64_t settings_get(ymod_mod *mod, const char *key) {
+    if (key == nullptr) return 0;
+    // Until the player changes it, a setting has its declared fallback.
+    const auto declared = mod->fallbacks.find(key);
+    const std::int64_t fallback = declared != mod->fallbacks.end() ? declared->second : 0;
+    ModSession *session = mods::session();
+    return session != nullptr ? session->library().setting(mod->id, key, fallback) : fallback;
+}
+
+int services_publish(ymod_mod *mod, const char *name, std::uint32_t version, const void *table) {
+    if (name == nullptr || table == nullptr || mod->failed) return -1;
+    std::map<std::string, Service> &services = state().services;
+    if (services.contains(name)) return -1;
+    services[name] = {mod, version, table};
+    return 0;
+}
+
+const void *services_import(ymod_mod *, const char *name, std::uint32_t version) {
+    if (name == nullptr) return nullptr;
+    const auto found = state().services.find(name);
+    if (found == state().services.end() || found->second.version < version) return nullptr;
+    return found->second.table;
+}
+
+// Fills in as much of `out` as the mod's struct holds, by its size.
+void give(const symbols::Symbol &symbol, ymod_symbol *out) {
+    if (out == nullptr || out->size < sizeof(std::uint32_t)) return;
+    const ymod_symbol entry{sizeof(ymod_symbol), symbol.name.c_str(),
+        symbol.overlay.empty() ? nullptr : symbol.overlay.c_str(), symbol.about.c_str(), symbol.address,
+        symbol.function ? static_cast<std::uint32_t>(YMOD_SYMBOL_FUNCTION)
+                        : static_cast<std::uint32_t>(YMOD_SYMBOL_DATA)};
+    const std::uint32_t size = out->size;
+    const std::size_t fits = std::min<std::size_t>(size, sizeof(ymod_symbol));
+    std::memcpy(static_cast<void *>(out), &entry, fits);
+    out->size = size;
+}
+
+std::uint32_t symbols_find(const char *name, ymod_symbol *out) {
+    if (name == nullptr) return 0u;
+    Runtime *runtime = state().runtime;
+    const symbols::Symbol *symbol = symbols::find(name, runtime != nullptr ? &runtime->memory() : nullptr);
+    if (symbol == nullptr) return 0u;
+    give(*symbol, out);
+    return symbol->address;
+}
+
+int symbols_name_of(std::uint32_t address, ymod_symbol *out) {
+    const symbols::Symbol *symbol = symbols::at(address);
+    if (symbol == nullptr) return -1;
+    give(*symbol, out);
+    return 0;
+}
+
+int symbols_get(std::uint32_t index, ymod_symbol *out) {
+    const std::vector<symbols::Symbol> &table = symbols::all();
+    if (index >= table.size()) return -1;
+    give(table[index], out);
+    return 0;
+}
+
+std::uint32_t symbols_overlay_at(std::uint32_t address, char *out, std::uint32_t capacity) {
+    Runtime *runtime = state().runtime;
+    if (runtime == nullptr) return 0u;
+    const std::optional<LoadedOverlay> loaded = overlay_at(runtime->memory(), address);
+    if (!loaded) return 0u;
+    if (out != nullptr && capacity != 0u) {
+        const std::size_t length = std::min<std::size_t>(loaded->name.size(), capacity - 1u);
+        std::memcpy(out, loaded->name.data(), length);
+        out[length] = '\0';
+    }
+    return loaded->base;
+}
+
+int add_drawing(ymod_mod *mod, const char *title, ymod_draw_fn draw, void *user, bool overlay) {
+    if (draw == nullptr || mod->failed) return -1;
+    state().drawings.push_back({mod, title != nullptr ? title : "", draw, user, overlay});
+    return 0;
+}
+
+int ui_panel(ymod_mod *mod, const char *title, ymod_draw_fn draw, void *user) {
+    return add_drawing(mod, title, draw, user, false);
+}
+
+int ui_overlay(ymod_mod *mod, const char *title, ymod_draw_fn draw, void *user) {
+    return add_drawing(mod, title, draw, user, true);
+}
+
+void ui_remove(ymod_mod *mod, ymod_draw_fn draw, void *user) {
+    std::erase_if(state().drawings,
+        [&](const Drawing &drawing) { return drawing.mod == mod && drawing.draw == draw && drawing.user == user; });
+}
+
+} // namespace
+
+const ymod_memory kMemory{
+    1u, sizeof(ymod_memory), &memory_read, &memory_write, &memory_allocate, &memory_release, &memory_code_changed};
+
+const ymod_events kEvents{1u, sizeof(ymod_events), &events_subscribe, &events_unsubscribe};
+
+void fire(int event, std::uint32_t value) {
+    // A callback may subscribe more: iterate over a copy.
+    const std::vector<Subscriber> subscribers = state().subscribers;
+    for (const Subscriber &s : subscribers)
+        if (s.event == event) s.callback(event, value, s.user);
+}
+
+const ymod_files kFiles{1u, sizeof(ymod_files), &files_replace, &files_read_original};
+
+const ymod_settings kSettings{
+    1u, sizeof(ymod_settings), &settings_switch, &settings_number, &settings_choice, &settings_get};
+
+const ymod_services kServices{1u, sizeof(ymod_services), &services_publish, &services_import};
+
+const ymod_symbols kSymbols{
+    1u, sizeof(ymod_symbols), &symbols_find, &symbols_name_of, &symbols_get, &symbols_overlay_at};
+
+const ymod_ui kUi{1u, sizeof(ymod_ui), &ui_panel, &ui_overlay, &ui_remove};
+
+} // namespace mhp3rd::mods::native

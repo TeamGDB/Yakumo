@@ -85,6 +85,19 @@ class AndroidRunnerTests(unittest.TestCase):
         self.assertIn('PSPRECOMP_TEST_NIDS_CSV=/data/local/tmp/yakumo-unit-tests/nids.csv', commands[0])
         self.assertTrue(any(call[0] == 'push' and call[-1].endswith('/nids.csv') for call in calls))
 
+    def test_test_mod_libraries_are_pushed_next_to_the_tests(self):
+        modules = self.build / 'bin'
+        modules.mkdir()
+        (modules / 'libmhp3rd_native_test_mod.so').write_bytes(b'public module fixture')
+        (modules / 'libother.so').write_bytes(b'not a test module')
+        (modules / 'libunsafe name_test_mod.so').write_bytes(b'unsafe name')
+        self.assertEqual(self.run_suite(self.tests[:1]), 0)
+        pushed = [Path(call[1]).name for call in map(json.loads, self.calls.read_text().splitlines())
+                  if call[0] == 'push']
+        self.assertIn('libmhp3rd_native_test_mod.so', pushed)
+        self.assertNotIn('libother.so', pushed)
+        self.assertNotIn('libunsafe name_test_mod.so', pushed)
+
     def test_success_and_bridge_timeout_have_different_statuses(self):
         self.assertEqual(self.run_suite(self.tests[:1]), 0)
         self.assertEqual(self.run_suite(self.tests[:1], timeout=True), 1)
