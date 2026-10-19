@@ -129,18 +129,20 @@ void test_record() {
     put32(0x10u + 4u, 200u);
     put32(0x10u + 8u, 1200u);
     put32(0x10u + 0x10u, 90000u);
-    payload[0x10u + 0x1Cu] = 0x61u; // 60001
-    payload[0x10u + 0x1Du] = 0xEAu;
+    payload[0x10u + 0x1Cu] = 0x31u; // 62001
+    payload[0x10u + 0x1Du] = 0xF2u;
     payload[0x10u + 0x1Eu] = 6u;
     payload[0x10u + 0x20u] = 12u;
     const std::string name = "Black Dragon";
     std::copy(name.begin(), name.end(), payload.begin() + 0x10 + 0x48);
     const std::optional<QuestRecord> record = read_quest_record(payload);
     check(record && record->offset == 0x10u && record->fee == 200u && record->reward == 1200u &&
-            record->frames == 90000u && record->id == 60001u && record->stars == 6u && record->map == 12u &&
+            record->frames == 90000u && record->id == 62001u && record->stars == 6u && record->map == 12u &&
             record->name == name,
         "record: its fields");
-    check(is_mod_quest(record->id) && !is_mod_quest(10840u) && !is_mod_quest(70000u), "record: mod quest ids");
+    check(is_mod_quest(record->id) && !is_mod_quest(10840u) && !is_mod_quest(60001u) && !is_mod_quest(61011u) &&
+            !is_mod_quest(70000u),
+        "record: mod quest ids, above the game's event quests");
     payload[0] = 0xF0u;
     check(!read_quest_record(payload), "record: an offset with no room for the record is refused");
     check(!read_quest_record(Bytes{1u, 2u}), "record: a payload too short for an offset is refused");

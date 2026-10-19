@@ -106,17 +106,17 @@ Added files are served for whole-file loads, the way the game loads models, text
 
 ```ini
 [Quests]
-60001 = quests/tigrex_peaks.bin
+62001 = quests/tigrex_peaks.bin
 ```
 
-Each line adds a quest under an id from 60000 to 65535. The file is the quest as the game holds it once decrypted, and its record must carry the same id; Yakumo encrypts it with the game's keys and serves it. Make one from a quest of your own disc image with `profiles/mhp3rd/tools/quests.py`:
+Each line adds a quest under an id from 62000 to 65535. The file is the quest as the game holds it once decrypted, and its record must carry the same id; Yakumo encrypts it with the game's keys and serves it. Make one from a quest of your own disc image with `profiles/mhp3rd/tools/quests.py`:
 
 ```sh
 python3 profiles/mhp3rd/tools/quests.py extract game.iso EBOOT.ELF 204 quest.bin
-python3 profiles/mhp3rd/tools/quests.py edit quest.bin tigrex_peaks.bin --id 60001 --name "Tigrex Peaks" --monster 42=58
+python3 profiles/mhp3rd/tools/quests.py edit quest.bin tigrex_peaks.bin --id 62001 --name "Tigrex Peaks" --monster 42=58
 ```
 
-`--monster OLD=NEW` changes a large monster's kind wherever the quest names it: the kinds it loads, its spawn records, the objective and the main monsters. Mods' quests are not on the counter yet; the developer tools list them, and `quest start 60001` departs on one. Two mods adding the same id conflict like two replacing one file. [QUESTS.md](QUESTS.md) describes the quest file and how the game finds and decrypts it.
+`--monster OLD=NEW` changes a large monster's kind wherever the quest names it: the kinds it loads, its spawn records, the objective and the main monsters. The game takes ids above 59999 for event quests, and mods' quests join its own at the Guild Hall's counter: *Event Quest*, *Yes* to show the included bonus content, then *Low Rank Quest* or *High Rank Quest*. They are accepted and played there like the game's; the developer tools also list them, and `quest start 62001` departs on one from the village. Two mods adding the same id conflict like two replacing one file. [QUESTS.md](QUESTS.md) describes the quest file and how the game finds and decrypts it.
 
 ### [Patch <file>]: changing bytes in a file
 
@@ -241,7 +241,7 @@ The script's main chunk runs once at start, before the game's first frame; it se
 | `allocate(size)` | Guest memory reserved for the mod from the game's allocator: its address, or `nil` |
 | `code_changed(address, length)` | Tells the JIT that instructions there were rewritten |
 | `hook(target, kind, function [, overlay])` | Runs `function(cpu)` at a guest function's entry. `target` is an address or a [known function's name](#the-games-functions-by-name) (`"armor.model_of_part"`), which brings its overlay with it. `kind` is `"before"`, `"after"` (when it returns, `v0`/`v1` hold its result) or `"replace"` (return `true` to return to the caller with what you set; anything else runs the game's function after all). With `overlay` (`"game_task"`), the hook is there whenever that overlay is loaded. Returns a hook number, or `nil` when the address cannot be hooked or the name is not known |
-| `hook_instruction(target, function [, overlay])` | Runs `function(cpu)` just before the instruction at `target`, anywhere in a function |
+| `hook_instruction(target, function [, overlay])` | Runs `function(cpu)` just before the instruction at `target`, anywhere in a function. On a jump or a branch, the instruction in its delay slot has not run yet: an argument it sets still holds its old value |
 | `unhook(number)` | Removes a hook |
 | `symbol(name)` | A known function's or data's address and its overlay (or `nil` for the executable); `nil` when the name is not known |
 | `symbol_name(address)` | The name of what is known at exactly `address`, or `nil` |
@@ -335,6 +335,7 @@ The mod then writes its rows with the memory functions, at the address `table()`
 | `monster.carves` | `game_task` | 4 bytes, by kind | Its carving points, read when it is killed |
 | `monster.files` | `game_task` | 8 bytes, by kind | Four more files loaded with it (u16, `0xFFFF` for none) |
 | `monster.models`, `.second`, `.third` | executable | 2 bytes, by model set from 1 | The model set's three files |
+| `quest.events` | `lobby_task` | 2 bytes | The event quests offered at the counter, by id, 0 after the last. Yakumo adds mods' quests to it itself |
 
 A kind's model set has the kind's number. A new kind made as a copy of the Tigrex (58), with rows copied from 58 in each of these tables and quest files naming it, loads, plays and moves as the Tigrex does: [MONSTERS.md](MONSTERS.md) says how they were traced, what a new kind still lacks, and how to test one.
 

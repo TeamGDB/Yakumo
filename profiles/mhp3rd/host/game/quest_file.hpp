@@ -75,9 +75,11 @@ struct QuestRecord {
 };
 [[nodiscard]] std::optional<QuestRecord> read_quest_record(std::span<const std::uint8_t> payload);
 
-// Quest ids mods use: 60000 to 65535, a range the game's own quests and
-// downloads never reach (its id-to-file code has no branch for them).
-inline constexpr std::uint16_t kFirstModQuest = 60000u;
+// Quest ids mods use: 62000 to 65535. Ids above 59999 are the game's event
+// quests, which it lists among the downloaded ones; its own run from 60001
+// to 60053 and from 61001 to 61011 (docs/QUESTS.md), and its id-to-file code
+// has no branch for any of them.
+inline constexpr std::uint16_t kFirstModQuest = 62000u;
 [[nodiscard]] constexpr bool is_mod_quest(std::uint32_t id) noexcept {
     return id >= kFirstModQuest && id <= 0xFFFFu;
 }

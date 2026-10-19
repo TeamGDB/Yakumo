@@ -16,14 +16,16 @@
 namespace mhp3rd::mods::tables {
 namespace {
 
-// An instruction pair that forms the table's address: lui at `hi`, and at
-// `lo` an instruction whose signed immediate completes it. Both words are
-// the game's, as traced; they are only ever rewritten from these.
+// An instruction pair that forms an address in the table: lui at `hi`, and
+// at `lo` an instruction whose signed immediate completes it, `offset` bytes
+// past the table's start. Both words are the game's, as traced; they are
+// only ever rewritten from these.
 struct Reference {
     std::uint32_t hi;
     std::uint32_t hi_word;
     std::uint32_t lo;
     std::uint32_t lo_word;
+    std::uint32_t offset{};
 };
 
 // An instruction whose immediate is the table's row count.
@@ -94,6 +96,17 @@ const std::vector<Definition> &definitions() {
                 {0x0A099678u, 0x3C020A18u, 0x0A09967Cu, 0x244234F0u},
                 {0x0A099E14u, 0x3C020A18u, 0x0A099E1Cu, 0x244234F0u}},
             {}},
+        // The event quests the game includes, offered at the counter where the
+        // downloaded ones are when there are none (u16 ids, 0 after the
+        // last). The loop at 0x0A0B1324 loads each into the next free download slot
+        // (100 of them) and 0x0A0B11A8 lists them; both read the next id
+        // through base + 2.
+        {{"quest.events", "lobby_task", 0x0A188B1Cu, 2u, 42u}, 101u,
+            {{0x0A0B1264u, 0x3C030A19u, 0x0A0B1278u, 0x94628B1Cu},
+                {0x0A0B1294u, 0x3C020A19u, 0x0A0B1298u, 0x24428B1Eu, 2u},
+                {0x0A0B1324u, 0x3C020A19u, 0x0A0B1328u, 0x94458B1Cu},
+                {0x0A0B1338u, 0x3C020A19u, 0x0A0B133Cu, 0x24528B1Eu, 2u}},
+            {}},
     };
     return list;
 }
@@ -140,7 +153,9 @@ Code reference_state(psprecomp::Runtime &runtime, const Reference &r, std::uint3
     if (!memory.contains(r.hi, 4u) || !memory.contains(r.lo, 4u)) return Code::Other;
     const std::uint32_t h = memory.load32(r.hi), l = memory.load32(r.lo);
     if (h == r.hi_word && l == r.lo_word) return Code::Game;
-    if (copy != 0u && h == with_immediate(r.hi_word, (copy + 0x8000u) >> 16u) && l == with_immediate(r.lo_word, copy))
+    const std::uint32_t target = copy + r.offset;
+    if (copy != 0u && h == with_immediate(r.hi_word, (target + 0x8000u) >> 16u) &&
+        l == with_immediate(r.lo_word, target))
         return Code::Ours;
     return Code::Other;
 }
@@ -178,12 +193,12 @@ void repoint(psprecomp::Runtime &runtime, const Definition &d, const Moved &m, s
             (void)install_overlay_at(runtime, overlay->base);
     }
     const std::string who = "table " + d.table.name;
-    const std::uint32_t hi = (m.address + 0x8000u) >> 16u;
     for (const Reference &r : d.references) {
         if (!present(runtime, d, r.hi) || reference_state(runtime, r, m.address) == Code::Ours) continue;
         if (reference_state(runtime, r, previous) == Code::Other) continue;
-        rewrite(runtime, r.hi, with_immediate(r.hi_word, hi), who);
-        rewrite(runtime, r.lo, with_immediate(r.lo_word, m.address), who);
+        const std::uint32_t target = m.address + r.offset;
+        rewrite(runtime, r.hi, with_immediate(r.hi_word, (target + 0x8000u) >> 16u), who);
+        rewrite(runtime, r.lo, with_immediate(r.lo_word, target), who);
     }
     for (const Count &c : d.counts) {
         if (!present(runtime, d, c.address) || count_state(runtime, c, m.rows) == Code::Ours) continue;

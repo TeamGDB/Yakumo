@@ -462,9 +462,9 @@ void test_quest_start() {
     // A quest a mod adds leaves by the village's gate.
     ram.store32(next, 0u);
     ram.store32(scene + quests::kSceneFlags, 0x100u);
-    const quests::Quest added{60001u, 6u, 100u, 9'000u, 90'000u, "From a Mod", {}, {}, {}};
+    const quests::Quest added{62001u, 6u, 100u, 9'000u, 90'000u, "From a Mod", {}, {}, {}};
     line = quests::start(ram, added);
-    check(line.rfind("started", 0) == 0u && ram.load16(character + quests::kQuestIdOffset) == 60001u &&
+    check(line.rfind("started", 0) == 0u && ram.load16(character + quests::kQuestIdOffset) == 62001u &&
             ram.load8(character + quests::kGateOffset) == quests::kVillageGate && game::money(ram) == 550u,
         "a mod's quest starts by the village's gate");
 

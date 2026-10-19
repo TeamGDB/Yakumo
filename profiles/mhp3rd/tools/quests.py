@@ -9,7 +9,7 @@ payload's fields, and changes the ones a new quest usually needs.
     quests.py list GAME.iso EBOOT.ELF
     quests.py extract GAME.iso EBOOT.ELF 204 quest.bin
     quests.py show quest.bin
-    quests.py edit quest.bin new.bin --id 60001 --name "Tigrex Peaks" --monster 42=58
+    quests.py edit quest.bin new.bin --id 62001 --name "Tigrex Peaks" --monster 42=58
 
 Nothing here writes the disc or the executable. The payloads it writes are the
 game's data: keep them out of public repositories you do not have the rights

@@ -44,10 +44,10 @@ private:
 };
 
 // Quests mods add (mod.ini's [Quests], ids from game::kFirstModQuest) are
-// served as new files: quest 60000 + n as file 6000 + n (hex). [Add] keeps
+// served as new files: quest 62000 + n as file 6000 + n (hex). [Add] keeps
 // out of that range, so quest files never meet a mod's own.
 inline constexpr FileId kFirstQuestFile = 0x6000u;
-inline constexpr FileId kQuestFiles = 0x10000u - 60000u;
+inline constexpr FileId kQuestFiles = 0x10000u - 62000u;
 [[nodiscard]] std::optional<FileId> quest_file(std::uint32_t quest);
 [[nodiscard]] std::optional<std::uint32_t> quest_of_file(FileId file);
 

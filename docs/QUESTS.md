@@ -48,28 +48,39 @@ Monster kinds seen so far: 1 Rathian, 2 Rathalos, 42 Arzuros, 44 Volvidon, 45 Gr
 
 Checked by changing them: quest 204 served with the Arzuros' kind changed to 58 in the list, the spawn record, the objective and the main monster loaded the Tigrex's overlay (`em058m0`), and the developer tools' `quest` command listed "Tigrex 1750/1750".
 
+## Event quests
+
+Ids above 59999 are event quests, which the game handles like downloaded ones. The Guild Hall's quest counter offers them under *Event Quest*: the game first loads the save of downloaded quests, `ULJM05800QST`, into a buffer of 100 slots of 24592 bytes (allocated by `0x088914CC`, its address at `+0x950` of the state `*0x09FBC940`). Without that save it offers "the included bonus content", the event quests on the disc: 41 of them, ids 60001 to 60053, whose ids are listed in `lobby_task.ovl` at `0x0A188B1C` (u16 each, 0 after the last). The loop at `0x0A0B1324` loads each into the next free slot through `0x0888F9F4`:
+
+- the file is `id + 9530` for ids up to 61000 and `id + 8583` above (16 bits): files 3995 to 4047 for the bonus quests, and 4048 to 4058 for ids 61001 to 61011, which the game has too;
+- the file is read whole with the loader's synchronous read (`0x08864C54`, [DATA_BIN.md](DATA_BIN.md#how-the-game-reads-it)), decrypted with the quest cipher into the slot, and the quest's name copied to a 43-byte record per slot (`+0x1490` of the state, 43 bytes each), which marks the slot as used;
+- `0x0A0B11A8` then sorts the slots' quests into the Low Rank and High Rank lists by bytes `+0x21` and `+0x22` of the record, and the quest loader plays an accepted one from its slot (the flag at `+0x21DC` of its state is 1).
+
+Found by following the counter in game: a script mod hooked the slot allocator, logged each slot's id and name, and a write watch on a slot's name record found the decryption writing it; the counter's menu was reached by setting the hunter's position (`hunter.load_step`'s object, `+0x80`) through the developer tools.
+
 ## Quests mods add
 
-A mod adds a quest under an id from 60000 to 65535, which the game's id-to-file code never handles (`[Quests]` in mod.ini: `60001 = quest.bin`). The file is the payload, as above, with the same id in its record. At start Yakumo:
+A mod adds a quest under an id from 62000 to 65535 (`[Quests]` in mod.ini: `62001 = quest.bin`), above the game's event quests. The file is the payload, as above, with the same id in its record. At start Yakumo:
 
-1. checks the instructions around `0x088C18B8` and reads the keys from the executable in memory; on another executable nothing is served;
-2. encrypts each quest and serves it as a new file, quest `60000 + n` as file `6000 + n` (hex), through the same takeover of the loader that serves files mods add ([DATA_BIN.md](DATA_BIN.md#files-mods-add));
-3. hooks the instruction at `0x088C18B8`: for a mod's quest id in `t1`, `s0` becomes its file, and the game goes on to read, decrypt and play it like its own.
+1. checks the instructions around `0x088C18B8` and `0x0888FA4C` and reads the keys from the executable in memory; on another executable nothing is served;
+2. encrypts each quest and serves it as a new file, quest `62000 + n` as file `6000 + n` (hex), through the same takeover of the loader that serves files mods add ([DATA_BIN.md](DATA_BIN.md#files-mods-add));
+3. makes the event quest list longer by one row per quest (the game table `quest.events`, [MODDING.md](MODDING.md#game-tables)) and, each time `lobby_task` loads, writes the mods' ids after the game's;
+4. hooks the instruction at `0x0888FA4C`, where the event quest loader has worked out the file for the id in `a1` into `s3`: for a mod's quest, `s3` becomes its file, and the game reads, decrypts, lists and plays it like its own event quests;
+5. hooks the instruction at `0x088C18B8`, where the id-to-file code arrives with no file (`0xFFFF` in `s0`, the id in `t1`): for a mod's quest, `s0` becomes its file, for the developer tools' `quest start`.
 
-The developer tools list mods' quests with the game's own, and `quest start 60001` departs on one from the village. In game (macOS), a mod's quest 60001, made from quest 204 with a Tigrex, started from the village and the Tigrex was on the map.
+In game (macOS), a mod's quest 62001, made from quest 204 with a Tigrex, was listed under *Event Quest*, *Low Rank Quest*, accepted at the counter for its fee, and departed on from the Hall's gate; the game loaded the Tigrex's overlay on the quest's map. The developer tools list mods' quests with the game's own, and `quest start 62001` departs on one from the village.
+
+When a save of downloaded quests exists, the game loads it instead of offering the bonus content, and mods' quests are not listed; that case was not tried.
 
 `profiles/mhp3rd/tools/quests.py` lists the disc's quests, extracts a quest's payload from your own disc image, shows its fields and changes its id, name and large monsters.
 
-## The counter
+## The quest lists
 
-The counter's lists (entries 4059 to 4066) hold one record per quest: the quest record and its texts, copied from the quest's payload up to a table of seven pointers, one per language, each to six pointers to the name, objective, failure conditions, description, main monsters and client. `+0x18` of the record points to that table. All of these are offsets from the start of the list file, so a record moved into a list has them rebased; the Japanese strings are zeroed in this release's lists. A rebuilt list with the payload of a new quest added this way loads and reads like the game's own.
-
-The counter does not show what a list holds, though: it shows the quests the save has opened, by id, and looks each one's record up in the list. A record under an id the save has not opened (219, an unused village id, and 60001 were both tried) stays hidden.
-
-The village's quest selection (`0x0A0B1678` in `lobby_task.ovl`) treats every id above 59999 as a downloaded quest and looks its record up among the downloaded quests, not in the lists. The game keeps downloaded quests in a save of their own, `ULJM05800QST/MHP3RD.BIN`; like the game's main save, its data file is encrypted twice: by the save-data utility, which Yakumo already handles, and by the game, whose cipher is `0x0888F114` (a byte substitution through a table at `0x089D5F60` and two number generators, run by the `checkSumThread` at `0x08890970`, with a SHA-1 over the decrypted data). The quest loader reads a downloaded quest from that save instead of from DATA.BIN when the flag at `+0x21DC` of its state is 1, and decrypts it with the same quest cipher. Serving mods' quests as downloaded quests is how they will reach the counter, in single player and in multiplayer; that part is not built yet.
+The counter's lists for the village and the Guild Hall's ranks (entries 4059 to 4066) hold one record per quest: the quest record and its texts, copied from the quest's payload up to a table of seven pointers, one per language, each to six pointers to the name, objective, failure conditions, description, main monsters and client. `+0x18` of the record points to that table. All of these are offsets from the start of the list file, so a record moved into a list has them rebased; the Japanese strings are zeroed in this release's lists. These lists show only the quests the save has opened: a record under an id the save has not opened (219, an unused village id, was tried) stays hidden.
 
 ## Not traced yet
 
-- Where the counter offers downloaded quests, the downloaded quest save's layout, and the game's save cipher in full.
+- The save of downloaded quests: its layout and the game's cipher on it (`0x0888F114`, run by the `checkSumThread` at `0x08890970`, with a table at `0x089D5F60` and a SHA-1 salted from `0x0896BB5C`).
+- What the 28-byte record per slot at `+0x954` of the state holds, and how a quest reaches the other hunters in multiplayer.
 - The tables at `+0x24` to `+0x2C`, the reward tables' layout, the small monsters' groups beyond their records, and the area's rules for positions.
 - What the u16 before the area and the word at `+0xC` of a spawn record mean.

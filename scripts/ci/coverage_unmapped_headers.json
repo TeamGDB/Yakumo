@@ -164,11 +164,11 @@
     "reason": "Private declarations between src/jit.cpp and src/jit_compiler.cpp: the Compiled and Settings aggregates and the compile entry point. Both files are covered by psprecomp_jit_tests."
   },
   "profiles/mhp3rd/host/game/quest_file.hpp": {
-    "sha256": "e0f2147fe473e46c6c9e2e2bad42537a4a8613b6df631b8959cd20089b8633bd",
+    "sha256": "75efee6c0a846d91868ff4cc14bb207ce455d5265ee32c3e33e2041208ab4a33",
     "reason": "Quest file constants, the QuestKeys and QuestRecord aggregates, declarations and one constexpr range check. quest_file.cpp is covered by mhp3rd_quest_file_tests on made-up keys and by the quest tests in mhp3rd_native_mods_tests."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_quests.hpp": {
-    "sha256": "591b1cdaba09f4eb42339959417363de37ef8b6f0a58b2fdd8ef5e878a06d040",
+    "sha256": "ca796c70118f3f6b87aafb52c58d67c69ed74302769ee1a592d347a5ccca7aa0",
     "reason": "Declarations and the Quest aggregate. mhp3rd_quests.cpp is covered by mhp3rd_native_mods_tests (keys and stand-in code in memory, a refused executable, the hook giving a mod's quest its file)."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_tables.hpp": {
@@ -176,7 +176,7 @@
     "reason": "Declarations and the Table and Placement aggregates. mhp3rd_tables.cpp is covered by mhp3rd_native_mods_tests (stand-in code that reads a table in the executable and one in a code overlay, refused and moved tables, the yakumo.tables service) and mhp3rd_script_mods_tests."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_mod_format.hpp": {
-    "sha256": "9ee2825c27a855ab18876213e05d20200b62ff1573e8761d2f85fe0b5b22c572",
+    "sha256": "42e61fc98bd24d92a3ade23958945fed46b9ce04faddf72167e5f031014160d8",
     "reason": "The mod format class, its block aggregates, quest file constants and declarations. mhp3rd_mod_format.cpp, quest_file() and quest_of_file() included, is covered by mhp3rd_mods_tests and mhp3rd_code_mods_tests."
   }
 }

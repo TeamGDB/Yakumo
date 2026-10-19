@@ -262,14 +262,14 @@ public:
             if (!source) return;
             mod_.changes.push_back({FileChange::Kind::Add, *file, *source, {}});
         }
-        // New quests: `60001 = quest.bin`, the quest as the game holds it once
+        // New quests: `62001 = quest.bin`, the quest as the game holds it once
         // decrypted, its record carrying the same id.
         for (const auto &[id, name] : ini.entries("Quests")) {
             std::uint32_t quest = 0u;
             const std::string text = trim(id);
             const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), quest);
             if (error != std::errc{} || end != text.data() + text.size() || !game::is_mod_quest(quest)) {
-                unusable("[Quests] " + text + ": a new quest needs an id from 60000 to 65535.");
+                unusable("[Quests] " + text + ": a new quest needs an id from 62000 to 65535.");
                 return;
             }
             const std::optional<fs::path> source = source_file(name);

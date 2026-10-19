@@ -443,8 +443,10 @@ std::vector<std::uint32_t> code_loaded(psprecomp::Runtime &runtime) {
         }
     }
     s.loaded_code.clear();
-    // Tables mods made longer, in the overlays that have just loaded.
+    // Tables mods made longer, in the overlays that have just loaded, and
+    // mods' quests in the event quest list.
     tables::overlay_loaded(runtime);
+    quests::overlay_loaded(runtime);
     // Code mods' blocks from the start, and the loaded files': the game is
     // running and at a point where it expects code to have changed.
     std::vector<std::uint32_t> run = std::move(s.pending_runs);

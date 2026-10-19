@@ -431,8 +431,8 @@ void test_quests(psprecomp::Runtime &runtime) {
     std::filesystem::create_directories(folder);
     std::vector<std::uint8_t> payload(0x100u, 0u);
     payload[0] = 0x10u;
-    payload[0x10u + 0x1Cu] = 0x61u; // 60001
-    payload[0x10u + 0x1Du] = 0xEAu;
+    payload[0x10u + 0x1Cu] = 0x31u; // 62001
+    payload[0x10u + 0x1Du] = 0xF2u;
     std::ofstream(folder / "q.bin", std::ios::binary)
         .write(reinterpret_cast<const char *>(payload.data()), static_cast<std::streamsize>(payload.size()));
     const std::map<mhp3rd::mods::FileId, mhp3rd::mods::Resolution::Source> wanted{
@@ -448,7 +448,7 @@ void test_quests(psprecomp::Runtime &runtime) {
     store(runtime, 0x088C1B70u, {0x03E00008u, 0u});
     const std::size_t mods_before = mhp3rd::mods::native::running();
     check(quests::install(runtime, wanted, files, folder / "cache") && files.size() == 2u && files.contains(0x6001u) &&
-            quests::find(60001u) != nullptr && quests::served().size() == 1u,
+            quests::find(62001u) != nullptr && quests::served().size() == 1u,
         "quests: a mod's quest is served as a new file");
     std::vector<std::uint8_t> file;
     {
@@ -466,9 +466,52 @@ void test_quests(psprecomp::Runtime &runtime) {
         (void)call(runtime, 0x088C18B4u, 0u);
         return runtime.cpu().gpr[16]; // s0
     };
-    check(file_for(60001u) == 0x6001u && runtime.cpu().pc == kSentinel, "quests: the mod's quest id loads its file");
-    check(file_for(60002u) == 0xFFFFu && runtime.cpu().pc == kSentinel, "quests: another id still finds no file");
+    check(file_for(62001u) == 0x6001u && runtime.cpu().pc == kSentinel, "quests: the mod's quest id loads its file");
+    check(file_for(62002u) == 0xFFFFu && runtime.cpu().pc == kSentinel, "quests: another id still finds no file");
     check(mhp3rd::mods::native::running() == mods_before, "quests: Yakumo's own hook is not counted as a mod");
+    check(mhp3rd::mods::tables::placement("quest.events")->address == 0x0A188B1Cu,
+        "quests: not among the event quests when the event loader is not as traced");
+    quests::reset_for_tests();
+
+    // The event quest loader where it has worked out the file into s3, then
+    // returning; and the game's event quest list in lobby_task.
+    store(runtime, 0x0888F9F4u, {0x30A5FFFFu, 0x3402EE48u, 0u, 0x24A3253Au});
+    store(runtime, 0x0888FA44u, {0x24A22187u, 0x3053FFFFu, 0x3C1409FCu, 0x03E00008u, 0u});
+    std::map<mhp3rd::mods::FileId, mhp3rd::mods::Resolution::Source> again{{0x2000u, {"other", "x", {}}}};
+    check(quests::install(runtime, wanted, again, folder / "cache") && again.contains(0x6001u),
+        "quests: served again, with the event quest loader there too");
+    const auto event_file = [&runtime](std::uint32_t quest) {
+        runtime.cpu().gpr[5] = quest;    // a1
+        runtime.cpu().gpr[19] = 0x0F9Bu; // s3: the game's file
+        (void)call(runtime, 0x0888FA4Cu, 0u);
+        return runtime.cpu().gpr[19];
+    };
+    check(event_file(62001u) == 0x6001u && event_file(60001u) == 0x0F9Bu,
+        "quests: the event quest loader reads a mod's quest from its file, the game's from theirs");
+    const std::optional<mhp3rd::mods::tables::Placement> events = mhp3rd::mods::tables::placement("quest.events");
+    check(events && events->address != 0x0A188B1Cu && events->rows == 43u,
+        "quests: the event quest list is made longer by one");
+    place_overlay(runtime, 0x0A05E600u, "lobby_task.ovl", 0x00200000u);
+    store(runtime, 0x0A0B1264u, {0x3C030A19u, 0u, 0u, 0u, 0u, 0x94628B1Cu});
+    store(runtime, 0x0A0B1294u, {0x3C020A19u, 0x24428B1Eu});
+    store(runtime, 0x0A0B1324u, {0x3C020A19u, 0x94458B1Cu});
+    store(runtime, 0x0A0B1338u, {0x3C020A19u, 0x24528B1Eu});
+    runtime.memory().store32(0x0A188B1Cu, 60001u | (60002u << 16u));
+    runtime.memory().store32(0x0A188B20u, 0u);
+    for (int load = 0; load < 2; ++load) {
+        mhp3rd::mods::tables::overlay_loaded(runtime);
+        quests::overlay_loaded(runtime);
+    }
+    const std::uint32_t list = events ? events->address : 0u;
+    check(runtime.memory().load16(list) == 60001u && runtime.memory().load16(list + 2u) == 60002u &&
+            runtime.memory().load16(list + 4u) == 62001u && runtime.memory().load16(list + 6u) == 0u,
+        "quests: once lobby_task loads, the mod's quest follows the game's in the list, once");
+    const std::uint32_t next = list + 2u;
+    check(runtime.memory().load32(0x0A0B1298u) == (0x24420000u | (next & 0xFFFFu)) &&
+            runtime.memory().load32(0x0A0B1294u) == (0x3C020000u | ((next + 0x8000u) >> 16u)) &&
+            runtime.memory().load32(0x0A0B1278u) == (0x94620000u | (list & 0xFFFFu)),
+        "quests: the code that reads the list, and the next id in it, reads the longer list");
+    mhp3rd::mods::tables::reset_for_tests();
     std::error_code ec;
     std::filesystem::remove_all(folder, ec);
 }

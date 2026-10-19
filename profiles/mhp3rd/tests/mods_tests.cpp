@@ -657,27 +657,27 @@ void test_yakumo_format(const fs::path &root) {
         std::copy(name.begin(), name.end(), payload.begin() + 0x10 + 0x48);
         return payload;
     };
-    write(mods / "quests" / "mod.ini", "[MOD INFO]\nType=Yakumo\n[Quests]\n60001 = q1.bin\n65535 = q2.bin\n");
-    write(mods / "quests" / "q1.bin", quest_payload(60001u));
+    write(mods / "quests" / "mod.ini", "[MOD INFO]\nType=Yakumo\n[Quests]\n62001 = q1.bin\n65535 = q2.bin\n");
+    write(mods / "quests" / "q1.bin", quest_payload(62001u));
     write(mods / "quests" / "q2.bin", quest_payload(65535u));
     mod = format.read(mods / "quests");
     check(mod && mod->unusable.empty() && mod->changes.size() == 2u &&
             mod->changes[0].kind == FileChange::Kind::Quest && mod->changes[0].file == 0x6001u &&
-            mod->changes[1].file == 0x759Fu,
-        "yakumo: quests from 60000 up, served as files from 6000 up");
-    check(p3::quest_file(60000u) == 0x6000u && !p3::quest_file(59999u) && p3::quest_of_file(0x759Fu) == 65535u &&
-            !p3::quest_of_file(0x75A0u) && !p3::quest_of_file(0x5FFFu),
+            mod->changes[1].file == 0x6DCFu,
+        "yakumo: quests from 62000 up, served as files from 6000 up");
+    check(p3::quest_file(62000u) == 0x6000u && !p3::quest_file(61999u) && !p3::quest_file(60001u) &&
+            p3::quest_of_file(0x6DCFu) == 65535u && !p3::quest_of_file(0x6DD0u) && !p3::quest_of_file(0x5FFFu),
         "yakumo: quest ids and their files map both ways");
-    write(mods / "quest_other" / "q.bin", quest_payload(60002u));
-    refused("quest_other", "[Quests]\n60001 = q.bin\n", "is quest 60002");
+    write(mods / "quest_other" / "q.bin", quest_payload(62002u));
+    refused("quest_other", "[Quests]\n62001 = q.bin\n", "is quest 62002");
     write(mods / "quest_low" / "q.bin", quest_payload(204u));
-    refused("quest_low", "[Quests]\n204 = q.bin\n", "[Quests] 204: a new quest needs an id from 60000");
+    refused("quest_low", "[Quests]\n204 = q.bin\n", "[Quests] 204: a new quest needs an id from 62000");
     refused("quest_word", "[Quests]\nnew = q.bin\n", "[Quests] new");
     write(mods / "quest_junk" / "q.bin", Bytes{1u, 2u, 3u});
-    refused("quest_junk", "[Quests]\n60003 = q.bin\n", "not a quest the game can read");
+    refused("quest_junk", "[Quests]\n62003 = q.bin\n", "not a quest the game can read");
     write(mods / "quest_huge" / "q.bin", Bytes(30000u, 0u));
-    refused("quest_huge", "[Quests]\n60004 = q.bin\n", "not a quest the game can read");
-    refused("quest_missing", "[Quests]\n60005 = gone.bin\n", "missing from the folder");
+    refused("quest_huge", "[Quests]\n62004 = q.bin\n", "not a quest the game can read");
+    refused("quest_missing", "[Quests]\n62005 = gone.bin\n", "missing from the folder");
     refused("add_in_quests", "[Add]\n6100 = a.pac\n", "kept for the quests mods add");
 
     // Resolved: the mod's memory edits come after its code files.
