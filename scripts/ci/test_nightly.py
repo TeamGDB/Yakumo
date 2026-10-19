@@ -62,6 +62,9 @@ class Fixture(unittest.TestCase):
             'profiles/mhp3rd/third_party/imgui/LICENSE.txt': 'PUBLIC IMGUI LICENSE',
             'profiles/mhp3rd/third_party/tiny_aes/UNLICENSE': 'PUBLIC AES LICENSE',
             'profiles/mhp3rd/third_party/xxhash/LICENSE': 'PUBLIC HASH LICENSE',
+            'third_party/asmjit/LICENSE.md': 'PUBLIC JIT LICENSE',
+            'profiles/mhp3rd/third_party/luau/LICENSE.txt': 'PUBLIC SCRIPT LICENSE',
+            'profiles/mhp3rd/third_party/luau/lua_LICENSE.txt': 'PUBLIC LUA LICENSE',
             'profiles/mhp3rd/packaging/linux/sources.sh':
                 'NOTO_CJK_SHA256=' + checksum(self.font) + '\nNOTO_CJK_LICENSE_SHA256='
                 + checksum(self.license) + '\n',
@@ -90,6 +93,9 @@ class Fixture(unittest.TestCase):
             'licenses/DearImGui-LICENSE.txt': fixed['profiles/mhp3rd/third_party/imgui/LICENSE.txt'].encode(),
             'licenses/tiny-AES-c-UNLICENSE.txt': fixed['profiles/mhp3rd/third_party/tiny_aes/UNLICENSE'].encode(),
             'licenses/xxHash-LICENSE.txt': fixed['profiles/mhp3rd/third_party/xxhash/LICENSE'].encode(),
+            'licenses/AsmJit-LICENSE.md': fixed['third_party/asmjit/LICENSE.md'].encode(),
+            'licenses/Luau-LICENSE.txt': fixed['profiles/mhp3rd/third_party/luau/LICENSE.txt'].encode(),
+            'licenses/Luau-Lua-LICENSE.txt': fixed['profiles/mhp3rd/third_party/luau/lua_LICENSE.txt'].encode(),
             'licenses/SDL3-LICENSE.txt': self.license,
             'licenses/FFmpeg-COPYING.LGPLv2.1.txt': self.license,
             'licenses/NotoSansCJK-OFL.txt': self.license,

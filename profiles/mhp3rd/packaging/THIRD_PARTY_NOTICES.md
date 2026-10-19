@@ -32,6 +32,14 @@ Read and write the PNG images of HD texture packs. Yakumo adds a checked-allocat
 
 Hashes textures for HD texture packs. Copyright (c) 2012-2021 Yann Collet. BSD 2-Clause License: `xxHash-LICENSE.txt`. <https://github.com/Cyan4973/xxHash>
 
+### AsmJit
+
+Machine code emitter behind the runtime's JIT, which compiles guest code that changed after recompilation to native code. Commit `0464e1c8f1f43c861a0c73d4e59437fff255cdd9`, unmodified. Copyright (c) 2008-2025 Petr Kobalicek. Zlib License: `AsmJit-LICENSE.md`. <https://github.com/asmjit/asmjit>
+
+### Luau 0.743
+
+The scripting language of script mods. Release `0.743`, its VM and compiler unmodified. Copyright (c) 2019-2026 Roblox Corporation; it derives from Lua 5.1, Copyright (c) 1994-2019 Lua.org, PUC-Rio. MIT License: `Luau-LICENSE.txt` and `Luau-Lua-LICENSE.txt`. <https://github.com/luau-lang/luau>
+
 ## Shipped as separate libraries
 
 These are dynamically linked shared libraries in `lib/` next to the executable (`/app/lib/yakumo/lib/` in the Flatpak, `Yakumo.app/Contents/Frameworks/` on macOS). They are unmodified builds of the upstream releases below. You may replace them with your own builds of the same or a compatible version.

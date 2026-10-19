@@ -94,6 +94,9 @@ cp "$repo/profiles/mhp3rd/third_party/imgui/LICENSE.txt" "$work/assets/licenses/
 cp "$repo/profiles/mhp3rd/third_party/tiny_aes/UNLICENSE" "$work/assets/licenses/tiny-AES-c-UNLICENSE.txt"
 cp "$repo/profiles/mhp3rd/third_party/xxhash/LICENSE" "$work/assets/licenses/xxHash-LICENSE.txt"
 cp "$sdl_dir/LICENSE.txt" "$work/assets/licenses/SDL3-LICENSE.txt"
+cp "$here/../../../../third_party/asmjit/LICENSE.md" "$work/assets/licenses/AsmJit-LICENSE.md"
+cp "$here/../../third_party/luau/LICENSE.txt" "$work/assets/licenses/Luau-LICENSE.txt"
+cp "$here/../../third_party/luau/lua_LICENSE.txt" "$work/assets/licenses/Luau-Lua-LICENSE.txt"
 cp "$build_dir"/bin/lib/FFmpeg-COPYING.LGPLv2.1.txt "$build_dir"/bin/lib/FFmpeg-SOURCE.txt "$work/assets/licenses/"
 if [[ -n "${FONT_DIR:-}" ]]; then
     mkdir -p "$work/assets/fonts"

@@ -155,6 +155,9 @@ cp "$build/bin/lib/FFmpeg-COPYING.LGPLv2.1.txt" "$build/bin/lib/FFmpeg-SOURCE.tx
 cp "$profile_dir/third_party/imgui/LICENSE.txt" "$stage/licenses/DearImGui-LICENSE.txt"
 cp "$profile_dir/third_party/tiny_aes/UNLICENSE" "$stage/licenses/tiny-AES-c-UNLICENSE.txt"
 cp "$profile_dir/third_party/xxhash/LICENSE" "$stage/licenses/xxHash-LICENSE.txt"
+cp "$profile_dir/../../third_party/asmjit/LICENSE.md" "$stage/licenses/AsmJit-LICENSE.md"
+cp "$profile_dir/third_party/luau/LICENSE.txt" "$stage/licenses/Luau-LICENSE.txt"
+cp "$profile_dir/third_party/luau/lua_LICENSE.txt" "$stage/licenses/Luau-Lua-LICENSE.txt"
 cp "$sources/NotoSansCJK-LICENSE.txt" "$stage/licenses/NotoSansCJK-OFL.txt"
 
 step "Checking the staged program"

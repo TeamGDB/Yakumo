@@ -51,10 +51,12 @@ A profile owns its generated AOT corpus, address-specific lowering, HLE behavior
 
 ## Third-party components
 
-Third-party source, binary dependencies, shader code and notices stay beside the profile that needs them. Their original copyright and license notices must be preserved.
+Third-party source, binary dependencies, shader code and notices stay beside the profile that needs them; the framework's own (AsmJit) is in `third_party/` at the root. Their original copyright and license notices must be preserved.
 
 | Component | Used by | License | How it is included |
 | --- | --- | --- | --- |
+| [AsmJit](https://github.com/asmjit/asmjit) commit `0464e1c8f1f4` | Framework: the runtime's JIT (`src/jit.cpp`) | Zlib | Unmodified copy of its `asmjit/` sources in `third_party/asmjit` with its `LICENSE.md`; the build file there is this project's own (README) |
+| [Luau](https://github.com/luau-lang/luau) 0.743 | mhp3rd profile: script mods (`host/mods/mod_script*.cpp`) | MIT (and the Lua 5.1 licence it derives from) | Unmodified copy of its `Common`, `Ast`, `Bytecode`, `Compiler` and `VM` directories in `profiles/mhp3rd/third_party/luau` with `LICENSE.txt` and `lua_LICENSE.txt`; the build file there is this project's own (README) |
 | [Dear ImGui](https://github.com/ocornut/imgui) 1.92.9b | mhp3rd profile: in-game menu and setup screens | MIT | Copy in `profiles/mhp3rd/third_party/imgui` with its `LICENSE.txt`; local debug texture-ID formatting, checked texture allocation glyph rectangle validation and font bitmap validation patches are recorded in its README |
 | [tiny-AES-c](https://github.com/kokke/tiny-AES-c) | mhp3rd profile: installer and save data | Unlicense (public domain) | Unmodified copy in `profiles/mhp3rd/third_party/tiny_aes` with its `UNLICENSE` |
 | [stb_truetype](https://github.com/nothings/stb) 1.26 | mhp3rd profile: game text | MIT or public domain | Single header, `profiles/mhp3rd/third_party/stb_truetype.h`, notice at its end; independently written local checks for bitmap dimensions, strides, coordinate conversion, SDF/rasterizer allocation failure and baked-glyph bounds |

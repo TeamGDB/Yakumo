@@ -119,6 +119,8 @@ class AndroidPackageContracts(unittest.TestCase):
         for name in ['LICENSE', 'profiles/mhp3rd/packaging/THIRD_PARTY_NOTICES.md',
                      'profiles/mhp3rd/third_party/imgui/LICENSE.txt', 'profiles/mhp3rd/third_party/tiny_aes/UNLICENSE',
                      'profiles/mhp3rd/third_party/xxhash/LICENSE', 'profiles/mhp3rd/cmake/FFmpeg.cmake',
+                     'third_party/asmjit/LICENSE.md', 'profiles/mhp3rd/third_party/luau/LICENSE.txt',
+                     'profiles/mhp3rd/third_party/luau/lua_LICENSE.txt',
                      'profiles/mhp3rd/packaging/linux/sources.sh', 'profiles/mhp3rd/packaging/android/AndroidManifest.xml']:
             destination = self.root / name
             destination.parent.mkdir(parents=True, exist_ok=True)

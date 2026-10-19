@@ -189,6 +189,9 @@ class WindowsPolicy:
             'licenses/DearImGui-LICENSE.txt': 'profiles/mhp3rd/third_party/imgui/LICENSE.txt',
             'licenses/tiny-AES-c-UNLICENSE.txt': 'profiles/mhp3rd/third_party/tiny_aes/UNLICENSE',
             'licenses/xxHash-LICENSE.txt': 'profiles/mhp3rd/third_party/xxhash/LICENSE',
+            'licenses/AsmJit-LICENSE.md': 'third_party/asmjit/LICENSE.md',
+            'licenses/Luau-LICENSE.txt': 'profiles/mhp3rd/third_party/luau/LICENSE.txt',
+            'licenses/Luau-Lua-LICENSE.txt': 'profiles/mhp3rd/third_party/luau/lua_LICENSE.txt',
         }
         self.hashed = {'licenses/SDL3-LICENSE.txt': SDL_LICENSE_SHA,
                        'licenses/FFmpeg-LICENSE.txt': FFMPEG_LICENSE_SHA}

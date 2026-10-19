@@ -292,7 +292,9 @@ cp "$4/bin/Yakumo.exe" "$YAKUMO_WORK/dist/yakumo-$2-windows-x86_64-portable.zip"
         for name in ['LICENSE', 'profiles/mhp3rd/packaging/THIRD_PARTY_NOTICES.md',
                      'profiles/mhp3rd/third_party/imgui/LICENSE.txt',
                      'profiles/mhp3rd/third_party/tiny_aes/UNLICENSE',
-                     'profiles/mhp3rd/third_party/xxhash/LICENSE']:
+                     'profiles/mhp3rd/third_party/xxhash/LICENSE', 'third_party/asmjit/LICENSE.md',
+                     'profiles/mhp3rd/third_party/luau/LICENSE.txt',
+                     'profiles/mhp3rd/third_party/luau/lua_LICENSE.txt']:
             path = self.repo / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('Public test fixture\n')

@@ -205,6 +205,9 @@ def inspect_linux(path, root=ROOT):
         'licenses/DearImGui-LICENSE.txt': root / 'profiles/mhp3rd/third_party/imgui/LICENSE.txt',
         'licenses/tiny-AES-c-UNLICENSE.txt': root / 'profiles/mhp3rd/third_party/tiny_aes/UNLICENSE',
         'licenses/xxHash-LICENSE.txt': root / 'profiles/mhp3rd/third_party/xxhash/LICENSE',
+        'licenses/AsmJit-LICENSE.md': root / 'third_party/asmjit/LICENSE.md',
+        'licenses/Luau-LICENSE.txt': root / 'profiles/mhp3rd/third_party/luau/LICENSE.txt',
+        'licenses/Luau-Lua-LICENSE.txt': root / 'profiles/mhp3rd/third_party/luau/lua_LICENSE.txt',
     }
     licenses = {'SDL3-LICENSE.txt', 'FFmpeg-COPYING.LGPLv2.1.txt', 'FFmpeg-SOURCE.txt',
                 'DearImGui-LICENSE.txt', 'tiny-AES-c-UNLICENSE.txt', 'xxHash-LICENSE.txt', 'NotoSansCJK-OFL.txt'}
