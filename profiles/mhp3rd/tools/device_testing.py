@@ -32,6 +32,7 @@ ENV_KEYS = {'MHP3RD_LANGUAGE', 'MHP3RD_TRACE_TEXT', 'MHP3RD_NO_RENDER',
             'MHP3RD_TEXT_NO_QUEST_DIRECT', 'MHP3RD_TEXT_SEARCH_UNLIMITED', 'MHP3RD_NO_SPARSE_VERTEX_DECODE',
             'MHP3RD_PERF_ALTERNATE'}
 EVIDENCE_LIMIT = 64 * 1024 * 1024
+PERFORMANCE_MODES = ('log', 'settings', 'alternate-alpha', 'alternate-sparse')
 EVIDENCE_FILES = {'report.json', 'run.log', 'vulkan.json', 'logcat.log'}
 ACTIVITY = 'io.github.teamgdb.yakumo.YakumoActivity'
 
@@ -163,8 +164,11 @@ def validate_device(value):
         raise ValueError('Gameplay reserve must be 0..1800 seconds within the session')
     if set(value.get('env', {})) - ENV_KEYS:
         raise ValueError('Unsupported environment override; isolation controls cannot be replaced')
-    if value.get('performance', 'log') not in ('log', 'settings'):
-        raise ValueError('Performance must be log or settings')
+    performance = value.get('performance', 'log')
+    if performance not in PERFORMANCE_MODES:
+        raise ValueError('Unknown performance mode')
+    if performance.startswith('alternate-') and (value['adapter'] != 'adb' or not value.get('observations') or value['build'] != 'dev'):
+        raise ValueError('Alternating APK diagnostics require developer ADB observations')
     for key in ('adb', 'android', 'python', 'args'):
         if key in value and (not isinstance(value[key], list) or
                 (key != 'args' and not value[key]) or any(not isinstance(item, str) or '\0' in item for item in value[key])):
@@ -847,8 +851,8 @@ def verify_artifact(device, actual):
 def android_contract(package, performance='log', observations=False, rtc_epoch_us=None):
     if not valid_package(package):
         raise ValueError('Test package must end in .devicetest')
-    if performance not in ('log', 'settings'):
-        raise ValueError('Performance must be log or settings')
+    if performance not in PERFORMANCE_MODES:
+        raise ValueError('Unknown performance mode')
     root = '/data/data/' + package + '/files/device-testing'
     contract = {'package': package, 'env': {'MHP3RD_GAME_DIR': root + '/data',
             'MHP3RD_DATA_DIR': root + '/data', 'MHP3RD_INPUT_LIVE': root + '/input-live.txt',
@@ -858,6 +862,10 @@ def android_contract(package, performance='log', observations=False, rtc_epoch_u
         contract['env'].pop('MHP3RD_PERF')
     if observations:
         contract['env'].update(MHP3RD_DEVICE_TEST='1', MHP3RD_TRACE_CAMERA='1')
+    if performance.startswith('alternate-'):
+        if not observations:
+            raise ValueError('Alternating APK diagnostics require explicit observations')
+        contract['env']['MHP3RD_PERF_ALTERNATE'] = performance.removeprefix('alternate-')
     if rtc_epoch_us is not None:
         if not observations or type(rtc_epoch_us) is not int or not 946684800000000 <= rtc_epoch_us <= 4102444800000000:
             raise ValueError('Pinned APK RTC requires explicit observations and a year from 2000 to 2100')
@@ -1550,7 +1558,7 @@ def main(argv=None):
     part.add_argument('--package', required=True)
     part.add_argument('--output', required=True)
     part.add_argument('--contract', required=True)
-    part.add_argument('--performance', choices=('log', 'settings'), default='log')
+    part.add_argument('--performance', choices=PERFORMANCE_MODES, default='log')
     part.add_argument('--observations', action='store_true', help='Enable developer-only structured readbacks')
     part.add_argument('--rtc-epoch-us', type=int, help='Pin developer test RTC; must match the device configuration')
     args = parser.parse_args(argv)

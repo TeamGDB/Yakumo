@@ -152,6 +152,9 @@ class EncounterBenchmarkTests(unittest.TestCase):
                 self.assertEqual((base/'saves/fixture').read_bytes(), b'original fixture stays unchanged')
 
     def test_configuration_and_finite_cli(self):
+        self.assertEqual(bench.timing_kind({'performance': 'alternate-alpha'}), 'alternating-diagnostic')
+        self.assertEqual(bench.timing_kind({'env': {'MHP3RD_PERF_ALTERNATE': 'sparse'}}), 'alternating-diagnostic')
+        self.assertEqual(bench.timing_kind({}), 'fixed')
         for device in ({'adapter': 'streaming'}, {'adapter': 'local', 'build': 'release'},
                        {'adapter': 'adb', 'build': 'dev', 'observations': True, 'rtc_epoch_us': 1}):
             with self.assertRaises((ValueError, bench.runner.NotTested)):
@@ -173,6 +176,14 @@ class EncounterBenchmarkTests(unittest.TestCase):
                 results=bench.main(['--config',str(config),'--device','b','--baseline','a','--repeat','2','--output-parent',temporary])
             self.assertEqual(order,['0-a','0-b','1-b','1-a'])
             self.assertEqual(len(results),4)
+            config.write_text(json.dumps({'devices': {'a': device, 'b': {**device,
+                'env': {'MHP3RD_PERF_ALTERNATE': 'alpha'}}}}))
+            with mock.patch.object(bench, 'run') as run:
+                with self.assertRaisesRegex(ValueError, 'separately'):
+                    bench.main(['--config', str(config), '--device', 'b', '--baseline', 'a',
+                                '--output-parent', temporary])
+                run.assert_not_called()
+            config.write_text(json.dumps({'devices': {'a': device, 'b': device}}))
             count=0
             def mismatch(*_):
                 nonlocal count

@@ -42,6 +42,11 @@ class Frames:
         self.sequence = sequence
 
 
+def timing_kind(device):
+    alternating = device.get('performance', 'log').startswith('alternate-') or device.get('env', {}).get('MHP3RD_PERF_ALTERNATE')
+    return 'alternating-diagnostic' if alternating else 'fixed'
+
+
 def encounter_records(text):
     records = []
     for line in text.splitlines(keepends=True):
@@ -142,6 +147,7 @@ def run(device, root, seconds, frames, start_tick):
         raise runner.NotTested('Missing finite load-character navigation fixture')
     suite.validate_program(program, fixture=True)
     report = {'schema': 1, 'source_commit': device['commit'], 'status': 'FAIL',
+              'timing_kind': timing_kind(device),
               'configuration_sha256': runner.object_hash(device), 'rtc_epoch_us': device['rtc_epoch_us'],
               'preset': 'barioth-tundra', 'capture_review': 'PENDING', 'error': ''}
     session = suite.Session(device, root, time.monotonic() + seconds)
@@ -180,6 +186,8 @@ def run(device, root, seconds, frames, start_tick):
         report['performance_environment'] = {key: value for key, value in device.get('env', {}).items()
                                              if key not in ('MHP3RD_NO_SPARSE_VERTEX_DECODE',
                                                             'MHP3RD_NO_PLAIN_ALPHA_VARIANTS')}
+        if device.get('performance', 'log').startswith('alternate-'):
+            report['performance_environment']['MHP3RD_PERF_ALTERNATE'] = device['performance'].removeprefix('alternate-')
         report['settings_sha256'] = runner.fingerprint(session.file('data/settings.ini'))
         report['status'] = 'COLLECTED'
     except Exception as error:
@@ -218,11 +226,14 @@ def main(argv=None):
     if not 1 <= args.seconds <= 900 or not 30 <= args.frames <= 1800 or not args.frames < args.start_tick < 89900:
         parser.error('Invalid bounded session, measurement interval or warmup tick')
     devices = [args.baseline, args.device] if args.baseline else [args.device]
+    kind = timing_kind(runner.load_device(args.config, args.device))
+    if args.baseline and any(timing_kind(runner.load_device(args.config, name)) != 'fixed' for name in devices):
+        raise ValueError('Alternating diagnostics must be analyzed separately, without a baseline entry')
     results = []
     ensemble = runner.output_directory(args.output_parent)
     print(ensemble, flush=True)
     identity = None
-    summary = {'status': 'FAIL', 'runs': results, 'capture_review': 'PENDING'}
+    summary = {'status': 'FAIL', 'runs': results, 'capture_review': 'PENDING', 'timing_kind': kind}
     try:
         for repetition in range(args.repeat):
             for name in devices if repetition % 2 == 0 else reversed(devices):

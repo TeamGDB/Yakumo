@@ -475,6 +475,30 @@ class DeviceTests(unittest.TestCase):
                 self.assertEqual(code, 2 if verdict == 'PASS' else 1)
                 self.assertEqual(dt.read_json(evidence / 'report.json')['automatic']['verdict'], verdict)
 
+    def test_alternating_apk_contract_is_explicit_and_observation_only(self):
+        package = 'org.example.yakumo.devicetest'
+        for path in ('alpha', 'sparse'):
+            performance = 'alternate-' + path
+            contract = dt.android_contract(package, performance, True)
+            self.assertEqual(contract['env']['MHP3RD_PERF'], 'log')
+            self.assertEqual(contract['env']['MHP3RD_PERF_ALTERNATE'], path)
+            with self.assertRaisesRegex(ValueError, 'observations'):
+                dt.android_contract(package, performance)
+            device = {**self.device, 'adapter': 'adb', 'package': package,
+                      'serial': 'synthetic-usb', 'apk': 'fixture.apk', 'observations': True,
+                      'performance': performance}
+            self.assertEqual(dt.validate_device(device)['performance'], performance)
+            for change in ({'adapter': 'local'}, {'build': 'release'}, {'observations': False}):
+                with self.assertRaises(ValueError):
+                    dt.validate_device({**device, **change})
+            output = self.root / (path + '.xml')
+            generated = dt.android_manifest(package, output, performance, True)
+            self.assertEqual(contract, generated)
+            self.assertIn('SDL_ENV.MHP3RD_PERF_ALTERNATE', output.read_text())
+        for value in ('alternate-unknown', '', None):
+            with self.assertRaises(ValueError):
+                dt.android_contract(package, value, True)
+
     def make_adb(self):
         if os.name == 'nt':
             self.skipTest('Synthetic ADB transport uses POSIX shell; real Windows supervisor is tested separately')

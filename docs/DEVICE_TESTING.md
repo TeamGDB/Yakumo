@@ -474,3 +474,21 @@ unblock a release. Record exceptions and relevant hardware evidence in release
 notes/[COMPATIBILITY.md](COMPATIBILITY.md). Review/redact evidence before any
 public upload: captures/logs/configuration can contain copyrighted or personal
 information and are never uploaded automatically.
+
+For continuous Android diagnostics, pack a dedicated developer APK with
+`DEVICE_TEST_OBSERVATIONS=1` and `DEVICE_TEST_PERFORMANCE=alternate-alpha` or
+`alternate-sparse`, and set the device entry's `performance` to the same value.
+The runner verifies the exact generated contract before installation. These
+modes use the existing one-second `MHP3RD_PERF_ALTERNATE` switch: `alpha`
+compares tested and test-free pipelines (including the plain compatibility
+shader variants), while `sparse` compares CPU vertex gathering. The native
+libraries are identical to the corresponding fixed-mode APK.
+
+Run the encounter command with that single device entry and a finite interval,
+for example `--repeat 2 --frames 900 --seconds 600`. Reports label the result
+`alternating-diagnostic`; a `--baseline` entry is rejected before starting any
+game. Analyze the native `alt on`/`alt off` telemetry windows within the declared
+measurement interval separately. Mixed-mode present percentiles do not establish
+a fixed-path FPS/p95/p99 improvement, and a frame crossing a mode transition
+can include GPU work from the previous mode. Normal player/release APK contracts
+and APKs without developer observations cannot enable these diagnostics.
