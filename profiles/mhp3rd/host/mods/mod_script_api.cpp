@@ -314,6 +314,41 @@ int api_table(lua_State *state) {
     return 3;
 }
 
+// Adds a large monster from a table {id, based_on, model, geometry, motions,
+// effects (optional)}:
+// its kind's number, or nil (the reason is in the log).
+int api_add_monster(lua_State *state) {
+    Script &script = self(state);
+    luaL_checktype(state, 1, LUA_TTABLE);
+    const auto field = [state](const char *name) -> std::string {
+        lua_getfield(state, 1, name);
+        std::string value = lua_isstring(state, -1) ? lua_tostring(state, -1) : "";
+        lua_pop(state, 1);
+        return value;
+    };
+    const std::string id = field("id"), base = field("based_on"), model = field("model"), geometry = field("geometry"),
+                      motions = field("motions"), effects = field("effects");
+    const ymod_monster monster{sizeof(ymod_monster), id.c_str(), base.c_str(), model.c_str(), geometry.c_str(),
+        motions.c_str(), effects.empty() ? nullptr : effects.c_str()};
+    const int32_t kind = script.monsters != nullptr ? script.monsters->add(script.mod, &monster) : -1;
+    if (kind < 0)
+        lua_pushnil(state);
+    else
+        lua_pushnumber(state, kind);
+    return 1;
+}
+
+// A large monster's kind by id (the game's or a mod's), or nil.
+int api_monster_kind(lua_State *state) {
+    Script &script = self(state);
+    const int32_t kind = script.monsters != nullptr ? script.monsters->kind(luaL_checkstring(state, 1)) : -1;
+    if (kind < 0)
+        lua_pushnil(state);
+    else
+        lua_pushnumber(state, kind);
+    return 1;
+}
+
 // Gives a table at least that many rows: where they are, or nil.
 int api_extend_table(lua_State *state) {
     Script &script = self(state);
@@ -517,6 +552,8 @@ void install_api(Script &script) {
         {"overlay_at", &api_overlay_at},
         {"table", &api_table},
         {"extend_table", &api_extend_table},
+        {"add_monster", &api_add_monster},
+        {"monster_kind", &api_monster_kind},
         {"panel", &api_panel},
         {"overlay", &api_overlay},
     };

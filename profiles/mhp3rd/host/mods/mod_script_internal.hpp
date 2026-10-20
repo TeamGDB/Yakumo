@@ -33,6 +33,7 @@ struct Script {
     const ymod_settings *settings{};
     const ymod_symbols *symbols{};
     const ymod_tables *tables{};
+    const ymod_monsters *monsters{};
     const ymod_ui *ui{};
     lua_State *state{};
     lua_State *thread{};                           // the sandboxed thread everything runs on

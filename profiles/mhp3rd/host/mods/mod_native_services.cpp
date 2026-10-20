@@ -1,7 +1,9 @@
 #include "mods/mod_native_internal.hpp"
 
 #include "mods/mhp3rd_code_mods.hpp"
+#include "mods/mhp3rd_mod_format.hpp"
 #include "mods/mhp3rd_mods.hpp"
+#include "mods/mhp3rd_monsters.hpp"
 #include "mods/mhp3rd_symbols.hpp"
 #include "mods/mhp3rd_tables.hpp"
 #include "mods/mod_ini.hpp"
@@ -11,9 +13,12 @@
 #include "overlays.hpp"
 
 #include <algorithm>
+#include <cstddef>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 
 // The services besides hooks: guest memory, events, files, settings,
 // services between mods, the game's symbols and drawing in the interface.
@@ -266,9 +271,180 @@ std::uint32_t tables_extend(ymod_mod *mod, const char *name, std::uint32_t rows)
     return address.value_or(0u);
 }
 
+// --- Monsters ---
+
+std::optional<std::vector<std::uint8_t>> mod_bytes(ymod_mod *mod, const char *relative, const char *what) {
+    if (relative == nullptr || *relative == '\0') {
+        report(mod, std::string("monster: no ") + what + " file given", true);
+        return std::nullopt;
+    }
+    const std::optional<std::filesystem::path> path = p3rd::mod_file(mod->folder, relative);
+    if (!path) {
+        report(mod, std::string("monster: the ") + what + " file " + relative + " is not in the mod's folder", true);
+        return std::nullopt;
+    }
+    std::ifstream in(*path, std::ios::binary);
+    std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    if (bytes.empty()) report(mod, std::string("monster: the ") + what + " file " + relative + " is empty", true);
+    return bytes.empty() ? std::nullopt : std::optional(std::move(bytes));
+}
+
+int32_t monsters_add(ymod_mod *mod, const ymod_monster *monster) {
+    Runtime *runtime = state().runtime;
+    if (runtime == nullptr || mod == nullptr || mod->failed || monster == nullptr ||
+        monster->size < offsetof(ymod_monster, motions) + sizeof(monster->motions))
+        return -1;
+    const auto model = mod_bytes(mod, monster->model, "model");
+    const auto geometry = mod_bytes(mod, monster->geometry, "geometry");
+    const auto motions = mod_bytes(mod, monster->motions, "motions");
+    if (!model || !geometry || !motions) return -1;
+    const bool has_effects = monster->size >= offsetof(ymod_monster, effects) + sizeof(monster->effects);
+    monsters::Spec spec{monster->id != nullptr ? monster->id : "",
+        monster->based_on != nullptr ? monster->based_on : "", *model, *geometry, *motions, mod->name, mod,
+        has_effects && monster->effects != nullptr ? monster->effects : ""};
+    std::string why;
+    const std::optional<std::uint8_t> kind = monsters::add(*runtime, spec, &why);
+    if (!kind) report(mod, "monster " + spec.id + " is not added: " + why, true);
+    return kind ? int32_t{*kind} : -1;
+}
+
+int32_t monsters_kind(const char *id) {
+    const std::optional<std::uint8_t> kind = id != nullptr ? monsters::kind(id) : std::nullopt;
+    return kind ? int32_t{*kind} : -1;
+}
+
+int monsters_behave(ymod_mod *mod, int32_t kind, int part, ymod_monster_fn fn, void *user) {
+    Runtime *runtime = state().runtime;
+    if (runtime == nullptr || mod == nullptr || mod->failed) return -1;
+    std::string why = "no such kind";
+    if (kind >= 0 && kind <= 0xFF &&
+        monsters::behave(*runtime, mod, static_cast<std::uint8_t>(kind), part, fn, user, &why))
+        return 0;
+    report(mod, "monster " + std::to_string(kind) + " is not given that behaviour: " + why, true);
+    return -1;
+}
+
+int monsters_play_motion(uint32_t monster, int32_t motion, int32_t blend) {
+    if (motion < 0 || motion > 0xFFFF || blend < 0) return -1;
+    return monsters::play_motion(monster, static_cast<std::uint16_t>(motion), static_cast<std::uint32_t>(blend)) ? 0
+                                                                                                                 : -1;
+}
+
+int monsters_motion_finished(uint32_t monster) {
+    Runtime *runtime = state().runtime;
+    const std::optional<bool> finished =
+        runtime != nullptr ? monsters::motion_finished(*runtime, monster) : std::nullopt;
+    return finished ? (*finished ? 1 : 0) : -1;
+}
+
+int monsters_at_frame(uint32_t monster, float frame) {
+    Runtime *runtime = state().runtime;
+    const std::optional<bool> passes = runtime != nullptr ? monsters::at_frame(*runtime, monster, frame) : std::nullopt;
+    return passes ? (*passes ? 1 : 0) : -1;
+}
+
+int put_vec3(const std::optional<monsters::Vec3> &value, ymod_vec3 *out) {
+    if (!value || out == nullptr) return -1;
+    *out = {value->x, value->y, value->z};
+    return 0;
+}
+
+int monsters_position(uint32_t monster, ymod_vec3 *out) {
+    Runtime *runtime = state().runtime;
+    return put_vec3(runtime != nullptr ? monsters::position(*runtime, monster) : std::nullopt, out);
+}
+
+int monsters_facing(uint32_t monster, float *degrees) {
+    Runtime *runtime = state().runtime;
+    const std::optional<float> value = runtime != nullptr ? monsters::facing(*runtime, monster) : std::nullopt;
+    if (!value || degrees == nullptr) return -1;
+    *degrees = *value;
+    return 0;
+}
+
+int monsters_set_facing(uint32_t monster, float degrees) {
+    Runtime *runtime = state().runtime;
+    return runtime != nullptr && monsters::set_facing(*runtime, monster, degrees) ? 0 : -1;
+}
+
+int monsters_target(uint32_t monster, ymod_vec3 *out) {
+    Runtime *runtime = state().runtime;
+    return put_vec3(runtime != nullptr ? monsters::target(*runtime, monster) : std::nullopt, out);
+}
+
+int monsters_attack_shape(ymod_mod *mod, int32_t kind, int32_t shape, const ymod_hit_sphere *spheres, int32_t count) {
+    if (mod == nullptr || mod->failed) return -1;
+    std::vector<monsters::HitSphere> list;
+    if (spheres != nullptr && count > 0 && count <= 16)
+        for (int32_t i = 0; i < count; ++i)
+            list.push_back({spheres[i].joint < 0 ? 0x100u : static_cast<std::uint32_t>(spheres[i].joint),
+                spheres[i].radius, spheres[i].x, spheres[i].y, spheres[i].z});
+    std::string why = "no such kind";
+    if (kind >= 0 && kind <= 0xFF && shape >= 0 &&
+        monsters::attack_shape(mod, static_cast<std::uint8_t>(kind), static_cast<std::uint32_t>(shape), list, &why))
+        return 0;
+    report(mod, "monster " + std::to_string(kind) + " is not given attack shape " + std::to_string(shape) + ": " + why,
+        true);
+    return -1;
+}
+
+int monsters_effect(uint32_t monster, int32_t effect, int32_t joint, const ymod_vec3 *offset, float scale) {
+    if (effect < 0 || joint < 0 || joint > 0xFF || !(scale > 0.0f) || !std::isfinite(scale)) return -1;
+    const monsters::Vec3 at = offset != nullptr ? monsters::Vec3{offset->x, offset->y, offset->z} : monsters::Vec3{};
+    return monsters::effect(monster, static_cast<std::uint32_t>(effect), static_cast<std::uint32_t>(joint), at, scale)
+        ? 0
+        : -1;
+}
+
+int monsters_aim(uint32_t monster) {
+    return monsters::aim(monster) ? 0 : -1;
+}
+
+int monsters_turn_to_target(uint32_t monster, float degrees) {
+    Runtime *runtime = state().runtime;
+    const std::optional<bool> faces =
+        runtime != nullptr ? monsters::turn_to_target(*runtime, monster, degrees) : std::nullopt;
+    return faces ? (*faces ? 1 : 0) : -1;
+}
+
+int monsters_move(uint32_t monster, float x, float z) {
+    Runtime *runtime = state().runtime;
+    return runtime != nullptr && monsters::move(*runtime, monster, x, z) ? 0 : -1;
+}
+
+int monsters_motion_frame(uint32_t monster, float *frame) {
+    Runtime *runtime = state().runtime;
+    const std::optional<float> value = runtime != nullptr ? monsters::motion_frame(*runtime, monster) : std::nullopt;
+    if (!value || frame == nullptr) return -1;
+    *frame = *value;
+    return 0;
+}
+
+int monsters_attack(uint32_t monster, int32_t slot, int32_t attack) {
+    if (slot < 0 || slot > 0xFF || attack < 0) return -1;
+    return monsters::attack(monster, static_cast<std::uint8_t>(slot), static_cast<std::uint32_t>(attack)) ? 0 : -1;
+}
+
+int monsters_end_attack(uint32_t monster, int32_t slot) {
+    if (slot < 0 || slot > 0xFF) return -1;
+    return monsters::end_attack(monster, static_cast<std::uint8_t>(slot)) ? 0 : -1;
+}
+
+const char *monsters_id_of(int32_t kind) {
+    if (kind < 0 || kind > 0xFF) return nullptr;
+    const std::string_view id = monsters::id_of(static_cast<std::uint8_t>(kind));
+    return id.empty() ? nullptr : id.data(); // ids are kept for the run, ending in a NUL
+}
+
 } // namespace
 
 const ymod_tables kTables{1u, sizeof(ymod_tables), &tables_find, &tables_get, &tables_extend};
+
+const ymod_monsters kMonsters{1u, sizeof(ymod_monsters), &monsters_add, &monsters_kind, &monsters_id_of,
+    &monsters_behave, &monsters_play_motion, &monsters_motion_finished, &monsters_motion_frame, &monsters_at_frame,
+    &monsters_position, &monsters_facing, &monsters_set_facing, &monsters_target, &monsters_aim,
+    &monsters_turn_to_target, &monsters_move, &monsters_attack, &monsters_end_attack, &monsters_attack_shape,
+    &monsters_effect};
 
 const ymod_memory kMemory{
     1u, sizeof(ymod_memory), &memory_read, &memory_write, &memory_allocate, &memory_release, &memory_code_changed};

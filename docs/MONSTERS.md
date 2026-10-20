@@ -14,6 +14,32 @@ A large monster's object keeps its kind as a byte at `+0x62`. The kind is also t
 
 Found by hooking the resource loader `0x08856BDC` (its third argument is the file) on a Tigrex quest and on one with a new kind: the new kind loaded every file the Tigrex did except 5500, and the code that asked for 5500 (called with the model set's number from `0x08856F44`) read `0x089FC040`. A model set without its third file crashed in a chunk walk at `0x088A0890`.
 
+## The game's kinds by id
+
+Mods name kinds by id ([MODDING.md](MODDING.md#large-monsters)): the game's own English names (text block 16, table 2, from entry 308, by kind), in lower case with `_`. A subspecies shares its base's name in that table; which kind is which was told apart by the names of the disc's quests that load it: 15 in *Golden Lunar Wheel*, 18 in *Silver Fire Wheel*, 20 in *Black Anger in the Night*, 23 in *Roar of the Black Tiger*, 32 in *Green Gale*, 51 to 57 in quests for Crimson Qurupeco, Baleful Gigginox, Sand Barioth (*Sand Barioth Training*), Jade Barroth, Steel Uragaan, Purple Ludroth (*Gather! Purple Water in Forest*) and Glacial Agnaktor (*Ice Wedge*), while 58 is in *Tigrex Interception* and 59 in *Hungry Eyes*. Kind 68 is a second Slagtoth whose difference from 49 is not traced; it is `slagtoth_2`.
+
+| | | | |
+| --- | --- | --- | --- |
+| 1 `rathian` | 2 `rathalos` | 3 `qurupeco` | 4 `gigginox` |
+| 5 `barioth` | 6 `diablos` | 7 `deviljho` | 8 `barroth` |
+| 9 `uragaan` | 10 `jaggi` | 11 `jaggia` | 12 `great_jaggi` |
+| 13 `baggi` | 14 `great_baggi` | 15 `gold_rathian` | 16 `royal_ludroth` |
+| 17 `ludroth` | 18 `silver_rathalos` | 19 `agnaktor` | 20 `black_diablos` |
+| 21 `uroktor` | 22 `delex` | 23 `brute_tigrex` | 24 `alatreon` |
+| 25 `jhen_mohran` | 26 `giggi` | 27 `aptonoth` | 28 `popo` |
+| 29 `rhenoplos` | 30 `felyne` | 31 `melynx` | 32 `green_nargacuga` |
+| 33 `altaroth` | 34 `kelbi` | 35 `gigginox_egg` | 36 `bnahabra` |
+| 37 `bnahabra_plains` | 38 `bnahabra_tundra` | 39 `bnahabra_volcano` | 40 `zinogre` |
+| 41 `amatsu_magatsuchi` | 42 `arzuros` | 43 `lagombi` | 44 `volvidon` |
+| 45 `great_wroggi` | 46 `duramboros` | 47 `nibelsnarf` | 48 `wroggi` |
+| 49 `slagtoth` | 50 `gargwa` | 51 `crimson_qurupeco` | 52 `baleful_gigginox` |
+| 53 `sand_barioth` | 54 `jade_barroth` | 55 `steel_uragaan` | 56 `purple_ludroth` |
+| 57 `glacial_agnaktor` | 58 `tigrex` | 59 `nargacuga` | 60 `akantor` |
+| 61 `ukanlos` | 62 `bulldrome` | 63 `bullfango` | 64 `anteka` |
+| 65 `cart_felyne` | 66 `nyanjiro` | 67 `veggie_elder` | 68 `slagtoth_2` |
+| 69 `rock` | 70 `rock_plains` | 71 `rock_forest` | 72 `rock_tundra` |
+| 73 `rock_volcano` | 74 `rock_peaks` |  |  |
+
 ## What the quest overlay keeps for each kind
 
 `game_task.ovl`, loaded for a quest, has five more tables indexed by kind, each with 75 rows:
@@ -30,6 +56,8 @@ Found by hooking the resource loader `0x08856BDC` (its third argument is the fil
 The two jump tables hold addresses in `game_task`, which always loads at the same address, so a row copied from another kind stays valid.
 
 ## Adding a kind
+
+The `yakumo.monsters` service does all of this for a mod ([MODDING.md](MODDING.md#large-monsters)): one call with an id, a base and the mod's model files. What follows is what it does, and how a mod can do it by hand.
 
 A mod extends each table by one row (kind 75: 76 rows by kind, 75 by model set), writes the new rows, and serves quests that name the kind ([MODDING.md](MODDING.md#quests-new-quests)). Starting from an existing kind, copy its row in every table: the executable's at start, `game_task`'s from the `"overlay"` event once `game_task` has loaded. A script mod:
 
@@ -95,6 +123,66 @@ AI code hides parts this way. The Tigrex's code sets that alpha by material numb
 The third file starts with a list of streams, each a slot count and the offset of its table of slots, then a zero and where the data starts; a slot holds the offset of a block or -1. A block is a u32 count of bone records, its size, a loop flag and a float loop start; a record is a u16 channel count and its size; a channel is a u16 type, a u16 key count and its size, then the keys, four s16 each (value, frame, ease in, ease out). Types are location (`0x40`, `0x80`, `0x100`), rotation (`0x08`, `0x10`, `0x20`) and scale (`0x200`, `0x400`, `0x800`), in that order within a record. The Tigrex's file has a stream of 65 slots, one of 20 and an empty one, with 43 records per block for its 46 joints.
 
 The game hands a block's records to the joints in the order it walks the tree from each root, first child before next sibling. On the Tigrex that is the joints' own order. On a skeleton numbered otherwise, records in index order turned the joints of the chest, wings and head (a joint's world matrix there was no longer a rotation), and sorting the records into walk order put them right.
+
+## A monster's behaviour
+
+A large monster's object starts with a vtable, and the game asks it for each part of its behaviour through one slot of it. Freedom Unite's monsters and Portable 3rd's have the same class: listed side by side, Fatalis's vtable in Freedom Unite and the Tigrex's (`0x0A1D9708` in `em058m0`) override the same slots and keep the common code at the same places; Portable 3rd's adds seven slots at the end (63 to 69, 70 in all).
+
+| Slot | Part | How it was found |
+| --- | --- | --- |
+| 32 (`+0x80`) | Each frame's behaviour (THINK): decide and act | The monster update in `game_task` (`0x0A08B558`) calls it between its common steps, before slot 14 (`+0x38`); both monsters' functions there are their largest, a switch on the monster's state |
+| 36 (`+0x90`) | The sounds and effects of the motion playing (EFFECTS) | The Tigrex's runs its tables by motion slot and its effects at frames by motion; with a mod's motions those are the wrong ones, so it is left out as ACT is |
+| 33 (`+0x84`) | Then carry out the action in the monster's mode (ACT) | Called from `0x0A086254` in `game_task`; the common class's is a bare return, and every Portable 3rd monster gives its own, a switch on the mode at `+0x18C`. With the Tigrex's THINK left out, the Tigrex's ACT kept turning a Fatalis back to a facing its THINK had chosen before (found with a write watch on `+0x74`: `0x0A0B2944`, the turn step, called from the Tigrex's turn action `0x0A1BCA64`) |
+
+What a part does goes through the game's own functions, which a mod reaches through the monsters service:
+
+| Function | What it does | How it was found |
+| --- | --- | --- |
+| `0x0A0B3004` | play(monster, motion, blend frames, first frame): plays a motion of the monster's motions file, by slot | The Tigrex's behaviour calls it 78 times with constants that fall on its motion slots; logged in a fight, it is called once at each change of action (motions 3, 26, 9, 33, 56, 57...), sometimes with a first frame (86, 60) |
+| `0x0A0AD0B0` | finished(monster): whether the motion has reached its last frame | Its code: the model's frame (`+4`) and step (`+12`) against its last frame (`+20`); no step for a looping motion (`+80` bit 2), a held one (`+40` 1 without `+64` bit 0) or `+72` above 0 |
+| `0x0A0A4914` | at_frame(monster, frame in f12, channel): whether this frame's step passes a frame of the motion; through the model to `0x0887A118`, which compares the frame with the model's frame and frame plus step (no further than the last frame; past it, a looping motion (`+80` bit 0) wraps to its loop start, `+16`) | The Tigrex's behaviour calls it 26 times, through wrappers that start an attack or an effect at a frame |
+| `0x0A0A7C74` | turn(monster, step): turns the facing (`+0x74`) towards the target (`+0x4C0`) by at most the step (65536 a turn); whether it faces it | Its code: the angle from `0x08878010` (an arc tangent of the x and z differences), then `0x0A0A7C20`, the shorter way round by at most the step. The Tigrex turns 384 a frame |
+| `0x0A09E884` | start_attack(monster, slot, attack, flags): an attack object made from row `attack` of the kind's attack table (28 bytes a row, at `+0x60` of the kind's data at `+0xA4`), kept in slot `slot` (`+0x174` + 4 × slot) | The Tigrex calls it at a motion's frames with attacks 6 to 28 in slots 1 to 3; `0x0A09EA9C` is the same with no flags |
+| `0x0A09B47C` | end_attack(monster, slot): calls slot 14 of the attack object in the slot | Its code |
+
+A monster's model is what slot 17 (`+0x44`) of its vtable returns; for the Tigrex that is a leaf adding `0xE00` to the monster (the Barioth's adds `0xDD0`). The monsters service reads it that way and works the finished check out itself; a motion is queued, and Yakumo calls the game's setter through a guest call once the mod's function returns.
+
+### A monster's body
+
+Where a monster is and what it is after, as the monster update and the behaviours read it. Logged each frame with a script probe on a Fatalis in the arena, with its own behaviour playing one motion after another:
+
+| Offset | What | Notes |
+| --- | --- | --- |
+| `+0x80`, `+0x84`, `+0x88` | Position: x, y (up), z | The previous frame's at `+0x90` |
+| `+0x74` | Facing, 65536 a turn: 0 towards +z, growing towards +x | A 32-bit word; the turn code keeps it to 16 bits. Turning motions change it (a motion's root rotation is applied); no motion moved the position |
+| `+0x4C0`, `+0x4C4`, `+0x4C8` | Target point: what the monster goes for | Brought up to date by the game only now and then: without the base's THINK it followed the hunter once, then stayed where the hunter had been. `0x0A0AFEB0` fills it from the target's kind at `+0x4D8` (and `+0x4D9`, `+0x4DA`): a hunter, another monster, a point to the side, or by default the first hunter |
+| `+0x18E` | The motion slot playing (u16) | Read by `0x0A0AD31C`; `0x0A0B2ED4` plays a motion only when this is another |
+| `+0xD50` | The kind's data, cached | From `0x0A09B644`: by the kind (`+0x62`) and its variant (`+0x2E3`). Its `+8` is the kind's base size, `+0xA4` the attack and part tables |
+
+A facing from one point to another is `atan2(dx, dz)`, and a step (x, z) in the monster's own frame becomes `(cos θ · x + sin θ · z, cos θ · z − sin θ · x)`: `0x08876D64` turns a vector that way. The monsters service reads and writes these itself (`position`, `facing`, `set_facing`, `target`, `move`, and the model's frame for `motion_frame`), works the turn out as `0x0A0A7C74` does, and the frame check as `0x0887A118` does; attacks, and `aim` (a call of `0x0A0AFEB0` with no point, which brings the target point up to date), are queued and made by the game's functions, like motions. A monster made from a base keeps the base's attack table: its attacks are the base's rows, with their joints numbered as in the base's skeleton.
+
+### A monster's attacks
+
+An attack is a row of the kind's attack table, made into an attack object by `0x0A09E884`. The table hangs off the kind's data, which a monster looks up once (`0x0A09B644`, by the kind's row in `monster.kinds`: a list per variant whose first word is the kind's data) and keeps at `+0xD50`. Dumped from a Tigrex-based monster in the arena:
+
+| Where | What |
+| --- | --- |
+| Kind's data, `0xA8` bytes | `+8` base size (float), `+0x50` points, `+0xA4` the attack tables |
+| Attack tables, `0x70` bytes | `+0x14`, `+0x18` part tables, `+0x5C` the shapes (a pointer each), `+0x60` the attack rows |
+| Attack row, 28 bytes | `+2`, `+4` its strength (u16 each), `+6` its kind of hit, `+0x11` the shape it hits with. The Tigrex has 29 rows (0 unused) and 18 shapes |
+| Shape | Spheres of 40 bytes, ended by joint `0xFFFF`: joint (u16; a second joint in the high half for a capsule), kind (0 sphere, 2 capsule, 1 a box), a flag, radius, centre x, y, z from the joint (floats) |
+
+The shapes name the base's joints, so a monster made from a base hits with spheres on whichever of its own joints have those numbers: on Fatalis the Tigrex's head is a front leg. `attack_shape` gives a kind a mod added its own spheres for a shape: the first time one of its monsters thinks with a kind's data the mod has not changed, Yakumo copies the kind's data, its attack tables and the shape pointers, writes the mod's spheres, and points the monster's `+0xD50` at the copy (one per kind and base data, kept for the run). The rows, and so what an attack does, are still the base's.
+
+### A monster's effects
+
+A monster's effects (flames, sparks, dust that follow it) are entries 3 and on of its model pack, which `monster.build_model` hands to `0x0895B90C`: entry 5 is a model for them (a self-contained PMO), entry 6 its textures and entry 7 the effects. The effects entry is a u32 count and an offset per effect (an offset at the entry's end is none: the Tigrex's effect 0); an effect is its part count, header size and part offsets, then at the header's end a float and a count of 80-byte emitters. Each emitter starts with its bank: a type and, for type 1 (a monster's own), the kind (u8, 58 in all of the Tigrex's). When an emitter draws from a model, game_sub (`0x0A013878`) looks the model up by that kind's loaded model set (`0x08856504` over the four sets at `+0x90` of `*0x08A38644`, by the kind's first model file).
+
+A kind made from a base kept the base's kind in its effects, so every effect that draws a model found no set and drew from a model with no PMO (`0x0889F2D0` reading `+4` of it): the Tigrex's effects 3, 4 and 10 stopped the game on a Fatalis, 1, 2, 7, 8 and 9 did not. Yakumo now rewrites those emitters' kind to the new kind's when it composes the pack; all 20 of the Tigrex's effects and the Rathalos's 27 then played on a Fatalis. A mod can take another kind's effects instead of the base's (`effects`), their entries 3 and on.
+
+An effect starts with game_sub's `0x0A00D7D8`: start(bank, effect, monster, joint, offset, scale, ...), the bank of a monster's own effects being 12 plus its model set's slot. Logged on the Tigrex: bank 12, effect 7, joint 26, offset (0, -10, 90), scale 0.7, flags 2 on the stack. `0x0A00D648` is the same without the scale. The Tigrex's motion sounds and effects come from its slot 36, by motion slot (its own tables, through `0x0A01476C`), and `0x0A0AD45C` shakes the ground at a joint.
+
+`game_task`'s maker (`0x0A090AE0`, make(manager, kind)) returns a new monster, with its kind at `+0x62` and its vtable at `+0`. The monsters service gives a kind a mod added a vtable of its own: a copy of the base's whose slot for each part the mod gives runs the mod's function first and then, unless it says it has done the part, the base's.
 
 ## Not traced yet
 

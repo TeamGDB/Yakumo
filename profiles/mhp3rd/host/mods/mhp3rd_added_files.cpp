@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <vector>
 
 namespace mhp3rd::mods::added {
@@ -46,7 +47,8 @@ constexpr std::array<CodeWord, 11> kSignature{{
 }};
 
 struct File {
-    fs::path path;
+    fs::path path;                                          // a mod's file on disk, or
+    std::shared_ptr<const std::vector<std::uint8_t>> bytes; // bytes a mod gave while running
     std::uint32_t size{};
 };
 
@@ -92,14 +94,19 @@ void size_of(Runtime &runtime, AllegrexContext &ctx) {
 // Copies the first `length` bytes of an added file to the destination in a2.
 void copy_file(Runtime &runtime, AllegrexContext &ctx, const File &file, std::uint32_t length) {
     const std::uint32_t destination = ctx.gpr[6]; // a2
-    std::ifstream in(file.path, std::ios::binary);
-    std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    std::vector<std::uint8_t> bytes;
+    if (file.bytes) {
+        bytes = *file.bytes;
+    } else {
+        std::ifstream in(file.path, std::ios::binary);
+        bytes.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    }
     if (bytes.size() != file.size || !runtime.memory().contains(destination, length)) {
         // A missing file still answers, with zeros, rather than a load that
         // never ends.
         std::cerr << "[mods] added file " << psprecomp::hex32(ctx.gpr[5] & 0xFFFFu) << " ("
-                  << to_utf8(file.path.filename()) << ") cannot be read or does not fit at "
-                  << psprecomp::hex32(destination) << "\n";
+                  << (file.bytes ? std::string("from memory") : to_utf8(file.path.filename()))
+                  << ") cannot be read or does not fit at " << psprecomp::hex32(destination) << "\n";
         bytes.assign(file.size, 0u);
     }
     if (runtime.memory().contains(destination, length)) runtime.memory().copy_in(destination, {bytes.data(), length});
@@ -136,9 +143,13 @@ void read_now(Runtime &runtime, AllegrexContext &ctx) {
 
 } // namespace
 
-bool install(Runtime &runtime, const std::map<FileId, Resolution::Source> &files) {
+namespace {
+
+// Takes the loader's three functions over, once. False when its code is not
+// as traced or cannot be compiled.
+bool take_over(Runtime &runtime) {
     State &s = state();
-    if (files.empty()) return true;
+    if (s.size != nullptr) return true;
     for (const CodeWord &expected : kSignature) {
         if (!runtime.memory().contains(expected.address, 4u) ||
             runtime.memory().load32(expected.address) != expected.word) {
@@ -146,6 +157,31 @@ bool install(Runtime &runtime, const std::map<FileId, Resolution::Source> &files
             return false;
         }
     }
+    s.trace = std::getenv("MHP3RD_TRACE_MODS") != nullptr;
+    // Registered first, so the game's own code is compiled from memory
+    // behind them, as a hook's is.
+    runtime.register_function(kSize, &size_of, "mhp3rd_added_files_size");
+    runtime.register_function(kSubmit, &submit, "mhp3rd_added_files_submit");
+    runtime.register_function(kRead, &read_now, "mhp3rd_added_files_read");
+    s.size = psprecomp::jit_compile_detached(runtime, kSize);
+    s.submit = psprecomp::jit_compile_detached(runtime, kSubmit);
+    s.read = psprecomp::jit_compile_detached(runtime, kRead);
+    if (s.size == nullptr || s.submit == nullptr || s.read == nullptr) {
+        std::cerr << "[mods] the game's file loader cannot be compiled; files mods add are not served\n";
+        runtime.unregister_functions(kSize, kSize + 4u);
+        runtime.unregister_functions(kSubmit, kSubmit + 4u);
+        runtime.unregister_functions(kRead, kRead + 4u);
+        s = {};
+        return false;
+    }
+    return true;
+}
+
+} // namespace
+
+bool install(Runtime &runtime, const std::map<FileId, Resolution::Source> &files) {
+    State &s = state();
+    if (files.empty()) return true;
     std::map<FileId, File> found;
     for (const auto &[id, source] : files) {
         std::error_code ec;
@@ -155,31 +191,28 @@ bool install(Runtime &runtime, const std::map<FileId, Resolution::Source> &files
                       << " cannot be read\n";
             continue;
         }
-        found[id] = {source.path, static_cast<std::uint32_t>(size)};
+        found[id] = {source.path, nullptr, static_cast<std::uint32_t>(size)};
     }
-    if (found.empty()) return false;
+    if (found.empty() || !take_over(runtime)) return false;
     s.files = std::move(found);
-    s.trace = std::getenv("MHP3RD_TRACE_MODS") != nullptr;
-    if (s.size == nullptr) {
-        // Registered first, so the game's own code is compiled from memory
-        // behind them, as a hook's is.
-        runtime.register_function(kSize, &size_of, "mhp3rd_added_files_size");
-        runtime.register_function(kSubmit, &submit, "mhp3rd_added_files_submit");
-        runtime.register_function(kRead, &read_now, "mhp3rd_added_files_read");
-        s.size = psprecomp::jit_compile_detached(runtime, kSize);
-        s.submit = psprecomp::jit_compile_detached(runtime, kSubmit);
-        s.read = psprecomp::jit_compile_detached(runtime, kRead);
-        if (s.size == nullptr || s.submit == nullptr || s.read == nullptr) {
-            std::cerr << "[mods] the game's file loader cannot be compiled; files mods add are not served\n";
-            runtime.unregister_functions(kSize, kSize + 4u);
-            runtime.unregister_functions(kSubmit, kSubmit + 4u);
-            runtime.unregister_functions(kRead, kRead + 4u);
-            s = {};
-            return false;
-        }
-    }
     std::cout << "[mods] " << s.files.size() << " added file(s) served\n";
     return true;
+}
+
+bool add(Runtime &runtime, FileId file, std::vector<std::uint8_t> bytes) {
+    if (bytes.empty() || bytes.size() > 0x7FFFFFFFu || state().files.contains(file) || !take_over(runtime))
+        return false;
+    const auto size = static_cast<std::uint32_t>(bytes.size());
+    state().files[file] = {{}, std::make_shared<const std::vector<std::uint8_t>>(std::move(bytes)), size};
+    return true;
+}
+
+FileId free_id() {
+    // From the top of the ids mods may add down, away from the ids mods choose
+    // themselves (mod.ini's [Add] starts near the disc's last file).
+    for (FileId id = kLastFreeId; id >= kFirstFreeId; --id)
+        if (!state().files.contains(id)) return id;
+    return 0u;
 }
 
 bool serves(FileId file) {

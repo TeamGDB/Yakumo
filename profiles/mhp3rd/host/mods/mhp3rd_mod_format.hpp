@@ -48,6 +48,11 @@ private:
 // out of that range, so quest files never meet a mod's own.
 inline constexpr FileId kFirstQuestFile = 0x6000u;
 inline constexpr FileId kQuestFiles = 0x10000u - 62000u;
+// A file of a mod by its path in the mod's folder (either slash, any case),
+// or nothing for a path that leaves the folder or a file that is not there.
+[[nodiscard]] std::optional<std::filesystem::path> mod_file(
+    const std::filesystem::path &folder, const std::string &relative);
+
 [[nodiscard]] std::optional<FileId> quest_file(std::uint32_t quest);
 [[nodiscard]] std::optional<std::uint32_t> quest_of_file(FileId file);
 

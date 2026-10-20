@@ -59,6 +59,10 @@ struct Placement {
 // overlay is copied to its slot and before the game runs it.
 void overlay_loaded(psprecomp::Runtime &runtime);
 
+// Writes, for tests, the game's code at every place the table's address and
+// count are read, as traced, so extend() finds it as it would in the game.
+void write_traced_code_for_tests(psprecomp::Runtime &runtime, std::string_view name);
+
 // Forgets every table moved, so tests can start again.
 void reset_for_tests();
 

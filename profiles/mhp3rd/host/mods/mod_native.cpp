@@ -83,6 +83,7 @@ const void *host_service(ymod_mod *, const char *name, std::uint32_t version) {
         {YMOD_SYMBOLS, 1u, &kSymbols},
         {YMOD_UI, 1u, &kUi},
         {YMOD_TABLES, 1u, &kTables},
+        {YMOD_MONSTERS, 1u, &kMonsters},
     };
     for (const Entry &entry : kEntries)
         if (std::strcmp(entry.name, name) == 0) return version <= entry.version ? entry.table : nullptr;

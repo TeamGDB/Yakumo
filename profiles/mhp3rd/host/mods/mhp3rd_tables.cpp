@@ -291,6 +291,16 @@ void overlay_loaded(psprecomp::Runtime &runtime) {
     }
 }
 
+void write_traced_code_for_tests(psprecomp::Runtime &runtime, std::string_view name) {
+    const Definition *d = definition(name);
+    if (d == nullptr) return;
+    for (const Reference &r : d->references) {
+        runtime.memory().store32(r.hi, r.hi_word);
+        runtime.memory().store32(r.lo, r.lo_word);
+    }
+    for (const Count &c : d->counts) runtime.memory().store32(c.address, c.word);
+}
+
 void reset_for_tests() {
     moved().clear();
 }

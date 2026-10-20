@@ -337,6 +337,125 @@ typedef struct ymod_tables {
     uint32_t (*extend)(ymod_mod *mod, const char *name, uint32_t rows);
 } ymod_tables;
 
+/* --------------------------------------------------------------------------
+ * "yakumo.monsters" 1: large monsters, by name. The game's kinds have ids
+ * ("rathian", "tigrex", "gold_rathian": docs/MONSTERS.md lists them), and a
+ * mod adds kinds of its own: an id, the game's kind it starts from (its
+ * behaviour, size and carves until the mod gives its own) and its model files
+ * in the formats docs/MONSTERS.md describes. Yakumo gives the kind its number
+ * and its place in the game's tables, and serves the files. Call add() from
+ * yakumo_mod_main.
+ */
+#define YMOD_MONSTERS "yakumo.monsters"
+typedef struct ymod_monster {
+    uint32_t size;         /* set to sizeof(ymod_monster) before passing one */
+    const char *id;        /* the mod's name for the kind: lower case, "fatalis" */
+    const char *based_on;  /* a kind of the game by id: "tigrex" */
+    const char *model;     /* paths in the mod's folder: the model pack (skeleton, model, textures), */
+    const char *geometry;  /* the model's GE data */
+    const char *motions;   /* and the motions */
+    /* A kind of the game by id whose effects the kind takes (its fire, its
+     * roar...), when the mod's model pack has none of its own; NULL: the
+     * base's. Effects are entries 3 and on of a model pack (docs/MONSTERS.md). */
+    const char *effects;
+} ymod_monster;
+/* The parts of a monster's behaviour a mod can give a kind it added. Each is a
+ * function the game calls on the monster; the base's runs where the mod gives
+ * none. More parts are named as they are traced (docs/MONSTERS.md). */
+enum ymod_monster_part {
+    YMOD_MONSTER_THINK = 0, /* each frame on a quest: decide what to do */
+    /* then: carry out the action decided. When a mod does THINK itself
+     * (YMOD_RETURN) and gives no ACT, the base's ACT is left out in that
+     * frame, as it would carry out the base's own decision. */
+    YMOD_MONSTER_ACT = 1,
+    /* the sounds and effects of the motion playing, from the base's tables by
+     * motion slot; left out as ACT is when the mod does THINK itself, since
+     * the base's slots are not the mod's motions */
+    YMOD_MONSTER_EFFECTS = 2
+};
+/* A point in the game's world: its units, y up. */
+typedef struct ymod_vec3 {
+    float x, y, z;
+} ymod_vec3;
+/* A sphere an attack hits with, on one of the kind's joints (numbered as in
+ * its skeleton): its radius and centre from the joint, in the joint's frame. */
+typedef struct ymod_hit_sphere {
+    int32_t joint;
+    float radius;
+    float x, y, z;
+} ymod_hit_sphere;
+/* `monster` is the monster's object. Return YMOD_RETURN when it has done the
+ * part itself, YMOD_CONTINUE to have the base's run as well (after it). */
+typedef int (*ymod_monster_fn)(ymod_cpu *cpu, uint32_t monster, void *user);
+typedef struct ymod_monsters {
+    uint32_t version;
+    uint32_t size;
+    /* Adds a kind: its number, or -1 (the reason is in the log). */
+    int32_t (*add)(ymod_mod *mod, const ymod_monster *monster);
+    /* A kind's number by id, the game's or a mod's; -1 for an id nothing has. */
+    int32_t (*kind)(const char *id);
+    /* A kind's id, or NULL for a number nothing has. */
+    const char *(*id_of)(int32_t kind);
+    /* Gives a kind this mod added its own part of behaviour: `fn` runs each
+     * time the game asks one of its monsters for that part. 0, or -1 (the
+     * reason is in the log). */
+    int (*behave)(ymod_mod *mod, int32_t kind, int part, ymod_monster_fn fn, void *user);
+    /* What a part of behaviour does, called from its fn on the monster it was
+     * given. Actions are queued and the game carries them out, in order, as
+     * soon as fn returns (before the base's part, when fn lets that run). */
+    /* Plays `motion` (the slot in the kind's motions file) on `monster`,
+     * blending from what it plays now over `blend` frames. 0, or -1 outside a
+     * part of behaviour. */
+    int (*play_motion)(uint32_t monster, int32_t motion, int32_t blend);
+    /* Whether the motion `monster` plays has reached its last frame (a looping
+     * motion never has): 1 or 0, or -1 when its model cannot be read. */
+    int (*motion_finished)(uint32_t monster);
+    /* The frame the motion playing has reached: 0, or -1 as above. */
+    int (*motion_frame)(uint32_t monster, float *frame);
+    /* Whether the motion passes `frame` in this frame's step, the way the
+     * game's behaviours time what they do: 1 or 0, or -1 as above. */
+    int (*at_frame)(uint32_t monster, float frame);
+    /* The monster's body (docs/MONSTERS.md, "A monster's body"). Facings are
+     * in degrees, 0 towards +z and growing towards +x. Each returns 0, or -1
+     * for an address that is not guest memory. */
+    int (*position)(uint32_t monster, ymod_vec3 *out);
+    int (*facing)(uint32_t monster, float *degrees);
+    int (*set_facing)(uint32_t monster, float degrees);
+    /* Where the monster is going: the hunter it is after, kept up to date by
+     * the game. */
+    int (*target)(uint32_t monster, ymod_vec3 *out);
+    /* Has the game bring the target up to date from the hunter the monster
+     * is after (it does so on its own only now and then); queued as
+     * play_motion is. Call it each frame the target matters. */
+    int (*aim)(uint32_t monster);
+    /* Turns towards the target by at most `degrees`: 1 when it faces the
+     * target now, 0 when not yet, -1 as above. */
+    int (*turn_to_target)(uint32_t monster, float degrees);
+    /* Moves it by (x, z) in its own frame: z ahead, x to the side, as in its
+     * motions. A motion turns a monster but does not carry it: its behaviour
+     * moves it, a little each frame. */
+    int (*move)(uint32_t monster, float x, float z);
+    /* Attacks, queued as play_motion is: starts attack `attack` (a row of the
+     * base kind's attack table, until a mod can give its own) in one of the
+     * monster's attack slots, or ends the attack in a slot. 0, or -1 outside
+     * a part of behaviour. */
+    int (*attack)(uint32_t monster, int32_t slot, int32_t attack);
+    int (*end_attack)(uint32_t monster, int32_t slot);
+    /* Gives a kind this mod added its own spheres (1 to 16) for one of the
+     * base kind's attack shapes, by number: what the base's attack rows that
+     * name the shape hit with, on the kind's own joints instead of the
+     * base's (docs/MONSTERS.md, "A monster's attacks"). Call at start; it
+     * takes effect in monsters with a part of behaviour. 0, or -1 (the
+     * reason is in the log). */
+    int (*attack_shape)(ymod_mod *mod, int32_t kind, int32_t shape, const ymod_hit_sphere *spheres, int32_t count);
+    /* Starts one of the kind's effects (in its model pack, docs/MONSTERS.md),
+     * by number, on one of its joints, `offset` from it (NULL: on the joint)
+     * and at `scale` (1: as made); queued as play_motion is. 0, or -1 outside
+     * a part of behaviour, for a number the kind's effects do not have, or
+     * when its model set is not loaded. */
+    int (*effect)(uint32_t monster, int32_t effect, int32_t joint, const ymod_vec3 *offset, float scale);
+} ymod_monsters;
+
 #ifdef __cplusplus
 }
 #endif

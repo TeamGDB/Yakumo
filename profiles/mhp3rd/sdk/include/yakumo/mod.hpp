@@ -5,6 +5,8 @@
 
 #include "yakumo/mod.h"
 
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <optional>
@@ -34,6 +36,7 @@ public:
     const ymod_symbols *symbols() const { return service<ymod_symbols>(YMOD_SYMBOLS, 1u); }
     const ymod_ui *ui() const { return service<ymod_ui>(YMOD_UI, 1u); }
     const ymod_tables *tables() const { return service<ymod_tables>(YMOD_TABLES, 1u); }
+    const ymod_monsters *monsters() const { return service<ymod_monsters>(YMOD_MONSTERS, 1u); }
 
     // A known function or data by name (sdk/symbols.txt), or nothing.
     [[nodiscard]] std::optional<ymod_symbol> symbol(const char *name) const {
@@ -71,6 +74,86 @@ public:
 private:
     const ymod_host *host_;
     ymod_mod *mod_;
+};
+
+// One monster, as a part of behaviour sees it: the monsters service's
+// functions on it, in the world's units and degrees (yakumo/mod.h). A
+// function the host's service is too old for does nothing and answers no.
+class Monster {
+public:
+    Monster(const ymod_monsters &service, std::uint32_t object) noexcept : service_(service), object_(object) {}
+
+    [[nodiscard]] std::uint32_t object() const noexcept { return object_; }
+
+    bool play(int motion, int blend = 0) const { return service_.play_motion(object_, motion, blend) == 0; }
+    [[nodiscard]] bool finished() const { return service_.motion_finished(object_) == 1; }
+    [[nodiscard]] float frame() const {
+        float out = 0.0f;
+        if (has(offsetof(ymod_monsters, motion_frame))) service_.motion_frame(object_, &out);
+        return out;
+    }
+    [[nodiscard]] bool at_frame(float frame) const {
+        return has(offsetof(ymod_monsters, at_frame)) && service_.at_frame(object_, frame) == 1;
+    }
+
+    [[nodiscard]] ymod_vec3 position() const {
+        ymod_vec3 out{};
+        if (has(offsetof(ymod_monsters, position))) service_.position(object_, &out);
+        return out;
+    }
+    [[nodiscard]] float facing() const {
+        float out = 0.0f;
+        if (has(offsetof(ymod_monsters, facing))) service_.facing(object_, &out);
+        return out;
+    }
+    bool set_facing(float degrees) const {
+        return has(offsetof(ymod_monsters, set_facing)) && service_.set_facing(object_, degrees) == 0;
+    }
+    [[nodiscard]] ymod_vec3 target() const {
+        ymod_vec3 out{};
+        if (has(offsetof(ymod_monsters, target))) service_.target(object_, &out);
+        return out;
+    }
+    // Has the game bring the target up to date (it lands for the next frame).
+    bool aim() const { return has(offsetof(ymod_monsters, aim)) && service_.aim(object_) == 0; }
+    // How far the target is, on the ground.
+    [[nodiscard]] float distance_to_target() const {
+        const ymod_vec3 at = position(), to = target();
+        return std::hypot(to.x - at.x, to.z - at.z);
+    }
+    // Where the target is from the monster's facing, in degrees from -180 to
+    // 180: turning by this much faces it.
+    [[nodiscard]] float angle_to_target() const {
+        const ymod_vec3 at = position(), to = target();
+        const float towards = std::atan2(to.x - at.x, to.z - at.z) * 180.0f / 3.14159265f;
+        float angle = std::fmod(towards - facing(), 360.0f);
+        if (angle > 180.0f) angle -= 360.0f;
+        if (angle <= -180.0f) angle += 360.0f;
+        return angle;
+    }
+    // Turns towards the target by at most `degrees`; whether it faces it now.
+    bool turn_to_target(float degrees) const {
+        return has(offsetof(ymod_monsters, turn_to_target)) && service_.turn_to_target(object_, degrees) == 1;
+    }
+    // Moves it by (x, z) in its own frame: z ahead, x to the side.
+    bool move(float x, float z) const { return has(offsetof(ymod_monsters, move)) && service_.move(object_, x, z) == 0; }
+    bool move_forward(float distance) const { return move(0.0f, distance); }
+
+    bool attack(int slot, int attack) const {
+        return has(offsetof(ymod_monsters, attack)) && service_.attack(object_, slot, attack) == 0;
+    }
+    bool effect(int number, int joint, ymod_vec3 offset = {}, float scale = 1.0f) const {
+        return has(offsetof(ymod_monsters, effect)) && service_.effect(object_, number, joint, &offset, scale) == 0;
+    }
+    bool end_attack(int slot) const {
+        return has(offsetof(ymod_monsters, end_attack)) && service_.end_attack(object_, slot) == 0;
+    }
+
+private:
+    [[nodiscard]] bool has(std::size_t field) const noexcept { return service_.size >= field + sizeof(void *); }
+
+    const ymod_monsters &service_;
+    std::uint32_t object_;
 };
 
 } // namespace yakumo

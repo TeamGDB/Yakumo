@@ -248,6 +248,8 @@ The script's main chunk runs once at start, before the game's first frame; it se
 | `overlay_at(address)` | The code overlay loaded now over `address`, by name, and its load address; `nil` when none is |
 | `table(name)` | A [game table](#game-tables)'s address now, its rows and its bytes per row; `nil` when the name is not known |
 | `extend_table(name, rows)` | Gives a game table at least `rows` rows: its new address, or `nil` (the reason is in the log) |
+| `add_monster{id, based_on, model, geometry, motions}` | Adds a [large monster](#large-monsters) from the mod's files: its kind's number, or `nil` (the reason is in the log) |
+| `monster_kind(id)` | A large monster's kind by id, the game's (`"tigrex"`) or a mod's; `nil` when nothing has the id |
 | `on(event, function)` | `"frame"` between frames, `"start"` before the first, `"file"` when the game has read a whole file (with its id), `"overlay"` when a code overlay is copied to its slot and `"overlay_unloaded"` when it leaves it (with its load address), `"quest_started"` and `"quest_ended"` (with the quest's id) |
 | `panel(title, function)`, `overlay(title, function)` | Draws in Yakumo's interface: see [Panels and overlays](#panels-and-overlays) |
 | `setting_switch(key, label, fallback)`, `setting_number(key, label, min, max, fallback)`, `setting_choice(key, label, {choices}, fallback)` | Declares a setting on the mod's page and returns its value. Choices count from 1 |
@@ -292,6 +294,7 @@ Yakumo calls `yakumo_mod_main` once at start. Everything else is a *service*, a 
 
 | Service | What it offers |
 | --- | --- |
+| `yakumo.monsters` | [Large monsters](#large-monsters) by name, and new ones a mod adds from its own model files |
 | `yakumo.memory` | Checked reads and writes of guest memory, allocation from the game's allocator, telling the JIT about rewritten code |
 | `yakumo.hooks` | Hooks before, after or instead of a function, and before any instruction, in the executable or an overlay |
 | `yakumo.calls` | Calling a guest function from a REPLACE hook, as guest code on the same thread; the call's result returns to the hooked function's caller. Refused from other callbacks |
@@ -338,6 +341,37 @@ The mod then writes its rows with the memory functions, at the address `table()`
 | `quest.events` | `lobby_task` | 2 bytes | The event quests offered at the counter, by id, 0 after the last. Yakumo adds mods' quests to it itself |
 
 A kind's model set has the kind's number. A new kind made as a copy of the Tigrex (58), with rows copied from 58 in each of these tables and quest files naming it, loads, plays and moves as the Tigrex does: [MONSTERS.md](MONSTERS.md) says how they were traced, what a new kind still lacks, and how to test one.
+
+## Large monsters
+
+A mod adds a monster of its own by name, from its own model files, and Yakumo does the rest: it gives the monster a kind number (from 75), a row in each [game table](#game-tables) above, the base monster's rows where the mod has none of its own yet (behaviour, constructor, size, extra files, carves), and serves the files.
+
+```cpp
+ymod_monster fatalis{sizeof(ymod_monster)};
+fatalis.id = "fatalis";               // the mod's name for it
+fatalis.based_on = "tigrex";          // the game's kind it starts from
+fatalis.model = "model/model.pac";    // in the mod's folder: model pack (skeleton, model, textures),
+fatalis.geometry = "model/model_ge.bin"; // its GE data,
+fatalis.motions = "model/motions.bin";   // and its motions
+const int32_t kind = mod.monsters()->add(handle, &fatalis); // -1 when not added; the reason is in the log
+```
+
+A script does the same with `yakumo.add_monster{id = "fatalis", based_on = "tigrex", model = "model/model.pac", geometry = "model/model_ge.bin", motions = "model/motions.bin"}`. Call it at start (`yakumo_mod_main`, or a script's main chunk). The files' formats are in [MONSTERS.md](MONSTERS.md#a-monsters-model); a monster from another game is converted into them by a tool of the mod's own.
+
+The game's kinds have ids too, for `based_on` and for anything else that names a monster: `rathian`, `tigrex`, `gold_rathian` and the rest, listed in [MONSTERS.md](MONSTERS.md#the-games-kinds-by-id). `kind(id)` and `id_of(kind)` turn one into the other.
+
+The model pack needs only the skeleton, the model and the textures (entries 0 to 2); Yakumo takes the base's other entries, and gives the model as many meshes as the base's behaviour expects. Where the base's behaviour checks for its own kind, or hides parts of its model by material, a monster made from it gets the base's treatment and keeps its own materials shown (traced for the Tigrex). A kind the mod added can be given its own behaviour, a part at a time. `behave(handle, kind, YMOD_MONSTER_THINK, fn, user)` runs `fn(cpu, monster, user)` each frame for each of its monsters on a quest, where the game asks a monster to think; returning `YMOD_RETURN` means the mod's function did the part, anything else lets the base's behaviour do it after. Give behaviour at start, before any of its monsters is made. Inside the part's function, `play_motion(monster, motion, blend)` asks for one of the kind's motions (by its slot), blended in over `blend` frames: the game plays it as soon as the function returns, before the base's part if that runs. `motion_finished(monster)` says whether the motion playing has reached its last frame, and `at_frame(monster, frame)` whether this frame's step passes a given frame of it, to time what happens during a motion.
+
+The monster's body is reached the same way: `position`, `facing` and `set_facing` (degrees, 0 towards +z), `target` (the point it goes for: the hunter it is after; the game brings it up to date only now and then, and `aim(monster)` has it do so for the next frame), `turn_to_target(monster, degrees)` (by at most that much this frame; 1 once it faces the target) and `move(monster, x, z)` in its own frame (z ahead, x to the side, as in its motions). A motion turns a monster but does not carry it, so a walk moves it a little each frame; `motion_frame(monster)` says how far the motion has got, to move it as far as the motion's own root travels. `attack(monster, slot, attack)` starts one of the base kind's attacks (a row of its attack table) in an attack slot, and `end_attack(monster, slot)` ends it; both are queued like motions. `effect(monster, number, joint, offset, scale)` starts one of the kind's effects on one of its joints, also queued; the effects are the base's, or another kind's named in the spec's `effects` (`"rathalos"` for fire), and a number the kind's effects do not have is refused. What an attack hits with is a shape of the base's, spheres on the base's joints; `attack_shape(handle, kind, shape, spheres, count)` gives the kind spheres on its own joints for it, at start. A kind whose `THINK` the mod does itself (`YMOD_RETURN`) has the base's `YMOD_MONSTER_ACT` (which carries out the base's decisions) and `YMOD_MONSTER_EFFECTS` (the base's sounds and effects by motion slot) left out in that frame, unless the mod gives those parts too. In C++, `yakumo::Monster` wraps these for one monster, with `distance_to_target()` and `angle_to_target()` worked out from them:
+
+```cpp
+yakumo::Monster self(*monsters, monster);
+if (std::abs(self.angle_to_target()) > 30.0f) self.turn_to_target(4.0f);
+else if (self.distance_to_target() > 800.0f) self.move_forward(12.0f);
+if (self.at_frame(40.0f)) self.attack(1, 6);
+```
+
+More parts get names as the game's calls into a monster are traced; its name, quests and hit zones are to come, as building blocks of their own.
 
 ## Panels and overlays
 

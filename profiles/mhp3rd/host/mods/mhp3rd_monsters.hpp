@@ -1,0 +1,170 @@
+#pragma once
+
+#include "mods/mod_library.hpp"
+
+#include <cstdint>
+#include <functional>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace psprecomp {
+class Runtime;
+}
+struct ymod_cpu;
+
+// Large monsters mods add (the "yakumo.monsters" service): a mod names a new
+// kind, the game's kind it starts from, and its own model files, and gets the
+// kind's number. Built on the game tables (mhp3rd_tables.hpp) and the files
+// mods add (mhp3rd_added_files.hpp); docs/MONSTERS.md describes what each
+// step does in the game.
+//
+// For a kind the game numbers it from 75 up, and:
+//
+// - extends every table indexed by kind or model set by a row;
+// - serves the mod's three files as new files, and points the kind's model
+//   set at them;
+// - gives the kind the base's rows in game_task's tables (behaviour,
+//   constructor, object size, extra files, carves) each time game_task loads;
+// - completes the mod's model pack with the base's entries it leaves out
+//   (beyond the skeleton, model and textures), and gives the model at least
+//   as many meshes as the base's, since the base's behaviour writes to its
+//   meshes by number;
+// - sends the kind the base's way where the base's behaviour checks its own
+//   kind, and keeps every material of the kind's model shown where the base's
+//   behaviour hides parts by material number (both traced for the Tigrex).
+namespace mhp3rd::mods::monsters {
+
+// The game's kinds of large monster (and the small ones that share the
+// numbers), as mods name them: from the game's own names (text block 16,
+// table 2, from entry 308), with subspecies told apart by the quests that use
+// them (docs/MONSTERS.md).
+struct GameKind {
+    std::string_view id;
+    std::uint8_t kind{};
+};
+[[nodiscard]] std::span<const GameKind> game_kinds();
+
+// A kind by its id, the game's or one a mod added; nothing for an unknown id.
+[[nodiscard]] std::optional<std::uint8_t> kind(std::string_view id);
+// The id of a kind, or empty for a number nothing has.
+[[nodiscard]] std::string_view id_of(std::uint8_t kind);
+
+struct Spec {
+    std::string id;                     // the mod's name for the kind
+    std::string base;                   // the game's kind it starts from, by id
+    std::vector<std::uint8_t> model;    // its model pack (skeleton, model, textures)
+    std::vector<std::uint8_t> geometry; // the model's GE data
+    std::vector<std::uint8_t> motions;  // its motions
+    std::string mod;                    // who adds it, for the log
+    const void *owner{};                // and which mod, for behave()
+    std::string effects;                // the game's kind whose effects it takes, by id; empty: the base's
+};
+
+// Adds a kind and returns its number, or nothing (with the reason in `why`)
+// when the id is taken, the base is not a large monster this knows, a table
+// cannot grow, or the files cannot be served.
+[[nodiscard]] std::optional<std::uint8_t> add(
+    psprecomp::Runtime &runtime, const Spec &spec, std::string *why = nullptr);
+
+// A part of behaviour a mod gives a kind it added: the function the game
+// calls for that part (a vtable slot of the monster's class, shared by Freedom
+// Unite's and Portable 3rd's monsters: docs/MONSTERS.md) runs `fn` first.
+// fn returns 1 (YMOD_RETURN) when it has done the part, anything else to have
+// the base's run after it.
+using PartFn = int (*)(::ymod_cpu *cpu, std::uint32_t monster, void *user);
+// Act runs after Think, each frame, and carries out the action Think chose;
+// a kind whose Think the mod does itself (YMOD_RETURN) skips the base's Act in
+// that frame, unless the mod gives Act too.
+enum class Part { Think = 0, Act = 1, Effects = 2 };
+[[nodiscard]] bool behave(psprecomp::Runtime &runtime, const void *owner, std::uint8_t kind, int part, PartFn fn,
+    void *user, std::string *why = nullptr);
+
+// A sphere an attack hits with, on one of the kind's joints: its radius and
+// its centre from the joint, in the joint's frame.
+struct HitSphere {
+    std::uint32_t joint{};
+    float radius{};
+    float x{}, y{}, z{};
+};
+// Gives a kind a mod added its own spheres for one of the base's attack
+// shapes (a shape is what a row of the attack table hits with; the base's
+// are on the base's joints). Applies to its monsters while it has a part of
+// behaviour. False when the kind is not the mod's, the shape number is out of
+// range or a sphere is not usable.
+[[nodiscard]] bool attack_shape(const void *owner, std::uint8_t kind, std::uint32_t shape,
+    std::span<const HitSphere> spheres, std::string *why = nullptr);
+
+// During a part of behaviour (inside its fn): queues the game's motion setter
+// for `monster`, carried out once fn returns. False outside a part.
+[[nodiscard]] bool play_motion(std::uint32_t monster, std::uint16_t motion, std::uint32_t blend);
+// Whether the motion `monster` plays has reached its last frame, as the
+// game's own check (0x0A0AD0B0) works it out; nothing when its model cannot be
+// read (its class's model getter is not the usual one-instruction leaf).
+[[nodiscard]] std::optional<bool> motion_finished(psprecomp::Runtime &runtime, std::uint32_t monster);
+
+// The monster's body, as the game keeps it (docs/MONSTERS.md, "A monster's
+// body"). Positions are in the game's units, y up; facings in degrees from
+// +z, growing towards +x. Each gives nothing for an address that is not
+// guest memory.
+struct Vec3 {
+    float x{}, y{}, z{};
+};
+[[nodiscard]] std::optional<Vec3> position(psprecomp::Runtime &runtime, std::uint32_t monster);
+[[nodiscard]] std::optional<float> facing(psprecomp::Runtime &runtime, std::uint32_t monster);
+bool set_facing(psprecomp::Runtime &runtime, std::uint32_t monster, float degrees);
+// The point the monster is after: the hunter it targets, which the game keeps
+// up to date.
+[[nodiscard]] std::optional<Vec3> target(psprecomp::Runtime &runtime, std::uint32_t monster);
+// During a part of behaviour: queues the game's own update of the target
+// point (0x0A0AFEB0), from the target it has chosen (a hunter, by default the
+// first). The game updates it on its own only now and then.
+[[nodiscard]] bool aim(std::uint32_t monster);
+// Turns towards the target by at most `degrees`, as the game's own turn
+// (0x0A0A7C74) does; whether it faces the target now.
+[[nodiscard]] std::optional<bool> turn_to_target(psprecomp::Runtime &runtime, std::uint32_t monster, float degrees);
+// Moves the monster by (x, z) in its own frame: z ahead, x to the side, as in
+// its motions (the game moves a monster only as its behaviour says: motions
+// turn it, they do not carry it).
+bool move(psprecomp::Runtime &runtime, std::uint32_t monster, float x, float z);
+// The frame the motion has reached.
+[[nodiscard]] std::optional<float> motion_frame(psprecomp::Runtime &runtime, std::uint32_t monster);
+// Whether the motion passes `frame` in this frame's step, as the game's frame
+// check (0x0887A118, for motion channel 0) works it out.
+[[nodiscard]] std::optional<bool> at_frame(psprecomp::Runtime &runtime, std::uint32_t monster, float frame);
+// During a part of behaviour: queues an attack of the base kind's (its number
+// in the kind's attack table) in one of the monster's attack slots, or the end
+// of the attack in a slot. False outside a part or when the game's code is not
+// as traced.
+[[nodiscard]] bool attack(std::uint32_t monster, std::uint8_t slot, std::uint32_t number);
+// During a part of behaviour: queues one of the kind's own effects (entries of
+// its model pack), by number, on one of its joints, `offset` from it, at
+// `scale`. False outside a part, when the kind's model set is not loaded, or
+// when the game's code is not as traced.
+[[nodiscard]] bool effect(std::uint32_t monster, std::uint32_t number, std::uint32_t joint, Vec3 offset, float scale);
+[[nodiscard]] bool end_attack(std::uint32_t monster, std::uint8_t slot);
+
+// Writes the added kinds' rows into game_task's tables once it has loaded
+// (after tables::overlay_loaded() moved them).
+void overlay_loaded(psprecomp::Runtime &runtime);
+
+// The model pack a kind gets: the entries of `mod` that are present, over the
+// entries of `base`, with the model (entry 1) given at least `meshes` meshes.
+// With `effects`, the effect entries (3 and on) the mod leaves out come from
+// that pack instead. The effects name the kind that owns them, and their
+// models are looked up by it: those owned by `from` become `to`'s. Empty when
+// a pack cannot be read.
+[[nodiscard]] std::vector<std::uint8_t> compose_pack(std::span<const std::uint8_t> mod,
+    std::span<const std::uint8_t> base, std::uint32_t meshes, std::span<const std::uint8_t> effects = {},
+    std::uint8_t from = 0u, std::uint8_t to = 0u);
+
+// Reads base model packs with `reader` instead of the game's own files, for
+// tests; an empty function goes back to the game's.
+void read_packs_with_for_tests(std::function<std::optional<std::vector<std::uint8_t>>(FileId)> reader);
+
+// Forgets the kinds added, so tests can add again.
+void reset_for_tests();
+
+} // namespace mhp3rd::mods::monsters

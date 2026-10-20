@@ -3,6 +3,7 @@
 // functions, and logs what it sees; the guest code runs through the JIT.
 #include "mods/mod_library.hpp"
 #include "mods/mhp3rd_added_files.hpp"
+#include "mods/mhp3rd_monsters.hpp"
 #include "mods/mod_native.hpp"
 #include "mods/mhp3rd_quests.hpp"
 #include "mods/mhp3rd_symbols.hpp"
@@ -17,7 +18,10 @@
 #include "psprecomp/jit.hpp"
 #include "psprecomp/runtime.hpp"
 
+#include <bit>
+#include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -75,8 +79,7 @@ void host_feature(psprecomp::Runtime &, psprecomp::AllegrexContext &ctx) {
 
 // Files mods add, served through stand-ins for the game's loader functions
 // that begin as the traced ones do.
-void test_added_files(psprecomp::Runtime &runtime) {
-    namespace added = mhp3rd::mods::added;
+void loader_stand_ins(psprecomp::Runtime &runtime) {
     // size(loader, id): 0x777 for the game's files.
     store(runtime, 0x08864E8Cu,
         {0x30A5FFFFu, 0x3402FFFFu, 0x00001821u, 0x10A20010u, 0u, 0x00801821u, 0x03E00008u, 0x24020777u});
@@ -89,6 +92,11 @@ void test_added_files(psprecomp::Runtime &runtime) {
     store(runtime, 0x08864C54u, {0x27BDFFE0u, 0x27BD0020u, 0x03E00008u, 0x24020003u});
     store(runtime, 0x08864C6Cu, {0x30B5FFFFu});
     store(runtime, 0x08864CFCu, {0x8C620014u});
+}
+
+void test_added_files(psprecomp::Runtime &runtime) {
+    namespace added = mhp3rd::mods::added;
+    loader_stand_ins(runtime);
     const std::filesystem::path file = std::filesystem::temp_directory_path() / "yakumo_added_file_test.bin";
     std::ofstream(file, std::ios::binary) << "ADDED FILE";
     const auto run = [&](std::uint32_t address, std::uint32_t id, std::uint32_t destination) {
@@ -123,6 +131,18 @@ void test_added_files(psprecomp::Runtime &runtime) {
         "added: and as much of it as asked for");
     runtime.cpu().gpr[7] = 0xFFFFFFFFu;
     check(run(0x08864C54u, 7u, 0x08B00100u) == 3u, "added: other files go to the game's read");
+
+    // Files a mod makes while running, from memory, under ids handed out.
+    const mhp3rd::mods::FileId free = added::free_id();
+    check(free == added::kLastFreeId, "added: the first free id is the top of the range");
+    check(added::add(runtime, free, {'M', 'E', 'M', 'O', 'R', 'Y'}) && added::serves(free) &&
+            added::free_id() == added::kLastFreeId - 1u,
+        "added: a file from memory is served, and its id is no longer free");
+    check(!added::add(runtime, free, {1u}) && !added::add(runtime, free - 1u, {}),
+        "added: an id taken, or no bytes, is refused");
+    check(run(0x08864E8Cu, free, 0u) == 6u && run(0x08863CDCu, free, 0x08B00200u) == 1u &&
+            runtime.memory().load32(0x08B00200u) == 0x4F4D454Du,
+        "added: a file from memory is sized and copied like one on disk");
     added::reset_for_tests();
     std::error_code ec;
     std::filesystem::remove(file, ec);
@@ -621,6 +641,644 @@ void test_tables(psprecomp::Runtime &runtime) {
     tables::reset_for_tests();
 }
 
+// A pack as both games keep one: a count, then an offset and a size per
+// entry (an empty entry is absent), then the entries, 16-byte aligned.
+std::vector<std::uint8_t> pack_of(const std::vector<std::vector<std::uint8_t>> &entries) {
+    const auto aligned = [](std::size_t n) { return (n + 15u) & ~std::size_t{15u}; };
+    std::vector<std::uint8_t> out(aligned(4u + 8u * entries.size()), 0u);
+    const auto put = [&out](std::size_t at, std::uint32_t v) { std::memcpy(out.data() + at, &v, 4u); };
+    put(0u, static_cast<std::uint32_t>(entries.size()));
+    for (std::size_t i = 0; i < entries.size(); ++i) {
+        if (entries[i].empty()) continue;
+        put(4u + 8u * i, static_cast<std::uint32_t>(out.size()));
+        put(8u + 8u * i, static_cast<std::uint32_t>(entries[i].size()));
+        out.insert(out.end(), entries[i].begin(), entries[i].end());
+        out.resize(aligned(out.size()), 0u);
+    }
+    return out;
+}
+
+std::uint32_t word_at(const std::vector<std::uint8_t> &data, std::size_t at) {
+    std::uint32_t v = 0u;
+    std::memcpy(&v, data.data() + at, 4u);
+    return v;
+}
+
+std::vector<std::uint8_t> entry_of(const std::vector<std::uint8_t> &pack, std::uint32_t index) {
+    const std::uint32_t offset = word_at(pack, 4u + 8u * index), size = word_at(pack, 8u + 8u * index);
+    return size ? std::vector<std::uint8_t>(pack.begin() + offset, pack.begin() + offset + size)
+                : std::vector<std::uint8_t>{};
+}
+
+// A PMO "102" with `meshes` meshes: tables after the mesh table, GE data in
+// the next file (its GE base is its size).
+std::vector<std::uint8_t> small_pmo(std::uint16_t meshes) {
+    const std::uint32_t groups = 0x40u + 0x30u * meshes;
+    std::vector<std::uint8_t> pmo(groups + 0x30u, 0u);
+    std::memcpy(pmo.data(),
+        "pmo\0"
+        "102\0",
+        8u);
+    const auto put = [&pmo](std::size_t at, std::uint32_t v) { std::memcpy(pmo.data() + at, &v, 4u); };
+    put(0x08u, static_cast<std::uint32_t>(pmo.size()) + 100u);
+    std::memcpy(pmo.data() + 0x1Cu, &meshes, 2u);
+    put(0x20u, 0x40u);
+    put(0x24u, groups);
+    put(0x2Cu, groups + 0x10u);
+    put(0x30u, groups + 0x20u);
+    put(0x34u, static_cast<std::uint32_t>(pmo.size()));
+    for (std::uint16_t m = 0; m < meshes; ++m) {
+        const float scale = 500.0f;
+        for (int axis = 0; axis < 3; ++axis) std::memcpy(pmo.data() + 0x40u + 0x30u * m + 4u * axis, &scale, 4u);
+        put(0x40u + 0x30u * m + 0x20u, 0x80000007u);
+        put(0x40u + 0x30u * m + 0x28u, 0x00010001u);
+    }
+    return pmo;
+}
+
+void test_monsters(psprecomp::Runtime &runtime) {
+    namespace monsters = mhp3rd::mods::monsters;
+    namespace tables = mhp3rd::mods::tables;
+    namespace added = mhp3rd::mods::added;
+    tables::reset_for_tests();
+    monsters::reset_for_tests();
+    added::reset_for_tests();
+
+    check(monsters::kind("tigrex") == 58u && monsters::kind("brute_tigrex") == 23u &&
+            monsters::kind("rock_peaks") == 74u && !monsters::kind("fatalis") &&
+            monsters::id_of(15u) == "gold_rathian" && monsters::id_of(200u).empty() &&
+            monsters::game_kinds().size() == 74u,
+        "monsters: the game's kinds by id, and back");
+
+    // The model pack: the mod's entries over the base's, and the base's mesh count.
+    const std::vector<std::uint8_t> mine = pack_of({{'S', 'K', 'E', 'L'}, small_pmo(2u), {'T', 'E', 'X', '0'}});
+    const std::vector<std::uint8_t> base = pack_of({{'B', 'S', 'K', 'L'}, small_pmo(16u), {'B', 'T', 'E', 'X'},
+        {'E', '3'}, {}, {'E', '5'}, {'E', '6'}, {'E', '7'}});
+    const std::vector<std::uint8_t> composed = monsters::compose_pack(mine, base, 4u);
+    check(composed.size() > 8u && word_at(composed, 0u) == 8u &&
+            entry_of(composed, 0u) == std::vector<std::uint8_t>{'S', 'K', 'E', 'L'} &&
+            entry_of(composed, 2u) == std::vector<std::uint8_t>{'T', 'E', 'X', '0'} &&
+            entry_of(composed, 3u) == std::vector<std::uint8_t>{'E', '3'} && entry_of(composed, 4u).empty() &&
+            entry_of(composed, 7u) == std::vector<std::uint8_t>{'E', '7'},
+        "monsters: the pack keeps the mod's entries and takes the rest from the base");
+    const std::vector<std::uint8_t> model = composed.empty() ? std::vector<std::uint8_t>{} : entry_of(composed, 1u);
+    const std::vector<std::uint8_t> before = small_pmo(2u);
+    check(model.size() == before.size() + 2u * 0x30u && model[0x1Cu] == 4u &&
+            word_at(model, 0x24u) == word_at(before, 0x24u) + 0x60u &&
+            word_at(model, 0x30u) == word_at(before, 0x30u) + 0x60u && word_at(model, 0x34u) == model.size() &&
+            word_at(model, 0x08u) == model.size() + 100u && word_at(model, 0x40u + 0x30u * 3u + 0x20u) == 0x80000003u &&
+            word_at(model, 0x40u + 0x30u * 3u + 0x28u) == 0u &&
+            word_at(model, 0x40u + 0x30u * 1u + 0x20u) == 0x80000007u,
+        "monsters: the model gets empty meshes up to the base's count, and the tables behind them move");
+    check(monsters::compose_pack(mine, base, 2u).size() ==
+            pack_of({entry_of(mine, 0u), small_pmo(2u), entry_of(mine, 2u), {'E', '3'}, {}, {'E', '5'}, {'E', '6'},
+                        {'E', '7'}})
+                .size(),
+        "monsters: a model with enough meshes is left as it is");
+    check(monsters::compose_pack({}, base, 4u).empty() &&
+            monsters::compose_pack(mine, std::vector<std::uint8_t>(3u, 0u), 4u).empty(),
+        "monsters: a pack that cannot be read gives nothing");
+    // Effects name the kind that owns them: two effects, the first none (its
+    // offset at the entry's end), the second with one emitter.
+    const auto effects_entry = [](std::uint8_t owner) {
+        std::vector<std::uint8_t> e(112u, 0u);
+        const auto put = [&e](std::size_t at, std::uint32_t v) { std::memcpy(e.data() + at, &v, 4u); };
+        put(0u, 2u);
+        put(4u, 112u);
+        put(8u, 12u);
+        put(12u, 1u);
+        put(16u, 12u);
+        put(20u, 100u);
+        put(24u, 0x3F800000u);
+        put(28u, 1u);
+        e[32u] = 1u;
+        e[33u] = owner;
+        return e;
+    };
+    const std::vector<std::uint8_t> fiery = pack_of({{'B', 'S', 'K', 'L'}, small_pmo(16u), {'B', 'T', 'E', 'X'},
+        {'E', '3'}, {}, {'E', '5'}, {'E', '6'}, effects_entry(58u)});
+    const std::vector<std::uint8_t> other =
+        pack_of({{'R'}, small_pmo(2u), {'R'}, {'R', '3'}, {}, {'R', '5'}, {'R', '6'}, effects_entry(2u)});
+    const std::vector<std::uint8_t> kept = monsters::compose_pack(mine, fiery, 0u, {}, 58u, 75u);
+    const std::vector<std::uint8_t> taken = monsters::compose_pack(mine, fiery, 0u, other, 2u, 75u);
+    check(entry_of(kept, 7u).size() == 112u && entry_of(kept, 7u)[33] == 75u && entry_of(kept, 3u)[1] == '3' &&
+            entry_of(taken, 3u) == std::vector<std::uint8_t>{'R', '3'} && entry_of(taken, 7u)[33] == 75u &&
+            entry_of(taken, 0u) == std::vector<std::uint8_t>{'S', 'K', 'E', 'L'} &&
+            entry_of(monsters::compose_pack(mine, fiery, 0u, {}, 2u, 75u), 7u)[33] == 58u,
+        "monsters: effects owned by the base or another kind become the new kind's, and can come from another kind");
+
+    std::string why;
+    check(!monsters::add(runtime, {"", "tigrex", mine, {1u}, {1u}, "test"}, &why) &&
+            why.find("taken or empty") != std::string::npos,
+        "monsters: an empty id is refused");
+    check(!monsters::add(runtime, {"tigrex", "rathian", mine, {1u}, {1u}, "test"}, &why) &&
+            why.find("taken") != std::string::npos,
+        "monsters: a game kind's id is refused");
+    check(!monsters::add(runtime, {"fatalis", "kirin", mine, {1u}, {1u}, "test"}, &why) &&
+            why.find("not one of the game's kinds") != std::string::npos,
+        "monsters: an unknown base is refused");
+
+    // The game as add() finds it: the loader, the tables' code and the Tigrex's
+    // model set (58, file 5498).
+    loader_stand_ins(runtime);
+    const auto traced_code = [&runtime] {
+        for (const char *name : {"monster.models", "monster.models.second", "monster.models.third", "monster.kinds",
+                 "monster.files", "monster.constructors", "monster.sizes", "monster.carves"})
+            tables::write_traced_code_for_tests(runtime, name);
+    };
+    traced_code();
+    for (std::uint32_t set = 1u; set <= 74u; ++set)
+        runtime.memory().store16(0x08982DD0u + (set - 1u) * 2u, 5000u + set);
+    runtime.memory().store16(0x08982DD0u + 57u * 2u, 5498u);
+    constexpr std::uint32_t kSlot = 0x0A05E600u;
+    place_overlay(runtime, kSlot, "lobby_task.ovl", 0x00200000u);
+    monsters::read_packs_with_for_tests([&base](mhp3rd::mods::FileId file) -> std::optional<std::vector<std::uint8_t>> {
+        if (file != 5498u) return std::nullopt;
+        return base;
+    });
+    runtime.memory().store32(0x0889EEC4u, 0x91030003u); // the draw's alpha read, as traced
+    mhp3rd::mods::native::attach(runtime);
+    const std::optional<std::uint8_t> fatalis =
+        monsters::add(runtime, {"fatalis", "tigrex", mine, {'G', 'E'}, {'M', 'O'}, "test"}, &why);
+    check(fatalis == 75u && monsters::kind("fatalis") == 75u && monsters::id_of(75u) == "fatalis",
+        "monsters: a kind is added as 75, and known by its id");
+    const std::optional<tables::Placement> sets = tables::placement("monster.models");
+    const auto row = [&](const char *table) {
+        const std::optional<tables::Placement> at = tables::placement(table);
+        return at ? runtime.memory().load16(at->address + 74u * 2u) : 0u;
+    };
+    check(sets && sets->rows == 75u && row("monster.models") == added::kLastFreeId &&
+            row("monster.models.second") == added::kLastFreeId - 1u &&
+            row("monster.models.third") == added::kLastFreeId - 2u && added::serves(added::kLastFreeId) &&
+            added::serves(added::kLastFreeId - 2u),
+        "monsters: its model set points at its three files, which are served");
+    check(!monsters::add(runtime, {"fatalis", "tigrex", mine, {1u}, {1u}, "test"}, &why) &&
+            why.find("taken") != std::string::npos,
+        "monsters: an id already added is refused");
+    monsters::read_packs_with_for_tests(
+        [](mhp3rd::mods::FileId) { return std::optional<std::vector<std::uint8_t>>{}; });
+    check(!monsters::add(runtime, {"kirin", "tigrex", mine, {1u}, {1u}, "test"}, &why) &&
+            why.find("base's model pack") != std::string::npos,
+        "monsters: a base whose model pack cannot be read is refused");
+    monsters::read_packs_with_for_tests({});
+
+    // game_task loads: the new kind takes the Tigrex's rows.
+    place_overlay(runtime, kSlot, "game_task.ovl", 0x00200000u);
+    traced_code();
+    for (std::uint32_t at = 0x0A17FE84u; at < 0x0A17FE84u + 75u * 8u; at += 4u) runtime.memory().store32(at, at);
+    for (std::uint32_t at = 0x0A19F440u; at < 0x0A19F440u + 75u * 4u; at += 4u) runtime.memory().store32(at, at);
+    tables::overlay_loaded(runtime);
+    monsters::overlay_loaded(runtime);
+    const std::optional<tables::Placement> kinds = tables::placement("monster.kinds");
+    const std::optional<tables::Placement> makers = tables::placement("monster.constructors");
+    check(kinds && makers && runtime.memory().load32(kinds->address + 75u * 8u) == 0x0A17FE84u + 58u * 8u &&
+            runtime.memory().load32(kinds->address + 75u * 8u + 4u) == 0x0A17FE84u + 58u * 8u + 4u &&
+            runtime.memory().load32(makers->address + 75u * 4u) == 0x0A19F440u + 58u * 4u,
+        "monsters: when game_task loads, the kind takes the base's rows");
+
+    // The Tigrex's behaviour checks its kind: the new kind goes its way.
+    place_overlay(runtime, 0x0A1BB000u, "em058m0.ovl", 0x00030000u);
+    store(runtime, 0x0A1BB304u, {0x00601021u, 0x03E00008u, 0u}); // addu v0, v1, zero; jr ra
+    mhp3rd::mods::native::overlay_loaded(runtime, 0x0A1BB000u);
+    runtime.cpu().gpr[3] = 75u;
+    const std::uint32_t seen = call(runtime, 0x0A1BB304u, 0u);
+    runtime.cpu().gpr[3] = 59u;
+    check(seen == 58u && call(runtime, 0x0A1BB304u, 0u) == 59u,
+        "monsters: the base's kind check sees the base for the new kind only");
+
+    // The Tigrex's behaviour hides materials: the new kind's model keeps them.
+    store(runtime, 0x0A08FE8Cu, {0u, 0x03E00008u, 0u});
+    store(runtime, 0x0889EEC4u, {0x91030003u, 0x03E00008u, 0u});
+    mhp3rd::mods::native::overlay_loaded(runtime, kSlot);
+    constexpr std::uint32_t kBuffer = 0x08B10000u, kPmo = 0x08B20000u, kStack = 0x08B30000u;
+    runtime.memory().store16(kPmo + 0x1Eu, 4u);
+    runtime.memory().store32(kStack + 100u, 75u);
+    runtime.memory().store32(kBuffer + 16u, 0x00FFFFFFu);
+    runtime.cpu().gpr[6] = kPmo;
+    runtime.cpu().gpr[18] = kBuffer;
+    runtime.cpu().gpr[29] = kStack;
+    (void)call(runtime, 0x0A08FE8Cu, 0u);
+    runtime.cpu().gpr[8] = kBuffer + 16u;
+    (void)call(runtime, 0x0889EEC4u, 0u);
+    check(
+        runtime.memory().load32(kBuffer + 16u) == 0xFFFFFFFFu, "monsters: a material its base hid is shown when drawn");
+    runtime.memory().store32(kBuffer + 0x100u, 0x00FFFFFFu);
+    runtime.cpu().gpr[8] = kBuffer + 0x100u;
+    (void)call(runtime, 0x0889EEC4u, 0u);
+    check(
+        runtime.memory().load32(kBuffer + 0x100u) == 0x00FFFFFFu, "monsters: another model's materials are left alone");
+    // An area loading during the quest (game_task still there) keeps the models built.
+    mhp3rd::mods::native::frame(runtime); // the quest, seen started
+    place_overlay(runtime, 0x0A055E80u, "P_m08a01d.ovl", 0x400u);
+    tables::overlay_loaded(runtime);
+    monsters::overlay_loaded(runtime);
+    runtime.memory().store32(kBuffer + 16u, 0x00FFFFFFu);
+    runtime.cpu().gpr[8] = kBuffer + 16u;
+    (void)call(runtime, 0x0889EEC4u, 0u);
+    check(runtime.memory().load32(kBuffer + 16u) == 0xFFFFFFFFu,
+        "monsters: an area loading later keeps its materials shown");
+    // The quest ends (game_task leaves): its models are forgotten.
+    place_overlay(runtime, kSlot, "lobby_task.ovl", 0x00200000u);
+    mhp3rd::mods::native::frame(runtime);
+    runtime.memory().store32(kBuffer + 16u, 0x00FFFFFFu);
+    runtime.cpu().gpr[8] = kBuffer + 16u;
+    (void)call(runtime, 0x0889EEC4u, 0u);
+    check(runtime.memory().load32(kBuffer + 16u) == 0x00FFFFFFu,
+        "monsters: once the quest ends, its models are forgotten");
+    place_overlay(runtime, kSlot, "game_task.ovl", 0x00200000u);
+    traced_code();
+    mhp3rd::mods::native::overlay_loaded(runtime, kSlot);
+
+    // Through the service: files from the mod's folder.
+    const std::filesystem::path folder = std::filesystem::temp_directory_path() / "yakumo_monster_test";
+    std::filesystem::create_directories(folder / "model");
+    std::ofstream(folder / "model" / "model.pac", std::ios::binary)
+        .write(reinterpret_cast<const char *>(mine.data()), static_cast<std::streamsize>(mine.size()));
+    std::ofstream(folder / "model" / "ge.bin", std::ios::binary) << "GE";
+    std::ofstream(folder / "model" / "motions.bin", std::ios::binary) << "MOTIONS";
+    monsters::read_packs_with_for_tests([&base](mhp3rd::mods::FileId) { return std::optional(base); });
+    ymod_mod *mod = mhp3rd::mods::native::add_mod("test.monsters", "Monster test", folder.string());
+    const auto *service =
+        static_cast<const ymod_monsters *>(mhp3rd::mods::native::host()->service(mod, YMOD_MONSTERS, 1u));
+    ymod_monster spec{
+        sizeof(ymod_monster), "black_fatalis", "tigrex", "model/model.pac", "model/ge.bin", "model/motions.bin"};
+    check(service != nullptr && service->add(mod, &spec) == 76 && service->kind("black_fatalis") == 76 &&
+            service->kind("tigrex") == 58 && service->kind("nothing") == -1 && service->kind(nullptr) == -1 &&
+            std::string(service->id_of(76)) == "black_fatalis" && service->id_of(255) == nullptr &&
+            service->id_of(-1) == nullptr,
+        "monsters: the service adds a kind from the mod's files and names kinds");
+    ymod_monster escape = spec;
+    escape.id = "escaped";
+    escape.model = "../yakumo_monster_test/model/model.pac";
+    ymod_monster missing = spec;
+    missing.id = "missing";
+    missing.motions = "model/none.bin";
+    ymod_monster old{sizeof(std::uint32_t)};
+    check(service != nullptr && service->add(mod, &escape) == -1 &&
+            logged("monster: the model file ../yakumo_monster_test/model/model.pac is not in the mod's folder") &&
+            service->add(mod, &missing) == -1 && service->add(mod, &old) == -1 && service->add(mod, nullptr) == -1,
+        "monsters: files outside the mod's folder, missing files and short structs are refused");
+    ymod_monster unknown = spec;
+    unknown.id = "unknown";
+    unknown.based_on = "kirin";
+    check(service != nullptr && service->add(mod, &unknown) == -1 &&
+            logged("monster unknown is not added: the base \"kirin\" is not one of the game's kinds"),
+        "monsters: the service says why a kind is not added");
+    // Behaviour: the kind's monsters get a vtable of their own, whose THINK
+    // runs the mod's function first.
+    struct Seen {
+        int calls{};
+        std::uint32_t monster{};
+        int answer{YMOD_CONTINUE};
+    } thought;
+    const ymod_monster_fn think = [](ymod_cpu *cpu, std::uint32_t monster, void *user) {
+        auto *s = static_cast<Seen *>(user);
+        ++s->calls;
+        s->monster = monster;
+        cpu->gpr[2] = 9u;
+        return s->answer;
+    };
+    check(service != nullptr && service->behave(mod, 58, YMOD_MONSTER_THINK, think, &thought) == -1 &&
+            service->behave(mod, 75, YMOD_MONSTER_THINK, think, &thought) == -1 &&
+            service->behave(mod, 76, 7, think, &thought) == -1 &&
+            service->behave(mod, 76, YMOD_MONSTER_THINK, nullptr, &thought) == -1 &&
+            logged("monster 75 is not given that behaviour: the kind was not added by this mod"),
+        "monsters: behaviour only for a kind the mod added, a part that exists and a function");
+    constexpr std::uint32_t kMonster = 0x08B40000u, kBaseTable = 0x08B41000u, kBaseThink = 0x08B42000u;
+    for (std::uint32_t slot = 0; slot < 96u; ++slot)
+        runtime.memory().store32(kBaseTable + slot * 4u, 0x08B43000u + slot);
+    runtime.memory().store32(kBaseTable + 32u * 4u, kBaseThink);
+    store(runtime, kBaseThink, {0x24020007u, 0x03E00008u, 0u}); // v0 = 7
+    runtime.memory().store32(kBaseTable + 33u * 4u, kBaseThink + 0x100u);
+    store(runtime, kBaseThink + 0x100u, {0x24020005u, 0x03E00008u, 0u}); // Act: v0 = 5
+    runtime.memory().store32(kBaseTable + 36u * 4u, kBaseThink + 0x200u);
+    store(runtime, kBaseThink + 0x200u, {0x24020006u, 0x03E00008u, 0u}); // Effects: v0 = 6
+    runtime.memory().store32(kMonster, kBaseTable);
+    runtime.memory().store8(kMonster + 0x62u, 76u);
+    // make(manager, kind) -> the monster, as game_task's maker returns it.
+    store(runtime, 0x0A090AE0u, {0x3C020000u | (kMonster >> 16u), 0x34420000u | (kMonster & 0xFFFFu), 0x03E00008u, 0u});
+    check(service != nullptr && service->behave(mod, 76, YMOD_MONSTER_THINK, think, &thought) == 0,
+        "monsters: a kind the mod added takes a part of behaviour");
+    mhp3rd::mods::native::overlay_loaded(runtime, kSlot);
+    check(call(runtime, 0x0A090AE0u, 0u) == kMonster && runtime.memory().load32(kMonster) != kBaseTable &&
+            runtime.memory().load32(runtime.memory().load32(kMonster)) == 0x08B43000u,
+        "monsters: a monster of the kind gets its own vtable, a copy of the base's");
+    const std::uint32_t own = runtime.memory().load32(kMonster);
+    const std::uint32_t stub = runtime.memory().load32(own + 32u * 4u);
+    check(
+        stub != kBaseThink && call(runtime, stub, kMonster) == 7u && thought.calls == 1 && thought.monster == kMonster,
+        "monsters: THINK runs the mod's function, then the base's");
+    // Act, which the mod does not give: the base's, unless the mod's Think
+    // did the frame's thinking alone.
+    const std::uint32_t act_stub = runtime.memory().load32(own + 33u * 4u);
+    runtime.cpu().gpr[2] = 0u;
+    const std::uint32_t effects_stub = runtime.memory().load32(own + 36u * 4u);
+    check(act_stub != kBaseThink + 0x100u && call(runtime, act_stub, kMonster) == 5u &&
+            effects_stub != kBaseThink + 0x200u && call(runtime, effects_stub, kMonster) == 6u,
+        "monsters: the base's Act and Effects follow the base's Think");
+    thought.answer = YMOD_RETURN;
+    check(call(runtime, stub, kMonster) == 9u && thought.calls == 2,
+        "monsters: and only the mod's when it has done the part");
+    runtime.cpu().gpr[2] = 0u;
+    check(call(runtime, act_stub, kMonster) == 0u && call(runtime, effects_stub, kMonster) == 0u,
+        "monsters: then the base's Act and Effects are left out too");
+    runtime.memory().store32(kMonster, kBaseTable);
+    check(call(runtime, 0x0A090AE0u, 0u) == kMonster && runtime.memory().load32(kMonster) == own,
+        "monsters: every monster of the kind shares the kind's vtable");
+    runtime.memory().store8(kMonster + 0x62u, 58u);
+    runtime.memory().store32(kMonster, kBaseTable);
+    check(call(runtime, 0x0A090AE0u, 0u) == kMonster && runtime.memory().load32(kMonster) == kBaseTable,
+        "monsters: other kinds' monsters keep theirs");
+    check(service != nullptr && service->behave(mod, 76, YMOD_MONSTER_THINK, think, &thought) == -1,
+        "monsters: behaviour is given before its monsters are made");
+    // What a part does: a motion, played by the game's setter once the part's
+    // function returns, then the base's part.
+    constexpr std::uint32_t kPlayed = 0x08B44000u;
+    // play(monster, motion, blend): records its arguments.
+    store(runtime, 0x0A0B3004u,
+        {0x30A5FFFFu, 0x3C080000u | (kPlayed >> 16u), 0xAD050000u | (kPlayed & 0xFFFFu),
+            0xAD060004u | (kPlayed & 0xFFFFu), 0x03E00008u, 0u});
+    struct Acting {
+        const ymod_monsters *service{};
+        int answer{YMOD_CONTINUE};
+    } acting{service};
+    check(service != nullptr && service->play_motion(kMonster, 3, 4) == -1,
+        "monsters: a motion is played only from a part of behaviour");
+    const ymod_monster_fn act = [](ymod_cpu *, std::uint32_t monster, void *user) -> int {
+        auto *a = static_cast<Acting *>(user);
+        if (a->service->play_motion(monster, 0x10012, 4) != -1 || a->service->play_motion(monster, 12, -1) != -1)
+            return YMOD_RETURN;
+        (void)a->service->play_motion(monster, 12, 4);
+        return a->answer;
+    };
+    ymod_monster second = spec;
+    second.id = "acting_fatalis";
+    const int32_t acting_kind = service != nullptr ? service->add(mod, &second) : -1;
+    check(acting_kind == 77 && service->behave(mod, acting_kind, YMOD_MONSTER_THINK, act, &acting) == 0,
+        "monsters: a second kind takes a part that acts");
+    runtime.memory().store32(kMonster, kBaseTable);
+    runtime.memory().store8(kMonster + 0x62u, 77u);
+    (void)call(runtime, 0x0A090AE0u, 0u);
+    const std::uint32_t acting_stub = runtime.memory().load32(runtime.memory().load32(kMonster) + 32u * 4u);
+    runtime.memory().store32(kPlayed, 0u);
+    check(call(runtime, acting_stub, kMonster) == 7u && runtime.memory().load32(kPlayed) == 12u &&
+            runtime.memory().load32(kPlayed + 4u) == 4u && runtime.cpu().pc == kSentinel,
+        "monsters: the motion it asked for is played, then the base's part runs and returns to the game");
+    acting.answer = YMOD_RETURN;
+    runtime.memory().store32(kPlayed, 0u);
+    runtime.cpu().gpr[2] = 0u;
+    check(call(runtime, acting_stub, kMonster) != 7u && runtime.memory().load32(kPlayed) == 12u &&
+            runtime.cpu().pc == kSentinel,
+        "monsters: and without the base's when the part is done");
+
+    // Whether the motion is over, as the game works it out from the model.
+    constexpr std::uint32_t kGetter = 0x08B45000u, kTable2 = 0x08B46000u, kActor = 0x08B47000u;
+    store(runtime, kGetter, {0x03E00008u, 0x24820E00u}); // jr ra; addiu v0, a0, 0xE00
+    runtime.memory().store32(kTable2 + 17u * 4u, kGetter);
+    runtime.memory().store32(kActor, kTable2);
+    const auto set = [&runtime](std::uint32_t at, float value) {
+        runtime.memory().store32(at, std::bit_cast<std::uint32_t>(value));
+    };
+    const std::uint32_t actor_model = kActor + 0xE00u;
+    set(actor_model + 4u, 10.0f);
+    set(actor_model + 12u, 1.0f);
+    set(actor_model + 20u, 10.5f);
+    check(service != nullptr && service->motion_finished(kActor) == 1,
+        "monsters: a motion whose next step passes its last frame is over");
+    set(actor_model + 20u, 20.0f);
+    check(service != nullptr && service->motion_finished(kActor) == 0, "monsters: one with frames left is not");
+    set(actor_model + 20u, 10.5f);
+    runtime.memory().store16(actor_model + 80u, 2u);
+    check(service != nullptr && service->motion_finished(kActor) == 0, "monsters: a looping one never is");
+    runtime.memory().store16(actor_model + 80u, 0u);
+    runtime.memory().store32(actor_model + 40u, 1u);
+    check(service != nullptr && service->motion_finished(kActor) == 0, "monsters: nor one held still");
+    // Frames: the step from 10 to 11 passes 10.5 and 11, not 10 or 12.
+    runtime.memory().store32(actor_model + 40u, 0u);
+    set(actor_model + 20u, 30.0f);
+    float reached = 0.0f;
+    check(service != nullptr && service->motion_frame(kActor, &reached) == 0 && reached == 10.0f &&
+            service->motion_frame(kActor, nullptr) == -1,
+        "monsters: the frame the motion has reached");
+    check(service != nullptr && service->at_frame(kActor, 10.5f) == 1 && service->at_frame(kActor, 11.0f) == 1 &&
+            service->at_frame(kActor, 10.0f) == 0 && service->at_frame(kActor, 12.0f) == 0,
+        "monsters: a frame is passed in the step that reaches it");
+    set(actor_model + 20u, 10.5f);
+    check(service != nullptr && service->at_frame(kActor, 10.5f) == 1 && service->at_frame(kActor, 10.8f) == 0,
+        "monsters: not beyond the motion's last frame");
+    runtime.memory().store16(actor_model + 80u, 1u);
+    set(actor_model + 16u, 2.0f);
+    check(service != nullptr && service->at_frame(kActor, 10.8f) == 1 && service->at_frame(kActor, 2.0f) == 1 &&
+            service->at_frame(kActor, 3.0f) == 0,
+        "monsters: a motion wrapping round passes its loop's start");
+    runtime.memory().store32(actor_model + 40u, 1u);
+    check(service != nullptr && service->at_frame(kActor, 10.8f) == 0, "monsters: one held still passes no frame");
+    runtime.memory().store16(actor_model + 80u, 0u);
+    runtime.memory().store32(actor_model + 40u, 0u);
+    runtime.memory().store32(kGetter, 0u);
+    check(service != nullptr && service->motion_finished(kActor) == -1 && service->motion_finished(4u) == -1 &&
+            service->at_frame(kActor, 1.0f) == -1 && service->motion_frame(kActor, &reached) == -1,
+        "monsters: a model that cannot be found gives no answer");
+
+    // The body: where it is, where it looks, where it goes.
+    set(kActor + 0x80u, 100.0f);
+    set(kActor + 0x84u, 5.0f);
+    set(kActor + 0x88u, 200.0f);
+    runtime.memory().store32(kActor + 0x74u, 0x4000u); // a quarter turn: towards +x
+    set(kActor + 0x4C0u, 100.0f);
+    set(kActor + 0x4C4u, 0.0f);
+    set(kActor + 0x4C8u, 1200.0f); // straight along +z
+    ymod_vec3 at{}, to{};
+    float looks = 0.0f;
+    check(service != nullptr && service->position(kActor, &at) == 0 && at.x == 100.0f && at.y == 5.0f &&
+            at.z == 200.0f && service->target(kActor, &to) == 0 && to.z == 1200.0f &&
+            service->facing(kActor, &looks) == 0 && looks == 90.0f,
+        "monsters: its position, target and facing in degrees");
+    check(service != nullptr && service->position(4u, &at) == -1 && service->position(kActor, nullptr) == -1 &&
+            service->facing(4u, &looks) == -1 && service->set_facing(kActor, std::nanf("")) == -1,
+        "monsters: nothing for an address that is not a monster");
+    check(service != nullptr && service->turn_to_target(kActor, 45.0f) == 0 &&
+            runtime.memory().load32(kActor + 0x74u) == 0x2000u && service->turn_to_target(kActor, 45.0f) == 1 &&
+            runtime.memory().load32(kActor + 0x74u) == 0u && service->turn_to_target(kActor, 45.0f) == 1,
+        "monsters: it turns towards its target the shorter way, by at most the step");
+    set(kActor + 0x4C0u, 0.0f);
+    set(kActor + 0x4C8u, 200.0f); // along -x: the shorter way is through 270
+    check(service != nullptr && service->turn_to_target(kActor, 10.0f) == 0 &&
+            runtime.memory().load32(kActor + 0x74u) == 0x10000u - 0x071Cu,
+        "monsters: and the other way round when that is shorter");
+    const auto where = [service] {
+        ymod_vec3 out{};
+        (void)service->position(kActor, &out);
+        return out;
+    };
+    check(service != nullptr && service->set_facing(kActor, -90.0f) == 0 &&
+            runtime.memory().load32(kActor + 0x74u) == 0xC000u && service->facing(kActor, &looks) == 0 &&
+            looks == 270.0f,
+        "monsters: facings set in degrees");
+    check(service != nullptr && service->move(kActor, 0.0f, 50.0f) == 0 && std::abs(where().x - 50.0f) < 0.001f &&
+            std::abs(where().z - 200.0f) < 0.001f,
+        "monsters: it moves along its facing");
+    check(service != nullptr && service->move(kActor, 30.0f, 0.0f) == 0 && std::abs(where().x - 50.0f) < 0.001f &&
+            std::abs(where().z - 230.0f) < 0.001f,
+        "monsters: and to its side, as its motions' x");
+    check(service != nullptr && service->set_facing(kActor, 405.0f) == 0 && service->facing(kActor, &looks) == 0 &&
+            looks == 45.0f && service->move(kActor, 0.0f, std::nanf("")) == -1 && service->move(4u, 0.0f, 1.0f) == -1,
+        "monsters: facings wrap round, and nothing moves by no number");
+
+    // Attacks, queued from a part as motions are: the game's start and end.
+    constexpr std::uint32_t kAttacked = 0x08B50100u; // a low half the stores take unsigned
+    store(runtime, 0x0A09E884u,
+        {0x27BDFFE0u, 0xAFB60018u, 0x3C080000u | (kAttacked >> 16u), 0xAD050000u | (kAttacked & 0xFFFFu),
+            0xAD060004u | (kAttacked & 0xFFFFu), 0xAD070008u | (kAttacked & 0xFFFFu), 0x03E00008u, 0x27BD0020u});
+    store(runtime, 0x0A0AFEB0u,
+        {0x27BDFF80u, 0xAFB10064u, 0x3C080000u | (kAttacked >> 16u), 0xAD040010u | (kAttacked & 0xFFFFu), 0x03E00008u,
+            0x27BD0080u});
+    store(runtime, 0x0A09B47Cu,
+        {0x30A500FFu, 0x00052880u, 0x3C080000u | (kAttacked >> 16u), 0xAD05000Cu | (kAttacked & 0xFFFFu), 0x03E00008u,
+            0u});
+    check(service != nullptr && service->attack(kMonster, 1, 6) == -1 && service->end_attack(kMonster, 1) == -1 &&
+            service->aim(kMonster) == -1,
+        "monsters: attacks only from a part of behaviour");
+    const ymod_monster_fn attacking = [](ymod_cpu *, std::uint32_t monster, void *user) -> int {
+        const auto *a = static_cast<Acting *>(user);
+        if (a->service->attack(monster, 256, 6) != -1 || a->service->attack(monster, 1, -1) != -1 ||
+            a->service->end_attack(monster, -1) != -1)
+            return YMOD_CONTINUE;
+        (void)a->service->attack(monster, 2, 23);
+        (void)a->service->end_attack(monster, 1);
+        (void)a->service->aim(monster);
+        return YMOD_RETURN;
+    };
+    ymod_monster third = spec;
+    third.id = "attacking_fatalis";
+    const int32_t attacking_kind = service != nullptr ? service->add(mod, &third) : -1;
+    check(attacking_kind == 78 && service->behave(mod, attacking_kind, YMOD_MONSTER_THINK, attacking, &acting) == 0,
+        "monsters: a third kind takes a part that attacks");
+    runtime.memory().store32(kMonster, kBaseTable);
+    runtime.memory().store8(kMonster + 0x62u, 78u);
+    (void)call(runtime, 0x0A090AE0u, 0u);
+    const std::uint32_t attacking_stub = runtime.memory().load32(runtime.memory().load32(kMonster) + 32u * 4u);
+    runtime.memory().store32(kAttacked + 12u, 0u);
+    // Its own attack shape: the kind's data the monster keeps becomes a copy
+    // whose shape 2 is the mod's spheres.
+    constexpr std::uint32_t kKindData = 0x08B51000u, kTables = 0x08B51100u, kShapeList = 0x08B51200u;
+    for (std::uint32_t at = 0; at < 0x300u; at += 4u) runtime.memory().store32(kKindData + at, 0u);
+    runtime.memory().store32(kKindData + 8u, 0x3F800000u);
+    runtime.memory().store32(kKindData + 0xA4u, kTables);
+    runtime.memory().store32(kTables + 0x5Cu, kShapeList);
+    runtime.memory().store32(kTables + 0x60u, 0x08B51280u);
+    for (std::uint32_t shape = 0; shape < 32u; ++shape)
+        runtime.memory().store32(kShapeList + shape * 4u, 0x08B52000u + shape);
+    runtime.memory().store32(kMonster + 0xD50u, kKindData);
+    const ymod_hit_sphere jaws[] = {{51, 200.0f, 0.0f, 10.0f, 20.0f}, {53, 150.0f, 0.0f, 0.0f, 0.0f}};
+    const ymod_hit_sphere broken[] = {{-1, 200.0f, 0.0f, 0.0f, 0.0f}};
+    const ymod_hit_sphere flat[] = {{3, 0.0f, 0.0f, 0.0f, 0.0f}};
+    check(service != nullptr && service->attack_shape(mod, 58, 2, jaws, 2) == -1 &&
+            service->attack_shape(mod, 78, 32, jaws, 2) == -1 && service->attack_shape(mod, 78, 2, jaws, 0) == -1 &&
+            service->attack_shape(mod, 78, 2, nullptr, 2) == -1 && service->attack_shape(mod, 78, 2, broken, 1) == -1 &&
+            service->attack_shape(mod, 78, 2, flat, 1) == -1 &&
+            logged("monster 78 is not given attack shape 2: a sphere needs a joint, a radius above 0 and a centre"),
+        "monsters: attack shapes only for the mod's kind, a shape that exists and usable spheres");
+    check(service != nullptr && service->attack_shape(mod, 78, 2, jaws, 2) == 0,
+        "monsters: a kind the mod added takes an attack shape of its own");
+    const std::uint32_t attacked_v0 = call(runtime, attacking_stub, kMonster);
+    check(attacked_v0 != 7u && runtime.memory().load32(kAttacked) == 2u &&
+            runtime.memory().load32(kAttacked + 4u) == 23u && runtime.memory().load32(kAttacked + 8u) == 0u &&
+            runtime.memory().load32(kAttacked + 12u) == 4u && runtime.memory().load32(kAttacked + 16u) == kMonster &&
+            runtime.cpu().pc == kSentinel,
+        "monsters: the attack starts in its slot, the other slot's ends, and the target is brought up to date");
+    const std::uint32_t own_data = runtime.memory().load32(kMonster + 0xD50u);
+    const std::uint32_t own_tables = runtime.memory().load32(own_data + 0xA4u);
+    const std::uint32_t own_list = runtime.memory().load32(own_tables + 0x5Cu);
+    const std::uint32_t sphere = runtime.memory().load32(own_list + 2u * 4u);
+    const auto real = [&runtime](std::uint32_t at) { return std::bit_cast<float>(runtime.memory().load32(at)); };
+    check(own_data != kKindData && runtime.memory().load32(own_data + 8u) == 0x3F800000u && own_tables != kTables &&
+            runtime.memory().load32(own_tables + 0x60u) == 0x08B51280u && own_list != kShapeList &&
+            runtime.memory().load32(own_list) == 0x08B52000u && runtime.memory().load32(sphere) == 51u &&
+            real(sphere + 12u) == 200.0f && real(sphere + 20u) == 10.0f && real(sphere + 24u) == 20.0f &&
+            runtime.memory().load32(sphere + 40u) == 53u && runtime.memory().load32(sphere + 80u) == 0xFFFFu &&
+            runtime.memory().load32(kShapeList + 8u) == 0x08B52002u,
+        "monsters: the monster keeps a copy of the kind's data with the mod's spheres, the base's left as it was");
+    (void)call(runtime, attacking_stub, kMonster);
+    check(runtime.memory().load32(kMonster + 0xD50u) == own_data, "monsters: and keeps the same copy afterwards");
+    runtime.memory().store32(0x0A09E884u, 0u);
+    const ymod_monster_fn changed = [](ymod_cpu *, std::uint32_t monster, void *user) -> int {
+        const auto *a = static_cast<Acting *>(user);
+        return a->service->attack(monster, 2, 23) == -1 ? YMOD_RETURN : YMOD_CONTINUE;
+    };
+    ymod_monster fourth = spec;
+    fourth.id = "changed_fatalis";
+    const int32_t changed_kind = service != nullptr ? service->add(mod, &fourth) : -1;
+    check(changed_kind == 79 && service->behave(mod, changed_kind, YMOD_MONSTER_THINK, changed, &acting) == 0,
+        "monsters: a fourth kind takes a part");
+    runtime.memory().store32(kMonster, kBaseTable);
+    runtime.memory().store8(kMonster + 0x62u, 79u);
+    (void)call(runtime, 0x0A090AE0u, 0u);
+    const std::uint32_t changed_stub = runtime.memory().load32(runtime.memory().load32(kMonster) + 32u * 4u);
+    runtime.cpu().gpr[2] = 0u;
+    check(call(runtime, changed_stub, kMonster) != 7u, "monsters: no attack where the game's code is not as traced");
+
+    // Effects: by number, on a joint, through the game's effect starter, with
+    // the offset and scale in a frame of their own below the caller's.
+    constexpr std::uint32_t kRecord = 0x08B50400u, kSets = 0x08B50800u;
+    // Records its arguments; the flags are the first stack word, 64 bytes up
+    // once its frame is made.
+    store(runtime, 0x0A00D7D8u,
+        {0x27BDFFC0u, 0x87A20044u, 0x3C0C0000u | (kRecord >> 16u), 0xAD840000u | (kRecord & 0xFFFFu),
+            0xAD850004u | (kRecord & 0xFFFFu), 0xAD860008u | (kRecord & 0xFFFFu), 0xAD87000Cu | (kRecord & 0xFFFFu),
+            0x87A20040u, 0xAD820010u | (kRecord & 0xFFFFu), 0x8D0D0008u, 0xAD8D0014u | (kRecord & 0xFFFFu), 0x8D2E0000u,
+            0xAD8E0018u | (kRecord & 0xFFFFu), 0x03E00008u, 0x27BD0040u});
+    monsters::read_packs_with_for_tests([&fiery](mhp3rd::mods::FileId) { return std::optional(fiery); });
+    struct Burning {
+        const ymod_monsters *service{};
+        int refusals{};
+        int started{-2};
+    } burning{service};
+    const ymod_monster_fn burn = [](ymod_cpu *, std::uint32_t monster, void *user) -> int {
+        auto *b = static_cast<Burning *>(user);
+        const ymod_vec3 ahead{0.0f, 0.0f, 90.0f};
+        b->refusals = (b->service->effect(monster, 0, 51, &ahead, 1.0f) == -1) +
+            (b->service->effect(monster, 2, 51, &ahead, 1.0f) == -1) +
+            (b->service->effect(monster, 1, 300, &ahead, 1.0f) == -1) +
+            (b->service->effect(monster, 1, 51, &ahead, 0.0f) == -1);
+        b->started = b->service->effect(monster, 1, 51, &ahead, 0.7f);
+        return YMOD_RETURN;
+    };
+    ymod_monster fifth = spec;
+    fifth.id = "burning_fatalis";
+    const int32_t burning_kind = service != nullptr ? service->add(mod, &fifth) : -1;
+    check(burning_kind == 80 && service->behave(mod, burning_kind, YMOD_MONSTER_THINK, burn, &burning) == 0,
+        "monsters: a fifth kind, with effects, takes a part that starts one");
+    const std::optional<tables::Placement> model_table = tables::placement("monster.models");
+    const std::uint16_t burning_file =
+        model_table ? runtime.memory().load16(model_table->address + 2u * (80u - 1u)) : std::uint16_t{0};
+    runtime.memory().store32(0x08A38644u, kSets);
+    runtime.memory().store16(kSets + 0x90u, 0u); // slot 0: another model set
+    runtime.memory().store16(kSets + 0x9Cu, 2u); // slot 1: the kind's
+    runtime.memory().store16(kSets + 0x9Eu, burning_file);
+    runtime.memory().store32(kMonster, kBaseTable);
+    runtime.memory().store8(kMonster + 0x62u, 80u);
+    (void)call(runtime, 0x0A090AE0u, 0u);
+    const std::uint32_t burning_stub = runtime.memory().load32(runtime.memory().load32(kMonster) + 32u * 4u);
+    const std::uint32_t stack = runtime.cpu().gpr[29];
+    (void)call(runtime, burning_stub, kMonster);
+    check(burning.refusals == 4 && burning.started == 0 && runtime.memory().load32(kRecord) == 13u &&
+            runtime.memory().load32(kRecord + 4u) == 1u && runtime.memory().load32(kRecord + 8u) == kMonster &&
+            runtime.memory().load32(kRecord + 12u) == 51u && runtime.memory().load32(kRecord + 16u) == 2u &&
+            real(kRecord + 20u) == 90.0f && real(kRecord + 24u) == 0.7f && runtime.cpu().gpr[29] == stack &&
+            runtime.cpu().pc == kSentinel,
+        "monsters: an effect starts in the bank of the kind's loaded model set, with its offset and scale, and the "
+        "stack is given back");
+    runtime.memory().store16(kSets + 0x9Cu, 0u);
+    (void)call(runtime, burning_stub, kMonster);
+    check(burning.started == -1, "monsters: no effect while the kind's model set is not loaded");
+    std::error_code ec;
+    std::filesystem::remove_all(folder, ec);
+    monsters::reset_for_tests();
+    added::reset_for_tests();
+    tables::reset_for_tests();
+}
+
 int main() {
     psprecomp::Runtime runtime(64u * 1024u * 1024u);
     mhp3rd::kernel().install(runtime, 0u, 0x08900000u);
@@ -682,6 +1340,7 @@ int main() {
     test_hook_changes(runtime);
     test_quests(runtime);
     test_tables(runtime);
+    test_monsters(runtime);
 
     std::printf("%s\n", failures == 0 ? "all native mod checks passed" : "native mod checks FAILED");
     return failures == 0 ? 0 : 1;

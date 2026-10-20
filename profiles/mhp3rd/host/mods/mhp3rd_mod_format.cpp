@@ -456,6 +456,10 @@ std::optional<Mod> read_id_files(const ModFolderFormat &format, std::uint32_t en
 
 } // namespace
 
+std::optional<std::filesystem::path> mod_file(const std::filesystem::path &folder, const std::string &relative) {
+    return find_file(folder, relative);
+}
+
 std::string ModFolderFormat::file_name(FileId file) const {
     return hex4(file);
 }

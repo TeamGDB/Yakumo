@@ -108,7 +108,7 @@
     "reason": "JIT interface declarations and its statistics aggregate. The out-of-line implementation in src/jit.cpp and src/jit_compiler.cpp is covered by psprecomp_jit_tests (differential against the interpreter, hooks, retired code and flushes) and the runtime tests, under the normal diff gate."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_added_files.hpp": {
-    "sha256": "793330639a089e146cadbb67c3623a7d1432aeef595a65a21b690f1d55f8163a",
+    "sha256": "d2cdca1fa50e6f7a1b6186f7d0ac91d7f6431761a1f4822bdd5bbb2be4cc34c3",
     "reason": "Declarations only. mhp3rd_added_files.cpp is covered by mhp3rd_native_mods_tests with stand-ins for the traced loader functions."
   },
   "profiles/mhp3rd/host/mods/mod_package.hpp": {
@@ -124,12 +124,12 @@
     "reason": "Script mod host declarations. mod_script*.cpp is covered by mhp3rd_script_mods_tests through the real Luau engine."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.h": {
-    "sha256": "a487d30d52c37b72f17fc5e84f5376ab760b6864c9b75470f9b3a8dffab81958",
+    "sha256": "4cfc507629d8bac343ab60c4f20d2e65f595853b7f880f3d0b6f93d48232ee05",
     "reason": "The C ABI of native mods: types, constants, function-pointer tables and the interface-version macro, no host code. The host implementation in mod_native*.cpp is covered by mhp3rd_native_mods_tests, which also loads a test mod declaring a newer interface."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.hpp": {
-    "sha256": "7e2a12c416eaa273f01f531c04257de7271ff404d0d750bd1efc7cf37feaaa30",
-    "reason": "Header-only C++ wrapper compiled into mod libraries, not into the host. It is exercised by the test mod and the SDK's native template, which mhp3rd_native_mods_tests loads and checks."
+    "sha256": "d816f10c66d6cbd9de8ee501ff9296f95fd1bac51741071e038679a73a2bebb6",
+    "reason": "Header-only C++ wrapper compiled into mod libraries, not into the host. It is exercised by the test mod and the SDK's native template, which mhp3rd_native_mods_tests loads and checks; yakumo::Monster wraps service functions those tests check through the C table."
   },
   "src/allegrex_semantics.hpp": {
     "sha256": "d3e9cf7d653b2946313c520761e1d386e09eaf88bf503190fac2d095030ed775",
@@ -144,11 +144,11 @@
     "reason": "Declarations of the drawing of mods' panels and overlays. mod_panels.cpp is covered by mhp3rd_renderer_ui_tests through the real interface."
   },
   "profiles/mhp3rd/host/mods/mod_native_internal.hpp": {
-    "sha256": "2af85933ac0ec3a8cc52a7a39d9f17cb3cf2cfc85e17a8fcbea95abb09410110",
+    "sha256": "c34268866fb86ef636862c316cf998bf1febba29d9ee9b6318ff50c2ed912b2c",
     "reason": "The native mod host's internal state: aggregates, one inline cast and declarations shared by mod_native.cpp, mod_native_hooks.cpp and mod_native_services.cpp, which mhp3rd_native_mods_tests covers through real shared libraries."
   },
   "profiles/mhp3rd/host/mods/mod_script_internal.hpp": {
-    "sha256": "929e98ac4ea2b4d88598047c527e498b8ba10ec32de00aa021c4b152259f9b4c",
+    "sha256": "385cbbb4f8ba3f58a20a8ff8c5b48ffa4dca146f5bc08a94ccd8e1ba8a4d79dc",
     "reason": "The script mod host's internal Script and Callback aggregates and declarations shared by mod_script.cpp and mod_script_api.cpp, which mhp3rd_script_mods_tests covers through the real Luau engine."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_game_events.hpp": {
@@ -172,11 +172,15 @@
     "reason": "Declarations and the Quest aggregate. mhp3rd_quests.cpp is covered by mhp3rd_native_mods_tests (keys and stand-in code in memory, a refused executable, the hook giving a mod's quest its file)."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_tables.hpp": {
-    "sha256": "1d99a144ac489e15de02a2532a4c01a65aab1062008353158dbc769070a3a370",
+    "sha256": "8852031ca4320b35ddafe8a0e44543a228c5dcf0025e25658ea60e7175887bc0",
     "reason": "Declarations and the Table and Placement aggregates. mhp3rd_tables.cpp is covered by mhp3rd_native_mods_tests (stand-in code that reads a table in the executable and one in a code overlay, refused and moved tables, the yakumo.tables service) and mhp3rd_script_mods_tests."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_mod_format.hpp": {
-    "sha256": "42e61fc98bd24d92a3ade23958945fed46b9ce04faddf72167e5f031014160d8",
+    "sha256": "4699cb04841f539b503163e52d64ff8083b1cd72b0ba6f6ca0d07ec4a471a465",
     "reason": "The mod format class, its block aggregates, quest file constants and declarations. mhp3rd_mod_format.cpp, quest_file() and quest_of_file() included, is covered by mhp3rd_mods_tests and mhp3rd_code_mods_tests."
+  },
+  "profiles/mhp3rd/host/mods/mhp3rd_monsters.hpp": {
+    "sha256": "0b3b28323a3dc57c7b5cd8692bbf24f1e198e6af472303add2b9bd4f7c0bd40f",
+    "reason": "Declarations only. mhp3rd_monsters.cpp is covered by mhp3rd_native_mods_tests (game kinds, model packs, adding a kind with stand-ins for the traced tables and loader, the base behaviour hooks, behaviour parts, the body, frames, attacks and attack shapes, the service) and mhp3rd_script_mods_tests."
   }
 }

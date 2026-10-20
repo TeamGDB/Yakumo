@@ -216,3 +216,5 @@ A mod gives a new file an id from `179B` to `FFFE` in its `[Add]` section. When 
 Checked on macOS: a script mod redirected the game's load of `0B13` at the title to an added copy as `2000`. The copy arrived at the game's buffer byte for byte, and the boot went on as without the mod.
 
 Only whole-file loads are served. Paths that read a file a piece at a time by id (`0x08863FE8`, streamed music and movies) still use the game's tables, and an added id there reads past them.
+
+Yakumo's services also add files while mods start, from bytes (the monsters service adds a monster's model files this way). They are served by the same takeover, under ids Yakumo hands out from `FFFE` down to `C000`, away from the ids mods choose for `[Add]`.
