@@ -237,6 +237,16 @@ public:
     void copy_out(std::uint32_t address, std::span<std::uint8_t> data) const;
     void zero(std::uint32_t address, std::size_t length);
 
+    // For code that emits the RAM fast path itself, the JIT: main RAM in host
+    // memory, the largest offset at which an access of `bytes` (1, 2 or 4)
+    // may start, and the flag that sends every store to the slow path. An
+    // offset is (address & 0x1FFFFFFF) - kPhysicalBase, as above.
+    [[nodiscard]] std::uint8_t *ram_base() noexcept { return ram_data_; }
+    [[nodiscard]] std::uint32_t ram_limit(std::uint32_t bytes) const noexcept {
+        return bytes == 1u ? ram_limit8_ : bytes == 2u ? ram_limit16_ : ram_limit32_;
+    }
+    [[nodiscard]] const bool *write_watch_flag() const noexcept { return &write_watch_enabled_; }
+
     [[nodiscard]] std::string read_c_string(std::uint32_t address, std::size_t max_length = 256u) const;
     [[nodiscard]] const std::vector<std::uint8_t> &bytes() const noexcept;
     [[nodiscard]] const std::vector<std::uint8_t> &vram_bytes() const noexcept;

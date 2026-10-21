@@ -150,7 +150,7 @@ out/mhp3rd/bin/Yakumo
 
 Check the configure output for `mhp3rd: Vulkan renderer enabled`. Without SDL3, Vulkan or `glslangValidator`, configuration still succeeds but builds a program with no window.
 
-Stage 5 is resumable. If it stops, run it again: overlays that are already built are skipped. You can play before it finishes. An overlay without its library runs in an interpreter, which works but is much slower, so hunts stutter until the overlays are built.
+Stage 5 is resumable. If it stops, run it again: overlays that are already built are skipped. You can play before it finishes. An overlay without its library is compiled at run time by the JIT, or interpreted when that fails; both work but are slower, so hunts may stutter until the overlays are built.
 
 ### FFmpeg
 

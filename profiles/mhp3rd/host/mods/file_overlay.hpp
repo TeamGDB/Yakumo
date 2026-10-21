@@ -24,11 +24,13 @@ namespace mhp3rd::mods {
 struct MemoryWrite {
     std::uint32_t address{};
     std::vector<std::uint8_t> bytes;
+    std::vector<std::uint8_t> expect; // when not empty, written only over these bytes
 };
 
 struct PatchOutcome {
     std::size_t applied{};               // parts of the patch applied to the file's bytes
     std::vector<MemoryWrite> after_load; // parts to write to memory after the load
+    std::vector<std::uint32_t> run;      // guest code to call after those writes, in order
     std::vector<std::string> problems;   // parts skipped, and why
 };
 
@@ -37,6 +39,7 @@ struct FileContent {
     bool replaced{};
     std::size_t patches{}; // patch files applied
     std::vector<MemoryWrite> after_load;
+    std::vector<std::uint32_t> run; // guest code to call once the load is done
     std::vector<std::string> problems;
 };
 
@@ -47,8 +50,8 @@ public:
         std::function<std::vector<std::uint8_t>(FileId)> original;
         // Its size, without reading it.
         std::function<std::uint64_t(FileId)> original_size;
-        // Applies one patch file to a file's bytes.
-        std::function<PatchOutcome(FileId, std::vector<std::uint8_t> &, const std::filesystem::path &)> patch;
+        // Applies one patch, a file or edits, to a file's bytes.
+        std::function<PatchOutcome(FileId, std::vector<std::uint8_t> &, const Resolution::Source &)> patch;
     };
 
     explicit FileOverlay(Game game) : game_(std::move(game)) {}

@@ -6,6 +6,7 @@
 #include "game/guest_ram.hpp"
 #include "mods/mhp3rd_data_bin.hpp"
 #include "mods/mhp3rd_mods.hpp"
+#include "mods/mhp3rd_quests.hpp"
 
 #include "adhoc/session.hpp"
 #include "hle/hle_common.hpp"
@@ -164,6 +165,17 @@ const std::vector<quests::Quest> &board_quests() {
         for (const quests::Quest &q : list) hall += q.board() == quests::Board::Hall ? 1u : 0u;
         log("read " + std::to_string(list.size() - hall) + " village and " + std::to_string(hall) +
             " Guild Hall quests from the game's quest lists");
+        // Quests mods add are in no list the game has; they start the same way.
+        for (const mods::quests::Quest &added : mods::quests::served()) {
+            quests::Quest quest;
+            quest.id = static_cast<std::uint16_t>(added.id);
+            quest.stars = static_cast<std::uint8_t>(added.stars);
+            quest.fee = added.fee;
+            quest.time_limit = added.frames;
+            quest.name = added.name;
+            quest.client = added.mod;
+            list.push_back(std::move(quest));
+        }
     }
     return list;
 }

@@ -31,6 +31,10 @@ struct PickedImport {
 // the translation input budget. The caller imports it, then removes its parent.
 [[nodiscard]] std::optional<PickedImport> pick_translation_to_import(const std::filesystem::path &staging);
 
+// A picked .ymod package, the same way, at most `limit` bytes.
+[[nodiscard]] std::optional<PickedImport> pick_package_to_import(
+    const std::filesystem::path &staging, std::size_t limit);
+
 // Copy only a user-selected unpacked folder into private staging. The regular
 // texture/mod importer validates it before installing anything. Names, cycles,
 // depth, entry count and aggregate bytes are bounded; failures remove the copy.

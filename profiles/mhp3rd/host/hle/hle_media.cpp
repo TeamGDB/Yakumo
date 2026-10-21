@@ -3,6 +3,7 @@
 // list completion callbacks, blocking audio output); the drawing and the
 // mixing themselves live under gpu/ and audio/.
 #include "hle_common.hpp"
+#include "mods/mod_native.hpp"
 #include "kernel/fast_forward.hpp"
 #include "kernel/fast_loading.hpp"
 #include "kernel/load_trace.hpp"
@@ -437,6 +438,8 @@ void present_frame(Runtime &rt) {
     game::sound::trace(game::GuestRam(rt.memory()));
     // Layered armor puts its wrappers in place here, between two frames.
     game::layered::frame(rt);
+    // Native mods: their overlay hooks follow the overlays, then their frame.
+    mods::native::frame(rt);
     // The game's text, in the player's language when one is chosen: applied
     // once the game has loaded its text block, between two frames.
     text::frame(rt.memory(), [](std::size_t bytes) -> std::optional<text::Arena> {

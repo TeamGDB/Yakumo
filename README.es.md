@@ -56,7 +56,7 @@ Puedes cargar una partida copiada de una PSP o empezar una nueva, cazar con otro
 | Partidas guardadas en el formato de la propia PSP, incluidas partidas y misiones descargadas copiadas de una PSP; importar, exportar y hacer copias de seguridad desde el menú | Superficies curvas (#10); los diálogos de guardado todavía no dibujan nada (#33) |
 | Gráficos Vulkan: modelos, animación, texturas, transparencias, iluminación y niebla; resolución interna ajustable, cualquier forma de ventana e interpolación de fotogramas | |
 | Paquetes de texturas HD compatibles con PPSSPP, instalados desde el menú o copiados al directorio de datos | |
-| Mods en el formato de la comunidad (mhp3reload): reemplazos y parches de archivos, gestionados desde el menú (ver el [README del perfil](profiles/mhp3rd/README.md#mods)) | Mods de código (#81) |
+| Mods gestionados desde el menú: el formato de la comunidad (mhp3reload), con mods de archivos, parches y código, y el formato propio de Yakumo, con archivos nuevos, scripts en Luau, mods nativos en C/C++ y paquetes `.ymod` de un solo archivo (ver el [README del perfil](profiles/mhp3rd/README.md#mods) y [`docs/MODDING.md`](docs/MODDING.md)) | |
 | Efectos de sonido, música en streaming y cinemáticas | |
 | Controles de teclado y ratón totalmente reasignables; mandos con cámara y apuntado analógicos en el stick derecho, preajustes de control y asignación de combinaciones de botones | |
 | El menú de Yakumo dentro del juego, la configuración inicial, el explorador de archivos y el teclado en pantalla, todos utilizables con mando, teclado o ratón | |
@@ -133,7 +133,7 @@ Esc, o los dos sticks pulsados a la vez (L3+R3), abre el menú propio de Yakumo.
 
 ## Cómo funciona
 
-El ejecutable se analiza y cada instrucción de su código se convierte en C++, que se compila dentro del programa. Además, el juego carga durante la ejecución 355 overlays de código en unas pocas regiones de memoria compartidas; cada uno se recompila en su propia biblioteca, y cuando el juego carga uno, la biblioteca correspondiente se instala entre fotogramas. Un intérprete ejecuta cualquier código que el conjunto recompilado no cubra, así que el juego nunca se detiene; solo va más lento en esas partes.
+El ejecutable se analiza y cada instrucción de su código se convierte en C++, que se compila dentro del programa. Además, el juego carga durante la ejecución 355 overlays de código en unas pocas regiones de memoria compartidas; cada uno se recompila en su propia biblioteca, y cuando el juego carga uno, la biblioteca correspondiente se instala entre fotogramas. El código que el conjunto recompilado no cubre, como el que cambia un mod, lo compila desde la memoria un JIT, con un intérprete detrás, así que el juego nunca se detiene; solo va menos optimizado en esas partes.
 
 Alrededor de ese código hay una reimplementación del sistema de la PSP: un núcleo con hilos, semáforos, flags de eventos y temporizadores; lectura del disco directamente desde la imagen; un renderizador en Vulkan para el motor gráfico de la PSP; mezcla de voces por software para el audio; y entrada mediante SDL3.
 
@@ -143,7 +143,7 @@ Alrededor de ese código hay una reimplementación del sistema de la PSP: un nú
 
 ```text
 include/psprecomp/   Framework: interfaces del runtime, la memoria y el estado Allegrex
-src/                 Framework: carga de ELF, decodificador, runtime, intérprete
+src/                 Framework: carga de ELF, decodificador, runtime, intérprete, JIT
 tools/               Framework: analizador y generador de código C++
 tests/               Pruebas de regresión del framework
 configs/             Datos de NID de PSP y ejemplos genéricos

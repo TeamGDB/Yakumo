@@ -199,7 +199,10 @@ class MacPolicy:
                  'THIRD_PARTY_NOTICES.md': package / 'THIRD_PARTY_NOTICES.md',
                  'DearImGui-LICENSE.txt': third / 'imgui/LICENSE.txt',
                  'tiny-AES-c-UNLICENSE.txt': third / 'tiny_aes/UNLICENSE',
-                 'xxHash-LICENSE.txt': third / 'xxhash/LICENSE'}
+                 'xxHash-LICENSE.txt': third / 'xxhash/LICENSE',
+                 'AsmJit-LICENSE.md': self.root / 'third_party/asmjit/LICENSE.md',
+                 'Luau-LICENSE.txt': third / 'luau/LICENSE.txt',
+                 'Luau-Lua-LICENSE.txt': third / 'luau/lua_LICENSE.txt'}
         for name, path in paths.items():
             self.exact[APP + 'Resources/licenses/' + name] = path.read_bytes()
         icd = {'file_format_version': '1.0.0', 'ICD': {

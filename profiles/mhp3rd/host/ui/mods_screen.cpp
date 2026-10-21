@@ -2,6 +2,7 @@
 
 #include "ui/file_browser.hpp"
 #include "ui/layer.hpp"
+#include "ui/mod_panels.hpp"
 #include "ui/save_screen.hpp"
 #include "ui/text_input.hpp"
 #include "ui/widgets.hpp"
@@ -11,7 +12,9 @@
 #include "game/guest_ram.hpp"
 #include "install/user_data.hpp"
 #include "mods/mhp3rd_mods.hpp"
+#include "mods/mod_native.hpp"
 #include "mods/mod_import.hpp"
+#include "mods/mod_package.hpp"
 #if defined(MHP3RD_ANDROID_APP)
 #include "platform/android_documents.hpp"
 #endif
@@ -66,6 +69,7 @@ struct State {
     std::unique_ptr<FileBrowser> browser;
     fs::path last_folder;
     fs::path document_staging;
+    fs::path package_staging; // where a .ymod package was unpacked for review
 #if defined(MHP3RD_ANDROID_APP)
     android::FolderImport document_import;
     bool cancel_import{};
@@ -106,16 +110,22 @@ void go(Stage stage) {
     ImGui::SetScrollY(0.0f);
 }
 
+void drop_staging() {
+    State &s = state();
+    std::error_code ec;
+    for (fs::path *staging : {&s.document_staging, &s.package_staging}) {
+        if (staging->empty()) continue;
+        fs::remove_all(*staging, ec);
+        staging->clear();
+    }
+}
+
 void back_to_list() {
     State &s = state();
     s.return_to = s.stage == Stage::Details ? s.mod : std::string();
     s.stage = Stage::List;
     s.browser.reset();
-    if (!s.document_staging.empty()) {
-        std::error_code ec;
-        fs::remove_all(s.document_staging, ec);
-        s.document_staging.clear();
-    }
+    drop_staging();
     s.focus_row = s.return_to.empty();
 }
 
@@ -190,10 +200,20 @@ std::string changes_text(ModSession &session, const Mod &mod) {
     std::string text;
     std::size_t replaced = 0u;
     std::size_t patched = 0u;
+    std::size_t added = 0u;
+    std::size_t quests = 0u;
     for (const mods::FileChange &change : mod.changes)
-        (change.kind == mods::FileChange::Kind::Replace ? replaced : patched) += 1u;
+        (change.kind == mods::FileChange::Kind::Replace        ? replaced
+                : change.kind == mods::FileChange::Kind::Add   ? added
+                : change.kind == mods::FileChange::Kind::Quest ? quests
+                                                               : patched) += 1u;
     if (replaced > 0u) text = "Replaces " + count(replaced, "file", "files");
     if (patched > 0u) text += (text.empty() ? "Patches " : ", patches ") + count(patched, "file", "files");
+    if (added > 0u) text += (text.empty() ? "Adds " : ", adds ") + count(added, "new file", "new files");
+    if (quests > 0u) text += (text.empty() ? "Adds " : ", adds ") + count(quests, "quest", "quests");
+    if (!mod.code.empty() || !mod.memory.empty())
+        text += text.empty() ? "Changes the game's code or memory at start"
+                             : ", changes the game's code or memory at start";
     if (!mod.slots.empty()) text += text.empty() ? "Replaces equipment you choose" : ", replaces equipment you choose";
     if (!mod.members.empty())
         text += (text.empty() ? "Turns on " : ", turns on ") + count(mod.members.size(), "mod", "mods");
@@ -252,14 +272,10 @@ void status_rows(ModSession &session) {
 
 void open_browser() {
     State &s = state();
+    drop_staging();
 #if defined(MHP3RD_ANDROID_APP)
     const char *legacy = std::getenv("MHP3RD_LEGACY_FOLDER_BROWSER");
     if (legacy == nullptr || std::string(legacy) != "1") {
-        if (!s.document_staging.empty()) {
-            std::error_code ec;
-            fs::remove_all(s.document_staging, ec);
-            s.document_staging.clear();
-        }
         s.cancel_import = false;
         s.document_import.start(install::user_data_directory() / "transfer" / "mods");
         go(Stage::Documents);
@@ -267,10 +283,10 @@ void open_browser() {
     }
 #endif
     FileBrowser::Options options;
-    options.extensions = {};
-    options.filter_name = "folders";
-    options.listed_name = "folders";
-    options.empty_note = "No folders here.";
+    options.extensions = {".ymod"};
+    options.filter_name = "folders and .ymod";
+    options.listed_name = "folders and .ymod packages";
+    options.empty_note = "No folders or .ymod packages here.";
     options.choose_folder = "Import from This Folder";
     // A mod folder is chosen as soon as it is opened.
     options.choose_on_open = [](const fs::path &folder) {
@@ -291,22 +307,48 @@ void check_folder(const fs::path &chosen) {
     State &s = state();
     ModSession *session = mods::session();
     if (session == nullptr) return;
-    s.check = mods::check_import(chosen, session->library().format(), session->paths().folder);
+    std::error_code ec;
+    if (mods::is_package(chosen) && fs::is_regular_file(chosen, ec)) {
+        // Unpacked into a folder named after the package, which names a mod
+        // packed without a folder of its own.
+        std::error_code ignored;
+        fs::remove_all(s.package_staging, ignored);
+        s.package_staging = install::user_data_directory() / "transfer" / "packages";
+        fs::remove_all(s.package_staging, ignored);
+        const fs::path unpacked = s.package_staging / chosen.stem();
+        if (const std::string problem = mods::unpack_package(chosen, unpacked); !problem.empty()) {
+            s.check = {};
+            s.check.chosen = chosen;
+            s.check.problem = "This package cannot be installed: " + problem + ".";
+            std::cout << "[mods] package " << utf8(chosen) << ": " << problem << std::endl;
+            go(Stage::Review);
+            return;
+        }
+        s.check = mods::check_import(unpacked, session->library().format(), session->paths().folder);
+        s.check.chosen = chosen;
+    } else {
+        s.check = mods::check_import(chosen, session->library().format(), session->paths().folder);
+    }
     std::cout << "[mods] import from " << utf8(chosen) << ": "
               << (s.check.mods.empty() ? s.check.problem : count(s.check.mods.size(), "mod", "mods") + " found")
               << std::endl;
     go(Stage::Review);
 }
 
+// A folder, a package or a file in a mod folder, dropped on the window.
+void check_dropped(const fs::path &dropped) {
+    std::error_code ec;
+    check_folder(fs::is_directory(dropped, ec) || mods::is_package(dropped) ? dropped : dropped.parent_path());
+}
+
 void browse(bool back) {
     State &s = state();
-    indented("Open the folder of a mod you downloaded and unpacked (the one with its mod.ini), or a folder that "
-             "holds several. You can also drop the folder on the window.");
+    indented("Choose a .ymod package, or open the folder of a mod you downloaded and unpacked (the one with its "
+             "mod.ini) or a folder that holds several. You can also drop either on the window.");
     if (auto dropped = Layer::get().take_dropped_file()) {
         s.last_folder = s.browser->folder();
         s.browser.reset();
-        std::error_code ec;
-        check_folder(fs::is_directory(*dropped, ec) ? *dropped : dropped->parent_path());
+        check_dropped(*dropped);
         return;
     }
     const FileBrowser::Result result = s.browser->frame(back);
@@ -524,6 +566,42 @@ void equipment_buttons(ModSession &session, const Mod &mod) {
                  "already wears, or moving between the village and the Guild Hall, keeps the models already loaded.");
 }
 
+// The settings a running native or script mod declared, kept in mods.ini.
+void mod_settings(ModSession &session, const Mod &mod) {
+    mods::ModLibrary &library = session.library();
+    const std::vector<mods::ModSetting> declared = library.settings_of(mod.id);
+    if (declared.empty()) return;
+    section("Settings:");
+    const RowOptions help{false, {}, "A setting of this mod. It applies when the mod reads it next, usually at once."};
+    for (const mods::ModSetting &setting : declared) {
+        const std::int64_t value = library.setting(mod.id, setting.key, setting.fallback);
+        std::optional<std::int64_t> changed;
+        switch (setting.kind) {
+        case mods::ModSetting::Kind::Switch:
+            if (toggle_row(setting.label.c_str(), value != 0, help)) changed = value != 0 ? 0 : 1;
+            break;
+        case mods::ModSetting::Kind::Number:
+            if (const int delta = choice_row(setting.label.c_str(), std::to_string(value), help); delta != 0)
+                changed = std::clamp<std::int64_t>(value + delta, setting.minimum, setting.maximum);
+            break;
+        case mods::ModSetting::Kind::Choice: {
+            const auto count = static_cast<std::int64_t>(setting.choices.size());
+            if (count == 0) break;
+            const std::int64_t index = std::clamp<std::int64_t>(value, 0, count - 1);
+            if (const int delta =
+                    choice_row(setting.label.c_str(), setting.choices[static_cast<std::size_t>(index)], help);
+                delta != 0)
+                changed = (index + delta + count) % count;
+            break;
+        }
+        }
+        if (changed) {
+            library.set_setting(mod.id, setting.key, *changed);
+            session.commit();
+        }
+    }
+}
+
 void details(ModSession &session, bool back) {
     State &s = state();
     mods::ModLibrary &library = session.library();
@@ -591,6 +669,8 @@ void details(ModSession &session, bool back) {
         }
     }
     equipment_buttons(session, mod);
+    mod_settings(session, mod);
+    draw_mod_panels(mod.id);
 
     section("About:");
     if (!mod.author.empty()) info_row("Author", mod.author);
@@ -608,7 +688,9 @@ void details(ModSession &session, bool back) {
         std::string needs;
         for (const std::string &dependency : mod.depends)
             needs += (needs.empty() ? "" : ", ") + mod_name(session, dependency) +
-                (library.find(dependency) == nullptr ? " (not installed)" : "");
+                (library.find(dependency) != nullptr            ? ""
+                        : library.format().built_in(dependency) ? " (built into Yakumo)"
+                                                                : " (not installed)");
         info_row("Needs", needs);
     }
     info_row("Folder", utf8(mod.folder));
@@ -621,6 +703,16 @@ void details(ModSession &session, bool back) {
         for (const Resolution::Conflict *c : conflicts)
             info_row(file_name(session, c->file).c_str(), conflict_text(session, *c));
     }
+    // What its native code or script said this run, newest last.
+    std::vector<const mods::native::Report *> lines;
+    for (const mods::native::Report &report : mods::native::reports())
+        if (report.mod == mod.name) lines.push_back(&report);
+    if (!lines.empty()) {
+        section("Its Log:");
+        constexpr std::size_t kShown = 12u;
+        for (std::size_t i = lines.size() > kShown ? lines.size() - kShown : 0u; i < lines.size(); ++i)
+            indented(lines[i]->line, lines[i]->problem ? colors::kDanger : colors::kTextDim);
+    }
     ImGui::Dummy({0.0f, px(12.0f)});
 #if !defined(MHP3RD_ANDROID_APP)
     if (button_row("Open Its Folder", {false, {}, "Show the mod's folder in the file manager."}))
@@ -631,6 +723,11 @@ void details(ModSession &session, bool back) {
 
 void list(ModSession &session) {
     State &s = state();
+    // A package or a mod folder dropped on the list starts its import.
+    if (auto dropped = Layer::get().take_dropped_file()) {
+        check_dropped(*dropped);
+        return;
+    }
     if (s.focus_row) {
         focus_next_row();
         s.focus_row = false;
@@ -649,9 +746,25 @@ void list(ModSession &session) {
     }
     if (button_row("Import Mod…",
             {false, {},
-                "Copy a mod you downloaded into the mods folder: choose its unpacked folder, the one with its "
-                "mod.ini. Yakumo does not download mods; unpack .zip, .rar or .7z archives first."}))
+                "Copy a mod you downloaded into the mods folder: choose its .ymod package, or its unpacked folder, "
+                "the one with its mod.ini. Yakumo does not download mods; unpack .zip, .rar or .7z archives first. "
+                "Dropping a package or a folder on the window imports it too."}))
         open_browser();
+#if defined(MHP3RD_ANDROID_APP)
+    if (button_row("Import a .ymod Package…",
+            {false, {}, "Choose a .ymod package in Android's picker; it is checked before anything is installed."})) {
+        const auto picked = android::pick_package_to_import(
+            install::user_data_directory() / "transfer" / "picked", mods::PackageLimits{}.bytes);
+        if (picked && !picked->error.empty()) {
+            state().result = {};
+            state().result.error = picked->error;
+            go(Stage::Result);
+        } else if (picked) {
+            state().document_staging = picked->staged.parent_path();
+            check_folder(picked->staged);
+        }
+    }
+#endif
 #if !defined(MHP3RD_ANDROID_APP)
     if (button_row("Open the Mods Folder",
             {false, {},

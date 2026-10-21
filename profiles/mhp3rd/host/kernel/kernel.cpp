@@ -115,8 +115,8 @@ void Kernel::install(Runtime &runtime, std::uint32_t gp, std::uint32_t image_end
     pristine_context_.set_gpr(28, gp);
 
     free_ranges_.clear();
-    const std::uint32_t user_start = align_up(image_end, 0x1000u);
-    free_ranges_.push_back(FreeRange{user_start, kUserMemoryEnd - user_start});
+    user_start_ = align_up(image_end, 0x1000u);
+    free_ranges_.push_back(FreeRange{user_start_, kUserMemoryEnd - user_start_});
 
     runtime.register_function(kThreadExitStub, &native_thread_exit, "mhp3rd_thread_exit");
     runtime.register_function(kInterruptReturnStub, &native_interrupt_return, "mhp3rd_interrupt_return");

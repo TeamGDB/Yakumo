@@ -1,5 +1,7 @@
 #include "debug/quest_start.hpp"
 
+#include "game/quest_file.hpp"
+
 #include "debug/game_state.hpp"
 #include "game/game_data.hpp"
 #include "game/guest_ram.hpp"
@@ -162,8 +164,9 @@ std::string start_blocked(const Ram &ram) {
 std::string start(Ram &ram, const Quest &quest) {
     const std::string label = "quest " + std::to_string(quest.id) + " (" + quest.name + ")";
     if (const std::string why = start_blocked(ram); !why.empty()) return "not started, " + why + ": " + label;
-    if (!village_quest(quest.id) && !hall_quest(quest.id))
-        return "not started, only village and Guild Hall quests can be started: " + label;
+    // A quest a mod adds leaves by the village's gate.
+    if (!village_quest(quest.id) && !hall_quest(quest.id) && !game::is_mod_quest(quest.id))
+        return "not started, only village, Guild Hall and mods' quests can be started: " + label;
     const bool hall = quest.board() == Board::Hall;
     const std::uint32_t zenny = p3rd::money(ram);
     if (zenny < quest.fee)

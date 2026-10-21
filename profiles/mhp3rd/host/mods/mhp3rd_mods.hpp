@@ -69,8 +69,27 @@ struct ArchiveEntry {
 
 // The game flushed its instruction cache, which it does right after copying a
 // code overlay into place: the point where a code overlay has finished
-// loading. Writes the patches that go to memory outside a loaded overlay.
-void code_loaded(psprecomp::Runtime &runtime);
+// loading. Writes the patches that go to memory outside a loaded overlay, and
+// returns the guest code the mods want called now, in order: blocks marked to
+// run as they load, of the overlay's patches and, at the first flush, of the
+// code mods written at start. The caller calls them on the game's thread.
+[[nodiscard]] std::vector<std::uint32_t> code_loaded(psprecomp::Runtime &runtime);
+
+// The code mods, written into guest memory once the executable is loaded and
+// before its first instruction runs. The game's recompiled code cannot see a
+// change to its instructions in memory, so every generated unit (16 KiB of
+// code) a block writes into is dropped and runs in the interpreter from then
+// on: slower, but it runs the mod's instructions. Blocks marked to run as
+// they load run at the game's first code load (code_loaded). Code mods apply
+// at start only; turning one on or off waits for a restart.
+void write_code(psprecomp::Runtime &runtime);
+
+// Starts the native mods of the mods that are on (native_mods.hpp), after
+// write_code() and before the game runs.
+void start_native(psprecomp::Runtime &runtime);
+
+// The game's own bytes of a DATA.BIN file, decrypted. Nothing without a disc.
+[[nodiscard]] std::optional<std::vector<std::uint8_t>> original_file(FileId file);
 
 // The session the menu manages; null when there is no disc.
 [[nodiscard]] ModSession *session();

@@ -71,6 +71,11 @@ jobs:
             queries:
               - uses: security-extended
             threat-models: [local]
+            # Unmodified upstream sources, vendored at a recorded commit
+            # (SOURCE_PROVENANCE.md); their findings belong upstream.
+            paths-ignore:
+              - third_party/asmjit
+              - profiles/mhp3rd/third_party/luau
 
       - name: Compile Yakumo Android Java
         if: matrix.language == 'java-kotlin'
@@ -84,4 +89,18 @@ jobs:
       - name: Analyze
         uses: github/codeql-action/analyze@7999b86c43a865dc79d8923397f35af22de63401 # v4
         with:
+          category: /language:${{ matrix.language }}
+          output: out/codeql-sarif
+          upload: never
+
+      # paths-ignore does not apply to C and C++, whose vendored headers are
+      # analysed where first-party code includes them: their results are
+      # dropped here, as paths-ignore drops them for the other languages.
+      - name: Leave out the vendored sources
+        run: python3 scripts/ci/codeql_filter.py out/codeql-sarif
+
+      - name: Upload
+        uses: github/codeql-action/upload-sarif@7999b86c43a865dc79d8923397f35af22de63401 # v4
+        with:
+          sarif_file: out/codeql-sarif
           category: /language:${{ matrix.language }}

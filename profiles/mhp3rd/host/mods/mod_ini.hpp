@@ -1,5 +1,8 @@
 #pragma once
 
+#include "mods/mod_library.hpp"
+
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -47,6 +50,18 @@ private:
 
 // "a;b; c;;" -> {"a", "b", "c"}: split at `separator`, trimmed, empty parts dropped.
 [[nodiscard]] std::vector<std::string> split_list(std::string_view value, char separator = ';');
+
+// Bytes as a mod.ini writes them, separated by spaces: "27 BD FF F0" or
+// "27BDFFF0" are bytes in order; a number with 0x and 2, 4 or 8 hex digits is
+// a byte, halfword or word in the guest's (little-endian) order, so
+// "0x24020001" is the instruction 24020001. Nothing, with `error` set, when
+// the text is not that or holds no bytes.
+[[nodiscard]] std::optional<std::vector<std::uint8_t>> parse_bytes(std::string_view text, std::string &error);
+
+// One line of a mod.ini section of edits: `address = bytes`, or
+// `address = expected -> bytes` to write only over the expected bytes. The
+// address is hex, with or without 0x. A ';' or '#' starts a comment.
+[[nodiscard]] std::optional<Edit> parse_edit(std::string_view key, std::string_view value, std::string &error);
 
 // ASCII-only case folding and comparison, for keys and file names.
 [[nodiscard]] std::string lower(std::string_view text);

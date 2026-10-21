@@ -23,6 +23,7 @@ import extract_iso
 import extract_blocks
 import extract_dialogue
 import extract_text
+import quests
 import text_report
 from extraction_paths import extraction_path
 
@@ -575,6 +576,155 @@ class BuildToolContracts(unittest.TestCase):
                 with self.assertRaises(subprocess.CalledProcessError):
                     embed_shaders.compile_shader(compiler, str(source), [])
                 self.assertEqual(set(root.glob("*.spv")), before)
+
+
+def quest_elf():
+    """A made-up executable holding made-up quest keys where the game keeps its own."""
+    base = quests.SALT & ~0xFFF
+    segment = bytearray(quests.MULTIPLIERS + 16 - base)
+    struct.pack_into("<4I", segment, quests.MULTIPLIERS - base, 5897, 15859, 29819, 45953)
+    struct.pack_into("<4I", segment, quests.MODULI - base, 65437, 65449, 65479, 65521)
+    segment[quests.SALT - base:quests.SALT - base + 16] = bytes(range(0x30, 0x40))
+    header = bytearray(0x54)
+    header[:4] = b"\x7fELF"
+    struct.pack_into("<I", header, 0x1C, 0x34)
+    struct.pack_into("<5I", header, 0x34, 1, len(header), base, base, len(segment))
+    return bytes(header) + bytes(segment)
+
+
+def quest_payload(quest=60001, kind=42):
+    """A quest payload with a record, a large monster group, a load list and one spawn."""
+    payload = bytearray(0x200)
+    struct.pack_into("<I", payload, 0, 0x40)
+    struct.pack_into("<I", payload, 0x20, 0x180)
+    struct.pack_into("<4I", payload, 0x180, 1, 0, 0x1A0, 0x100)
+    struct.pack_into("<2H", payload, 0x1A0, kind, 0)
+    struct.pack_into("<H", payload, 0x1A4, 0xFFFF)
+    struct.pack_into("<IHH", payload, 0x100, kind, 1, 6)
+    struct.pack_into("<3f", payload, 0x110, 1.0, 2.0, 3.0)
+    struct.pack_into("<I", payload, 0x130, 0xFFFF)
+    struct.pack_into("<2I", payload, 0x44, 200, 1200)
+    struct.pack_into("<I", payload, 0x50, 90000)
+    struct.pack_into("<2H", payload, 0x5C, quest, 6)
+    payload[0x60] = 12
+    struct.pack_into("<2H", payload, 0x6C, kind, 1)
+    struct.pack_into("<H", payload, 0x7C, kind)
+    payload[0x88:0x88 + 12] = b"Black Dragon"
+    return bytes(payload)
+
+
+class QuestToolContracts(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        self.eboot = self.root / "EBOOT.ELF"
+        self.eboot.write_bytes(quest_elf())
+        self.keys = quests.read_keys(self.eboot)
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def test_keys_come_from_the_executable(self):
+        self.assertEqual(self.keys[0], (5897, 15859, 29819, 45953))
+        self.assertEqual(self.keys[2], bytes(range(0x30, 0x40)))
+        (self.root / "other").write_bytes(b"not an executable")
+        with self.assertRaises(ValueError):
+            quests.read_keys(self.root / "other")
+        empty = bytearray(quest_elf())
+        empty[0x54 + quests.MULTIPLIERS - (quests.SALT & ~0xFFF)] = 0
+        empty[0x55 + quests.MULTIPLIERS - (quests.SALT & ~0xFFF)] = 0
+        (self.root / "empty").write_bytes(bytes(empty))
+        with self.assertRaises(ValueError):
+            quests.read_keys(self.root / "empty")
+        short = bytearray(quest_elf())
+        struct.pack_into("<I", short, 0x44, 16)  # a segment too small to hold the keys
+        (self.root / "short").write_bytes(bytes(short))
+        with self.assertRaises(ValueError):
+            quests.read_keys(self.root / "short")
+
+    def test_cipher_matches_the_host_and_refuses_damage(self):
+        payload = bytes.fromhex("0800000000000000") + b"Test quest\0\0" + bytes(range(20))
+        reference = bytes.fromhex(
+            "1111222233334444bcb8b94fc1bd990129f5c5c6e1fda0b872d9d79de3e908ce9e4d5dcc3202885c498"
+            "d508ded9f86e0f0ae2b5706d690ea0a145c2d3ddcc86a757e3d2ddf0331fe")
+        self.assertEqual(quests.encrypt(payload, self.keys, (0x1111, 0x2222, 0x3333, 0x4444)), reference)
+        self.assertEqual(quests.decrypt(reference, self.keys), payload)
+        self.assertEqual(quests.decrypt(quests.encrypt(payload + b"x", self.keys), self.keys), payload + b"x\0")
+        damaged = bytearray(reference)
+        damaged[40] ^= 1
+        self.assertIsNone(quests.decrypt(bytes(damaged), self.keys))
+        self.assertIsNone(quests.decrypt(reference[:20], self.keys))
+        self.assertIsNone(quests.decrypt(reference[:40], self.keys))
+
+    def test_record_monsters_and_edits(self):
+        payload = quest_payload()
+        fields = quests.record(payload)
+        self.assertEqual((fields["id"], fields["stars"], fields["map"], fields["fee"], fields["minutes"]),
+                         (60001, 6, 12, 200, 50))
+        self.assertEqual((fields["target"], fields["monsters"], fields["name"]), (42, [42], "Black Dragon"))
+        kinds, records = quests.large_monsters(payload)
+        self.assertEqual((kinds, records), ([0x1A0], [0x100]))
+        edited = quests.edit(payload, 60002, "Two Kings", [(42, 58)])
+        fields = quests.record(edited)
+        self.assertEqual((fields["id"], fields["name"], fields["target"], fields["monsters"]),
+                         (60002, "Two Kings", 58, [58]))
+        self.assertEqual(struct.unpack_from("<H", edited, 0x1A0)[0], 58)
+        self.assertEqual(struct.unpack_from("<I", edited, 0x100)[0], 58)
+        with self.assertRaises(ValueError):
+            quests.edit(payload, name="A name far longer than the room the quest has for one")
+        with self.assertRaises(ValueError):
+            quests.edit(payload, monsters=[(7, 58)])
+        with self.assertRaises(ValueError):
+            quests.record(b"\xff\0\0\0" + bytes(8))
+        no_group = bytearray(payload)
+        struct.pack_into("<I", no_group, 0x20, 0)
+        self.assertEqual(quests.large_monsters(bytes(no_group)), ([], []))
+
+    def test_commands(self):
+        source = self.root / "quest.bin"
+        source.write_bytes(quest_payload())
+        output = io.StringIO()
+        with patch("sys.stdout", output):
+            self.assertEqual(quests.main(["show", str(source)]), 0)
+        self.assertIn("Black Dragon", output.getvalue())
+        self.assertIn("spawn    kind 42 area 6 at 1, 2, 3", output.getvalue())
+        target = self.root / "new.bin"
+        self.assertEqual(quests.main(["edit", str(source), str(target), "--id", "60005", "--monster", "42=58"]), 0)
+        self.assertEqual(quests.record(target.read_bytes())["id"], 60005)
+
+        image = self.root / "game.iso"
+        image.write_bytes(b"")
+        found = [(2909, quest_payload(204)), (2910, quest_payload(205))]
+        with patch.object(quests, "quest_entries", lambda path, keys: iter(found)):
+            output = io.StringIO()
+            with patch("sys.stdout", output):
+                self.assertEqual(quests.main(["list", str(image), str(self.eboot)]), 0)
+                self.assertEqual(quests.main(["extract", str(image), str(self.eboot), "205", str(target)]), 0)
+            self.assertIn("  204  entry 2909", output.getvalue())
+            self.assertEqual(quests.record(target.read_bytes())["id"], 205)
+            with patch("sys.stderr", io.StringIO()):
+                self.assertEqual(quests.main(["extract", str(image), str(self.eboot), "999", str(target)]), 1)
+
+    def test_entries_from_an_archive(self):
+        encrypted = quests.encrypt(quest_payload(204), self.keys)
+
+        class Archive:
+            def __init__(self, path):
+                pass
+
+            def __len__(self):
+                return quests.FIRST_QUEST_ENTRY + 3
+
+            def entry_size(self, entry):
+                return {quests.FIRST_QUEST_ENTRY: len(encrypted), quests.FIRST_QUEST_ENTRY + 1: 8}.get(entry, 64)
+
+            def read(self, entry):
+                return encrypted if entry == quests.FIRST_QUEST_ENTRY else bytes(64)
+
+        with patch.object(quests.databin, "Archive", Archive):
+            found = list(quests.quest_entries("game.iso", self.keys))
+        self.assertEqual([entry for entry, _ in found], [quests.FIRST_QUEST_ENTRY])
+        self.assertEqual(quests.record(found[0][1])["id"], 204)
 
 if __name__ == "__main__":
     unittest.main()

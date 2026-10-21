@@ -298,6 +298,9 @@ public:
     std::int32_t free_block(SceUID uid);
     [[nodiscard]] const MemoryBlock *find_block(SceUID uid) const;
     [[nodiscard]] std::uint32_t free_memory() const noexcept;
+    // Where user memory the game can allocate starts: the end of the loaded
+    // executable's image, rounded up.
+    [[nodiscard]] std::uint32_t user_memory_start() const noexcept { return user_start_; }
 
     // Interrupts ----------------------------------------------------------
     std::map<std::uint32_t, std::map<std::uint32_t, SubInterruptHandler>> sub_interrupts;
@@ -377,6 +380,7 @@ private:
 
     std::map<SceUID, MemoryBlock> blocks_;
     std::vector<FreeRange> free_ranges_;
+    std::uint32_t user_start_{};
 
     struct GuestCall {
         std::uint32_t return_address{};

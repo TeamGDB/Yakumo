@@ -60,6 +60,9 @@ class WindowsPolicyTests(unittest.TestCase):
             'licenses/DearImGui-LICENSE.txt': ('profiles/mhp3rd/third_party/imgui/LICENSE.txt', b'Public ImGui fixture\n'),
             'licenses/tiny-AES-c-UNLICENSE.txt': ('profiles/mhp3rd/third_party/tiny_aes/UNLICENSE', b'Public AES fixture\n'),
             'licenses/xxHash-LICENSE.txt': ('profiles/mhp3rd/third_party/xxhash/LICENSE', b'Public xxHash fixture\n'),
+            'licenses/AsmJit-LICENSE.md': ('third_party/asmjit/LICENSE.md', b'Public AsmJit fixture\n'),
+            'licenses/Luau-LICENSE.txt': ('profiles/mhp3rd/third_party/luau/LICENSE.txt', b'Public Luau fixture\n'),
+            'licenses/Luau-Lua-LICENSE.txt': ('profiles/mhp3rd/third_party/luau/lua_LICENSE.txt', b'Public Lua fixture\n'),
         }
         for path, content in self.licenses.values():
             self.write(path, content)

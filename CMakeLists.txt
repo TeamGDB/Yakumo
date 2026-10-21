@@ -114,18 +114,24 @@ endif()
 # Keep the runtime as an object library so profile executables own its objects.
 # On Windows this also lets WINDOWS_EXPORT_ALL_SYMBOLS include runtime symbols
 # in the executable's import library for separately linked overlay modules.
+add_subdirectory(third_party/asmjit)
+
 add_library(psprecomp_core OBJECT
+    src/allegrex_semantics.cpp
     src/decoder.cpp
     src/deflate.cpp
     src/elf32.cpp
     src/guest_memory.cpp
     src/interpreter.cpp
+    src/jit.cpp
+    src/jit_compiler.cpp
     src/nid_registry.cpp
     src/program_analysis.cpp
     src/runtime.cpp
     src/sha256.cpp
 )
 target_include_directories(psprecomp_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(psprecomp_core PUBLIC psprecomp_asmjit)
 target_compile_definitions(psprecomp_core PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>)
 if(MSVC)
@@ -210,4 +216,11 @@ if(PSPRECOMP_BUILD_TESTS)
     set_tests_properties(psprecomp_memory_watch_contracts PROPERTIES TIMEOUT 60
         ENVIRONMENT "PSPRECOMP_WATCH_WRITE=0x08804000;PSPRECOMP_WATCH_WRITE_SIZE=4;PSPRECOMP_TRACE_VRAM_READS=1")
     add_dependencies(psprecomp_test_binaries psprecomp_runtime_contract_tests)
+
+    # The JIT against the interpreter on generated guest code.
+    add_executable(psprecomp_jit_tests tests/jit_tests.cpp)
+    target_link_libraries(psprecomp_jit_tests PRIVATE psprecomp_core)
+    add_test(NAME psprecomp_jit_tests COMMAND psprecomp_jit_tests)
+    set_tests_properties(psprecomp_jit_tests PROPERTIES TIMEOUT 120)
+    add_dependencies(psprecomp_test_binaries psprecomp_jit_tests)
 endif()

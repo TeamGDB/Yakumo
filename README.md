@@ -54,7 +54,7 @@ You can load a save copied from a PSP or start a new game, hunt, play with other
 | Saves in the PSP's own format, including saves and downloaded quests copied from a PSP; import, export and backups from the menu | Curved surfaces (#10); the save-data dialogs draw nothing yet (#33) |
 | Vulkan graphics: models, animation, textures, transparency, lighting and fog; adjustable internal resolution, arbitrary window shapes and frame interpolation | |
 | PPSSPP-compatible HD texture packs, installed from the menu or copied into the data directory | |
-| Mods in the community's mhp3reload format: file replacements and patches, managed from the menu (see the [profile README](profiles/mhp3rd/README.md#mods)) | Code mods (#81) |
+| Mods, managed from the menu: the community's mhp3reload format, file, patch and code mods alike, and Yakumo's own, with new files, Luau scripts, native C/C++ mods and one-file `.ymod` packages (see the [profile README](profiles/mhp3rd/README.md#mods) and [`docs/MODDING.md`](docs/MODDING.md)) | |
 | Sound effects, streamed music and cutscene movies | |
 | Fully rebindable keyboard and mouse controls; gamepads with an analog right-stick camera and aim, control presets and button-combination binds | |
 | Yakumo's in-game menu, first-run setup, file browser and on-screen keyboard, all usable with a gamepad, keyboard or mouse | |
@@ -131,7 +131,7 @@ Esc, or both sticks pressed together (L3+R3), opens Yakumo's own menu. It holds 
 
 ## How it works
 
-The executable is analyzed and every instruction of its code is emitted as C++, which is compiled into the program. The game also loads 355 code overlays at run time into a handful of shared memory slots; each is recompiled into its own library, and when the game loads one, the matching library is installed between frames. An interpreter covers any code the recompiled set does not reach, so nothing stops the game — it only runs slower there.
+The executable is analyzed and every instruction of its code is emitted as C++, which is compiled into the program. The game also loads 355 code overlays at run time into a handful of shared memory slots; each is recompiled into its own library, and when the game loads one, the matching library is installed between frames. Code the recompiled set does not reach, such as code a mod changes, is compiled from memory by a JIT, with an interpreter behind it, so nothing stops the game — it only runs less optimised there.
 
 Around that code sits a reimplementation of the PSP system: a kernel with threads, semaphores, event flags and timers; disc I/O read straight from the image; a Vulkan renderer for the PSP's graphics engine; software voice mixing for audio; and input from SDL3.
 
@@ -141,7 +141,7 @@ Around that code sits a reimplementation of the PSP system: a kernel with thread
 
 ```text
 include/psprecomp/   Framework interfaces: runtime, memory, Allegrex state
-src/                 Framework: ELF loading, decoder, runtime, interpreter
+src/                 Framework: ELF loading, decoder, runtime, interpreter, JIT
 tools/               Framework: analyzer and C++ code generator
 tests/               Framework regression tests
 configs/             PSP NID data and generic examples

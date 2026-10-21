@@ -372,6 +372,9 @@ cp "$build_dir/bin/lib/FFmpeg-COPYING.LGPLv2.1.txt" "$build_dir/bin/lib/FFmpeg-S
 cp "$profile_dir/third_party/imgui/LICENSE.txt" "$licenses/DearImGui-LICENSE.txt"
 cp "$profile_dir/third_party/tiny_aes/UNLICENSE" "$licenses/tiny-AES-c-UNLICENSE.txt"
 cp "$profile_dir/third_party/xxhash/LICENSE" "$licenses/xxHash-LICENSE.txt"
+cp "$profile_dir/../../third_party/asmjit/LICENSE.md" "$licenses/AsmJit-LICENSE.md"
+cp "$profile_dir/third_party/luau/LICENSE.txt" "$licenses/Luau-LICENSE.txt"
+cp "$profile_dir/third_party/luau/lua_LICENSE.txt" "$licenses/Luau-Lua-LICENSE.txt"
 cp "$sources/NotoSansCJK-LICENSE.txt" "$licenses/NotoSansCJK-OFL.txt"
 
 # ---------------------------------------------------------------------------

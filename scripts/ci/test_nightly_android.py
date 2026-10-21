@@ -230,6 +230,8 @@ class AndroidPackagingTests(unittest.TestCase):
                      'profiles/mhp3rd/packaging/android/build_apk.sh',
                      'profiles/mhp3rd/third_party/imgui/LICENSE.txt', 'profiles/mhp3rd/third_party/tiny_aes/UNLICENSE',
                      'profiles/mhp3rd/third_party/xxhash/LICENSE', 'profiles/mhp3rd/packaging/linux/sources.sh',
+                     'third_party/asmjit/LICENSE.md', 'profiles/mhp3rd/third_party/luau/LICENSE.txt',
+                     'profiles/mhp3rd/third_party/luau/lua_LICENSE.txt',
                      'profiles/mhp3rd/cmake/FFmpeg.cmake']:
             destination = self.repo / name;destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / name, destination)

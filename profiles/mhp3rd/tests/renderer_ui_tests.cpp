@@ -14,6 +14,8 @@
 #include "ui/font_menu.hpp"
 #include "fonts/game_font.hpp"
 #include "mods/mhp3rd_mods.hpp"
+#include "mods/mod_native.hpp"
+#include "yakumo/mod.h"
 #include "mods/mhp3rd_data_bin.hpp"
 #include "kernel/iso_image.hpp"
 #include "ui/mods_screen.hpp"
@@ -2390,6 +2392,61 @@ void texture_pack_screen_contracts(gpu::VulkanRenderer &renderer, const std::fil
     layer.set_interactive(false);
 }
 
+// A zip of stored entries, as a .ymod package.
+std::string stored_zip(const std::vector<std::pair<std::string, std::string>> &entries) {
+    std::string file, directory;
+    const auto put = [](std::string &out, std::uint32_t value, int bytes) {
+        for (int i = 0; i < bytes; ++i) out.push_back(static_cast<char>(value >> (8 * i)));
+    };
+    for (const auto &[name, data] : entries) {
+        std::uint32_t crc = 0xFFFFFFFFu;
+        for (const char c : data) {
+            crc ^= static_cast<std::uint8_t>(c);
+            for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1u) ^ (0xEDB88320u & (0u - (crc & 1u)));
+        }
+        crc = ~crc;
+        const auto offset = static_cast<std::uint32_t>(file.size());
+        const auto size = static_cast<std::uint32_t>(data.size());
+        const auto length = static_cast<std::uint32_t>(name.size());
+        put(file, 0x04034B50u, 4);
+        put(file, 20u, 2);
+        put(file, 0u, 2);
+        put(file, 0u, 2);
+        put(file, 0u, 4);
+        put(file, crc, 4);
+        put(file, size, 4);
+        put(file, size, 4);
+        put(file, length, 2);
+        put(file, 0u, 2);
+        file += name + data;
+        put(directory, 0x02014B50u, 4);
+        put(directory, 20u, 2);
+        put(directory, 20u, 2);
+        put(directory, 0u, 2);
+        put(directory, 0u, 2);
+        put(directory, 0u, 4);
+        put(directory, crc, 4);
+        put(directory, size, 4);
+        put(directory, size, 4);
+        put(directory, length, 2);
+        put(directory, 0u, 4); // extra, comment
+        put(directory, 0u, 4); // disk, internal attributes
+        put(directory, 0u, 4);
+        put(directory, offset, 4);
+        directory += name;
+    }
+    const auto at = static_cast<std::uint32_t>(file.size());
+    file += directory;
+    put(file, 0x06054B50u, 4);
+    put(file, 0u, 4);
+    put(file, static_cast<std::uint32_t>(entries.size()), 2);
+    put(file, static_cast<std::uint32_t>(entries.size()), 2);
+    put(file, static_cast<std::uint32_t>(directory.size()), 4);
+    put(file, at, 4);
+    put(file, 0u, 2);
+    return file;
+}
+
 void mods_screen_contracts(
     gpu::VulkanRenderer &renderer, const std::filesystem::path &sandbox, psprecomp::Runtime &runtime) {
     // Construct a tiny ISO9660 image and archive entirely from public bytes.
@@ -2466,6 +2523,24 @@ void mods_screen_contracts(
     expect(!mods::entry_at_offset(0) && !mods::entry_at_offset(2 * block + 8),
         "archive lookup rejects directory bytes and exact-size padding");
     {
+        // Native and script mods hear of every whole file read, also while
+        // no mod changes a file and the disc's archive is read as it is.
+        static std::vector<std::uint32_t> heard;
+        heard.clear();
+        ymod_mod *listener = mods::native::add_mod("listener", "Listener", sandbox.string());
+        const auto *events = static_cast<const ymod_events *>(mods::native::host()->service(listener, YMOD_EVENTS, 1u));
+        events->subscribe(
+            listener, YMOD_EVENT_FILE_LOADED, [](int, std::uint32_t file, void *) { heard.push_back(file); }, nullptr);
+        std::array<std::uint8_t, 4> half{};
+        std::array<std::uint8_t, 4> rest{};
+        mods::read_data_bin(2 * block, half);
+        const bool none_yet = heard.empty();
+        mods::read_data_bin(2 * block + 4, rest);
+        expect(!mods::serving() && none_yet && heard == std::vector<std::uint32_t>{1u},
+            "a file event comes once the game has read the whole file, with no mod serving files");
+        mods::native::reset_for_tests();
+    }
+    {
         std::ofstream out(folder / "replacement.bin", std::ios::binary);
         out << std::string(block + 17, 'G');
     }
@@ -2504,7 +2579,8 @@ void mods_screen_contracts(
     layer.set_interactive(true);
     ImVec2 click{};
     ScriptedUiMouse mouse(renderer.window());
-    auto frame = [&](bool back = false, bool scroll = false, const char *focused_row = nullptr) {
+    // `scope`: the ID scope a mod's panel draws its rows in (its index).
+    auto frame = [&](bool back = false, bool scroll = false, const char *focused_row = nullptr, int scope = -1) {
         mouse.prepare_frame();
         layer.begin_frame();
         ui::begin_panel("##mods-contract", "Mod contract", "", false);
@@ -2512,7 +2588,10 @@ void mods_screen_contracts(
         if (focused_row) {
             auto *window = ImGui::GetCurrentWindow();
             ImGui::FocusWindow(window);
-            ImGui::SetFocusID(window->GetID(focused_row), window);
+            if (scope >= 0) ImGui::PushID(scope);
+            const ImGuiID row = window->GetID(focused_row);
+            if (scope >= 0) ImGui::PopID();
+            ImGui::SetFocusID(row, window);
             ImGui::SetNavCursorVisible(true);
         }
         ui::mods_page(back);
@@ -2552,6 +2631,85 @@ void mods_screen_contracts(
     ImGui::GetIO().AddKeyEvent(ImGuiKey_LeftArrow, false);
     frame();
     expect(!session->library().enabled(id) && !mods::serving(), "details toggle restores original archive");
+    {
+        // Settings a running mod declared, and what it logged, on its page.
+        mods::ModLibrary &library = session->library();
+        const auto declare = [&](const char *key, mods::ModSetting::Kind kind, std::int64_t maximum,
+                                 std::vector<std::string> choices = {}) {
+            mods::ModSetting setting;
+            setting.key = key;
+            setting.label = key;
+            setting.kind = kind;
+            setting.maximum = maximum;
+            setting.choices = std::move(choices);
+            (void)library.declare_setting(id, setting);
+        };
+        declare("Fast", mods::ModSetting::Kind::Switch, 1);
+        declare("Count", mods::ModSetting::Kind::Number, 1);
+        declare("Mode", mods::ModSetting::Kind::Choice, 1, {"Calm", "Wild"});
+        const std::string name = library.mods().front().name;
+        ymod_mod *logger = mods::native::add_mod(id, name, folder.string());
+        mods::native::host()->log(logger, YMOD_LOG_ERROR, "contract problem line");
+        const auto right_on = [&](const char *row, int scope = -1) {
+            frame(false, false, row, scope);
+            ImGui::GetIO().AddKeyEvent(ImGuiKey_RightArrow, true);
+            frame(false, false, row, scope);
+            ImGui::GetIO().AddKeyEvent(ImGuiKey_RightArrow, false);
+            frame();
+        };
+        // A panel the mod draws under its settings, with the menu's rows.
+        static int panel_switch = 0;
+        static std::int32_t panel_count = 2;
+        static float panel_ratio = 0.5f;
+        static int panel_presses = 0;
+        static char panel_name[16] = "abc";
+        const auto *mod_ui = static_cast<const ymod_ui *>(mods::native::host()->service(logger, YMOD_UI, 1u));
+        expect(mod_ui != nullptr &&
+                mod_ui->panel(
+                    logger, "Tools",
+                    [](const ymod_widgets *w, void *) {
+                        w->text("panel text");
+                        w->text_colored(0xFF0000FFu, "panel warning");
+                        (void)w->section("Group");
+                        w->separator();
+                        (void)w->checkbox("Panel Switch", &panel_switch);
+                        (void)w->slider_int("Panel Count", &panel_count, 0, 5);
+                        (void)w->slider_float("Panel Ratio", &panel_ratio, 0.0f, 1.0f);
+                        if (w->button("Panel Button") != 0) ++panel_presses;
+                        (void)w->input_text("Panel Name", panel_name, sizeof(panel_name));
+                        // Shapes belong to overlays: nothing on a panel.
+                        w->line(0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu, 1.0f);
+                        w->rect(0.0f, 0.0f, 1.0f, 1.0f, 0xFFFFFFFFu, 1);
+                        w->circle(0.5f, 0.5f, 0.1f, 0xFFFFFFFFu, 0);
+                        w->text_at(0.5f, 0.5f, 0xFFFFFFFFu, "no");
+                    },
+                    nullptr) == 0,
+            "a mod registers a panel for its page");
+        frame();
+        right_on("Fast");
+        right_on("Count");
+        right_on("Count");
+        right_on("Mode");
+        right_on("Mode");
+        right_on("Panel Switch", 0);
+        right_on("Panel Count", 0);
+        right_on("Panel Ratio", 0);
+        frame(false, false, "Panel Button", 0);
+        ImGui::GetIO().AddKeyEvent(ImGuiKey_Space, true);
+        frame(false, false, "Panel Button", 0);
+        ImGui::GetIO().AddKeyEvent(ImGuiKey_Space, false);
+        frame();
+        expect(panel_switch == 1 && panel_count == 3 && std::abs(panel_ratio - 0.51f) < 0.0001f,
+            "a mod panel's switch, number and slider change through the menu's rows");
+        expect(panel_presses == 1 && std::string(panel_name) == "abc", "a mod panel's button reports one press");
+        expect(library.setting(id, "Fast") == 1, "a mod's switch setting changes on its page");
+        expect(library.setting(id, "Count") == 1, "a mod's number setting stays within its range");
+        expect(library.setting(id, "Mode") == 0, "a mod's choice setting cycles through its choices");
+        expect(std::any_of(mods::native::reports().begin(), mods::native::reports().end(),
+                   [&](const auto &report) { return report.mod == name && report.problem; }),
+            "a mod's problems are kept for its page");
+        mods::native::reset_for_tests();
+    }
     frame(true);
     expect(!ui::mods_screen_open() && !ui::take_mods_restart_request(),
         "back closes mod details without requesting restart");
@@ -2613,6 +2771,39 @@ void mods_screen_contracts(
     expect(mod_backup && session->library().mods().size() == 2,
         "reimport replaces existing mod while preserving old public bytes in backup");
     frame(true);
+    {
+        // A .ymod package dropped on the list: unpacked, reviewed, imported,
+        // and its unpacked copy removed.
+        const auto package = sandbox / "Packed Drop.ymod";
+        std::ofstream(package, std::ios::binary) << stored_zip(
+            {{"mod.ini", "[MOD INFO]\nName=Packed drop\nType=File\nVersion=HD\nFiles=replacement.bin\nTarget=0000\n"},
+                {"replacement.bin", "PACKAGE!"}});
+        frame();
+        const std::string package_path = package.string();
+        SDL_Event package_drop{};
+        package_drop.type = SDL_EVENT_DROP_FILE;
+        package_drop.drop.windowID = SDL_GetWindowID(renderer.window());
+        package_drop.drop.data = package_path.c_str();
+        expect(SDL_PushEvent(&package_drop), "synthetic package drop queues");
+        renderer.pump_events();
+        frame();
+        frame();
+        expect(ui::mods_screen_open(), "a package dropped on the mod list opens its review");
+        frame(false, false, "Import This Mod");
+        frame(false, false, "Import This Mod");
+        press(ImGuiKey_Space);
+        for (int settle = 0; settle < 5 && session->library().mods().size() != 3; ++settle) frame();
+        const auto installed = sandbox / "mods" / "Packed Drop";
+        expect(session->library().mods().size() == 3 && std::filesystem::is_regular_file(installed / "replacement.bin"),
+            "a dropped package imports the mod it holds, named after the package");
+        frame(true);
+        expect(!ui::mods_screen_open() &&
+                !std::filesystem::exists(install::user_data_directory() / "transfer" / "packages"),
+            "the package's unpacked copy is removed once the import is done");
+        std::filesystem::remove_all(installed);
+        session->rescan();
+        frame();
+    }
     for (const auto &mod : session->library().mods()) session->library().set_enabled(mod.id, true);
     session->commit();
     frame();
@@ -5179,6 +5370,45 @@ void menu_contracts(gpu::VulkanRenderer &renderer, psprecomp::Runtime &runtime, 
     ui::show_note("Synthetic status note");
     frame();
     ui::set_lock_on_marker(std::nullopt);
+    {
+        // A mod's overlay over the running game.
+        static bool overlay_drawn = false;
+        ymod_mod *painter = mods::native::add_mod("painter", "Painter", "");
+        const auto *mod_ui = static_cast<const ymod_ui *>(mods::native::host()->service(painter, YMOD_UI, 1u));
+        expect(mod_ui != nullptr &&
+                mod_ui->overlay(
+                    painter, "Painter",
+                    [](const ymod_widgets *w, void *) {
+                        w->text("over the game");
+                        w->text_colored(0xFF8040FFu, "coloured");
+                        (void)w->section("Numbers");
+                        int seen = 1;
+                        std::int32_t count = 3;
+                        float ratio = 0.5f;
+                        char name[8] = "abc";
+                        (void)w->checkbox("Seen", &seen);
+                        (void)w->slider_int("Count", &count, 0, 9);
+                        (void)w->slider_float("Ratio", &ratio, 0.0f, 1.0f);
+                        (void)w->input_text("Name", name, sizeof(name));
+                        (void)w->button("Not a button here");
+                        w->line(0.1f, 0.1f, 0.9f, 0.9f, 0x00FF00FFu, 2.0f);
+                        w->rect(0.2f, 0.2f, 0.4f, 0.4f, 0xFF0000FFu, 0);
+                        w->rect(0.5f, 0.5f, 0.6f, 0.6f, 0xFF000080u, 1);
+                        w->circle(0.5f, 0.5f, 0.05f, 0xFFFFFFFFu, 0);
+                        w->circle(0.7f, 0.5f, 0.05f, 0xFFFFFFFFu, 1);
+                        w->text_at(0.5f, 0.1f, 0xFFFF00FFu, "marker");
+                        overlay_drawn = true;
+                    },
+                    nullptr) == 0,
+            "a mod registers an overlay");
+        frame();
+        auto *mod_window = ImGui::FindWindowByName("##mod overlay 0");
+        expect(overlay_drawn && mod_window && mod_window->Active && mod_window->DrawList->VtxBuffer.Size > 0,
+            "a mod's overlay draws in its window over the running game");
+        mods::native::reset_for_tests();
+        frame();
+        expect(mod_window && !mod_window->Active, "without a mod's overlay its window goes");
+    }
     auto &layer = ui::Layer::get();
     layer.set_interactive(true);
     ui::open_touch_editor();

@@ -14,6 +14,7 @@
 #include "ui/input_script.hpp"
 #include "ui/layer.hpp"
 #include "ui/layered_armor_screen.hpp"
+#include "ui/mod_panels.hpp"
 #include "ui/mods_screen.hpp"
 #include "ui/save_screen.hpp"
 #include "ui/texture_pack_screen.hpp"
@@ -2214,10 +2215,12 @@ void draw_over_game() {
         !note().text.empty() && Clock::now() < note().until && !layer.renderer().window_capture_pending();
     const double hud_note = menu || layer.renderer().window_capture_pending() ? 0.0 : gpu::hud::note_seconds_left();
     const std::optional<std::array<float, 2>> marker = menu ? std::nullopt : lock_on_marker_at();
+    const bool mod_overlays = !menu && mod_overlays_present();
     if (hint_left <= 0.0 && !overlay && !menu && !touch && gpu_problem.empty() && !flying && !fast && !noted &&
-        !compat_noted && hud_note <= 0.0 && !marker)
+        !compat_noted && hud_note <= 0.0 && !marker && !mod_overlays)
         return;
     layer.begin_frame();
+    if (mod_overlays) draw_mod_overlays();
     if (marker) draw_lock_on_marker(*marker);
     if (noted) draw_note(note());
     if (compat_noted) draw_gpu_compat_notice(gpu_compat_notice());

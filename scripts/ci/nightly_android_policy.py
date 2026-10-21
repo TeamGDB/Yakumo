@@ -364,7 +364,10 @@ class AndroidPolicy:
                       'assets/licenses/THIRD_PARTY_NOTICES.md': self.root / 'profiles/mhp3rd/packaging/THIRD_PARTY_NOTICES.md',
                       'assets/licenses/DearImGui-LICENSE.txt': self.root / 'profiles/mhp3rd/third_party/imgui/LICENSE.txt',
                       'assets/licenses/tiny-AES-c-UNLICENSE.txt': self.root / 'profiles/mhp3rd/third_party/tiny_aes/UNLICENSE',
-                      'assets/licenses/xxHash-LICENSE.txt': self.root / 'profiles/mhp3rd/third_party/xxhash/LICENSE'}
+                      'assets/licenses/xxHash-LICENSE.txt': self.root / 'profiles/mhp3rd/third_party/xxhash/LICENSE',
+                      'assets/licenses/AsmJit-LICENSE.md': self.root / 'third_party/asmjit/LICENSE.md',
+                      'assets/licenses/Luau-LICENSE.txt': self.root / 'profiles/mhp3rd/third_party/luau/LICENSE.txt',
+                      'assets/licenses/Luau-Lua-LICENSE.txt': self.root / 'profiles/mhp3rd/third_party/luau/lua_LICENSE.txt'}
         self.hashes = {'assets/fonts/NotoSansCJKjp-Regular.otf': pin(self.root, 'NOTO_CJK_SHA256'),
                        'assets/licenses/NotoSansCJK-OFL.txt': pin(self.root, 'NOTO_CJK_LICENSE_SHA256'),
                        'assets/licenses/SDL3-LICENSE.txt': SDL_SHA,
