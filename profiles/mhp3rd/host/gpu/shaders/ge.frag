@@ -12,6 +12,7 @@ layout(set = 0, binding = 0) uniform sampler2D guest_texture;
 // False for pipelines of draws without an alpha test (texture_params.w 0):
 // the discard below is then compiled out, so tiled GPUs keep their early
 // depth test and hidden surface removal for them.
+#ifndef GE_NO_ALPHA_TEST
 #ifdef GE_NO_SPECIALIZATION
 // kGeFragmentShaderPlain, for GPU compatibility mode: the same shader with no
 // specialization constant at all, for drivers that fail to build one. Every
@@ -19,6 +20,7 @@ layout(set = 0, binding = 0) uniform sampler2D guest_texture;
 const bool kAlphaTest = true;
 #else
 layout(constant_id = 0) const bool kAlphaTest = true;
+#endif
 #endif
 
 layout(push_constant) uniform Push {
@@ -73,6 +75,9 @@ void main() {
     color.rgb = min(color.rgb + frag_specular, vec3(1.0));
     if ((int(push.viewport.w + 0.5) & 1) != 0) color.rgb = mix(lighting.fog_color.rgb, color.rgb, clamp(frag_fog, 0.0, 1.0));
 
+    // The alpha-free plain variant has neither specialization constants nor
+    // a discard instruction. Select it only when the pipeline needs no test.
+#ifndef GE_NO_ALPHA_TEST
     // PSP alpha test, evaluated per fragment.
     if (!kAlphaTest) {
         out_color = color;
@@ -90,6 +95,7 @@ void main() {
     else if (alpha_function == 6) passed = alpha > reference;
     else if (alpha_function == 7) passed = alpha >= reference;
     if (!passed) discard;
+#endif
 
     out_color = color;
 }

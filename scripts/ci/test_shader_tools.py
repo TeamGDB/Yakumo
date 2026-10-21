@@ -25,6 +25,7 @@ class ShaderToolTests(unittest.TestCase):
         variants = {'Ge': 'ge.vert', 'Raw': 'GE_RAW_VERTICES@ge.vert',
                     'Checked': 'GE_RAW_VERTICES,GE_CHECK_DECODE@ge.vert',
                     'Fragment': 'ge.frag', 'Plain': 'GE_NO_SPECIALIZATION@ge.frag',
+                    'PlainAlphaFree': 'GE_NO_SPECIALIZATION,GE_NO_ALPHA_TEST@ge.frag',
                     'RotateVertex': 'rotate.vert', 'RotateFragment': 'rotate.frag'}
         entries = []
         for name, source in variants.items():
@@ -42,6 +43,23 @@ class ShaderToolTests(unittest.TestCase):
                 self.assertGreater(len(words), 5, name)
                 self.assertEqual(int(words[0], 16), 0x07230203, name)
                 self.assertGreater(int(words[3], 16), 0, name)
+                # Walk instruction headers, not arbitrary operand words. Opcode
+                # values are from Khronos SPIR-V's unified grammar: OpKill 252,
+                # OpSpecConstant{True,False,,Composite,Op} 48 through 52.
+                instructions = [int(word, 16) for word in words]
+                cursor, opcodes = 5, set()
+                while cursor < len(instructions):
+                    count = instructions[cursor] >> 16
+                    self.assertGreater(count, 0)
+                    opcodes.add(instructions[cursor] & 0xffff)
+                    cursor += count
+                self.assertEqual(cursor, len(instructions))
+                if name in ('Plain', 'PlainAlphaFree'):
+                    self.assertTrue(opcodes.isdisjoint(range(48, 53)), name)
+                    self.assertEqual(252 in opcodes, name == 'Plain', name)
+                if name == 'Fragment':
+                    self.assertIn(252, opcodes)
+                    self.assertTrue(opcodes.intersection(range(48, 53)))
 
     def test_failed_compilation_preserves_diagnostics_and_removes_temporary_binary(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -146,6 +146,9 @@ public:
     // for MHP3RD_CHECK_GPU_DECODE.
     [[nodiscard]] bool gpu_decode() const;
     [[nodiscard]] bool check_gpu_decode() const;
+    // Temporal skinning needs complete current spans, including vertices used
+    // only by the older frame. Query before decoding a display list.
+    [[nodiscard]] bool skinning_replay() const noexcept;
     void submit(const DrawCall &call, const GuestMemory &memory);
     // Writes the framebuffer shown a frame or two ago back to guest VRAM, in
     // the guest's pixel format at 480x272, so game code that copies a frame

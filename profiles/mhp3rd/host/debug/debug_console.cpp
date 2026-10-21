@@ -14,6 +14,7 @@
 #include "audio/audio_sink.hpp"
 #include "text/translation.hpp"
 #include "game/layered_armor.hpp"
+#include "psprecomp/runtime.hpp"
 #if defined(MHP3RD_HAS_RENDERER)
 #include "camera/free_camera.hpp"
 #include "camera/game_camera.hpp"
@@ -129,6 +130,23 @@ std::vector<std::string> run_command(Ram &ram, const std::string &line) {
     const auto arg = [&](std::size_t i) { return i < args.size() ? number(args[i]) : 0u; };
 
     if (command.empty() || command[0] == '#') return out;
+    if (command == "pcstats") {
+        if (std::getenv("PSPRECOMP_COUNT_PC") == nullptr)
+            return {"PC counters unavailable: set PSPRECOMP_COUNT_PC before startup"};
+        psprecomp::report_counted_pcs();
+        return out;
+    }
+    if (command == "encounter") {
+        if (args == std::vector<std::string>{"start", "barioth"} ||
+            args == std::vector<std::string>{"start", "barioth-tundra"}) {
+            request_encounter_start();
+        } else if (args == std::vector<std::string>{"cancel"}) {
+            request_encounter_cancel();
+        } else if (!args.empty() && args != std::vector<std::string>{"status"}) {
+            return {"usage: encounter start barioth | status | cancel"};
+        }
+        return {encounter_status()};
+    }
     if (command == "observe") {
         const char *mode = std::getenv("MHP3RD_DEVICE_TEST");
         if (mode == nullptr || std::string(mode) != "1")
@@ -197,7 +215,22 @@ std::vector<std::string> run_command(Ram &ram, const std::string &line) {
                     ",\"window_height\":" + std::to_string(summary.height) +
                     ",\"speed_percent\":" + std::to_string(summary.speed * 100.0) +
                     ",\"game_fps\":" + std::to_string(summary.game_fps) +
-                    ",\"presented_fps\":" + std::to_string(summary.fps) + ",\"frame_ms\":[";
+                    ",\"presented_fps\":" + std::to_string(summary.fps) +
+                    ",\"guest_ms\":" + std::to_string(summary.guest_ms) +
+                    ",\"render_ms\":" + std::to_string(summary.render_ms) +
+                    ",\"wait_ms\":" + std::to_string(summary.wait_ms) +
+                    ",\"pacing_ms\":" + std::to_string(summary.pacing_ms) +
+                    ",\"gpu_valid\":" + (summary.gpu_valid ? "true" : "false") + ",\"gpu_ms\":";
+                json += summary.gpu_valid ? std::to_string(summary.gpu_avg_ms) : "null";
+                json += ",\"ge_draws\":" + std::to_string(summary.draws) +
+                    ",\"vertex_mib\":" + std::to_string(summary.vertex_mib) +
+                    ",\"index_mib\":" + std::to_string(summary.index_mib) +
+                    ",\"recorded_draws\":" + std::to_string(summary.recorded_draws) +
+                    ",\"render_passes\":" + std::to_string(summary.passes) +
+                    ",\"target_copies\":" + std::to_string(summary.copies) +
+                    ",\"requested_rate\":" + std::to_string(summary.requested_rate) +
+                    ",\"running_rate\":" + std::to_string(summary.frame_rate) +
+                    ",\"frame_sequence\":" + std::to_string(perf::history_sequence()) + ",\"frame_ms\":[";
                 const auto &history = perf::frame_history();
                 for (std::size_t i = 0; i < history.size(); ++i) {
                     if (i) json += ',';

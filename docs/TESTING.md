@@ -2,6 +2,16 @@
 
 ## Automated
 
+- **Barioth encounter tools** (`mhp3rd_debug_tools_tests` and
+  `scripts/ci/test_encounter_benchmark.py`) use synthetic RAM, model headers,
+  observations and bounded owned child processes. They cover real quest
+  departure contracts, initial-area/capacity/lifetime guards, valid and invalid
+  model/actor/camera state, landing/relocation, stable readiness, deadlines,
+  cancellation, network guard closure, cleanup and non-overlapping frame
+  collection. The private [combat benchmark](DEVICE_TESTING.md#barioth-encounter-performance)
+  supplies separate real-game evidence. Public tests contain no game models,
+  archives, saves or performance pass/fail thresholds.
+
 - **GPU compatibility notification** (`mhp3rd_gpu_compat_notice_*`) uses the real SDL/Vulkan/ImGui renderer with public triangles. Cases cover explicit On, healthy Auto, Off, automatic fallback after a failed startup self-test or pipeline and after a refused pipeline in play, plain-shader retry under Off, and notification opt-out. Tests inspect rendered text and geometry, input/focus flags, single consumption and expiry; startup notifications are included in diagnostic window captures. The main menu suite verifies the restart marker, performance warning, active-mode description and unchanged runtime mode when editing the saved choice. No game data is needed.
 
 - **Editable PSP touch controls** (`mhp3rd_touch_tests`, `mhp3rd_settings_tests` and `mhp3rd_touch_ui_tests`) use synthetic placements and SDL fingers to check safe-area coordinates, relative size percentages across screen shapes/insets, click-versus-drag preservation, visibility, independent PSP/Action settings, combination insertion/removal and capacity, simultaneous button ownership, D-pad toggling and release, virtual R3 button/movement/camera bindings in Camera/D-Pad/Off modes and cancellation, and floating/fixed sticks. The UI mode also exercises both editors and retains a synthetic window capture in the printed temporary directory. These public tests require no game data. Actual Android touch hardware, haptics and gameplay remain separate manual checks.
@@ -308,6 +318,30 @@ The manual check matters most on Windows, where the standard library's narrow pa
 
 ### Renderer performance paths (#92)
 
+For large-monster CPU cost, `mhp3rd_ge_state_tests` verifies sparse indexed
+skinning against full-span decoding, including all weight/normal/position and
+index formats, repeated/nonmonotonic indices, the maximum 16-bit index,
+mirrored EDRAM, morph/through fallbacks and raw GPU comparison. Fractional
+eight-bone fixtures require bit-identical referenced attributes. The legacy
+variant sets `MHP3RD_NO_SPARSE_VERTEX_DECODE=1`; the scalar and checked variants
+retain their existing independent checks. Temporal-replay fixtures require
+the full current span, including vertices referenced only by an older frame.
+The renderer/HLE policy disables compaction while frame interpolation records
+skinning data, and re-enables it at the ordinary presentation rate.
+No private data or timing threshold is needed for these regressions.
+
+Use the [Barioth benchmark](DEVICE_TESTING.md#barioth-encounter-performance) for
+actual combat measurements. `MHP3RD_NO_SPARSE_VERTEX_DECODE=1` restores the old
+CPU path. For a separate continuous-scene diagnostic,
+`MHP3RD_PERF_ALTERNATE=sparse` alternates it each second; the `[perf]` line's
+`alt on/off` names the window it covers. Keep mixed-mode diagnostics separate
+from fixed-artifact baseline/candidate timing reports. With
+`MHP3RD_CHECK_DECODE=1`, any `[sparse-decode-check] referenced vertex differs`
+is a failure. Require positive `[sparse-decode-check] N draws compared, 0 differed`
+progress before claiming that the gather checker ran. Comparisons are too
+expensive for performance measurements. Interpolated 45/60/90/120 FPS rendering
+retains its full spans and receives no sparse-decoding performance claim.
+
 Build `mhp3rd_render_tests` and run it through CTest: it checks, without a GPU or game data, that the index lists transformed draws are now drawn with name exactly the vertices the old expansion wrote, in the same order.
 
 The speed changes each have an off switch that restores the old path: `MHP3RD_NO_DIRECT_VERTICES`, `MHP3RD_NO_LOOKUP_CACHE`, `MHP3RD_NO_BUFFER_REUSE` and `MHP3RD_NO_DRAW_MERGE`. When a frame looks wrong, run once with all four set: if the fault goes away, set them one at a time to find the change behind it, and report which. `MHP3RD_CHECK_DIRECT_VERTICES=1` compares every transformed draw with the old expansion while playing and prints `[direct-check] N draws compared, M differed`; M must stay 0.
@@ -533,3 +567,11 @@ shortcuts are diagnostic only.
 The font-spacing contracts in `mhp3rd_kernel_hle_tests` use an independently authored narrow glyph with Latin, Cyrillic and Japanese mappings. They verify wider half-width ink, unchanged full-width metrics/line height, cell bounds, bitmap/metric agreement, Sharp Text cell generation and the diagnostic opt-out. Manual comparisons must use the same font, text, internal resolution and game frame.
 
 - Touch menu footer: real SDL finger and touch-emulated mouse events replace the menu's bottom key hints with a bottom-right Close Menu button and hide the tab-switch caps, allowing the tab strip to fill the row. Renderer/UI contracts verify its bounds, cancelled drags, tap-to-resume, and restoration of keyboard/mouse/gamepad hints. The touch UI mode retains a window capture for inspection. Actual Android display and input hardware remain a manual check.
+
+The three `mhp3rd_renderer_plain_alpha_{normal,legacy,refused}_tests` reuse the
+bounded primitive/opacity contracts in forced compatibility mode. They cover
+alpha rejection, exact RGBA, sampled textures, depth writes/occlusion, rollback
+and rejection of the optional alpha-free pipeline. The refused case must log
+its fallback to the original plain shader. Public shader-tool tests inspect
+SPIR-V instructions: the alpha-free variant contains neither `OpKill` nor
+specialization constants, while the tested plain variant retains `OpKill`.

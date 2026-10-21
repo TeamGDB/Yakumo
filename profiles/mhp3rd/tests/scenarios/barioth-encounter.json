@@ -1,0 +1,20 @@
+{
+  "id": "barioth-encounter", "build": "dev", "execution": "automatic", "seconds": 180,
+  "description": "Prepare original quest 507 beside its actual Barioth, without manually finding the monster.",
+  "prerequisites": ["Developer native AOT artifact and all 355 compatible overlays", "Explicit device-test observations", "Copied character/settings; offline, no DATA.BIN mods or held quest cheats", "Finite load-character fixture"],
+  "steps": [
+    {"fixture": "load-character"},
+    {"wait": "\\[overlay\\] installed P_v00a00d", "fresh": false, "timeout": 50},
+    {"debug": "encounter start barioth"},
+    {"wait": "\\[debug\\] encounter .*\"phase\":\"ready\"", "timeout": 65},
+    {"debug": "observe 330 perf"},
+    {"wait": "\\[debug\\] observation .*\"active_id\":507", "timeout": 10},
+    {"capture": "barioth-ready"},
+    {"debug": "encounter cancel"},
+    {"wait": "\\[debug\\] encounter .*\"phase\":\"idle\"", "timeout": 10}
+  ],
+  "review": [
+    {"id": "barioth-identity", "expect": "Barioth is visibly loaded in the original Tundra environment beside the hunter. Inspect the actual model and camera; projection/readback alone cannot rule out occlusion."},
+    {"id": "barioth-combat", "expect": "Normal monster AI, attacks, hunter physics, terrain, snow/effects and camera work. Original small-monster population remains. A setup acknowledgement or camp view is insufficient."}
+  ]
+}

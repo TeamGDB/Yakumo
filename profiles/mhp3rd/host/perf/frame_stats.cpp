@@ -59,7 +59,7 @@ Alternate &alternate() {
         if (text == nullptr) return result;
         const std::string names = std::string(",") + text + ",";
         const char *known[] = {"direct", "lookup", "reuse", "merge", "store", "decode", "alpha", "uploads", "clearload",
-            "gpudecode", "texturedecode", "opaque"};
+            "gpudecode", "texturedecode", "opaque", "sparse"};
         static_assert(sizeof(known) / sizeof(known[0]) == static_cast<std::size_t>(NewPath::Count));
         for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(NewPath::Count); ++i)
             if (names.find(std::string(",") + known[i] + ",") != std::string::npos) result.paths |= 1u << i;
@@ -134,6 +134,7 @@ struct State {
     float refresh_hz{};
     std::array<float, kHistoryFrames> history{};
     std::size_t cursor{};
+    std::uint64_t present_sequence{};
 };
 
 State &state() {
@@ -432,6 +433,7 @@ void count_present() {
     s.last_present = now;
     s.history[s.cursor] = static_cast<float>(present_ms);
     s.cursor = (s.cursor + 1u) % kHistoryFrames;
+    ++s.present_sequence;
     ++s.presents;
     s.present_sum_ms += present_ms;
     s.present_max_ms = std::max(s.present_max_ms, present_ms);
@@ -585,6 +587,10 @@ const std::array<float, kHistoryFrames> &frame_history() {
 }
 std::size_t history_cursor() {
     return state().cursor;
+}
+
+std::uint64_t history_sequence() {
+    return state().present_sequence;
 }
 
 } // namespace mhp3rd::perf

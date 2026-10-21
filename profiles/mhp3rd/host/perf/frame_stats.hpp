@@ -145,7 +145,7 @@ struct Summary {
 // turned off every other second, so one run measures them against the paths
 // they replaced under the same load. Each [perf] line ends in "alt on" or
 // "alt off" for the second it covers. Names: direct, lookup, reuse, merge,
-// store, decode, alpha, uploads, clearload, gpudecode, texturedecode, opaque.
+// store, decode, alpha, uploads, clearload, gpudecode, texturedecode, opaque, sparse.
 enum class NewPath : std::uint8_t {
     Direct,
     Lookup,
@@ -159,6 +159,7 @@ enum class NewPath : std::uint8_t {
     GpuDecode,
     TextureDecode,
     Opaque,
+    Sparse,
     Count
 };
 // True while `path` is to take its old route this second.
@@ -217,5 +218,8 @@ private:
 inline constexpr std::size_t kHistoryFrames = 192u;
 [[nodiscard]] const std::array<float, kHistoryFrames> &frame_history();
 [[nodiscard]] std::size_t history_cursor();
+// Monotonic present sequence for collecting the rolling history without
+// duplicating overlapping readbacks. Pauses do not reset this sequence.
+[[nodiscard]] std::uint64_t history_sequence();
 
 } // namespace mhp3rd::perf

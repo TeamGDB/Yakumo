@@ -244,7 +244,9 @@ class Session:
                 text = complete[offset:]
                 if re.search(r'FATAL EXCEPTION|Fatal signal|VK_ERROR_DEVICE_LOST|\[script\] unknown |\[debug\] (?:not started|refused)', complete):
                     raise checks.CheckFailed('Game crash, device loss or rejected scripted input')
-                for line in text.splitlines():
+                for line in text.splitlines(keepends=True):
+                    if not line.endswith('\n'):
+                        continue
                     marker = '[debug] observation '
                     if marker in line:
                         sample = json.loads(line.split(marker, 1)[1])

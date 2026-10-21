@@ -7,6 +7,7 @@
 #include <sstream>
 #include <bit>
 #include <cmath>
+#include <cstring>
 #include <iostream>
 #include <vector>
 
@@ -289,6 +290,229 @@ void draws() {
     execute(ge, m, bad);
     expect(calls == 2, "empty/out-of-range draws are skipped");
 }
+
+void sparse_skinned_draws() {
+    const bool optimized =
+        std::getenv("MHP3RD_NO_FAST_DECODE") == nullptr && std::getenv("MHP3RD_NO_SPARSE_VERTEX_DECODE") == nullptr;
+    const std::array<std::uint16_t, 6> source{63u, 3u, 31u, 3u, 63u, 0u};
+    // Every case overwrites all declared vertex fields and indices. Reuse the
+    // guest address space instead of zeroing gigabytes across the format matrix.
+    psprecomp::GuestMemory memory;
+    for (std::uint32_t weight = 1u; weight <= 3u; ++weight)
+        for (std::uint32_t normal = 0u; normal <= 3u; ++normal)
+            for (std::uint32_t position = 1u; position <= 3u; ++position)
+                for (std::uint32_t index_type = 1u; index_type <= 3u; ++index_type) {
+                    const auto type = 3u | (7u << 2u) | (normal << 5u) | (position << 7u) | (weight << 9u) |
+                        (index_type << 11u) | (1u << 14u);
+                    const auto format = vertex_format(type);
+                    std::array<float, 96> bones{};
+                    bones[0] = bones[4] = bones[8] = 1.0f;
+                    bones[9] = 10.0f;
+                    bones[12] = 2.0f;
+                    bones[16] = 3.0f;
+                    bones[20] = 4.0f;
+                    bones[21] = 20.0f;
+                    bones[22] = 2.0f;
+                    bones[23] = 4.0f;
+                    for (std::uint32_t i = 0; i < 65u; ++i) {
+                        const auto at = vertices + i * format.stride;
+                        if (weight == 1u) {
+                            memory.store8(at, 32u);
+                            memory.store8(at + 1u, 96u);
+                        }
+                        if (weight == 2u) {
+                            memory.store16(at, 8192u);
+                            memory.store16(at + 2u, 24576u);
+                        }
+                        if (weight == 3u) {
+                            memory.store32(at, std::bit_cast<std::uint32_t>(0.25f));
+                            memory.store32(at + 4u, std::bit_cast<std::uint32_t>(0.75f));
+                        }
+                        memory.store32(at + format.color_offset, 0x80604020u + i);
+                        memory.store32(at + format.texcoord_offset, std::bit_cast<std::uint32_t>(i * 0.25f));
+                        memory.store32(
+                            at + format.texcoord_offset + 4u, std::bit_cast<std::uint32_t>(0.5f - i * 0.125f));
+                        for (std::uint32_t axis = 0; axis < 3u; ++axis) {
+                            const auto value = static_cast<std::int32_t>(i) + static_cast<std::int32_t>(axis) * 3 - 16;
+                            const auto n = static_cast<std::int32_t>(axis) * 12 - 12;
+                            const auto put = [&](std::uint32_t field, std::uint32_t kind, std::int32_t number) {
+                                if (kind == 1u) memory.store8(at + field + axis, static_cast<std::uint8_t>(number));
+                                if (kind == 2u)
+                                    memory.store16(at + field + axis * 2u, static_cast<std::uint16_t>(number));
+                                if (kind == 3u)
+                                    memory.store32(
+                                        at + field + axis * 4u, std::bit_cast<std::uint32_t>(number * 0.125f));
+                            };
+                            put(format.position_offset, position, value);
+                            if (normal) put(format.normal_offset, normal, n);
+                        }
+                    }
+                    const auto put_index = [&](std::uint32_t i, std::uint16_t value) {
+                        if (index_type == 1u) memory.store8(indices + i, static_cast<std::uint8_t>(value));
+                        if (index_type == 2u) memory.store16(indices + i * 2u, value);
+                        if (index_type == 3u) memory.store32(indices + i * 4u, value);
+                    };
+                    for (std::uint32_t i = 0; i < source.size(); ++i) put_index(i, source[i]);
+                    for (std::uint32_t i = 0; i < 3u; ++i) put_index(6u + i, static_cast<std::uint16_t>(i));
+                    std::vector<Vertex> full;
+                    decode_vertices(memory, vertices, type, 65u, full, bones.data());
+                    auto words = setup(type);
+                    words.push_back(command(2, indices & 0xffffffu));
+                    words.push_back(command(0x2a, 0));
+                    for (auto value : bones) words.push_back(command(0x2b, f24(value)));
+                    words.push_back(command(4, (3u << 16u) | 6u));
+                    words.push_back(command(4, (3u << 16u) | 3u));
+                    GeState ge;
+                    std::vector<DrawCall> calls;
+                    ge.set_draw_sink([&](const DrawCall &draw) { calls.push_back(draw); });
+                    execute(ge, memory, words);
+                    expect(calls.size() == 2u, "sparse and following dense primitive both draw");
+                    if (calls.size() != 2u) continue;
+                    const auto &draw = calls[0];
+                    expect(draw.vertices.size() == (optimized ? 4u : 64u),
+                        "sparse skinning decodes only unique referenced vertices; rollback restores full span");
+                    expect(draw.primitive_count == 6u && draw.indices.size() == 6u &&
+                            ge.vertex_count() == (optimized ? 7u : 67u),
+                        "primitive consumption stays unchanged while the GE counter reports actual decoded work");
+                    for (std::size_t i = 0; i < source.size(); ++i) {
+                        expect(draw.indices[i] < draw.vertices.size(), "compacted index stays inside decoded vertices");
+                        if (draw.indices[i] >= draw.vertices.size()) continue;
+                        const auto &actual = draw.vertices[draw.indices[i]];
+                        expect(std::memcmp(&actual, &full[source[i]], sizeof(Vertex)) == 0,
+                            "all referenced attributes/skinning are bit-identical to the original full-span decoder");
+                        const float raw_x = static_cast<float>(source[i]) - 16.0f;
+                        const float scale =
+                            position == 1u ? 1.0f / 128.0f : (position == 2u ? 1.0f / 32768.0f : 0.125f);
+                        expect(near(actual.position[0], 1.75f * raw_x * scale + 17.5f) &&
+                                actual.color == 0x80604020u + source[i] && near(actual.texcoord[0], source[i] * 0.25f),
+                            "independently specified transformed position, colour and UV retain original draw order");
+                    }
+                    expect(calls[1].vertices.size() == 3u &&
+                            calls[1].index_address ==
+                                indices + 6u * (index_type == 1u ? 1u : (index_type == 2u ? 2u : 4u)),
+                        "the following dense draw consumes the original index stream");
+                    for (bool raw_check : {false, true}) {
+                        GeState raw;
+                        raw.set_raw_vertices(true, raw_check);
+                        raw.set_draw_sink([&](const DrawCall &call) {
+                            if (call.primitive_count != 6u) return;
+                            expect(call.raw_count == 64u && call.raw_vertices != nullptr &&
+                                    call.vertices.size() == (raw_check ? 64u : 0u),
+                                "raw GPU and checked raw decoding retain contiguous source/count/index semantics");
+                        });
+                        execute(raw, memory, words);
+                    }
+                    for (std::uint32_t i = 0; i < source.size(); ++i) put_index(i, source[i] + 1u);
+                    execute(ge, memory, words);
+                    expect(calls.size() == 4u, "moving the whole index window retains both primitives");
+                    if (calls.size() == 4u)
+                        for (std::size_t i = 0; i < source.size(); ++i)
+                            expect(calls[2].indices[i] < calls[2].vertices.size() &&
+                                    std::memcmp(&calls[2].vertices[calls[2].indices[i]], &full[source[i] + 1u],
+                                        sizeof(Vertex)) == 0,
+                                "shifted source window still decodes the exact referenced vertices");
+                    GeState temporal;
+                    bool preserve = true;
+                    temporal.set_draw_sink([&](const DrawCall &call) {
+                        if (call.primitive_count != 6u) return;
+                        expect(call.vertices.size() == (preserve ? 64u : (optimized ? 4u : 64u)),
+                            "temporal replay retains full spans and ordinary rendering restores compaction");
+                        if (preserve && call.vertices.size() == 64u)
+                            expect(std::memcmp(&call.vertices[10], &full[11], sizeof(Vertex)) == 0,
+                                "an unreferenced current vertex remains available to interpolate an older frame");
+                    });
+                    temporal.set_skinning_replay(true);
+                    execute(temporal, memory, words);
+                    preserve = false;
+                    temporal.set_skinning_replay(false);
+                    execute(temporal, memory, words);
+                }
+}
+
+void sparse_boundaries() {
+    const bool optimized =
+        std::getenv("MHP3RD_NO_FAST_DECODE") == nullptr && std::getenv("MHP3RD_NO_SPARSE_VERTEX_DECODE") == nullptr;
+    for (unsigned mode = 0; mode < 4u; ++mode) {
+        psprecomp::GuestMemory memory;
+        const std::uint32_t address = mode == 1u ? 0x041FFFF0u : 0x08100000u;
+        const std::uint32_t count = mode == 0u ? 65536u : 64u;
+        const auto type =
+            (1u << 9u) | (3u << 7u) | (2u << 11u) | (mode == 2u ? 1u << 18u : 0u) | (mode == 3u ? 1u << 23u : 0u);
+        const auto format = vertex_format(type);
+        const auto stride = format.stride * (mode == 2u ? 2u : 1u);
+        const std::array<std::uint16_t, 4> source{
+            static_cast<std::uint16_t>(count - 1u), 16u, static_cast<std::uint16_t>(count - 1u), 0u};
+        for (unsigned i = 0; i < source.size(); ++i) {
+            const auto at = address + source[i] * stride;
+            memory.store8(at, 128u);
+            floats(memory, at + format.position_offset, source[i] * 0.125f, 2, -3);
+            memory.store16(indices + i * 2u, source[i]);
+        }
+        auto words = setup(type);
+        words[0] = command(0x10, mode == 1u ? 0x040000u : 0x080000u);
+        words[2] = command(1, address & 0xffffffu);
+        words.push_back(command(0x10, 0x080000u));
+        words.push_back(command(2, indices & 0xffffffu));
+        words.push_back(command(0x2a, 0));
+        for (unsigned i = 0; i < 96u; ++i)
+            words.push_back(command(0x2b, f24(i == 0u || i == 4u || i == 8u ? 1.0f : (i == 9u ? 7.0f : 0.0f))));
+        words.push_back(command(4, (4u << 16u) | 4u));
+        GeState ge;
+        DrawCall draw;
+        ge.set_draw_sink([&](const DrawCall &call) { draw = call; });
+        execute(ge, memory, words);
+        expect(draw.indices.size() == 4u, "maximum legal index, mirrored EDRAM, morph and through draws remain valid");
+        const auto expected_count = optimized && mode == 0u ? 3u : count;
+        expect(
+            draw.vertices.size() == expected_count, "only contiguous single-morph transformed skinning is compacted");
+        for (unsigned i = 0; i < source.size() && draw.indices.size() == 4u; ++i) {
+            if (draw.indices[i] >= draw.vertices.size()) {
+                expect(false, "boundary index maps inside vertices");
+                continue;
+            }
+            const auto &v = draw.vertices[draw.indices[i]];
+            expect(near(v.position[0], source[i] * 0.125f + (mode == 3u ? 0.0f : 7.0f)) && near(v.position[1], 2) &&
+                    near(v.position[2], -3),
+                "boundary fallback and compact paths preserve actual indexed geometry and through semantics");
+        }
+    }
+}
+
+void sparse_fractional_skinning() {
+    psprecomp::GuestMemory memory;
+    const auto type = (3u << 9u) | (7u << 14u) | (3u << 5u) | (3u << 7u) | (2u << 11u);
+    const auto format = vertex_format(type);
+    const std::array<std::uint16_t, 6> source{63, 3, 31, 3, 63, 0};
+    std::array<float, 96> bones{};
+    auto words = setup(type);
+    words.push_back(command(2, indices & 0xffffffu));
+    words.push_back(command(0x2a, 0));
+    for (unsigned i = 0; i < bones.size(); ++i) {
+        const float value = (static_cast<int>(i % 11u) - 5) * 0.193f;
+        bones[i] = std::bit_cast<float>(std::bit_cast<std::uint32_t>(value) & 0xffffff00u);
+        words.push_back(command(0x2b, f24(bones[i])));
+    }
+    for (unsigned i = 0; i < 64u; ++i) {
+        const auto at = vertices + i * format.stride;
+        for (unsigned bone = 0; bone < 8u; ++bone)
+            memory.store32(at + bone * 4u, std::bit_cast<std::uint32_t>((bone % 3u) * 0.107f));
+        floats(memory, at + format.normal_offset, 0.071f, -0.231f, 0.413f);
+        floats(memory, at + format.position_offset, i * 0.137f - 9.17f, i * 0.371f - 2.71f, i * -0.113f + 3.19f);
+    }
+    for (unsigned i = 0; i < source.size(); ++i) memory.store16(indices + i * 2u, source[i]);
+    words.push_back(command(4, (3u << 16u) | 6u));
+    std::vector<Vertex> reference;
+    decode_vertices(memory, vertices, type, 64u, reference, bones.data());
+    GeState ge;
+    ge.set_draw_sink([&](const DrawCall &draw) {
+        expect(draw.indices.size() == source.size(), "fractional eight-bone mesh retains complete topology");
+        for (unsigned i = 0; i < source.size() && draw.indices.size() == source.size(); ++i)
+            expect(draw.indices[i] < draw.vertices.size() &&
+                    std::memcmp(&draw.vertices[draw.indices[i]], &reference[source[i]], sizeof(Vertex)) == 0,
+                "fractional matrices, weights, positions and normals preserve exact floating-point operation order");
+    });
+    execute(ge, memory, words);
+}
 void registers() {
     psprecomp::GuestMemory m;
     floats(m, vertices, 1, 2, 3);
@@ -441,6 +665,9 @@ int main() {
     vertex_formats();
     mirrored_vram_vertices_and_indices();
     draws();
+    sparse_skinned_draws();
+    sparse_boundaries();
+    sparse_fractional_skinning();
     registers();
     matrices_transfer_copy();
     if (checked) {
@@ -459,6 +686,8 @@ int main() {
             "comparison progress reports its real bounded successful milestone");
         expect(diagnostics.str().find(" differs over ") == std::string::npos,
             "fast and scalar decoding agree exactly across format and skinning contracts");
+        expect(diagnostics.str().find("[sparse-decode-check] referenced vertex differs") == std::string::npos,
+            "gathered vertices agree exactly with independently indexed full-span reference vertices");
     }
     std::cout << (failures ? "FAIL" : "PASS") << ": GE contracts (" << failures << " failures)\n";
     return failures ? 1 : 0;

@@ -43,6 +43,16 @@ if(MHP3RD_GENERATED)
     endif()
     message(STATUS "mhp3rd: camera rotation helper in ${MHP3RD_CAMERA_HELPER_UNIT}")
 
+    # Developer encounter setup wraps the game's initial-area choice. Locate
+    # its unit without coupling the host to one generated partition.
+    foreach(unit IN LISTS MHP3RD_GENERATED)
+        file(STRINGS "${unit}" encounter_hit REGEX "register_function\\(0x088BDEECu, &recomp_unit_[0-9]+," LIMIT_COUNT 1)
+        if(encounter_hit)
+            string(REGEX MATCH "recomp_unit_[0-9]+" MHP3RD_ENCOUNTER_HELPER_UNIT "${encounter_hit}")
+            break()
+        endif()
+    endforeach()
+
     # Hiding the HUD (host/gpu/game_hud.cpp) wraps the game's 2D functions the
     # same way, so their units are read from the corpus too, in one pass.
     set(MHP3RD_HUD_FUNCTIONS
@@ -99,7 +109,8 @@ if(MHP3RD_RENDERER)
             "kGeRawVertexShader=GE_RAW_VERTICES@${MHP3RD_PROFILE_DIR}/host/gpu/shaders/ge.vert"
             "kGeCheckVertexShader=GE_RAW_VERTICES,GE_CHECK_DECODE@${MHP3RD_PROFILE_DIR}/host/gpu/shaders/ge.vert"
             "kGeFragmentShader=${MHP3RD_PROFILE_DIR}/host/gpu/shaders/ge.frag"
-            "kGeFragmentShaderPlain=GE_NO_SPECIALIZATION@${MHP3RD_PROFILE_DIR}/host/gpu/shaders/ge.frag")
+            "kGeFragmentShaderPlain=GE_NO_SPECIALIZATION@${MHP3RD_PROFILE_DIR}/host/gpu/shaders/ge.frag"
+            "kGeFragmentShaderPlainAlphaFree=GE_NO_SPECIALIZATION,GE_NO_ALPHA_TEST@${MHP3RD_PROFILE_DIR}/host/gpu/shaders/ge.frag")
         if(ANDROID)
             # Pre-rotation of the finished frame for a display turned sideways.
             list(APPEND MHP3RD_SHADERS
@@ -398,17 +409,23 @@ if(MHP3RD_DEBUG_MENU AND NOT MHP3RD_RELEASE)
     target_sources(Yakumo PRIVATE
         host/debug/debug_console.cpp
         host/debug/debug_tools.cpp
+        host/debug/encounter.cpp
         host/debug/game_state.cpp
         host/debug/quest_start.cpp)
     if(MHP3RD_RENDERER)
         target_sources(Yakumo PRIVATE host/ui/debug_screen.cpp)
     endif()
     target_compile_definitions(Yakumo PRIVATE MHP3RD_DEBUG_MENU=1)
+    if(MHP3RD_ENCOUNTER_HELPER_UNIT)
+        target_compile_definitions(Yakumo PRIVATE MHP3RD_ENCOUNTER_HELPER_UNIT=${MHP3RD_ENCOUNTER_HELPER_UNIT})
+    endif()
     message(STATUS "mhp3rd: developer tools compiled in (shown with MHP3RD_DEBUG_MENU=1)")
 
     # The game's structures as the tools read and write them, on a buffer.
     add_executable(mhp3rd_debug_tools_tests
         tests/debug_tools_tests.cpp
+        tests/encounter_tests.cpp
+        host/debug/encounter.cpp
         host/debug/game_state.cpp
         host/debug/quest_start.cpp
         host/game/game_data.cpp)
@@ -783,11 +800,14 @@ if(PSPRECOMP_BUILD_TESTS)
     add_custom_target(mhp3rd_ge_state_slow_tests DEPENDS mhp3rd_ge_state_tests)
     add_test(NAME mhp3rd_ge_state_slow_tests COMMAND mhp3rd_ge_state_tests)
     set_tests_properties(mhp3rd_ge_state_slow_tests PROPERTIES ENVIRONMENT "MHP3RD_NO_FAST_DECODE=1")
+    add_custom_target(mhp3rd_ge_state_sparse_legacy_tests DEPENDS mhp3rd_ge_state_tests)
+    add_test(NAME mhp3rd_ge_state_sparse_legacy_tests COMMAND mhp3rd_ge_state_tests)
+    set_tests_properties(mhp3rd_ge_state_sparse_legacy_tests PROPERTIES ENVIRONMENT "MHP3RD_NO_SPARSE_VERTEX_DECODE=1")
     add_custom_target(mhp3rd_ge_state_checked_tests DEPENDS mhp3rd_ge_state_tests)
     add_test(NAME mhp3rd_ge_state_checked_tests COMMAND mhp3rd_ge_state_tests)
     set_tests_properties(mhp3rd_ge_state_checked_tests PROPERTIES
         ENVIRONMENT "MHP3RD_CHECK_DECODE=1;MHP3RD_TRACE_MATERIAL=1;MHP3RD_TRACE_LIGHTING=1;MHP3RD_TRACE_FB_TEXTURES=1"
-        TIMEOUT 30 FAIL_REGULAR_EXPRESSION "FAIL:;\\[decode-check\\].*differs over")
+        TIMEOUT 30 FAIL_REGULAR_EXPRESSION "FAIL:;\\[decode-check\\].*differs over;\\[sparse-decode-check\\].*differs")
 endif()
 
 add_executable(mhp3rd_texture_decode_tests
@@ -1138,7 +1158,7 @@ if(MHP3RD_RENDERER_TESTS)
     if(MHP3RD_DEBUG_MENU AND NOT MHP3RD_RELEASE)
         target_sources(mhp3rd_renderer_ui_tests PRIVATE
             host/debug/debug_console.cpp host/debug/debug_tools.cpp
-            host/debug/game_state.cpp host/debug/quest_start.cpp host/ui/debug_screen.cpp)
+            host/debug/encounter.cpp host/debug/game_state.cpp host/debug/quest_start.cpp host/ui/debug_screen.cpp)
         target_compile_definitions(mhp3rd_renderer_ui_tests PRIVATE MHP3RD_DEBUG_MENU=1)
     endif()
     add_dependencies(mhp3rd_renderer_ui_tests mhp3rd_shaders mhp3rd_version)
@@ -1213,6 +1233,20 @@ if(MHP3RD_RENDERER_TESTS)
             COMMAND mhp3rd_renderer_ui_tests --primitives)
         set_tests_properties(mhp3rd_renderer_trivial_alpha_legacy_tests PROPERTIES
             TIMEOUT 90 ENVIRONMENT "MHP3RD_NO_TRIVIAL_ALPHA_VARIANTS=1")
+        # Compatibility keeps specialization constants disabled. Exercise its
+        # alpha-free shader, exact rollback and rejected-pipeline fallback on
+        # the same independent alpha/depth/texture pixel contracts.
+        foreach(plain_case IN ITEMS normal legacy refused)
+            set(plain_test "mhp3rd_renderer_plain_alpha_${plain_case}_tests")
+            add_custom_target(${plain_test} DEPENDS mhp3rd_renderer_ui_tests)
+            add_test(NAME ${plain_test} COMMAND mhp3rd_renderer_ui_tests --primitives)
+            set_tests_properties(${plain_test} PROPERTIES TIMEOUT 45 ENVIRONMENT "MHP3RD_GPU_COMPAT=on")
+        endforeach()
+        set_tests_properties(mhp3rd_renderer_plain_alpha_legacy_tests PROPERTIES
+            ENVIRONMENT "MHP3RD_GPU_COMPAT=on;MHP3RD_NO_PLAIN_ALPHA_VARIANTS=1")
+        set_tests_properties(mhp3rd_renderer_plain_alpha_refused_tests PROPERTIES
+            ENVIRONMENT "MHP3RD_GPU_COMPAT=on;MHP3RD_GPU_FAIL_PIPELINES=plain-alpha-free"
+            PASS_REGULAR_EXPRESSION "alpha-free plain pipeline refused.*using the original plain shader")
         # Documented rollback paths must preserve the same independent pixel contracts.
         add_custom_target(mhp3rd_renderer_ui_legacy_tests DEPENDS mhp3rd_renderer_ui_tests)
         add_test(NAME mhp3rd_renderer_ui_legacy_tests COMMAND mhp3rd_renderer_ui_tests)

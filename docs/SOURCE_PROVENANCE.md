@@ -49,6 +49,18 @@ A profile owns its generated AOT corpus, address-specific lowering, HLE behavior
 
 `profiles/mhp3rd/host/camera/` was written from this project's own NPJB-40001 executable analysis and run-time traces. The camera caller, structure offsets, 16-bit yaw format and height-filter coefficient are observed facts. Continuous pitch uses an independently written spherical-orbit calculation. No third-party camera-mod code is included or adapted.
 
+## Developer encounters
+
+`host/debug/encounter.*` was independently written from this project's private
+NPJB-40001 executable analysis, actor-table write traces and bounded copied-save
+quest runs. Initial-area choice, the twenty-slot actor manager, spawn-record
+offsets, Barioth's model accessor/PMO header and hunter transform fields are
+observed format/address facts. Bounded normal quest abandonment also traced
+the game's Barioth/base actor destructors and verified village cleanup without
+save writes. The preset retains original quest/resource/AI
+lifecycle; no third-party spawn/cheat implementation or game-derived corpus is
+included. Public tests construct independent synthetic RAM and model headers.
+
 ## Third-party components
 
 Third-party source, binary dependencies, shader code and notices stay beside the profile that needs them. Their original copyright and license notices must be preserved.
@@ -70,3 +82,14 @@ Released builds carry these notices in `profiles/mhp3rd/packaging/THIRD_PARTY_NO
 ## Contribution rule
 
 Do not paste or adapt source from a project whose license is incompatible with the destination file. Reimplement required behavior from specifications, observations or independently documented semantics, and record the source of third-party material when it is intentionally included under a compatible license.
+
+## Plain fragment alpha variants
+
+The compatibility alpha-free shader independently modifies this repository's
+`ge.frag`; no external implementation was copied. Khronos SPIR-V instruction
+facts (`OpKill` and specialization constants) are used by the binary regression
+check. Arm's [Bifrost performance-counter documentation](https://developer.arm.com/community/arm-community-blogs/b/mobile-graphics-and-gaming-blog/posts/mali-bifrost-family-performance-counters)
+explains why shader-dependent coverage can prevent an early depth/stencil
+update. This motivates testing a no-discard variant; actual device measurements
+and their limits belong in [COMPATIBILITY.md](COMPATIBILITY.md). Hardware counter
+behavior is not inferred solely from a shader's source.
