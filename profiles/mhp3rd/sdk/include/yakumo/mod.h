@@ -491,6 +491,33 @@ typedef struct ymod_quest {
     uint32_t monster_count;
     ymod_quest_texts texts;
 } ymod_quest;
+/* --------------------------------------------------------------------------
+ * "yakumo.equipment" 1: weapons mods add. A weapon starts from one of the
+ * game's of its class (its attack, element, sharpness, slots, rarity and
+ * upgrades) and has its own model, name, description and price
+ * (docs/EQUIPMENT_MODS.md). Call add_weapon() from yakumo_mod_main.
+ */
+#define YMOD_EQUIPMENT "yakumo.equipment"
+typedef struct ymod_weapon {
+    uint32_t size;           /* set to sizeof(ymod_weapon) before passing one */
+    const char *id;          /* the mod's name for it */
+    const char *kind;        /* its class: "great_sword", "sword_and_shield", "hammer", "lance", "heavy_bowgun",
+                                "light_bowgun", "long_sword", "switch_axe", "gunlance", "bow", "dual_blades",
+                                "hunting_horn" */
+    int32_t based_on;        /* the game's weapon of that class it starts from, by its id there (from 1) */
+    const char *model;       /* a path in the mod's folder: its model pack (model, skeleton, textures) */
+    const char *name;        /* NUL-terminated UTF-8 */
+    const char *description; /* "\n" for a new line */
+    uint32_t price;          /* 0: the base's */
+    int32_t give;            /* 1: put one in the equipment box when the village loads, if there is none */
+} ymod_weapon;
+typedef struct ymod_equipment {
+    uint32_t version;
+    uint32_t size;
+    /* Adds a weapon: its id in its class, or -1 (the reason is in the log). */
+    int32_t (*add_weapon)(ymod_mod *mod, const ymod_weapon *weapon);
+} ymod_equipment;
+
 typedef struct ymod_quests {
     uint32_t version;
     uint32_t size;

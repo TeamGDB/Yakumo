@@ -3,6 +3,7 @@
 // functions, and logs what it sees; the guest code runs through the JIT.
 #include "mods/mod_library.hpp"
 #include "mods/mhp3rd_added_files.hpp"
+#include "mods/mhp3rd_equipment.hpp"
 #include "mods/mhp3rd_monsters.hpp"
 #include "mods/mod_native.hpp"
 #include "mods/mhp3rd_quests.hpp"
@@ -11,6 +12,7 @@
 
 #include "yakumo/mod.h"
 
+#include "game/game_data.hpp"
 #include "game/guest_ram.hpp"
 #include "game/quest_builder.hpp"
 #include "game/quest_file.hpp"
@@ -723,6 +725,126 @@ std::vector<std::uint8_t> small_pmo(std::uint16_t meshes) {
     return pmo;
 }
 
+// Weapons mods add: a row of the class's table, its model through the
+// model-to-file code, its name and description in the text block, and one in
+// the box once the village loads; on stand-ins for the game's code and data.
+void test_equipment(psprecomp::Runtime &runtime) {
+    namespace equipment = mhp3rd::mods::equipment;
+    namespace tables = mhp3rd::mods::tables;
+    tables::reset_for_tests();
+    equipment::reset_for_tests();
+    mhp3rd::mods::added::reset_for_tests();
+    loader_stand_ins(runtime);
+    tables::write_traced_code_for_tests(runtime, "weapon.great_sword");
+    auto &memory = runtime.memory();
+    // Great sword 3: model 0x1D, rarity 2, price 1000, description 3.
+    constexpr std::uint32_t kSwords = 0x08997AA0u;
+    for (std::uint32_t i = 0; i < 92u * 28u; i += 4u) memory.store32(kSwords + i, 0u);
+    memory.store16(kSwords + 3u * 28u, 0x1Du);
+    memory.store8(kSwords + 3u * 28u + 2u, 2u);
+    memory.store32(kSwords + 3u * 28u + 4u, 1000u);
+    memory.store32(kSwords + 3u * 28u + 8u, 0x005A010Au);
+    memory.store16(kSwords + 3u * 28u + 0x18u, 3u);
+    memory.store16(0x089CD1F8u, 40u); // the class's models
+    // The text block: table 5 the names (92), table 6 the descriptions (60).
+    constexpr std::uint32_t kBlock = 0x08A40640u;
+    const auto make_table = [&memory](std::uint32_t at, std::uint32_t rows, const char *prefix) {
+        std::uint32_t text = at + 4u * (rows + 1u);
+        for (std::uint32_t i = 0; i < rows; ++i) {
+            memory.store32(at + 4u * i, text - at);
+            const std::string s = prefix + std::to_string(i);
+            for (const char c : s) memory.store8(text++, static_cast<std::uint8_t>(c));
+            memory.store8(text++, 0u);
+        }
+        memory.store32(at + 4u * rows, 0xFFFFFFFFu);
+    };
+    make_table(kBlock + 0x1000u, 92u, "Sword ");
+    make_table(kBlock + 0x2000u, 60u, "About ");
+    memory.store32(kBlock + 5u * 4u, 0x1000u);
+    memory.store32(kBlock + 6u * 4u, 0x2000u);
+    // The model-to-file code: the model in a1, the class in s0; a model past
+    // the count gives 0xDEAD, any other the class's first file plus it.
+    store(runtime, 0x088A59DCu,
+        {0x34030028u, 0u, 0x00A3102Bu, 0x1040000Eu, 0u, 0x340805D1u, 0u, 0u, 0u, 0u, 0x00A82021u, 0x3082FFFFu,
+            0x03E00008u, 0u});
+    store(runtime, 0x088A5A24u, {0x3402DEADu, 0x03E00008u, 0u});
+
+    const std::filesystem::path folder = std::filesystem::temp_directory_path() / "yakumo_weapon_test";
+    std::filesystem::create_directories(folder);
+    std::ofstream(folder / "blade.pac", std::ios::binary) << "BLADE";
+    ymod_mod *mod = mhp3rd::mods::native::add_mod("test.weapons", "Weapon test", folder.string());
+    const auto *service =
+        static_cast<const ymod_equipment *>(mhp3rd::mods::native::host()->service(mod, YMOD_EQUIPMENT, 1u));
+    ymod_weapon blade{sizeof(ymod_weapon), "black_blade", "great_sword", 3, "blade.pac", "Black Blade",
+        "A blade a mod added.", 1234u, 1};
+    check(service != nullptr && service->add_weapon(mod, &blade) == 92, "equipment: a weapon is added as the next id");
+    const std::optional<tables::Placement> swords = tables::placement("weapon.great_sword");
+    const std::uint32_t row = swords ? swords->address + 92u * 28u : 0u;
+    check(swords && swords->address != kSwords && swords->rows >= 93u && memory.load16(row) == 40u &&
+            memory.load8(row + 2u) == 2u && memory.load32(row + 4u) == 1234u && memory.load32(row + 8u) == 0x005A010Au,
+        "equipment: its record is the base's, with a model past the class's and its own price");
+    const auto file_for = [&runtime](std::uint32_t model) {
+        runtime.cpu().gpr[5] = model;
+        runtime.cpu().gpr[16] = 0u;
+        return call(runtime, 0x088A59DCu, 0u);
+    };
+    const std::uint32_t served = file_for(40u);
+    check(served >= mhp3rd::mods::added::kFirstFreeId && mhp3rd::mods::added::serves(served) &&
+            file_for(10u) == 1499u && file_for(41u) == 0xDEADu,
+        "equipment: its model gives its own file; the game's models and others past the count as before");
+    equipment::frame(runtime);
+    mhp3rd::game::GuestRam ram(memory);
+    check(mhp3rd::game::text_count(ram, kBlock, 5) == 93u &&
+            mhp3rd::game::text_entry(ram, kBlock, 5, 92u) == "Black Blade" &&
+            mhp3rd::game::text_entry(ram, kBlock, 5, 91u) == "Sword 91" &&
+            mhp3rd::game::text_entry(ram, kBlock, 6, 60u) == "A blade a mod added." &&
+            memory.load16(row + 0x18u) == 60u,
+        "equipment: its name at its id and its description, whose index the record keeps, are in the text block");
+    // The game loads the block again: the strings are put back.
+    memory.store32(kBlock + 5u * 4u, 0x1000u);
+    equipment::frame(runtime);
+    check(
+        mhp3rd::game::text_entry(ram, kBlock, 5, 92u) == "Black Blade", "equipment: and again when the block reloads");
+    // In the village with a character: one in the box, once.
+    for (std::uint32_t i = 0; i < 1000u * 12u; i += 4u) memory.store32(mhp3rd::game::kEquipmentBox + i, 0u);
+    memory.store8(mhp3rd::game::kEquipmentBox, 1u); // slot 0 taken
+    memory.store8(mhp3rd::game::kEquipmentBox + 1u, 5u);
+    memory.store16(mhp3rd::game::kEquipmentBox + 2u, 3u);
+    equipment::frame(runtime);
+    check(memory.load8(mhp3rd::game::kEquipmentBox + 12u) == 0u, "equipment: not given outside the village");
+    place_overlay(runtime, 0x0A05E600u, "lobby_task.ovl", 0x00200000u);
+    memory.store16(mhp3rd::game::kHunterName, 'A');
+    equipment::frame(runtime);
+    equipment::frame(runtime);
+    check(memory.load8(mhp3rd::game::kEquipmentBox + 12u) == 1u &&
+            memory.load8(mhp3rd::game::kEquipmentBox + 13u) == 5u &&
+            memory.load16(mhp3rd::game::kEquipmentBox + 14u) == 92u &&
+            memory.load8(mhp3rd::game::kEquipmentBox + 24u) == 0u,
+        "equipment: in the village, one is put in the first free slot of the box, once");
+    ymod_weapon taken = blade;
+    ymod_weapon unknown = blade;
+    unknown.id = "unknown";
+    unknown.kind = "spear";
+    ymod_weapon no_base = blade;
+    no_base.id = "no_base";
+    no_base.based_on = 92;
+    ymod_weapon no_model = blade;
+    no_model.id = "no_model";
+    no_model.model = "missing.pac";
+    ymod_weapon old{sizeof(std::uint32_t)};
+    check(service != nullptr && service->add_weapon(mod, &taken) == -1 &&
+            logged("weapon black_blade is not added: the id \"black_blade\" is taken or empty") &&
+            service->add_weapon(mod, &unknown) == -1 && service->add_weapon(mod, &no_base) == -1 &&
+            service->add_weapon(mod, &no_model) == -1 && service->add_weapon(mod, &old) == -1 &&
+            service->add_weapon(mod, nullptr) == -1,
+        "equipment: a taken id, an unknown class, a base past the class's, a missing model and short structs are refused");
+    std::error_code ec;
+    std::filesystem::remove_all(folder, ec);
+    equipment::reset_for_tests();
+    mhp3rd::mods::added::reset_for_tests();
+    tables::reset_for_tests();
+}
+
 void test_monsters(psprecomp::Runtime &runtime) {
     namespace monsters = mhp3rd::mods::monsters;
     namespace tables = mhp3rd::mods::tables;
@@ -1402,6 +1524,7 @@ int main() {
     test_quests(runtime);
     test_tables(runtime);
     test_monsters(runtime);
+    test_equipment(runtime);
 
     std::printf("%s\n", failures == 0 ? "all native mod checks passed" : "native mod checks FAILED");
     return failures == 0 ? 0 : 1;

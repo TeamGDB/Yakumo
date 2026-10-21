@@ -124,11 +124,11 @@
     "reason": "Script mod host declarations. mod_script*.cpp is covered by mhp3rd_script_mods_tests through the real Luau engine."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.h": {
-    "sha256": "2981f617ac089d450ccdd6f4100c8f5f6d42cb1d0ddb3d1236e1f0af2e27677f",
+    "sha256": "db478c02f0a66f06dee9e20da9bd910806204b7bc9ce46d7d43fa27dc4098178",
     "reason": "The C ABI of native mods: types, constants, function-pointer tables and the interface-version macro, no host code. The host implementation in mod_native*.cpp is covered by mhp3rd_native_mods_tests, which also loads a test mod declaring a newer interface."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.hpp": {
-    "sha256": "6744756cdb743602e7359e4789bb0ab64716b31cddedd5e3c854d9106c48133b",
+    "sha256": "f5cc172598dc1595b9bdbd854a5877db58e6a5452cd7ef216369ccf9edb3c86e",
     "reason": "Header-only C++ wrapper compiled into mod libraries, not into the host. It is exercised by the test mod and the SDK's native template, which mhp3rd_native_mods_tests loads and checks; yakumo::Monster wraps service functions those tests check through the C table."
   },
   "src/allegrex_semantics.hpp": {
@@ -144,7 +144,7 @@
     "reason": "Declarations of the drawing of mods' panels and overlays. mod_panels.cpp is covered by mhp3rd_renderer_ui_tests through the real interface."
   },
   "profiles/mhp3rd/host/mods/mod_native_internal.hpp": {
-    "sha256": "def03c97af7c04470906a98e10507c8ad20e1510aa2dfa10b1845d5ef5f3aa3e",
+    "sha256": "6ca4ebbdaedbf2a8383c37779a0b054d6a863307c332b8e329c4188ce7770b22",
     "reason": "The native mod host's internal state: aggregates, one inline cast and declarations shared by mod_native.cpp, mod_native_hooks.cpp and mod_native_services.cpp, which mhp3rd_native_mods_tests covers through real shared libraries."
   },
   "profiles/mhp3rd/host/mods/mod_script_internal.hpp": {
@@ -186,5 +186,13 @@
   "profiles/mhp3rd/host/game/quest_builder.hpp": {
     "sha256": "b0aa2bf133701af96bc484c5021097ab2bfddb9b51e0d1f771ecc0141c2a99fe",
     "reason": "Declarations only. quest_builder.cpp is covered by mhp3rd_quest_file_tests (the record, texts, monsters, tables and refusals) and mhp3rd_native_mods_tests (quests built through the quests service)."
+  },
+  "profiles/mhp3rd/host/mods/mhp3rd_equipment.hpp": {
+    "sha256": "7c06791481ca92ed89ae8bb2bfcd1a4229c00a12d52f75e9512f5b95b70724e9",
+    "reason": "Declarations only. mhp3rd_equipment.cpp is covered by mhp3rd_native_mods_tests (adding a weapon on stand-ins for the tables, model-to-file code and text block; refusals; giving one in the village)."
+  },
+  "profiles/mhp3rd/host/mods/mhp3rd_texts.hpp": {
+    "sha256": "b01bbd08352a3153836e540c74de80ddd3ab2d02ad2325ee17d3bbe7932410ce",
+    "reason": "Declarations only. mhp3rd_texts.cpp is covered by mhp3rd_native_mods_tests (names and descriptions placed in a stand-in text block, and again when it reloads)."
   }
 }

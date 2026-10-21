@@ -396,6 +396,25 @@ mod.quests()->add(mod.handle(), &quest); // the id, or -1 with the reason in the
 
 Add it at start, after the monsters it names. A built quest is a hunt with no rewards, supplies or small monsters yet, and its texts are the same in every language. A monster's `health(monster, now, most)` says when it has fallen, so a mod's behaviour can play its fall.
 
+## Weapons
+
+A native mod adds a weapon with `yakumo.equipment` ([EQUIPMENT_MODS.md](EQUIPMENT_MODS.md#weapons-mods-add)):
+
+```cpp
+ymod_weapon blade{sizeof(ymod_weapon)};
+blade.id = "black_blade";
+blade.kind = "great_sword";        // one of the twelve classes
+blade.based_on = 3;                // the game's great sword it starts from: its attack, element, sharpness, slots
+blade.model = "model/blade.pac";   // a pack of model, skeleton and textures
+blade.name = "Black Blade";
+blade.description = "Forged from a black dragon.";
+blade.price = 18000;
+blade.give = 1;                    // one in the equipment box when the village loads
+const int32_t id = mod.equipment()->add_weapon(mod.handle(), &blade); // its id in its class, or -1
+```
+
+Add it at start. Its stats are the base's for now; armor is to come.
+
 ## Panels and overlays
 
 A mod can draw in Yakumo's interface through `yakumo.ui` (native) or `yakumo.panel` and `yakumo.overlay` (scripts):

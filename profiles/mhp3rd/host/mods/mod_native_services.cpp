@@ -3,6 +3,7 @@
 #include "mods/mhp3rd_code_mods.hpp"
 #include "mods/mhp3rd_mod_format.hpp"
 #include "mods/mhp3rd_mods.hpp"
+#include "mods/mhp3rd_equipment.hpp"
 #include "mods/mhp3rd_monsters.hpp"
 #include "mods/mhp3rd_quests.hpp"
 #include "mods/mhp3rd_symbols.hpp"
@@ -275,19 +276,20 @@ std::uint32_t tables_extend(ymod_mod *mod, const char *name, std::uint32_t rows)
 
 // --- Monsters ---
 
-std::optional<std::vector<std::uint8_t>> mod_bytes(ymod_mod *mod, const char *relative, const char *what) {
+std::optional<std::vector<std::uint8_t>> mod_bytes(
+    ymod_mod *mod, const char *relative, const char *what, const char *thing = "monster") {
     if (relative == nullptr || *relative == '\0') {
-        report(mod, std::string("monster: no ") + what + " file given", true);
+        report(mod, std::string(thing) + ": no " + what + " file given", true);
         return std::nullopt;
     }
     const std::optional<std::filesystem::path> path = p3rd::mod_file(mod->folder, relative);
     if (!path) {
-        report(mod, std::string("monster: the ") + what + " file " + relative + " is not in the mod's folder", true);
+        report(mod, std::string(thing) + ": the " + what + " file " + relative + " is not in the mod's folder", true);
         return std::nullopt;
     }
     std::ifstream in(*path, std::ios::binary);
     std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    if (bytes.empty()) report(mod, std::string("monster: the ") + what + " file " + relative + " is empty", true);
+    if (bytes.empty()) report(mod, std::string(thing) + ": the " + what + " file " + relative + " is empty", true);
     return bytes.empty() ? std::nullopt : std::optional(std::move(bytes));
 }
 
@@ -487,6 +489,26 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
     return static_cast<int32_t>(quest->id);
 }
 
+int32_t equipment_add_weapon(ymod_mod *mod, const ymod_weapon *weapon) {
+    Runtime *runtime = state().runtime;
+    if (runtime == nullptr || mod == nullptr || mod->failed || weapon == nullptr ||
+        weapon->size < offsetof(ymod_weapon, give) + sizeof(weapon->give))
+        return -1;
+    const auto text = [](const char *s) { return std::string(s != nullptr ? s : ""); };
+    const auto refuse = [mod, weapon, &text](const std::string &why) {
+        report(mod, "weapon " + text(weapon->id) + " is not added: " + why, true);
+        return -1;
+    };
+    if (weapon->based_on <= 0 || weapon->based_on > 0xFFFF) return refuse("its base is not a weapon's id");
+    const std::optional<std::vector<std::uint8_t>> model = mod_bytes(mod, weapon->model, "model", "weapon");
+    if (!model) return -1;
+    equipment::WeaponSpec spec{text(weapon->id), text(weapon->kind), static_cast<std::uint16_t>(weapon->based_on),
+        *model, text(weapon->name), text(weapon->description), weapon->price, weapon->give != 0, mod->name};
+    std::string why;
+    const std::optional<std::uint16_t> id = equipment::add_weapon(*runtime, spec, &why);
+    return id ? int32_t{*id} : refuse(why);
+}
+
 const char *monsters_id_of(int32_t kind) {
     if (kind < 0 || kind > 0xFF) return nullptr;
     const std::string_view id = monsters::id_of(static_cast<std::uint8_t>(kind));
@@ -498,6 +520,8 @@ const char *monsters_id_of(int32_t kind) {
 const ymod_tables kTables{1u, sizeof(ymod_tables), &tables_find, &tables_get, &tables_extend};
 
 const ymod_quests kQuests{1u, sizeof(ymod_quests), &quests_add};
+
+const ymod_equipment kEquipment{1u, sizeof(ymod_equipment), &equipment_add_weapon};
 
 const ymod_monsters kMonsters{1u, sizeof(ymod_monsters), &monsters_add, &monsters_kind, &monsters_id_of,
     &monsters_behave, &monsters_play_motion, &monsters_motion_finished, &monsters_motion_frame, &monsters_at_frame,

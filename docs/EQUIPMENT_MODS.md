@@ -146,6 +146,21 @@ Checked by the files read for two great swords (`05F4`, `05DD`) and a long
 sword (`06B7`). The other classes follow the same code and were not loaded;
 bowguns and bows may use more files than one.
 
+## Weapons mods add
+
+A native mod adds a weapon of its own with `yakumo.equipment` ([MODDING.md](MODDING.md#weapons)): its class, the game's weapon of that class it starts from, its model, name, description and price. What it takes from the base is the base's record, its attack, element, sharpness, slots, rarity and upgrades as the game keeps them there; which field is which is not traced yet beyond the model number (`+0`), rarity (`+2`), price (`+4`) and the description's index (`+0x18`).
+
+What Yakumo does, and how it was found:
+
+| Step | How |
+| --- | --- |
+| The class's record table a row longer | Every place the executable forms one of the twelve tables' addresses is one of four getters (by field, by id, and by equipment record, `0x0885CB38` to `0x0885D8C8`); no overlay reads them. The tables are game tables (`weapon.great_sword` and the rest, [MODDING.md](MODDING.md#game-tables)), with as many rows as the class's name table has names: 92 great swords, 95 swords and shields, 94 hammers, 97 lances, 67 and 68 bowguns, 86 long swords, 72 switch axes, 78 gunlances, 81 bows, 83 dual blades, 86 hunting horns |
+| Its model | The model number is past the class's models (the counts above). `0x088A59CC` turns a weapon's model number into its file: it clamps the number below the class's count, then adds the class's first file. An instruction hook at `0x088A59E4` lets a mod's number through the clamp, and one at `0x088A5A08` gives it the mod's file, served as a file added from memory. A weapon file is a pack of a PMO model, a skeleton and textures, as a monster's model pack |
+| Its name and description | Added to the class's name and description tables of the main text block (`mods/mhp3rd_texts.cpp`): each table is copied with the strings after the game's, its offsets rebased, and the block's header pointed at the copy, once the block is loaded and again whenever the game loads it. The name lands at the weapon's id; the description's index goes into the record |
+| One in the box | When asked, once the village has loaded with a character, one in the first free slot of the equipment box unless the box holds one already |
+
+Checked in game (macOS): a test mod's great sword got id 92, its name and description showed in the developer tools' `table 5` and `table 6`, and one was put in the equipment box. Not checked yet: equipping it at the box and seeing its model on the hunter. A save that holds a mod's weapon needs the mod to load it: without the mod its id is past the table.
+
 ## Not verified
 
 - Weapon mods: the formula was checked against the files the game read, and
