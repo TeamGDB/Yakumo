@@ -71,8 +71,9 @@ struct Matching {
     // same mesh drawn more than once) it may have been mistaken for.
     std::uint32_t rejected{};
     std::uint32_t rejected_shared{};
-    float max_own_motion{};      // the largest own motion among the pairs kept
-    float max_rejected_motion{}; // the largest among those given up
+    std::uint32_t rejected_turns{}; // abrupt skinned local-basis changes held with the camera
+    float max_own_motion{};         // the largest own motion among the pairs kept
+    float max_rejected_motion{};    // the largest among those given up
     // Draws of a mesh drawn more than once that were given a nearer partner
     // than the one drawing order gave them (CutThresholds::nearest_instances).
     std::uint32_t repaired{};
@@ -119,6 +120,11 @@ struct CutThresholds {
     // pair up in drawing order, and that order can change. 0 turns the
     // guard off (MHP3RD_INTERPOLATION_NO_MOTION_GUARD).
     float max_own_motion{120.0f};
+    // Skinned vertices can counter-rotate when the game's local basis flips.
+    // Blending those coordinates collapses the mesh even with a valid world
+    // rotation. Hold the old pose through abrupt own turns, following only the
+    // camera, until the next original frame. Zero disables this guard.
+    float max_skinned_angle_degrees{120.0f};
     // Instances of one mesh (particles such as the hot spring's glints) are
     // paired by where they are, each with the nearest of the
     // newer frame's instances once the camera's motion is taken out, rather
@@ -205,9 +211,11 @@ private:
 
 // Blends two affine transforms: each basis vector keeps a length between the
 // two lengths while its direction turns (a normalised blend, close to a
-// rotation's slerp for the few degrees one game frame turns), and the
-// translation moves linearly. `t` = 0 gives `a`, 1 gives `b`.
-[[nodiscard]] Matrix blend_affine(const Matrix &a, const Matrix &b, float t) noexcept;
+// rotation's slerp for the few degrees one game frame turns). Large turns
+// follow a rigid rotation so opposite axes cannot cancel; false retains the
+// old normalized blend. Translation and scale move linearly.
+// `t` = 0 gives `a`, 1 gives `b`.
+[[nodiscard]] Matrix blend_affine(const Matrix &a, const Matrix &b, float t, bool stable_turns = true) noexcept;
 // a * b for column-major matrices.
 [[nodiscard]] Matrix multiply(const Matrix &a, const Matrix &b) noexcept;
 // Element-wise linear blend, for projections.
@@ -254,6 +262,7 @@ struct RigidMotion {
 // motion is blended in the older frame's eye space and the camera's motion
 // is followed along its arcs. A draw that stays put in eye space, like the
 // character the camera follows, stays put.
-[[nodiscard]] Matrix blend_eye(const Matrix &older, const Matrix &newer, const RigidMotion &camera, float t) noexcept;
+[[nodiscard]] Matrix blend_eye(
+    const Matrix &older, const Matrix &newer, const RigidMotion &camera, float t, bool stable_turns = true) noexcept;
 
 } // namespace mhp3rd::gpu::interpolation

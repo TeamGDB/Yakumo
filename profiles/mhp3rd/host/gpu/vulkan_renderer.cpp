@@ -1807,6 +1807,7 @@ struct VulkanRenderer::Impl {
         std::uint64_t flipbook_steps{};  // texture offsets not blended: a flipbook's step
         std::uint64_t followed{};        // draw calls without a partner moved with the camera only
         std::uint32_t rejected{};        // pairs given up: moved too far on their own
+        std::uint32_t rejected_turns{};  // sharp skinned basis changes held with the camera
         std::uint32_t rejected_shared{}; // of those, with other draws of the same mesh
         std::uint32_t repaired{};        // instances of a mesh given a nearer partner than drawing order's
         float max_own_motion{};
@@ -2450,6 +2451,8 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
     impl.sharp_screen = player.sharp_screen;
     impl.sharp_textures = player.sharp_textures;
     impl.trace_interpolation = std::getenv("MHP3RD_TRACE_INTERPOLATION") != nullptr;
+    if (std::getenv("MHP3RD_INTERPOLATION_LEGACY_TURNS") != nullptr)
+        impl.cut_thresholds.max_skinned_angle_degrees = 0.0f;
     if (std::getenv("MHP3RD_INTERPOLATION_NO_MOTION_GUARD") != nullptr) impl.cut_thresholds.max_own_motion = 0.0f;
     if (std::getenv("MHP3RD_INTERPOLATION_NO_NEAREST_INSTANCES") != nullptr)
         impl.cut_thresholds.nearest_instances = false;
@@ -8080,6 +8083,7 @@ void VulkanRenderer::Impl::finish_interpolated_frame(VkImage source, std::uint32
     if (matching.continued) ++stats.continued;
     stats.rejected += matching.rejected;
     stats.rejected_shared += matching.rejected_shared;
+    stats.rejected_turns += matching.rejected_turns;
     stats.repaired += matching.repaired;
     stats.max_own_motion = std::max(stats.max_own_motion, matching.max_own_motion);
     if (matching.camera_found) {
@@ -8336,6 +8340,7 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot, 
     // MHP3RD_INTERPOLATION_NO_FLIPBOOK_GUARD blends texture offsets up to
     // half the texture, as before; MHP3RD_INTERPOLATION_NO_MOTION_GUARD
     // leaves draws without a partner where the older frame drew them.
+    static const bool stable_turns = std::getenv("MHP3RD_INTERPOLATION_LEGACY_TURNS") == nullptr;
     static const bool flipbook_guard = std::getenv("MHP3RD_INTERPOLATION_NO_FLIPBOOK_GUARD") == nullptr;
     static const bool motion_guard = std::getenv("MHP3RD_INTERPOLATION_NO_MOTION_GUARD") == nullptr;
 
@@ -8392,13 +8397,13 @@ void VulkanRenderer::Impl::replay(VkCommandBuffer commands, std::uint32_t slot, 
                 changed = true;
             }
             if (!world_pair.same(from.world, to.world)) {
-                world = interpolation::blend_affine(from.world, to.world, t);
+                world = interpolation::blend_affine(from.world, to.world, t, stable_turns);
                 world_pair = {&from.world, &to.world};
                 eye_changed = true;
             }
             if (eye_changed) {
                 view_world = interpolation::blend_eye(interpolation::multiply(from.view, from.world),
-                    interpolation::multiply(to.view, to.world), camera_motion, t);
+                    interpolation::multiply(to.view, to.world), camera_motion, t, stable_turns);
                 changed = true;
             }
             if (changed) {
@@ -8567,6 +8572,7 @@ void VulkanRenderer::Impl::report_interpolation() {
             stats.repaired, stats.rejected, stats.rejected_shared, static_cast<double>(stats.max_own_motion),
             stats.blended != 0u ? static_cast<double>(stats.followed) / stats.blended : 0.0,
             stats.blended != 0u ? static_cast<double>(stats.flipbook_steps) / stats.blended : 0.0);
+        std::printf("[interp] skin turns: %u abrupt local-basis changes held with the camera\n", stats.rejected_turns);
         std::fflush(stdout);
     }
     const perf::Summary &summary = perf::last_second();
