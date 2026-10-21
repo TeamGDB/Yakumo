@@ -153,6 +153,12 @@ struct Settings {
     std::string adhoc_mac;                 // this player's virtual MAC, made up on first use
     std::vector<std::string> adhoc_recent; // sessions joined lately, the latest first
     std::uint32_t adhoc_host_port{27312};  // the built-in server's adhocctl port; the relay is on the next
+    // Lobby (lobby/reporter.hpp): the hunter's name and current equipment sent
+    // to a lobby dashboard when it enters a gathering hall. Off by default;
+    // the server is the dashboard's report address, host or host:port (8090).
+    bool lobby{};
+    std::string lobby_server;
+    std::string lobby_token; // the dashboard's shared secret, when one is set
 
     // Interface
     bool menu_pause{true};         // opening the menu pauses the game

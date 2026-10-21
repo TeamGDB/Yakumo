@@ -14,6 +14,7 @@
 #include "kernel/kernel.hpp"
 #include "camera/game_aspect.hpp"
 #include "camera/game_camera.hpp"
+#include "lobby/reporter.hpp"
 #include "settings/settings.hpp"
 #include "text/translation.hpp"
 
@@ -499,6 +500,7 @@ int main(int argc, char **argv) {
         // Quit from the menu, a closed window or the game ending: the network
         // threads stop here, while everything they use still exists.
         mhp3rd::adhoc_shutdown();
+        mhp3rd::lobby::shutdown();
         // "Set up game data again" in the in-game menu.
         if (mhp3rd::install::setup_requested_on_exit()) return mhp3rd::install::restart_for_setup(argv[0]);
         // "Restart now" after importing a save.
@@ -508,6 +510,7 @@ int main(int argc, char **argv) {
         return runtime.stop_reason().empty() ? 0 : 4;
     } catch (const std::exception &e) {
         mhp3rd::adhoc_shutdown();
+        mhp3rd::lobby::shutdown();
         std::cerr << "Yakumo error: " << e.what() << "\n";
         return 1;
     }

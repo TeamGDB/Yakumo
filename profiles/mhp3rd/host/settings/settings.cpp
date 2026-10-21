@@ -502,6 +502,21 @@ const std::vector<Field> &fields() {
                 return true;
             },
             [](const Settings &s) { return s.adhoc_mac; }, [](Settings &s, const char *t) { s.adhoc_mac = t; }},
+        {"network.lobby", "MHP3RD_LOBBY", [](Settings &s, const std::string &t) { return parse_bool(t, s.lobby); },
+            [](const Settings &s) { return std::string(s.lobby ? "1" : "0"); },
+            [](Settings &s, const char *t) { s.lobby = variable_flag(t); }},
+        {"network.lobby_server", "MHP3RD_LOBBY_SERVER",
+            [](Settings &s, const std::string &t) {
+                s.lobby_server = t;
+                return true;
+            },
+            [](const Settings &s) { return s.lobby_server; }, [](Settings &s, const char *t) { s.lobby_server = t; }},
+        {"network.lobby_token", "MHP3RD_LOBBY_TOKEN",
+            [](Settings &s, const std::string &t) {
+                s.lobby_token = t;
+                return true;
+            },
+            [](const Settings &s) { return s.lobby_token; }, [](Settings &s, const char *t) { s.lobby_token = t; }},
         {"ui.menu_pause", "MHP3RD_MENU_PAUSE",
             [](Settings &s, const std::string &t) { return parse_bool(t, s.menu_pause); },
             [](const Settings &s) { return std::string(s.menu_pause ? "1" : "0"); },
