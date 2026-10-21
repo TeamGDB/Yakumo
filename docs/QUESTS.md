@@ -74,6 +74,27 @@ When a save of downloaded quests exists, the game loads it instead of offering t
 
 `profiles/mhp3rd/tools/quests.py` lists the disc's quests, extracts a quest's payload from your own disc image, shows its fields and changes its id, name and large monsters.
 
+## Quests a mod describes
+
+A native mod can describe a quest instead of shipping a payload: `yakumo.quests` builds the payload (`game/quest_builder.cpp`) and serves it as a quest added from memory, at the counter and for the developer tools as above. A built quest is a hunt: its map, its large monsters (by id, the game's or a mod's) with the area and position each starts at and their levels, the objective, time, fee, reward, stars and texts. Nothing in it comes from a quest on the disc. Built that way, a quest in the arena (map 8) with a mod's monster loaded, spawned the monster with the health and size asked for, and showed the reward menu when the monster fell.
+
+What the builder writes, found by comparing the disc's 379 quests and changing one field at a time on a quest played in the arena:
+
+| Where | What |
+| --- | --- |
+| Header `+0x30` + 8 × *i* | Large monster *i*'s stats, up to five. The first word: its health level in the top byte (`0x1E` gave a Tigrex-based kind 5400 health, `0x0A` 1750; the game's hunts use `0x0A` to `0x34`) and its size in percent in the low half (`0x96`: 150); byte 2 not traced. The second word: its attack level in the low byte (`0x30` hit three times as hard as `0x13`), then two bytes not traced (`0x13` and `0x03` in most hunts) |
+| Header `+0x58`, `+0x5C` | The same two words for the small monsters |
+| Header `+0x24` | Three pointers (and a 0) to the small monsters' area index: eight bytes, then entries of 16 (two spawn lists, the area, 0) ended by a zero list. Empty, its second word must be `0x9999`: with 0 there the large monsters never came |
+| Header `+0x28` | Further spawn records (0x30 bytes each) ended by kind `0xFFFF` |
+| Header `+0x2C` | 52 bytes starting `FF FF 00 FF FF FF` in every quest looked at |
+| Header `+0x08`, `+0x1C`, `+0x60` | Rewards, gathering and supplies: lists of (weight, count or item, ...) the builder leaves empty (`FF`, `FF FF` and zeros), which the game took |
+| Record `+0x00` | The quest's kind (`4` a hunt, `1` slay, `2` deliver, `8` main monsters); `+0x27` the number of objectives, `+0x28` the first one's kind (1 hunt or slay, 2 deliver) |
+| Record `+0x0C` | A third of the reward in the game's hunts |
+| Record `+0x18` | Seven pointers, one per language, each to six pointers to the texts |
+| Record `+0x38` | 0, or the training quests' loadout |
+
+The large monsters' group and spawn records are as above; the builder writes the kinds to load once each.
+
 ## The quest lists
 
 The counter's lists for the village and the Guild Hall's ranks (entries 4059 to 4066) hold one record per quest: the quest record and its texts, copied from the quest's payload up to a table of seven pointers, one per language, each to six pointers to the name, objective, failure conditions, description, main monsters and client. `+0x18` of the record points to that table. All of these are offsets from the start of the list file, so a record moved into a list has them rebased; the Japanese strings are zeroed in this release's lists. These lists show only the quests the save has opened: a record under an id the save has not opened (219, an unused village id, was tried) stays hidden.

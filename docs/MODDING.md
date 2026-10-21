@@ -373,6 +373,29 @@ if (self.at_frame(40.0f)) self.attack(1, 6);
 
 More parts get names as the game's calls into a monster are traced; its name, quests and hit zones are to come, as building blocks of their own.
 
+## Quests
+
+A native mod describes a quest with `yakumo.quests`, and Yakumo builds it into the game's format and offers it among the event quests ([QUESTS.md](QUESTS.md#quests-a-mod-describes)):
+
+```cpp
+const ymod_quest_monster fatalis{"fatalis", 1, {200.0f, 1.0f, 1500.0f}, 0x2A, 0x28, 100}; // area, position, health, attack, size
+ymod_quest quest{sizeof(ymod_quest)};
+quest.id = 62666;           // 62000 to 65535
+quest.map = 8;              // the arena
+quest.stars = 8;
+quest.minutes = 50;
+quest.fee = 1500;
+quest.reward = 18000;
+quest.target = "fatalis";   // hunt `count` of it
+quest.count = 1;
+quest.monsters = &fatalis;
+quest.monster_count = 1;
+quest.texts = {"The Black Dragon", "Hunt the Fatalis", "Reward Zero\nTime Over", "...", "Fatalis", "Guild Master"};
+mod.quests()->add(mod.handle(), &quest); // the id, or -1 with the reason in the log
+```
+
+Add it at start, after the monsters it names. A built quest is a hunt with no rewards, supplies or small monsters yet, and its texts are the same in every language. A monster's `health(monster, now, most)` says when it has fallen, so a mod's behaviour can play its fall.
+
 ## Panels and overlays
 
 A mod can draw in Yakumo's interface through `yakumo.ui` (native) or `yakumo.panel` and `yakumo.overlay` (scripts):

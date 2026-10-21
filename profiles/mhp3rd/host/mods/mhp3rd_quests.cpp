@@ -1,5 +1,7 @@
 #include "mods/mhp3rd_quests.hpp"
 
+#include "mods/mhp3rd_added_files.hpp"
+
 #include "mods/mhp3rd_mod_format.hpp"
 #include "mods/mhp3rd_tables.hpp"
 #include "mods/mod_ini.hpp"
@@ -90,7 +92,61 @@ template <std::size_t N> bool code_as_traced(psprecomp::Runtime &runtime, const 
     return true;
 }
 
+// The hooks that give the game mods' quest files, and the event quest list
+// made long enough for them: once, then the list grows with each quest.
+bool attach(psprecomp::Runtime &runtime) {
+    State &s = state();
+    native::attach(runtime);
+    if (s.host == nullptr) s.host = native::add_mod("yakumo.quests", "Quests from mods", "");
+    const auto *hooks = static_cast<const ymod_hooks *>(native::host()->service(s.host, YMOD_HOOKS, 1u));
+    if (s.hook == 0u && hooks != nullptr) s.hook = hooks->instruction(s.host, nullptr, kNoFile, &give_file, nullptr);
+    if (s.hook == 0u) {
+        std::cerr << "[mods] the quest hook cannot be installed; quests mods add are not served\n";
+        return false;
+    }
+    std::string why;
+    if (!code_as_traced(runtime, kEventSignature))
+        why = "the event quest loader is not as traced";
+    else if (s.event_hook == 0u &&
+        (s.event_hook = hooks->instruction(s.host, nullptr, kEventFile, &give_event_file, nullptr)) == 0u)
+        why = "the event quest hook cannot be installed";
+    else if (const tables::Table *list = tables::find(kEvents); list == nullptr ||
+        !tables::extend(runtime, kEvents, list->rows + static_cast<std::uint32_t>(s.files.size()), &why))
+        why = "the event quest list cannot be made longer: " + why;
+    s.events = why.empty();
+    if (!s.events) std::cerr << "[mods] quests mods add are not at the counter: " << why << "\n";
+    return true;
+}
+
 } // namespace
+
+bool add(psprecomp::Runtime &runtime, std::vector<std::uint8_t> payload, const std::string &mod, std::string *why) {
+    State &s = state();
+    const auto fail = [why](std::string reason) {
+        if (why != nullptr) *why = std::move(reason);
+        return false;
+    };
+    const std::optional<game::QuestRecord> record = game::read_quest_record(payload);
+    if (!record || !game::is_mod_quest(record->id)) return fail("it is not a quest with a mod's id");
+    if (s.files.contains(record->id)) return fail("quest " + std::to_string(record->id) + " is served already");
+    if (payload.size() > game::kQuestMaxPayload) return fail("it is larger than the game reads");
+    if (!code_as_traced(runtime, kSignature)) return fail("the game's quest loading is not as traced");
+    game::GuestRam ram(runtime.memory());
+    const std::optional<game::QuestKeys> keys = game::read_quest_keys(ram);
+    if (!keys) return fail("the game's quest keys are not in memory");
+    const std::optional<FileId> file = p3rd::quest_file(record->id);
+    if (!file || !added::add(runtime, *file, game::encrypt_quest(payload, *keys)))
+        return fail("its file cannot be served");
+    s.files[record->id] = *file;
+    s.served.push_back({record->id, record->name, record->fee, record->frames, record->stars, mod});
+    if (!attach(runtime)) {
+        s.files.erase(record->id);
+        s.served.pop_back();
+        return fail("the quest hook cannot be installed");
+    }
+    std::cout << "[mods] " << mod << " adds quest " << record->id << " (" << record->name << ")\n";
+    return true;
+}
 
 bool install(psprecomp::Runtime &runtime, const std::map<FileId, Resolution::Source> &quests,
     std::map<FileId, Resolution::Source> &files, const fs::path &cache) {
@@ -132,29 +188,13 @@ bool install(psprecomp::Runtime &runtime, const std::map<FileId, Resolution::Sou
         s.served.push_back({*id, record->name, record->fee, record->frames, record->stars, source.mod});
     }
     if (encrypted.empty()) return false;
-    // The hook goes through the mods' own hooks, as a host-owned mod.
-    native::attach(runtime);
-    if (s.host == nullptr) s.host = native::add_mod("yakumo.quests", "Quests from mods", "");
-    const auto *hooks = static_cast<const ymod_hooks *>(native::host()->service(s.host, YMOD_HOOKS, 1u));
-    if (s.hook == 0u && hooks != nullptr) s.hook = hooks->instruction(s.host, nullptr, kNoFile, &give_file, nullptr);
-    if (s.hook == 0u) {
-        std::cerr << "[mods] the quest hook cannot be installed; quests mods add are not served\n";
+    // The hooks go through the mods' own hooks, as a host-owned mod; at the
+    // counter, among the event quests.
+    if (!attach(runtime)) {
         s = {};
         return false;
     }
     files.insert(encrypted.begin(), encrypted.end());
-    // At the counter, among the event quests.
-    std::string why;
-    if (!code_as_traced(runtime, kEventSignature))
-        why = "the event quest loader is not as traced";
-    else if (s.event_hook == 0u &&
-        (s.event_hook = hooks->instruction(s.host, nullptr, kEventFile, &give_event_file, nullptr)) == 0u)
-        why = "the event quest hook cannot be installed";
-    else if (const tables::Table *list = tables::find(kEvents); list == nullptr ||
-        !tables::extend(runtime, kEvents, list->rows + static_cast<std::uint32_t>(s.files.size()), &why))
-        why = "the event quest list cannot be made longer: " + why;
-    s.events = why.empty();
-    if (!s.events) std::cerr << "[mods] quests mods add are not at the counter: " << why << "\n";
     std::cout << "[mods] " << encrypted.size() << " quest(s) served\n";
     return true;
 }

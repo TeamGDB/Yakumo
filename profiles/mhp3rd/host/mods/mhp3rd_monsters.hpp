@@ -114,6 +114,12 @@ struct Vec3 {
 };
 [[nodiscard]] std::optional<Vec3> position(psprecomp::Runtime &runtime, std::uint32_t monster);
 [[nodiscard]] std::optional<float> facing(psprecomp::Runtime &runtime, std::uint32_t monster);
+// Its health now and at most (+0x246 and +0x288, s16), as the developer
+// tools read them; 0 now once it has fallen.
+struct Health {
+    std::int32_t now{}, most{};
+};
+[[nodiscard]] std::optional<Health> health(psprecomp::Runtime &runtime, std::uint32_t monster);
 bool set_facing(psprecomp::Runtime &runtime, std::uint32_t monster, float degrees);
 // The point the monster is after: the hunter it targets, which the game keeps
 // up to date.

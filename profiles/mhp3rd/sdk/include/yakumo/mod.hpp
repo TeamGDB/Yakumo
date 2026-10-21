@@ -37,6 +37,7 @@ public:
     const ymod_ui *ui() const { return service<ymod_ui>(YMOD_UI, 1u); }
     const ymod_tables *tables() const { return service<ymod_tables>(YMOD_TABLES, 1u); }
     const ymod_monsters *monsters() const { return service<ymod_monsters>(YMOD_MONSTERS, 1u); }
+    const ymod_quests *quests() const { return service<ymod_quests>(YMOD_QUESTS, 1u); }
 
     // A known function or data by name (sdk/symbols.txt), or nothing.
     [[nodiscard]] std::optional<ymod_symbol> symbol(const char *name) const {
@@ -109,6 +110,18 @@ public:
     bool set_facing(float degrees) const {
         return has(offsetof(ymod_monsters, set_facing)) && service_.set_facing(object_, degrees) == 0;
     }
+    // Its health now (0 once it has fallen) and at most.
+    [[nodiscard]] int health() const {
+        int32_t now = 0;
+        if (has(offsetof(ymod_monsters, health))) service_.health(object_, &now, nullptr);
+        return now;
+    }
+    [[nodiscard]] int most_health() const {
+        int32_t most = 0;
+        if (has(offsetof(ymod_monsters, health))) service_.health(object_, nullptr, &most);
+        return most;
+    }
+    [[nodiscard]] bool fallen() const { return has(offsetof(ymod_monsters, health)) && health() <= 0; }
     [[nodiscard]] ymod_vec3 target() const {
         ymod_vec3 out{};
         if (has(offsetof(ymod_monsters, target))) service_.target(object_, &out);

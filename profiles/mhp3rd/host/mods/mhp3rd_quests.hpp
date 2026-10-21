@@ -49,6 +49,14 @@ struct Quest {
 bool install(psprecomp::Runtime &runtime, const std::map<FileId, Resolution::Source> &quests,
     std::map<FileId, Resolution::Source> &files, const std::filesystem::path &cache);
 
+// Serves a quest a mod made while it starts (yakumo.quests): encrypted and
+// added as a file from memory, at the counter and for the developer tools as
+// mod.ini's quests are. False, with the reason in `why`, when it is not a
+// quest under a mod's id, its id is served already, or the keys or the traced
+// code are not there.
+bool add(
+    psprecomp::Runtime &runtime, std::vector<std::uint8_t> payload, const std::string &mod, std::string *why = nullptr);
+
 // Writes mods' quests into the event quest list once lobby_task, where it
 // is, has loaded (after tables::overlay_loaded() moved it).
 void overlay_loaded(psprecomp::Runtime &runtime);

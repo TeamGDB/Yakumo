@@ -12,6 +12,7 @@
 #include "yakumo/mod.h"
 
 #include "game/guest_ram.hpp"
+#include "game/quest_builder.hpp"
 #include "game/quest_file.hpp"
 #include "kernel/kernel.hpp"
 
@@ -531,6 +532,32 @@ void test_quests(psprecomp::Runtime &runtime) {
             runtime.memory().load32(0x0A0B1294u) == (0x3C020000u | ((next + 0x8000u) >> 16u)) &&
             runtime.memory().load32(0x0A0B1278u) == (0x94620000u | (list & 0xFFFFu)),
         "quests: the code that reads the list, and the next id in it, reads the longer list");
+
+    // A quest a mod describes, built and served from memory.
+    loader_stand_ins(runtime);
+    mhp3rd::game::QuestSpec spec;
+    spec.id = 62002u;
+    spec.map = 8u;
+    spec.stars = 6u;
+    spec.target = 58u;
+    spec.monsters = {{58u, 1u, 1086.0f, 1.0f, 255.0f, 0x1Eu, 0x13u, 100u}};
+    spec.texts = {"Built", "Hunt the Tigrex", "Time Over", "A quest made by a mod", "Tigrex", "Guild"};
+    const std::optional<std::vector<std::uint8_t>> built = mhp3rd::game::build_quest(spec);
+    std::string why;
+    check(built && quests::add(runtime, *built, "builder", &why) && file_for(62002u) == 0x6002u &&
+            quests::find(62002u) != nullptr && quests::find(62002u)->name == "Built" &&
+            mhp3rd::mods::added::serves(0x6002u) && event_file(62002u) == 0x6002u,
+        "quests: a quest a mod built is served from memory, for the developer tools and the counter");
+    check(mhp3rd::mods::tables::placement("quest.events")->rows == 44u,
+        "quests: the event quest list grows by one for it");
+    std::vector<std::uint8_t> game_quest = *built;
+    game_quest[0x94u + 0x1Cu] = 101u;
+    game_quest[0x94u + 0x1Du] = 0u;
+    check(!quests::add(runtime, *built, "builder", &why) && why.find("served already") != std::string::npos &&
+            !quests::add(runtime, game_quest, "builder", &why) && why.find("mod's id") != std::string::npos &&
+            !quests::add(runtime, {1u, 2u}, "builder", &why),
+        "quests: an id served already, a game quest's id and a broken payload are refused");
+    mhp3rd::mods::added::reset_for_tests();
     mhp3rd::mods::tables::reset_for_tests();
     std::error_code ec;
     std::filesystem::remove_all(folder, ec);
@@ -1094,6 +1121,12 @@ void test_monsters(psprecomp::Runtime &runtime) {
             at.z == 200.0f && service->target(kActor, &to) == 0 && to.z == 1200.0f &&
             service->facing(kActor, &looks) == 0 && looks == 90.0f,
         "monsters: its position, target and facing in degrees");
+    runtime.memory().store16(kActor + 0x246u, 1234u);
+    runtime.memory().store16(kActor + 0x288u, 5400u);
+    std::int32_t now = 0, most = 0;
+    check(service != nullptr && service->health(kActor, &now, &most) == 0 && now == 1234 && most == 5400 &&
+            service->health(kActor, nullptr, nullptr) == 0 && service->health(4u, &now, &most) == -1,
+        "monsters: its health now and at most");
     check(service != nullptr && service->position(4u, &at) == -1 && service->position(kActor, nullptr) == -1 &&
             service->facing(4u, &looks) == -1 && service->set_facing(kActor, std::nanf("")) == -1,
         "monsters: nothing for an address that is not a monster");
@@ -1272,6 +1305,34 @@ void test_monsters(psprecomp::Runtime &runtime) {
     runtime.memory().store16(kSets + 0x9Cu, 0u);
     (void)call(runtime, burning_stub, kMonster);
     check(burning.started == -1, "monsters: no effect while the kind's model set is not loaded");
+
+    // A quest to hunt the kind, described through the quests service.
+    const auto *quest_service =
+        static_cast<const ymod_quests *>(mhp3rd::mods::native::host()->service(mod, YMOD_QUESTS, 1u));
+    const ymod_quest_monster hunted{"black_fatalis", 1, {1086.0f, 1.0f, 255.0f}, 0x1E, 0x13, 0};
+    ymod_quest quest{sizeof(ymod_quest), 62010u, 8, 8, 50u, 0u, 9000u, "black_fatalis", 1u, &hunted, 1u,
+        {"Black Fatalis", "Hunt the Black Fatalis", "Time Over", "In the arena", "Black Fatalis", "Guild"}};
+    const mhp3rd::mods::quests::Quest *served = nullptr;
+    check(quest_service != nullptr && quest_service->add(mod, &quest) == 62010 &&
+            (served = mhp3rd::mods::quests::find(62010u)) != nullptr && served->name == "Black Fatalis" &&
+            served->stars == 8u,
+        "quests: a mod's quest for a kind it added is built and served");
+    ymod_quest unknown_target = quest;
+    unknown_target.id = 62011u;
+    unknown_target.target = "nothing";
+    ymod_quest no_monsters = quest;
+    no_monsters.id = 62012u;
+    no_monsters.monster_count = 0u;
+    ymod_quest out_of_range = quest;
+    out_of_range.id = 62013u;
+    out_of_range.map = 300;
+    ymod_quest old_quest{sizeof(std::uint32_t)};
+    check(quest_service != nullptr && quest_service->add(mod, &unknown_target) == -1 &&
+            logged("quest 62011 is not added: its target \"nothing\" is not a monster's id") &&
+            quest_service->add(mod, &no_monsters) == -1 && quest_service->add(mod, &out_of_range) == -1 &&
+            quest_service->add(mod, &quest) == -1 && quest_service->add(mod, &old_quest) == -1 &&
+            quest_service->add(mod, nullptr) == -1,
+        "quests: an unknown monster, no monsters, a number out of range, a served id and short structs are refused");
     std::error_code ec;
     std::filesystem::remove_all(folder, ec);
     monsters::reset_for_tests();

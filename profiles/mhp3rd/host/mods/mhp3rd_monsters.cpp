@@ -204,6 +204,8 @@ constexpr std::uint32_t kLastSphere = 0xFFFFu; // the joint that ends a shape
 constexpr std::uint32_t kPosition = 0x80u; // x, y, z as floats
 constexpr std::uint32_t kFacing = 0x74u;   // 65536 a turn, from +z towards +x
 constexpr std::uint32_t kTarget = 0x4C0u;  // x, y, z the monster is after
+constexpr std::uint32_t kHealth = 0x246u;  // s16, now
+constexpr std::uint32_t kMostHealth = 0x288u;
 constexpr std::uint32_t kBodySize = 0x4CCu;
 constexpr float kTurn = 65536.0f;
 
@@ -885,6 +887,13 @@ std::optional<Vec3> position(Runtime &runtime, std::uint32_t monster) {
 std::optional<float> facing(Runtime &runtime, std::uint32_t monster) {
     if (!body(runtime, monster)) return std::nullopt;
     return static_cast<float>(runtime.memory().load32(monster + kFacing) & 0xFFFFu) * 360.0f / kTurn;
+}
+
+std::optional<Health> health(Runtime &runtime, std::uint32_t monster) {
+    if (!body(runtime, monster)) return std::nullopt;
+    auto &memory = runtime.memory();
+    return Health{static_cast<std::int16_t>(memory.load16(monster + kHealth)),
+        static_cast<std::int16_t>(memory.load16(monster + kMostHealth))};
 }
 
 bool set_facing(Runtime &runtime, std::uint32_t monster, float degrees) {

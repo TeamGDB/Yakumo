@@ -10,12 +10,14 @@
 // address) and decrypts a quest file extracted from the disc, to check the
 // cipher against the game's own files.
 #include "game/guest_ram.hpp"
+#include "game/quest_builder.hpp"
 #include "game/quest_file.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -188,6 +190,76 @@ int decrypt_real(const char *eboot, const char *quest, const char *out) {
     return std::equal(again.begin(), again.end(), file.begin()) ? 0 : 3;
 }
 
+std::uint32_t word(const Bytes &b, std::size_t at) {
+    std::uint32_t v = 0;
+    std::memcpy(&v, b.data() + at, 4u);
+    return v;
+}
+std::uint16_t half(const Bytes &b, std::size_t at) {
+    return static_cast<std::uint16_t>(b[at] | b[at + 1u] << 8u);
+}
+float real(const Bytes &b, std::size_t at) {
+    float v = 0;
+    std::memcpy(&v, b.data() + at, 4u);
+    return v;
+}
+
+void test_builder() {
+    QuestSpec spec;
+    spec.id = 62006u;
+    spec.map = 8u;
+    spec.stars = 8u;
+    spec.minutes = 50u;
+    spec.fee = 1000u;
+    spec.reward = 9000u;
+    spec.target = 75u;
+    spec.monsters = {
+        {75u, 1u, 1086.0f, 1.0f, 255.0f, 0x1Eu, 0x13u, 120u}, {58u, 2u, 0.0f, 0.0f, 100.0f, 0x10u, 0x10u, 100u}};
+    spec.texts = {"Fatalis", "Hunt the Fatalis", "Reward Zero\nTime Over", "A black dragon", "Fatalis", "Guild"};
+    std::string why;
+    const std::optional<Bytes> built = build_quest(spec, &why);
+    const std::optional<QuestRecord> record = built ? read_quest_record(*built) : std::nullopt;
+    check(record && record->id == 62006u && record->map == 8u && record->stars == 8u && record->fee == 1000u &&
+            record->reward == 9000u && record->frames == 50u * 1800u && record->name == "Fatalis",
+        "builder: the record carries the description, as the game's records do");
+    const Bytes &q = *built;
+    const std::size_t rec = word(q, 0u);
+    check(std::memcmp(q.data() + 4u, "v005", 4u) == 0 && rec == 0x94u && q[rec] == 4u && half(q, rec + 0x2Cu) == 75u &&
+            half(q, rec + 0x2Eu) == 1u && half(q, rec + 0x3Cu) == 75u && half(q, rec + 0x3Eu) == 58u &&
+            q.size() % 16u == 0u,
+        "builder: a hunt for the target, with the large monsters as the main ones");
+    const std::size_t languages = word(q, rec + 0x18u), set = word(q, languages);
+    check(word(q, languages + 24u) == set &&
+            std::string(reinterpret_cast<const char *>(q.data() + word(q, set + 4u))) == "Hunt the Fatalis" &&
+            std::string(reinterpret_cast<const char *>(q.data() + word(q, set + 8u))) == "Reward Zero\nTime Over",
+        "builder: the texts, the same in every language");
+    const std::size_t large = word(q, 0x20u), loads = word(q, large + 8u), spawns = word(q, large + 12u);
+    check(word(q, large) == 1u && half(q, loads) == 75u && half(q, loads + 4u) == 58u &&
+            half(q, loads + 8u) == 0xFFFFu && word(q, spawns) == 75u && half(q, spawns + 6u) == 1u &&
+            real(q, spawns + 0x10u) == 1086.0f && real(q, spawns + 0x18u) == 255.0f && word(q, spawns + 0x30u) == 58u &&
+            half(q, spawns + 0x60u) == 0xFFFFu,
+        "builder: the large monsters' group, the kinds to load, and where each starts, ended");
+    check(word(q, 0x30u) == 0x1E000078u && (word(q, 0x34u) & 0xFFu) == 0x13u && word(q, 0x38u) == 0x10000064u,
+        "builder: each monster's health level, size and attack level");
+    const std::size_t waves = word(q, 0x24u);
+    check(word(q, waves) == word(q, waves + 8u) && word(q, word(q, waves) + 4u) == 0x9999u &&
+            q[word(q, 0x08u)] == 0xFFu && half(q, word(q, 0x1Cu)) == 0xFFFFu && half(q, word(q, 0x28u)) == 0xFFFFu &&
+            q[word(q, 0x2Cu)] == 0xFFu,
+        "builder: no rewards, gathering or small monsters, each table in the form the game reads as empty");
+    QuestSpec none = spec;
+    none.monsters.clear();
+    QuestSpec many = spec;
+    many.monsters.assign(6u, spec.monsters[0]);
+    QuestSpec game = spec;
+    game.id = 101u;
+    QuestSpec wordy = spec;
+    wordy.texts.description.assign(30000u, 'x');
+    check(!build_quest(none, &why) && why.find("1 to 5") != std::string::npos && !build_quest(many) &&
+            !build_quest(game, &why) && why.find("62000") != std::string::npos && !build_quest(wordy, &why) &&
+            why.find("larger") != std::string::npos,
+        "builder: no monsters, too many, a game quest's id and texts too long are refused");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -196,6 +268,7 @@ int main(int argc, char **argv) {
     test_sha1();
     test_cipher();
     test_record();
+    test_builder();
     std::printf("%s\n", failures == 0 ? "all quest file checks passed" : "quest file checks FAILED");
     return failures == 0 ? 0 : 1;
 }

@@ -454,7 +454,49 @@ typedef struct ymod_monsters {
      * a part of behaviour, for a number the kind's effects do not have, or
      * when its model set is not loaded. */
     int (*effect)(uint32_t monster, int32_t effect, int32_t joint, const ymod_vec3 *offset, float scale);
+    /* Its health now and at most (either may be NULL); now is 0 once it has
+     * fallen. 0, or -1 for an address that is not guest memory. */
+    int (*health)(uint32_t monster, int32_t *now, int32_t *most);
 } ymod_monsters;
+
+/* --------------------------------------------------------------------------
+ * "yakumo.quests" 1: quests a mod describes, built by Yakumo into the game's
+ * quest format (docs/QUESTS.md) and served at the counter, among the event
+ * quests, and to the developer tools. A hunt for now: its map, its large
+ * monsters and where they start, the objective, time, fee and reward, and its
+ * texts. Call add() from yakumo_mod_main, after adding the monsters it names.
+ */
+#define YMOD_QUESTS "yakumo.quests"
+typedef struct ymod_quest_monster {
+    const char *monster; /* a kind by id, the game's or a mod's: "fatalis" */
+    int32_t area;        /* the area of the quest's map it starts in */
+    ymod_vec3 at;        /* and where in it */
+    int32_t health;      /* the game's health level: higher is more (0x1E: a Tigrex-based kind's 5400) */
+    int32_t attack;      /* the game's attack level (0x13: a low rank hunt; 0x30 hits three times as hard) */
+    int32_t size;        /* percent of the kind's size; 0: 100 */
+} ymod_quest_monster;
+typedef struct ymod_quest_texts {
+    /* Shown in every language for now; NUL-terminated UTF-8, "\n" for a new line. */
+    const char *name, *objective, *failure, *description, *monsters, *client;
+} ymod_quest_texts;
+typedef struct ymod_quest {
+    uint32_t size; /* set to sizeof(ymod_quest) before passing one */
+    uint32_t id;   /* 62000 to 65535 */
+    int32_t map;   /* the game's map number: 8 is the arena */
+    int32_t stars;
+    uint32_t minutes, fee, reward;
+    const char *target; /* the objective: hunt `count` of this kind, by id */
+    uint32_t count;
+    const ymod_quest_monster *monsters; /* 1 to 5 large monsters; the first are the main ones */
+    uint32_t monster_count;
+    ymod_quest_texts texts;
+} ymod_quest;
+typedef struct ymod_quests {
+    uint32_t version;
+    uint32_t size;
+    /* Builds and serves the quest: its id, or -1 (the reason is in the log). */
+    int32_t (*add)(ymod_mod *mod, const ymod_quest *quest);
+} ymod_quests;
 
 #ifdef __cplusplus
 }

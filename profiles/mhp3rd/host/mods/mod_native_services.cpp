@@ -4,10 +4,12 @@
 #include "mods/mhp3rd_mod_format.hpp"
 #include "mods/mhp3rd_mods.hpp"
 #include "mods/mhp3rd_monsters.hpp"
+#include "mods/mhp3rd_quests.hpp"
 #include "mods/mhp3rd_symbols.hpp"
 #include "mods/mhp3rd_tables.hpp"
 #include "mods/mod_ini.hpp"
 
+#include "game/quest_builder.hpp"
 #include "install/user_data.hpp"
 #include "kernel/kernel.hpp"
 #include "overlays.hpp"
@@ -362,6 +364,16 @@ int monsters_facing(uint32_t monster, float *degrees) {
     return 0;
 }
 
+int monsters_health(uint32_t monster, int32_t *now, int32_t *most) {
+    Runtime *runtime = state().runtime;
+    const std::optional<monsters::Health> value =
+        runtime != nullptr ? monsters::health(*runtime, monster) : std::nullopt;
+    if (!value) return -1;
+    if (now != nullptr) *now = value->now;
+    if (most != nullptr) *most = value->most;
+    return 0;
+}
+
 int monsters_set_facing(uint32_t monster, float degrees) {
     Runtime *runtime = state().runtime;
     return runtime != nullptr && monsters::set_facing(*runtime, monster, degrees) ? 0 : -1;
@@ -430,6 +442,51 @@ int monsters_end_attack(uint32_t monster, int32_t slot) {
     return monsters::end_attack(monster, static_cast<std::uint8_t>(slot)) ? 0 : -1;
 }
 
+int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
+    Runtime *runtime = state().runtime;
+    if (runtime == nullptr || mod == nullptr || mod->failed || quest == nullptr ||
+        quest->size < offsetof(ymod_quest, texts) + sizeof(quest->texts))
+        return -1;
+    const auto text = [](const char *s) { return std::string(s != nullptr ? s : ""); };
+    const auto kind_of = [](const char *id) { return id != nullptr ? monsters::kind(id) : std::nullopt; };
+    const auto refuse = [mod, quest](const std::string &why) {
+        report(mod, "quest " + std::to_string(quest->id) + " is not added: " + why, true);
+        return -1;
+    };
+    game::QuestSpec spec;
+    if (quest->id > 0xFFFFu || quest->map < 0 || quest->map > 0xFF || quest->stars < 0)
+        return refuse("a number is out of range");
+    spec.id = static_cast<std::uint16_t>(quest->id);
+    spec.map = static_cast<std::uint8_t>(quest->map);
+    spec.stars = static_cast<std::uint16_t>(quest->stars);
+    spec.minutes = quest->minutes;
+    spec.fee = quest->fee;
+    spec.reward = quest->reward;
+    const std::optional<std::uint8_t> target = kind_of(quest->target);
+    if (!target) return refuse("its target \"" + text(quest->target) + "\" is not a monster's id");
+    spec.target = *target;
+    spec.count = static_cast<std::uint16_t>(std::clamp<std::uint32_t>(quest->count, 1u, 0xFFFFu));
+    for (std::uint32_t i = 0; quest->monsters != nullptr && i < quest->monster_count && i < 6u; ++i) {
+        const ymod_quest_monster &m = quest->monsters[i];
+        const std::optional<std::uint8_t> kind = kind_of(m.monster);
+        if (!kind) return refuse("its monster \"" + text(m.monster) + "\" is not a monster's id");
+        if (m.area < 0 || m.area > 0xFF || m.health < 0 || m.health > 0xFF || m.attack < 0 || m.attack > 0xFF ||
+            m.size < 0 || m.size > 0xFFFF)
+            return refuse("a monster's area, levels or size are out of range");
+        spec.monsters.push_back(
+            {*kind, static_cast<std::uint16_t>(m.area), m.at.x, m.at.y, m.at.z, static_cast<std::uint8_t>(m.health),
+                static_cast<std::uint8_t>(m.attack), static_cast<std::uint16_t>(m.size == 0 ? 100 : m.size)});
+    }
+    const ymod_quest_texts &t = quest->texts;
+    spec.texts = {
+        text(t.name), text(t.objective), text(t.failure), text(t.description), text(t.monsters), text(t.client)};
+    std::string why;
+    const std::optional<std::vector<std::uint8_t>> payload = game::build_quest(spec, &why);
+    if (!payload) return refuse(why);
+    if (!mhp3rd::mods::quests::add(*runtime, *payload, mod->name, &why)) return refuse(why);
+    return static_cast<int32_t>(quest->id);
+}
+
 const char *monsters_id_of(int32_t kind) {
     if (kind < 0 || kind > 0xFF) return nullptr;
     const std::string_view id = monsters::id_of(static_cast<std::uint8_t>(kind));
@@ -440,11 +497,13 @@ const char *monsters_id_of(int32_t kind) {
 
 const ymod_tables kTables{1u, sizeof(ymod_tables), &tables_find, &tables_get, &tables_extend};
 
+const ymod_quests kQuests{1u, sizeof(ymod_quests), &quests_add};
+
 const ymod_monsters kMonsters{1u, sizeof(ymod_monsters), &monsters_add, &monsters_kind, &monsters_id_of,
     &monsters_behave, &monsters_play_motion, &monsters_motion_finished, &monsters_motion_frame, &monsters_at_frame,
     &monsters_position, &monsters_facing, &monsters_set_facing, &monsters_target, &monsters_aim,
     &monsters_turn_to_target, &monsters_move, &monsters_attack, &monsters_end_attack, &monsters_attack_shape,
-    &monsters_effect};
+    &monsters_effect, &monsters_health};
 
 const ymod_memory kMemory{
     1u, sizeof(ymod_memory), &memory_read, &memory_write, &memory_allocate, &memory_release, &memory_code_changed};
