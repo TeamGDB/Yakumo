@@ -490,6 +490,8 @@ typedef struct ymod_quest {
     const ymod_quest_monster *monsters; /* 1 to 5 large monsters; the first are the main ones */
     uint32_t monster_count;
     ymod_quest_texts texts;
+    const char *area; /* NULL, or an area of the mod's (yakumo.maps, added first) the quest is played in; `map`
+                         is then that area's map, and its monsters start in its area of that map */
 } ymod_quest;
 /* --------------------------------------------------------------------------
  * "yakumo.equipment" 1: weapons mods add. A weapon starts from one of the
@@ -517,6 +519,33 @@ typedef struct ymod_equipment {
     /* Adds a weapon: its id in its class, or -1 (the reason is in the log). */
     int32_t (*add_weapon)(ymod_mod *mod, const ymod_weapon *weapon);
 } ymod_equipment;
+
+/* --------------------------------------------------------------------------
+ * "yakumo.maps" 1: areas mods add. An area takes the place of one of the
+ * game's (an area of one of its maps) on the mod's quests that name it
+ * (ymod_quest.area): its model, GE data, textures and collision (a block for
+ * its ground and one for its walls) are served
+ * instead of the game's while such a quest is played; the rest of the area
+ * (its scene, camera paths, minimap) stays the game's (docs/MAPS.md). Call
+ * add_area() from yakumo_mod_main, before the quests that name it.
+ */
+#define YMOD_MAPS "yakumo.maps"
+typedef struct ymod_area {
+    uint32_t size;          /* set to sizeof(ymod_area) before passing one */
+    const char *id;         /* the mod's name for it */
+    int32_t map, area;      /* the game's area it takes the place of: map 8's area 1 is the arena's */
+    const char *model;      /* paths in the mod's folder: its model (PMO "102", static), */
+    const char *geometry;   /* that model's GE data, */
+    const char *textures;   /* its textures (TMH), */
+    const char *ground;     /* its ground's collision block ("4.00"): what stands on it, */
+    const char *walls;      /* and its walls', ceilings' and steep slopes': what runs into them */
+} ymod_area;
+typedef struct ymod_maps {
+    uint32_t version;
+    uint32_t size;
+    /* Adds an area: 0, or -1 (the reason is in the log). */
+    int32_t (*add_area)(ymod_mod *mod, const ymod_area *area);
+} ymod_maps;
 
 typedef struct ymod_quests {
     uint32_t version;

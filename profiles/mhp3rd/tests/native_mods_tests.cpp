@@ -4,6 +4,7 @@
 #include "mods/mod_library.hpp"
 #include "mods/mhp3rd_added_files.hpp"
 #include "mods/mhp3rd_equipment.hpp"
+#include "mods/mhp3rd_maps.hpp"
 #include "mods/mhp3rd_monsters.hpp"
 #include "mods/mod_native.hpp"
 #include "mods/mhp3rd_quests.hpp"
@@ -14,6 +15,7 @@
 
 #include "game/game_data.hpp"
 #include "game/guest_ram.hpp"
+#include "game/pack_file.hpp"
 #include "game/quest_builder.hpp"
 #include "game/quest_file.hpp"
 #include "kernel/kernel.hpp"
@@ -845,6 +847,161 @@ void test_equipment(psprecomp::Runtime &runtime) {
     tables::reset_for_tests();
 }
 
+void test_maps(psprecomp::Runtime &runtime) {
+    namespace maps = mhp3rd::mods::maps;
+    namespace game = mhp3rd::game;
+    using Bytes = std::vector<std::uint8_t>;
+    const auto bytes = [](std::string_view s) { return Bytes(s.begin(), s.end()); };
+    const auto entry = [](const Bytes &pack, std::size_t i) {
+        const auto entries = game::read_pack(pack);
+        return entries && i < entries->size() ? Bytes((*entries)[i].begin(), (*entries)[i].end()) : Bytes{};
+    };
+
+    // Packs.
+    const Bytes pack = game::write_pack({bytes("zero"), {}, bytes("two!")});
+    check(pack.size() == 64u && entry(pack, 0) == bytes("zero") && entry(pack, 1).empty() &&
+            entry(pack, 2) == bytes("two!"),
+        "packs: entries are written at 16-byte steps, an empty one as absent, and read back");
+    const auto replaced = game::replace_entries(pack, {{1u, bytes("one")}});
+    check(replaced && entry(*replaced, 0) == bytes("zero") && entry(*replaced, 1) == bytes("one") &&
+            entry(*replaced, 2) == bytes("two!"),
+        "packs: an entry is replaced and the others kept");
+    check(!game::read_pack(bytes("\xFF\xFF")) && !game::replace_entries(pack, {{3u, bytes("x")}}) &&
+            !game::read_pack(Bytes{2, 0, 0, 0, 0x40, 0, 0, 0, 8, 0, 0, 0}),
+        "packs: something that is not a pack, or an entry past its last, is refused");
+
+    maps::reset_for_tests();
+    mhp3rd::mods::added::reset_for_tests();
+    loader_stand_ins(runtime);
+    const std::filesystem::path folder = std::filesystem::temp_directory_path() / "yakumo_maps_test";
+    std::filesystem::create_directories(folder);
+    const auto write = [&folder](const char *name, std::string_view text) {
+        std::ofstream(folder / name, std::ios::binary).write(text.data(), static_cast<std::streamsize>(text.size()));
+    };
+    write("model.pmo",
+        std::string_view("pmo\0"
+                         "102\0MINE",
+            12));
+    write("ge.bin", "GEOMETRY");
+    write("tex.tmh", ".TMH0.14 mine");
+    write("ground.bin", "4.00 ground");
+    write("walls.bin", "4.00 walls");
+    write("bad.pmo", "not a model");
+    ymod_mod *mod = mhp3rd::mods::native::add_mod("test.maps", "Map test", folder.string());
+    const auto *service = static_cast<const ymod_maps *>(mhp3rd::mods::native::host()->service(mod, YMOD_MAPS, 1u));
+    ymod_area castle{sizeof(ymod_area), "castle", 8, 1, "model.pmo", "ge.bin", "tex.tmh", "ground.bin", "walls.bin"};
+    check(service != nullptr && service->add_area(mod, &castle) == 0 && maps::find("castle") != nullptr &&
+            maps::find("castle")->map == 8u && maps::find("castle")->area == 1u,
+        "maps: an area is added in place of a map's area");
+    ymod_area taken = castle;
+    ymod_area bad_map = castle;
+    bad_map.id = "bad_map";
+    bad_map.map = 20;
+    ymod_area bad_model = castle;
+    bad_model.id = "bad_model";
+    bad_model.model = "bad.pmo";
+    ymod_area missing = castle;
+    missing.id = "missing";
+    missing.walls = "none.bin";
+    ymod_area old{sizeof(std::uint32_t)};
+    check(service != nullptr && service->add_area(mod, &taken) == -1 &&
+            logged("area castle is not added: the id \"castle\" is taken or empty") &&
+            service->add_area(mod, &bad_map) == -1 &&
+            logged("area bad_map is not added: map 20 is not one of the game's") &&
+            service->add_area(mod, &bad_model) == -1 &&
+            logged("area bad_model is not added: its model is not a PMO \"102\"") &&
+            service->add_area(mod, &missing) == -1 && service->add_area(mod, &old) == -1 &&
+            service->add_area(mod, nullptr) == -1 && maps::find("bad_map") == nullptr,
+        "maps: a taken id, a map that is not the game's, a file not in its format, a missing file and short structs "
+        "are refused");
+    std::string why;
+    const Bytes pmo = bytes(std::string_view("pmo\0"
+                                             "102\0",
+        8)); // the bytes a PMO "102" starts with
+    check(!maps::add_area(runtime, {"tex", 8, 1, pmo, bytes("g"), bytes("TMH?"), bytes("4.00"), bytes("4.00")}, &why) &&
+            why == "its textures are not a TMH" &&
+            !maps::add_area(
+                runtime, {"hits", 8, 1, pmo, bytes("g"), bytes(".TMH"), bytes("4.00"), bytes("HITS")}, &why) &&
+            why == "its ground or walls are not a collision block (\"4.00\")" &&
+            !maps::add_area(runtime, {"ge", 8, 1, pmo, {}, bytes(".TMH"), bytes("4.00"), bytes("4.00")}, &why) &&
+            why == "it has no GE data",
+        "maps: textures, collision and GE data are checked too");
+
+    // The game's files for the arena's floor, and the map's collision.
+    const Bytes area_pack =
+        game::write_pack({bytes("THEIR MODEL"), bytes("SCENE"), bytes("SETTINGS"), bytes("THEIR TMH")});
+    const Bytes hits_pack = game::write_pack(
+        {bytes("MAP TMH"), bytes("CAMP 1"), bytes("CAMP 2"), bytes("FLOOR 1"), bytes("FLOOR 2"), bytes("OTHER")});
+    maps::read_files_with_for_tests([&](mhp3rd::mods::FileId file) -> std::optional<Bytes> {
+        if (file == 0x138Bu) return area_pack;
+        if (file == 0x1262u) return hits_pack;
+        if (file == 0x1263u) return bytes("not a pack");
+        return std::nullopt;
+    });
+    auto &memory = runtime.memory();
+    memory.store32(0x08AB3640u, 0x09000000u); // the character
+    memory.store16(0x09000000u + 0x60472u, 62600u);
+    check(maps::serve(runtime, 0x138Cu) == nullptr, "maps: nothing is served before a quest is played in the area");
+    check(maps::play_quest_in("castle", 62600u) && !maps::play_quest_in("nowhere", 62601u),
+        "maps: a quest is played in an area that was added, and only such");
+    check(maps::serve(runtime, 0x138Cu) == nullptr, "maps: nor while game_sub, which holds the tables, is not loaded");
+    place_overlay(runtime, 0x0A001780u, "game_sub.ovl", 0x00050000u);
+    memory.store16(0x0A0457C4u + 16u, 0x1389u); // map 8's first area pack
+    memory.store16(0x0A04579Cu + 16u, 0x138Au); // and GE data
+    const auto served = [&](mhp3rd::mods::FileId file) {
+        const auto b = maps::serve(runtime, file);
+        return b ? *b : Bytes{};
+    };
+    const Bytes their_pack = served(0x138Bu);
+    check(served(0x138Cu) == bytes("GEOMETRY"), "maps: the area's GE data is the mod's");
+    check(entry(their_pack, 0) ==
+                bytes(std::string_view("pmo\0"
+                                       "102\0MINE",
+                    12)) &&
+            entry(their_pack, 1) == bytes("SCENE") && entry(their_pack, 2) == bytes("SETTINGS") &&
+            entry(their_pack, 3) == bytes(".TMH0.14 mine"),
+        "maps: the area's pack has the mod's model and textures, the game's scene and settings");
+    const Bytes collision = served(0x1262u);
+    check(entry(collision, 1) == bytes("CAMP 1") && entry(collision, 2) == bytes("CAMP 2") &&
+            entry(collision, 3) == bytes("4.00 ground") && entry(collision, 4) == bytes("4.00 walls") &&
+            entry(collision, 5) == bytes("OTHER"),
+        "maps: the map's collision has the mod's ground and walls in the area's blocks, the others the game's");
+    check(served(0x1389u).empty() && served(0x138Eu).empty() && served(0x1263u).empty(),
+        "maps: the map's other areas and other files are the game's");
+    // Through the loader the game asks.
+    runtime.cpu().gpr[5] = 0x138Cu;
+    check(call(runtime, 0x08864E8Cu, 0x08B3F040u) == 8u, "maps: the loader answers the mod's GE data's size");
+    runtime.cpu().gpr[5] = 0x138Cu;
+    runtime.cpu().gpr[6] = 0x08B00000u;
+    check(call(runtime, 0x08863CDCu, 0x08B3F040u) == 1u && memory.load32(0x08B00000u) == 0x4D4F4547u,
+        "maps: and copies it where the game asks");
+    memory.store16(0x09000000u + 0x60472u, 501u);
+    runtime.cpu().gpr[5] = 0x138Cu;
+    check(call(runtime, 0x08864E8Cu, 0x08B3F040u) == 0x777u && maps::serve(runtime, 0x138Bu) == nullptr,
+        "maps: on another quest the game's own files load");
+    // An area of a map whose collision pack is not as expected.
+    check(maps::add_area(
+              runtime, {"odd", 9, 0, pmo, bytes("g"), bytes(".TMH"), bytes("4.00"), bytes("4.00"), "Map test"}, &why) &&
+            maps::play_quest_in("odd", 62602u),
+        "maps: a second area is added");
+    memory.store16(0x09000000u + 0x60472u, 62602u);
+    check(
+        maps::serve(runtime, 0x1263u) == nullptr, "maps: a collision pack that is not as expected is left the game's");
+
+    // A quest played in an area names it; one that names an area not added is refused.
+    const auto *quests = static_cast<const ymod_quests *>(mhp3rd::mods::native::host()->service(mod, YMOD_QUESTS, 1u));
+    const ymod_quest_monster monster{"tigrex", 1, {0.0f, 0.0f, 0.0f}, 0x1E, 0x13, 100};
+    ymod_quest quest{sizeof(ymod_quest), 62603u, 5, 1, 30u, 0u, 0u, "tigrex", 1u, &monster, 1u, {}, "nowhere"};
+    check(quests != nullptr && quests->add(mod, &quest) == -1 &&
+            logged("quest 62603 is not added: its area \"nowhere\" has not been added"),
+        "maps: a quest naming an area that was not added is refused");
+
+    std::error_code ec;
+    std::filesystem::remove_all(folder, ec);
+    maps::reset_for_tests();
+    mhp3rd::mods::added::reset_for_tests();
+}
+
 void test_monsters(psprecomp::Runtime &runtime) {
     namespace monsters = mhp3rd::mods::monsters;
     namespace tables = mhp3rd::mods::tables;
@@ -1525,6 +1682,7 @@ int main() {
     test_tables(runtime);
     test_monsters(runtime);
     test_equipment(runtime);
+    test_maps(runtime);
 
     std::printf("%s\n", failures == 0 ? "all native mod checks passed" : "native mod checks FAILED");
     return failures == 0 ? 0 : 1;

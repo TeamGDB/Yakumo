@@ -391,6 +391,7 @@ quest.count = 1;
 quest.monsters = &fatalis;
 quest.monster_count = 1;
 quest.texts = {"The Black Dragon", "Hunt the Fatalis", "Reward Zero\nTime Over", "...", "Fatalis", "Guild Master"};
+quest.area = nullptr;       // or an area of the mod's to play it in (see Maps)
 mod.quests()->add(mod.handle(), &quest); // the id, or -1 with the reason in the log
 ```
 
@@ -414,6 +415,27 @@ const int32_t id = mod.equipment()->add_weapon(mod.handle(), &blade); // its id 
 ```
 
 Add it at start. Its stats are the base's for now; armor is to come.
+
+## Maps
+
+A native mod adds an area with `yakumo.maps`: its own model, GE data, textures and collision, in place of one of the game's areas on the mod's quests that name it ([MAPS.md](MAPS.md#areas-mods-add)):
+
+```cpp
+ymod_area castle{sizeof(ymod_area)};
+castle.id = "castle_schrade";
+castle.map = 8;                            // the arena,
+castle.area = 1;                           // its fighting area
+castle.model = "map/area_model.pmo";       // PMO "102", static
+castle.geometry = "map/area_ge.bin";       // its GE data
+castle.textures = "map/area_textures.tmh";
+castle.ground = "map/area_ground.bin";     // collision blocks ("4.00"): the ground
+castle.walls = "map/area_walls.bin";       // and the walls
+mod.maps()->add_area(mod.handle(), &castle); // 0, or -1 with the reason in the log
+
+quest.area = "castle_schrade";             // and the quest is played in it
+```
+
+Add it at start, before the quests that name it. While such a quest is played, the base area's files are served with the mod's in them; the area's scene, camera paths and minimap stay the game's, and every other quest loads the game's area. The files' formats are in [MAPS.md](MAPS.md); an area from another game is converted into them by a tool of the mod's own.
 
 ## Panels and overlays
 

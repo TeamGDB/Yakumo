@@ -2,7 +2,9 @@
 
 #include "mods/mod_library.hpp"
 
+#include <functional>
 #include <map>
+#include <memory>
 #include <vector>
 
 namespace psprecomp {
@@ -21,6 +23,10 @@ class Runtime;
 // destination at once and queues nothing, so the game's own wait for the
 // queue sees it done. Every other id runs the game's code unchanged.
 //
+// The same two places let a mod's bytes stand in for one of the disc's files
+// while the mod asks (stand_in()): an area a mod gives in place of the game's
+// on its own quests.
+//
 // Installed at start when a mod adds a file, and only on the executable the
 // two functions were traced in (docs/DATA_BIN.md).
 namespace mhp3rd::mods::added {
@@ -32,6 +38,15 @@ bool install(psprecomp::Runtime &runtime, const std::map<FileId, Resolution::Sou
 // Adds a file a mod made while running (bytes, copied), under `file`. False
 // when the id is taken, the file is empty, or the loader cannot be taken over.
 bool add(psprecomp::Runtime &runtime, FileId file, std::vector<std::uint8_t> bytes);
+
+// Asked at each load of one of the disc's files (its size, then its copy), with
+// its id: the bytes to serve instead, or null for the disc's own. It must give
+// the same answer to both questions of one load.
+using StandIn = std::function<std::shared_ptr<const std::vector<std::uint8_t>>(psprecomp::Runtime &, FileId)>;
+
+// Lets `provider` stand in for the disc's files; the first of several to give
+// bytes wins. False when the loader cannot be taken over.
+bool stand_in(psprecomp::Runtime &runtime, StandIn provider);
 
 // The ids add() hands out when a mod does not choose one: the top of the range
 // mods may add to, below the ids an id-less number can reach (0xFFFF means no

@@ -14,6 +14,7 @@
 #include <iostream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace mhp3rd::mods::added {
@@ -54,6 +55,7 @@ struct File {
 
 struct State {
     std::map<FileId, File> files;
+    std::vector<StandIn> stand_ins;
     psprecomp::JitFunction size{};
     psprecomp::JitFunction submit{};
     psprecomp::JitFunction read{};
@@ -76,14 +78,20 @@ void run_game(psprecomp::JitFunction &compiled, std::uint32_t address, Runtime &
     compiled(runtime, ctx);
 }
 
-const File *added(const AllegrexContext &ctx) {
-    const auto found = state().files.find(ctx.gpr[5] & 0xFFFFu); // a1
-    return found != state().files.end() ? &found->second : nullptr;
+// The file a mod serves for the id in a1: one it added, or bytes standing in
+// for the disc's.
+std::optional<File> served(Runtime &runtime, const AllegrexContext &ctx) {
+    const FileId id = ctx.gpr[5] & 0xFFFFu; // a1
+    if (const auto found = state().files.find(id); found != state().files.end()) return found->second;
+    for (const StandIn &provider : state().stand_ins)
+        if (auto bytes = provider(runtime, id); bytes && !bytes->empty())
+            return File{{}, bytes, static_cast<std::uint32_t>(bytes->size())};
+    return std::nullopt;
 }
 
 void size_of(Runtime &runtime, AllegrexContext &ctx) {
-    const File *file = added(ctx);
-    if (file == nullptr) {
+    const std::optional<File> file = served(runtime, ctx);
+    if (!file) {
         run_game(state().size, kSize, runtime, ctx);
         return;
     }
@@ -104,20 +112,20 @@ void copy_file(Runtime &runtime, AllegrexContext &ctx, const File &file, std::ui
     if (bytes.size() != file.size || !runtime.memory().contains(destination, length)) {
         // A missing file still answers, with zeros, rather than a load that
         // never ends.
-        std::cerr << "[mods] added file " << psprecomp::hex32(ctx.gpr[5] & 0xFFFFu) << " ("
+        std::cerr << "[mods] file " << psprecomp::hex32(ctx.gpr[5] & 0xFFFFu) << " ("
                   << (file.bytes ? std::string("from memory") : to_utf8(file.path.filename()))
                   << ") cannot be read or does not fit at " << psprecomp::hex32(destination) << "\n";
         bytes.assign(file.size, 0u);
     }
     if (runtime.memory().contains(destination, length)) runtime.memory().copy_in(destination, {bytes.data(), length});
     if (state().trace)
-        std::cout << "[mods] added file " << psprecomp::hex32(ctx.gpr[5] & 0xFFFFu) << ": " << length << " bytes to "
-                  << psprecomp::hex32(destination) << "\n";
+        std::cout << "[mods] file " << psprecomp::hex32(ctx.gpr[5] & 0xFFFFu) << " from a mod: " << length
+                  << " bytes to " << psprecomp::hex32(destination) << "\n";
 }
 
 void submit(Runtime &runtime, AllegrexContext &ctx) {
-    const File *file = added(ctx);
-    if (file == nullptr) {
+    const std::optional<File> file = served(runtime, ctx);
+    if (!file) {
         run_game(state().submit, kSubmit, runtime, ctx);
         return;
     }
@@ -129,8 +137,8 @@ void submit(Runtime &runtime, AllegrexContext &ctx) {
 // The loader's read that waits for the file: it reads the file's sectors
 // from DATA.BIN itself, and an added file has none.
 void read_now(Runtime &runtime, AllegrexContext &ctx) {
-    const File *file = added(ctx);
-    if (file == nullptr) {
+    const std::optional<File> file = served(runtime, ctx);
+    if (!file) {
         run_game(state().read, kRead, runtime, ctx);
         return;
     }
@@ -204,6 +212,12 @@ bool add(Runtime &runtime, FileId file, std::vector<std::uint8_t> bytes) {
         return false;
     const auto size = static_cast<std::uint32_t>(bytes.size());
     state().files[file] = {{}, std::make_shared<const std::vector<std::uint8_t>>(std::move(bytes)), size};
+    return true;
+}
+
+bool stand_in(Runtime &runtime, StandIn provider) {
+    if (!provider || !take_over(runtime)) return false;
+    state().stand_ins.push_back(std::move(provider));
     return true;
 }
 

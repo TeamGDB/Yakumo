@@ -30,7 +30,8 @@ Read the documents relevant to the task before changing code, testing, packaging
 | [DATA_BIN.md](docs/DATA_BIN.md) | Archive layout, obfuscation, overlay entries, file IDs and mod I/O |
 | [QUESTS.md](docs/QUESTS.md) | Quest files, their cipher and payload, how a quest id finds its file, and quests mods add |
 | [MONSTERS.md](docs/MONSTERS.md) | Large monster kinds, the tables indexed by kind and model set, and adding a kind |
-| [MODDING.md](docs/MODDING.md) | Making mods: Yakumo's mod format, files added and changed, memory and code edits, the JIT, script and native mods and their API, .ymod packages, testing |
+| [MAPS.md](docs/MAPS.md) | How an area's files are found, its model and collision formats, and areas mods add in place of the game's |
+| [MODDING.md](docs/MODDING.md) | Making mods: Yakumo's mod format, files added and changed, memory and code edits, the JIT, script and native mods and their API (monsters, quests, weapons, maps), .ymod packages, testing |
 | [EQUIPMENT_MODS.md](docs/EQUIPMENT_MODS.md) | Equipment model/file lookup, traced tables and mod targets |
 | [LAYERED_ARMOR.md](docs/LAYERED_ARMOR.md) | Appearance overrides, model hooks, reload behavior and multiplayer visibility |
 | [TEXT_TRANSLATION.md](docs/TEXT_TRANSLATION.md) | Translation format, import safety limits, text tools and runtime tests |

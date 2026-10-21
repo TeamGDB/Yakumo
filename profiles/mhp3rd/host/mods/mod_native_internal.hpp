@@ -147,5 +147,6 @@ extern const ymod_tables kTables;
 extern const ymod_monsters kMonsters;
 extern const ymod_quests kQuests;
 extern const ymod_equipment kEquipment;
+extern const ymod_maps kMaps;
 
 } // namespace mhp3rd::mods::native

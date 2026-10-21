@@ -39,6 +39,7 @@ public:
     const ymod_monsters *monsters() const { return service<ymod_monsters>(YMOD_MONSTERS, 1u); }
     const ymod_quests *quests() const { return service<ymod_quests>(YMOD_QUESTS, 1u); }
     const ymod_equipment *equipment() const { return service<ymod_equipment>(YMOD_EQUIPMENT, 1u); }
+    const ymod_maps *maps() const { return service<ymod_maps>(YMOD_MAPS, 1u); }
 
     // A known function or data by name (sdk/symbols.txt), or nothing.
     [[nodiscard]] std::optional<ymod_symbol> symbol(const char *name) const {
