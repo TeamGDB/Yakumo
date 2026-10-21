@@ -259,6 +259,7 @@ set(MHP3RD_HOST_SOURCES
     host/mods/mhp3rd_monsters.cpp
     host/mods/mhp3rd_quests.cpp
     host/mods/mhp3rd_equipment.cpp
+    host/mods/mhp3rd_maps.cpp
     host/mods/mhp3rd_texts.cpp
     host/mods/mhp3rd_symbols.cpp
     host/mods/mhp3rd_tables.cpp
@@ -277,6 +278,7 @@ set(MHP3RD_HOST_SOURCES
     host/game/game_data.cpp
     host/game/quest_file.cpp
     host/game/quest_builder.cpp
+    host/game/pack_file.cpp
     host/game/equipment_models.cpp
     host/game/layered_armor.cpp
     host/game/layered_armor_hook.cpp

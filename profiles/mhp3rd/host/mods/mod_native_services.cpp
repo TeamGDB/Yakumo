@@ -4,6 +4,7 @@
 #include "mods/mhp3rd_mod_format.hpp"
 #include "mods/mhp3rd_mods.hpp"
 #include "mods/mhp3rd_equipment.hpp"
+#include "mods/mhp3rd_maps.hpp"
 #include "mods/mhp3rd_monsters.hpp"
 #include "mods/mhp3rd_quests.hpp"
 #include "mods/mhp3rd_symbols.hpp"
@@ -460,6 +461,11 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
         return refuse("a number is out of range");
     spec.id = static_cast<std::uint16_t>(quest->id);
     spec.map = static_cast<std::uint8_t>(quest->map);
+    // Played in an area of the mod's: on that area's map.
+    const bool has_area = quest->size >= offsetof(ymod_quest, area) + sizeof(quest->area) && quest->area != nullptr;
+    const maps::Area *area = has_area ? maps::find(quest->area) : nullptr;
+    if (has_area && area == nullptr) return refuse("its area \"" + text(quest->area) + "\" has not been added");
+    if (area != nullptr) spec.map = area->map;
     spec.stars = static_cast<std::uint16_t>(quest->stars);
     spec.minutes = quest->minutes;
     spec.fee = quest->fee;
@@ -486,7 +492,32 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
     const std::optional<std::vector<std::uint8_t>> payload = game::build_quest(spec, &why);
     if (!payload) return refuse(why);
     if (!mhp3rd::mods::quests::add(*runtime, *payload, mod->name, &why)) return refuse(why);
+    if (area != nullptr) maps::play_quest_in(area->id, quest->id);
     return static_cast<int32_t>(quest->id);
+}
+
+int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
+    Runtime *runtime = state().runtime;
+    if (runtime == nullptr || mod == nullptr || mod->failed || area == nullptr ||
+        area->size < offsetof(ymod_area, walls) + sizeof(area->walls))
+        return -1;
+    const auto text = [](const char *s) { return std::string(s != nullptr ? s : ""); };
+    const auto refuse = [mod, area, &text](const std::string &why) {
+        report(mod, "area " + text(area->id) + " is not added: " + why, true);
+        return -1;
+    };
+    if (area->map < 0 || area->map > 0xFF || area->area < 0 || area->area > 0xFF)
+        return refuse("its map or area is out of range");
+    const auto model = mod_bytes(mod, area->model, "model", "area");
+    const auto geometry = mod_bytes(mod, area->geometry, "geometry", "area");
+    const auto textures = mod_bytes(mod, area->textures, "textures", "area");
+    const auto ground = mod_bytes(mod, area->ground, "ground", "area");
+    const auto walls = mod_bytes(mod, area->walls, "walls", "area");
+    if (!model || !geometry || !textures || !ground || !walls) return -1;
+    maps::AreaSpec spec{text(area->id), static_cast<std::uint8_t>(area->map), static_cast<std::uint8_t>(area->area),
+        *model, *geometry, *textures, *ground, *walls, mod->name};
+    std::string why;
+    return maps::add_area(*runtime, std::move(spec), &why) ? 0 : refuse(why);
 }
 
 int32_t equipment_add_weapon(ymod_mod *mod, const ymod_weapon *weapon) {
@@ -522,6 +553,8 @@ const ymod_tables kTables{1u, sizeof(ymod_tables), &tables_find, &tables_get, &t
 const ymod_quests kQuests{1u, sizeof(ymod_quests), &quests_add};
 
 const ymod_equipment kEquipment{1u, sizeof(ymod_equipment), &equipment_add_weapon};
+
+const ymod_maps kMaps{1u, sizeof(ymod_maps), &maps_add_area};
 
 const ymod_monsters kMonsters{1u, sizeof(ymod_monsters), &monsters_add, &monsters_kind, &monsters_id_of,
     &monsters_behave, &monsters_play_motion, &monsters_motion_finished, &monsters_motion_frame, &monsters_at_frame,
