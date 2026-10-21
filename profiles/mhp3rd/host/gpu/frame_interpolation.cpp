@@ -14,7 +14,7 @@ float length3(const float *v) noexcept {
 
 } // namespace
 
-DrawSummary summarize(const DrawCall &call) {
+DrawSummary summarize(const DrawCall &call, bool measure_skin_position) {
     DrawSummary draw{};
     draw.vertex_address = call.vertex_address;
     draw.index_address = call.index_address;
@@ -33,6 +33,25 @@ DrawSummary summarize(const DrawCall &call) {
     draw.key_hash = Matcher::hash_of(draw);
     draw.eye_translation = Matcher::eye_translation_of(draw);
     draw.prepared = true;
+    if (measure_skin_position && draw.skinned && call.raw_vertices == nullptr && !call.vertices.empty()) {
+        const std::size_t count = call.indices.empty() ? call.vertices.size() : call.indices.size();
+        std::array<double, 3> sum{};
+        for (std::size_t i = 0; i < count; ++i) {
+            const std::size_t index = call.indices.empty() ? i : call.indices[i];
+            if (index >= call.vertices.size()) return draw;
+            const auto &position = call.vertices[index].position;
+            for (std::size_t axis = 0; axis < 3u; ++axis) sum[axis] += position[axis];
+        }
+        const Matrix eye = multiply(draw.view, draw.world);
+        for (std::size_t row = 0; row < 3u; ++row) {
+            double position = eye[12u + row];
+            for (std::size_t axis = 0; axis < 3u; ++axis)
+                position += eye[axis * 4u + row] * (sum[axis] / static_cast<double>(count));
+            draw.skin_position[row] = static_cast<float>(position);
+            if (!std::isfinite(draw.skin_position[row])) return draw;
+        }
+        draw.skin_position_valid = true;
+    }
     return draw;
 }
 
@@ -183,7 +202,9 @@ const Matching &Matcher::match(
 
     // Each pair's own motion: where the camera's motion would have taken the
     // older draw against where the newer one is, in eye space.
-    if (out.camera_found && thresholds.max_own_motion > 0.0f) {
+    if (out.camera_found &&
+        (thresholds.max_own_motion > 0.0f || thresholds.max_skinned_angle_degrees > 0.0f ||
+            thresholds.max_skinned_pose_motion > 0.0f)) {
         const Matrix &c = out.camera;
         // Only the translation column of view times world is used; summarize()
         // stores it (eye_translation_of, the same sums as multiply()).
@@ -192,6 +213,31 @@ const Matching &Matcher::match(
             if (partner < 0) continue;
             const DrawSummary &from = older[i];
             const DrawSummary &to = newer[static_cast<std::size_t>(partner)];
+            if (from.skinned && to.skinned && thresholds.max_skinned_angle_degrees > 0.0f) {
+                const Matrix predicted = multiply(c, multiply(from.view, from.world));
+                const Matrix after = multiply(to.view, to.world);
+                if (rotation_angle_degrees(predicted, after) > thresholds.max_skinned_angle_degrees) {
+                    out.newer_of[i] = Matching::kFollowCamera;
+                    ++out.rejected_turns;
+                    continue;
+                }
+            }
+            if (thresholds.max_skinned_pose_motion > 0.0f && from.skin_position_valid && to.skin_position_valid) {
+                float squared = 0.0f;
+                for (std::size_t row = 0; row < 3u; ++row) {
+                    const float predicted = c[row] * from.skin_position[0] + c[4u + row] * from.skin_position[1] +
+                        c[8u + row] * from.skin_position[2] + c[12u + row];
+                    const float d = to.skin_position[row] - predicted;
+                    squared += d * d;
+                }
+                const float motion = std::sqrt(squared);
+                out.max_skinned_motion = std::max(out.max_skinned_motion, motion);
+                if (motion > thresholds.max_skinned_pose_motion) {
+                    out.newer_of[i] = Matching::kFollowCamera;
+                    ++out.rejected_poses;
+                    continue;
+                }
+            }
             const std::array<float, 3> before_column = from.prepared ? from.eye_translation : eye_translation_of(from);
             const std::array<float, 3> after_column = to.prepared ? to.eye_translation : eye_translation_of(to);
             float distance = 0.0f;
@@ -202,7 +248,7 @@ const Matching &Matcher::match(
                 distance += d * d;
             }
             distance = std::sqrt(distance);
-            if (distance > thresholds.max_own_motion) {
+            if (thresholds.max_own_motion > 0.0f && distance > thresholds.max_own_motion) {
                 out.newer_of[i] = Matching::kFollowCamera;
                 ++out.rejected;
                 out.max_rejected_motion = std::max(out.max_rejected_motion, distance);
@@ -336,16 +382,59 @@ void Matcher::pair_nearest_instances(
     }
 }
 
-Matrix blend_affine(const Matrix &a, const Matrix &b, float t) noexcept {
+Matrix blend_affine(const Matrix &a, const Matrix &b, float t, bool stable_turns) noexcept {
+    if (t == 0.0f) return a;
+    if (t == 1.0f) return b;
     Matrix out = blend_linear(a, b, t);
+    std::array<float, 3> from_lengths{}, to_lengths{}, wanted_lengths{};
+    bool sharp = false;
     for (std::uint32_t column = 0; column < 3u; ++column) {
-        float *axis = out.data() + column * 4u;
+        const std::size_t at = column * 4u;
+        const float from = length3(a.data() + at), to = length3(b.data() + at);
+        from_lengths[column] = from;
+        to_lengths[column] = to;
+        wanted_lengths[column] = from * (1.0f - t) + to * t;
+        const float alignment = a[at] * b[at] + a[at + 1u] * b[at + 1u] + a[at + 2u] * b[at + 2u];
+        sharp = sharp || alignment < 0.5f * from * to;
+        float *axis = out.data() + at;
         const float length = length3(axis);
         if (length < 1e-12f) continue;
-        const float wanted = length3(a.data() + column * 4u) * (1.0f - t) + length3(b.data() + column * 4u) * t;
-        const float scale = wanted / length;
+        const float scale = wanted_lengths[column] / length;
         for (std::uint32_t row = 0; row < 3u; ++row) axis[row] *= scale;
     }
+    if (!stable_turns || !sharp) return out;
+
+    // Opposing basis vectors cancel in a linear blend. Turn the whole basis
+    // along its rotation instead, keeping translation and each scale linear.
+    // Small changes retain the existing inexpensive normalized blend.
+    Matrix before{}, after{};
+    before[15] = after[15] = 1.0f;
+    for (std::size_t column = 0; column < 3u; ++column) {
+        const float from = from_lengths[column], to = to_lengths[column];
+        if (!(from > 1e-12f && to > 1e-12f) || !std::isfinite(from) || !std::isfinite(to)) return out;
+        for (std::size_t row = 0; row < 3u; ++row) {
+            const std::size_t at = column * 4u + row;
+            before[at] = a[at] / from;
+            after[at] = b[at] / to;
+        }
+    }
+    Matrix inverse{};
+    if (!affine_inverse(before, inverse)) return out;
+    const Matrix relative = multiply(after, inverse);
+    const RigidMotion turn = rigid_motion(relative);
+    if (!turn.valid) return out;
+    const Matrix whole = rigid_at(turn, 1.0f);
+    // A change of handedness or shear is not a rotation. Preserve the old
+    // blend for these rather than replacing it with a different transform.
+    for (std::size_t column = 0; column < 3u; ++column)
+        for (std::size_t row = 0; row < 3u; ++row) {
+            const std::size_t at = column * 4u + row;
+            if (std::fabs(whole[at] - relative[at]) > 1e-3f) return out;
+        }
+    const Matrix rotated = multiply(rigid_at(turn, t), before);
+    for (std::size_t column = 0; column < 3u; ++column)
+        for (std::size_t row = 0; row < 3u; ++row)
+            out[column * 4u + row] = rotated[column * 4u + row] * wanted_lengths[column];
     return out;
 }
 
@@ -527,13 +616,14 @@ Matrix rigid_at(const RigidMotion &motion, float t) noexcept {
     return out;
 }
 
-Matrix blend_eye(const Matrix &older, const Matrix &newer, const RigidMotion &camera, float t) noexcept {
+Matrix blend_eye(
+    const Matrix &older, const Matrix &newer, const RigidMotion &camera, float t, bool stable_turns) noexcept {
     if (older == newer) return older;
-    if (!camera.valid) return blend_affine(older, newer, t);
+    if (!camera.valid) return blend_affine(older, newer, t, stable_turns);
     // The newer transform as the older camera would have seen it, then the
     // camera's own motion a fraction of the way.
     const Matrix own = multiply(camera.inverse, newer);
-    return multiply(rigid_at(camera, t), blend_affine(older, own, t));
+    return multiply(rigid_at(camera, t), blend_affine(older, own, t, stable_turns));
 }
 
 } // namespace mhp3rd::gpu::interpolation

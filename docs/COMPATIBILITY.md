@@ -660,3 +660,26 @@ Windows x64, source commit `e7b96c5` (`sound-settings`, based on `c40b979`):
 - A bounded game run with isolated data loaded all 355 existing overlays. The game audio diagnostic reported BGM/SFX at 7/7. Changing BGM through the new Audio menu produced BGM 6/7 with SFX still 7/7 after resuming. The Master Volume, BGM Volume and SFX Volume menu captures were inspected.
 - The user also confirmed that the controls work and both volume levels change during gameplay.
 - Original Options screen round trips, save/restart persistence of these levels, and other platforms were not checked in this pass. No coverage percentage was measured on Windows.
+
+## Interpolation investigation (#344, #197; 2026-10-21)
+
+Windows x64, Radeon RX 6500 XT 8 GB, Vulkan: source `de6818a` contains the
+hunter turn guard; `354410e` adds the disabled-by-default skin-motion experiment.
+Manual tests used the corresponding source trees before committing, based on
+`90b66a6`, in a separate checkout without the pending HUD customization.
+
+- The reporter tentatively no longer observes the hunter blinking during sharp
+  direction reversals after the skinned-turn guard. An affine-only fix had not
+  resolved the gameplay blink.
+- Amatsu's opening cutscene looks smooth at 30 FPS. At 120 FPS the model still
+  jitters with normal instance matching, with nearest-instance matching disabled,
+  and with `MHP3RD_INTERPOLATION_SKIN_MOTION_GUARD=1`. Combat appeared smooth in
+  an earlier manual check, but that observation is tentative.
+- The skin-motion experiment detects large centroid steps but did not resolve
+  the reported cutscene artifact. It remains off by default and may hold
+  legitimate fast animation; it is not a verified Amatsu fix.
+- The Windows Release build, all five relevant interpolation/GE/render/UI test
+  suites and the pinned formatter passed. Synthetic regressions cover sharp
+  transforms, camera compensation, the optional pose guard and invalid inputs.
+  Native coverage, other platforms, and original/intermediate cutscene replay
+  pixel comparisons were not measured in this pass.

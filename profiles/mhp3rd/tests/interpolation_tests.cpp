@@ -114,6 +114,104 @@ void blending() {
     check(is_orthographic(ortho) && !is_orthographic(perspective()), "orthographic projections are told apart");
 }
 
+float determinant(const Matrix &m) {
+    return m[0] * (m[5] * m[10] - m[9] * m[6]) - m[4] * (m[1] * m[10] - m[9] * m[2]) +
+        m[8] * (m[1] * m[6] - m[5] * m[2]);
+}
+
+void turning() {
+    const Matrix start = transform(0.0f, 10.0f, 20.0f, -300.0f);
+    for (const float angle : {-179.0f, -120.0f, -61.0f, 61.0f, 120.0f, 179.0f, 180.0f}) {
+        const Matrix end = transform(angle, 30.0f, 40.0f, -320.0f);
+        for (const float t : {0.0f, 0.25f, 0.5f, 0.75f, 1.0f}) {
+            const Matrix between = blend_affine(start, end, t);
+            check(near(determinant(between), 1.0f), "a sharp turn preserves the model's volume and winding");
+            check(near(rotation_angle_degrees(start, between), std::fabs(angle) * t, 0.02f),
+                "a sharp turn advances at a constant angular rate");
+            check(near(between[12], 10.0f + 20.0f * t) && near(between[13], 20.0f + 20.0f * t) &&
+                    near(between[14], -300.0f - 20.0f * t),
+                "turning still interpolates the model's position linearly");
+        }
+    }
+    // Exact half-turns have no trigonometric rounding to keep opposing axes apart.
+    for (const std::size_t axis : {0u, 1u, 2u}) {
+        Matrix end = start;
+        for (std::size_t c = 0; c < 3u; ++c) end[c * 5u] = c == axis ? 1.0f : -1.0f;
+        const Matrix half = blend_affine(start, end, 0.5f);
+        check(near(determinant(half), 1.0f), "an exact half-turn never collapses at its midpoint");
+        check(
+            near(rotation_angle_degrees(start, half), 90.0f, 0.01f), "an exact half-turn has a quarter-turn midpoint");
+        for (std::size_t c = 0; c < 3u; ++c) {
+            float length = 0.0f;
+            for (std::size_t r = 0; r < 3u; ++r) length += half[c * 4u + r] * half[c * 4u + r];
+            check(near(length, 1.0f), "every basis axis retains its length through a half-turn");
+        }
+    }
+    Matrix end = transform(180.0f, 30.0f, 40.0f, -320.0f);
+    for (std::size_t c = 0; c < 3u; ++c)
+        for (std::size_t r = 0; r < 3u; ++r) end[c * 4u + r] *= static_cast<float>(c + 2u);
+    const Matrix scaled = blend_affine(start, end, 0.5f);
+    for (std::size_t c = 0; c < 3u; ++c) {
+        float length = 0.0f;
+        for (std::size_t r = 0; r < 3u; ++r) length += scaled[c * 4u + r] * scaled[c * 4u + r];
+        check(near(std::sqrt(length), 1.5f + static_cast<float>(c) * 0.5f),
+            "a sharp turn interpolates each scale axis without shrinking it");
+    }
+    check(near(determinant(scaled), 7.5f), "a scaled turn keeps the expected volume");
+    const Matrix half_eye = blend_eye(start, transform(180.0f, 30.0f, 40.0f, -320.0f), {}, 0.5f);
+    check(near(determinant(half_eye), 1.0f), "eye-space interpolation also preserves a turning hunter's volume");
+}
+
+void turn_boundaries() {
+    const Matrix identity = transform(0.0f, 0.0f, 0.0f, 0.0f);
+    Matrix reversed = identity;
+    reversed[0] = reversed[10] = -1.0f;
+    check(near(determinant(blend_affine(identity, reversed, 0.5f, false)), 0.0f),
+        "the legacy comparison path reproduces the collapsed half-turn");
+    check(blend_affine(identity, reversed, 0.0f) == identity && blend_affine(identity, reversed, 1.0f) == reversed,
+        "half-turn endpoints are exact");
+    for (const float angle : {-59.0f, -6.0f, 0.0f, 6.0f, 59.0f}) {
+        const Matrix after = transform(angle, 10.0f, 0.0f, 0.0f);
+        check(blend_affine(identity, after, 0.25f) == blend_affine(identity, after, 0.25f, false),
+            "small turns retain the original blend");
+    }
+    Matrix mirrored = identity;
+    mirrored[0] = -1.0f;
+    const Matrix mirrored_after = multiply(reversed, mirrored);
+    check(near(determinant(blend_affine(mirrored, mirrored_after, 0.5f)), -1.0f),
+        "a turning reflected model preserves its handedness");
+    check(blend_affine(identity, mirrored, 0.5f) == blend_affine(identity, mirrored, 0.5f, false),
+        "a handedness change retains the legacy blend");
+    Matrix shear = reversed;
+    shear[4] = 0.4f;
+    check(blend_affine(identity, shear, 0.5f) == blend_affine(identity, shear, 0.5f, false),
+        "a non-rotational shear change retains the legacy blend");
+    Matrix flat = identity;
+    flat[0] = 0.0f;
+    const Matrix flat_after = multiply(reversed, flat);
+    const Matrix flat_half = blend_affine(flat, flat_after, 0.5f);
+    bool finite = true;
+    for (const float value : flat_half) finite = finite && std::isfinite(value);
+    check(finite, "a zero-length axis remains finite");
+    check(flat_half == blend_affine(flat, flat_after, 0.5f, false), "a degenerate scale uses the legacy blend");
+    Matrix dependent = identity;
+    dependent[4] = 1.0f;
+    dependent[5] = 0.0f;
+    const Matrix dependent_after = multiply(reversed, dependent);
+    check(blend_affine(dependent, dependent_after, 0.5f) == blend_affine(dependent, dependent_after, 0.5f, false),
+        "a dependent basis keeps the legacy fallback");
+    Matrix nonfinite = reversed;
+    nonfinite[0] = std::numeric_limits<float>::infinity();
+    const Matrix invalid = blend_affine(identity, nonfinite, 0.5f);
+    check(!std::isfinite(invalid[0]), "an invalid endpoint is not treated as a valid rotation");
+    const RigidMotion camera = rigid_motion(transform(15.0f, 0.0f, 0.0f, 0.0f));
+    const Matrix end_eye = multiply(rigid_at(camera, 1.0f), reversed);
+    const Matrix half_eye = blend_eye(identity, end_eye, camera, 0.5f);
+    check(near(determinant(half_eye), 1.0f), "a sharp model turn also works while the camera moves");
+    check(near(determinant(blend_eye(identity, reversed, {}, 0.5f, false)), 0.0f),
+        "the legacy switch also reaches eye-space interpolation");
+}
+
 void rigid() {
     // A camera orbiting a point 400 units ahead by 24 degrees and sliding up
     // 5 units along the axis.
@@ -162,6 +260,134 @@ void rigid() {
     bool walks = true;
     for (std::size_t i = 12u; i < 15u; ++i) walks = walks && near(walker_half[i], walker_expected[i], 0.2f);
     check(walks, "a moving character is halfway along its own path, seen from halfway along the orbit");
+}
+
+void skinned_turn_guard() {
+    for (const float camera_angle : {0.0f, 24.0f}) {
+        for (const float angle : {-180.0f, -121.0f, -119.0f, 0.0f, 119.0f, 121.0f, 180.0f}) {
+            std::vector<DrawSummary> older = scene(40u);
+            std::vector<DrawSummary> newer = scene(40u, camera_angle);
+            DrawSummary before = draw(90u, 0.0f);
+            DrawSummary after = draw(90u, 0.0f, camera_angle);
+            before.skinned = after.skinned = true;
+            after.world = multiply(after.world, transform(angle, 0.0f, 0.0f, 0.0f));
+            older.push_back(before);
+            newer.push_back(after);
+            mark_eligible(older, kShown);
+            mark_eligible(newer, kShown);
+            Matcher matcher;
+            const Matching &matched = matcher.match(older, newer, {});
+            const bool abrupt = std::fabs(angle) > 120.0f;
+            check(matched.newer_of[40] == (abrupt ? Matching::kFollowCamera : 40),
+                "abrupt skinned turns hold the original mesh while smaller turns still blend");
+            check(matched.rejected_turns == (abrupt ? 1u : 0u) && matched.cut == nullptr,
+                "a skinned basis flip does not stop interpolation of the rest of the scene");
+            check(matched.newer_of[0] == 0 && matched.rejected == 0u,
+                "camera motion and scenery are preserved by the skinned turn guard");
+            CutThresholds legacy{};
+            legacy.max_skinned_angle_degrees = 0.0f;
+            Matcher original;
+            check(original.match(older, newer, legacy).newer_of[40] == 40,
+                "disabling the skinned turn guard restores the original match");
+            CutThresholds no_distance{};
+            no_distance.max_own_motion = 0.0f;
+            Matcher rotation_only;
+            check(
+                rotation_only.match(older, newer, no_distance).newer_of[40] == (abrupt ? Matching::kFollowCamera : 40),
+                "the angular guard works independently of the translation guard");
+            newer[40].skinned = older[40].skinned = false;
+            Matcher rigid_object;
+            check(rigid_object.match(older, newer, {}).newer_of[40] == 40,
+                "unskinned rigid meshes keep their rotation interpolation");
+        }
+    }
+    std::vector<DrawSummary> older = scene(40u), newer = scene(40u, 24.0f);
+    older[3].skinned = newer[3].skinned = true;
+    Matcher camera_only;
+    check(camera_only.match(older, newer, {}).rejected_turns == 0u,
+        "camera rotation by itself never triggers the skin turn guard");
+}
+
+void skinned_pose_guard() {
+    DrawCall call{};
+    call.vertex_type = 1u << 9u;
+    call.primitive = PrimitiveType::Triangles;
+    call.primitive_count = 3u;
+    call.vertex_address = 0x09100000u;
+    call.target.color_address = kShown;
+    call.world = transform(0.0f, 0.0f, 0.0f, -500.0f);
+    call.view = transform(0.0f, 0.0f, 0.0f, 0.0f);
+    call.projection = perspective();
+    call.vertices.resize(3u);
+    call.vertices[0].position = {-10.0f, 0.0f, 0.0f, 1.0f};
+    call.vertices[1].position = {10.0f, 0.0f, 0.0f, 1.0f};
+    call.vertices[2].position = {0.0f, 6.0f, 0.0f, 1.0f};
+    check(!summarize(call).skin_position_valid, "default summary does not measure experimental skin positions");
+    const auto base = summarize(call, true);
+    check(base.skin_position_valid && near(base.skin_position[0], 0.0f) && near(base.skin_position[1], 2.0f) &&
+            near(base.skin_position[2], -500.0f),
+        "decoded skinned centroid is measured in eye space");
+    call.indices = {1u, 1u, 2u};
+    check(near(summarize(call, true).skin_position[0], 20.0f / 3.0f),
+        "indexed skin positions use the vertices actually drawn");
+    call.indices = {99u};
+    check(!summarize(call, true).skin_position_valid, "an invalid index has no usable skin position");
+    call.indices.clear();
+    call.vertices[0].position[0] = std::numeric_limits<float>::infinity();
+    check(!summarize(call, true).skin_position_valid, "nonfinite skin positions are not matched as valid poses");
+    call.vertices[0].position[0] = -10.0f;
+    call.through = true;
+    check(!summarize(call, true).skin_position_valid, "screen-space geometry is not measured as a skinned pose");
+    call.through = false;
+    call.vertex_type = 0u;
+    check(!summarize(call, true).skin_position_valid, "rigid geometry does not acquire a skin position");
+    call.vertex_type = 1u << 9u;
+    std::uint8_t raw{};
+    call.raw_vertices = &raw;
+    check(!summarize(call, true).skin_position_valid, "raw GPU skinning keeps its existing interpolation path");
+    call.raw_vertices = nullptr;
+    call.vertices.clear();
+    check(!summarize(call, true).skin_position_valid, "an empty skin has no centroid");
+
+    for (const float camera_angle : {0.0f, 24.0f}) {
+        for (const float distance : {0.0f, 119.0f, 121.0f, 1100.0f}) {
+            auto older = scene(40u), newer = scene(40u, camera_angle);
+            auto from = base, to = base;
+            to.view = draw(90u, 0.0f, camera_angle).view;
+            // Skinning moves vertices while the root transform stays fixed.
+            const Matrix camera = multiply(to.view, transform(0.0f, 0.0f, 0.0f, 0.0f));
+            for (std::size_t row = 0; row < 3u; ++row)
+                to.skin_position[row] =
+                    camera[row] * distance + camera[4u + row] * 2.0f - camera[8u + row] * 500.0f + camera[12u + row];
+            older.push_back(from);
+            newer.push_back(to);
+            mark_eligible(older, kShown);
+            mark_eligible(newer, kShown);
+            CutThresholds opt_in{};
+            opt_in.max_skinned_pose_motion = 120.0f;
+            Matcher candidate;
+            const auto &matched = candidate.match(older, newer, opt_in);
+            const bool jump = distance > 120.0f;
+            check(matched.newer_of[40] == (jump ? Matching::kFollowCamera : 40) &&
+                    matched.rejected_poses == (jump ? 1u : 0u),
+                "the pose guard holds a centroid jump hidden in CPU skinning after camera compensation");
+            check(
+                near(matched.max_skinned_motion, distance, 0.02f) && matched.cut == nullptr && matched.newer_of[0] == 0,
+                "skin motion is measured independently and does not cut the rest of the scene");
+            Matcher default_matcher;
+            check(default_matcher.match(older, newer, {}).newer_of[40] == 40,
+                "the experimental pose guard is disabled by default");
+            newer[40].skin_position_valid = false;
+            Matcher missing;
+            check(missing.match(older, newer, opt_in).newer_of[40] == 40,
+                "missing decoded positions retain root-transform matching");
+            opt_in.max_own_motion = opt_in.max_skinned_angle_degrees = 0.0f;
+            newer[40].skin_position_valid = true;
+            Matcher independent;
+            check(independent.match(older, newer, opt_in).newer_of[40] == (jump ? Matching::kFollowCamera : 40),
+                "the experimental pose guard can run without the root guards");
+        }
+    }
 }
 
 void guards() {
@@ -594,6 +820,10 @@ int main() {
         check(pacing::requested_rate(FrameRate::Display, unknown) == 60.0, "unknown display refresh uses 60");
     check(pacing::requested_rate(static_cast<FrameRate>(99), 120.0) == 30.0, "invalid rate uses game frames");
     blending();
+    turning();
+    turn_boundaries();
+    skinned_turn_guard();
+    skinned_pose_guard();
     rigid();
     guards();
     matching();

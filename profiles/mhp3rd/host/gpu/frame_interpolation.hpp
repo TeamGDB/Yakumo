@@ -43,6 +43,10 @@ struct DrawSummary {
     // render-to-texture passes are shown as the frame drew them.
     bool eligible{};
     bool skinned{}; // the vertices were blended by bone matrices
+    // Optional CPU-skinned centroid in eye space, measured only for the
+    // experimental pose-motion guard. Raw GPU draws have no decoded centroid.
+    bool skin_position_valid{};
+    std::array<float, 3> skin_position{};
     Matrix world{};
     Matrix view{};
     Matrix projection{};
@@ -50,7 +54,7 @@ struct DrawSummary {
 
 // Fills the fields of a summary that come from the draw itself; `eligible`
 // is decided once the frame's displayed framebuffer is known.
-DrawSummary summarize(const DrawCall &call);
+DrawSummary summarize(const DrawCall &call, bool measure_skin_position = false);
 // Marks the perspective draws into `displayed` eligible.
 void mark_eligible(std::vector<DrawSummary> &draws, std::uint32_t displayed) noexcept;
 
@@ -71,8 +75,11 @@ struct Matching {
     // same mesh drawn more than once) it may have been mistaken for.
     std::uint32_t rejected{};
     std::uint32_t rejected_shared{};
-    float max_own_motion{};      // the largest own motion among the pairs kept
-    float max_rejected_motion{}; // the largest among those given up
+    std::uint32_t rejected_poses{}; // CPU-skinned centroids moved too far after camera compensation
+    float max_skinned_motion{};
+    std::uint32_t rejected_turns{}; // abrupt skinned local-basis changes held with the camera
+    float max_own_motion{};         // the largest own motion among the pairs kept
+    float max_rejected_motion{};    // the largest among those given up
     // Draws of a mesh drawn more than once that were given a nearer partner
     // than the one drawing order gave them (CutThresholds::nearest_instances).
     std::uint32_t repaired{};
@@ -119,6 +126,15 @@ struct CutThresholds {
     // pair up in drawing order, and that order can change. 0 turns the
     // guard off (MHP3RD_INTERPOLATION_NO_MOTION_GUARD).
     float max_own_motion{120.0f};
+    // Skinned vertices can counter-rotate when the game's local basis flips.
+    // Blending those coordinates collapses the mesh even with a valid world
+    // rotation. Hold the old pose through abrupt own turns, following only the
+    // camera, until the next original frame. Zero disables this guard.
+    float max_skinned_angle_degrees{120.0f};
+    // Opt-in experiment: the root matrix can stay fixed while skinning moves
+    // a model. Reject large centroid steps not explained by the camera. Zero
+    // disables it; raw GPU skinning has no decoded centroid and is unchanged.
+    float max_skinned_pose_motion{0.0f};
     // Instances of one mesh (particles such as the hot spring's glints) are
     // paired by where they are, each with the nearest of the
     // newer frame's instances once the camera's motion is taken out, rather
@@ -205,9 +221,11 @@ private:
 
 // Blends two affine transforms: each basis vector keeps a length between the
 // two lengths while its direction turns (a normalised blend, close to a
-// rotation's slerp for the few degrees one game frame turns), and the
-// translation moves linearly. `t` = 0 gives `a`, 1 gives `b`.
-[[nodiscard]] Matrix blend_affine(const Matrix &a, const Matrix &b, float t) noexcept;
+// rotation's slerp for the few degrees one game frame turns). Large turns
+// follow a rigid rotation so opposite axes cannot cancel; false retains the
+// old normalized blend. Translation and scale move linearly.
+// `t` = 0 gives `a`, 1 gives `b`.
+[[nodiscard]] Matrix blend_affine(const Matrix &a, const Matrix &b, float t, bool stable_turns = true) noexcept;
 // a * b for column-major matrices.
 [[nodiscard]] Matrix multiply(const Matrix &a, const Matrix &b) noexcept;
 // Element-wise linear blend, for projections.
@@ -254,6 +272,7 @@ struct RigidMotion {
 // motion is blended in the older frame's eye space and the camera's motion
 // is followed along its arcs. A draw that stays put in eye space, like the
 // character the camera follows, stays put.
-[[nodiscard]] Matrix blend_eye(const Matrix &older, const Matrix &newer, const RigidMotion &camera, float t) noexcept;
+[[nodiscard]] Matrix blend_eye(
+    const Matrix &older, const Matrix &newer, const RigidMotion &camera, float t, bool stable_turns = true) noexcept;
 
 } // namespace mhp3rd::gpu::interpolation
