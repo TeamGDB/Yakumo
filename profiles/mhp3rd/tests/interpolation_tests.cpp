@@ -308,6 +308,88 @@ void skinned_turn_guard() {
         "camera rotation by itself never triggers the skin turn guard");
 }
 
+void skinned_pose_guard() {
+    DrawCall call{};
+    call.vertex_type = 1u << 9u;
+    call.primitive = PrimitiveType::Triangles;
+    call.primitive_count = 3u;
+    call.vertex_address = 0x09100000u;
+    call.target.color_address = kShown;
+    call.world = transform(0.0f, 0.0f, 0.0f, -500.0f);
+    call.view = transform(0.0f, 0.0f, 0.0f, 0.0f);
+    call.projection = perspective();
+    call.vertices.resize(3u);
+    call.vertices[0].position = {-10.0f, 0.0f, 0.0f, 1.0f};
+    call.vertices[1].position = {10.0f, 0.0f, 0.0f, 1.0f};
+    call.vertices[2].position = {0.0f, 6.0f, 0.0f, 1.0f};
+    check(!summarize(call).skin_position_valid, "default summary does not measure experimental skin positions");
+    const auto base = summarize(call, true);
+    check(base.skin_position_valid && near(base.skin_position[0], 0.0f) && near(base.skin_position[1], 2.0f) &&
+            near(base.skin_position[2], -500.0f),
+        "decoded skinned centroid is measured in eye space");
+    call.indices = {1u, 1u, 2u};
+    check(near(summarize(call, true).skin_position[0], 20.0f / 3.0f),
+        "indexed skin positions use the vertices actually drawn");
+    call.indices = {99u};
+    check(!summarize(call, true).skin_position_valid, "an invalid index has no usable skin position");
+    call.indices.clear();
+    call.vertices[0].position[0] = std::numeric_limits<float>::infinity();
+    check(!summarize(call, true).skin_position_valid, "nonfinite skin positions are not matched as valid poses");
+    call.vertices[0].position[0] = -10.0f;
+    call.through = true;
+    check(!summarize(call, true).skin_position_valid, "screen-space geometry is not measured as a skinned pose");
+    call.through = false;
+    call.vertex_type = 0u;
+    check(!summarize(call, true).skin_position_valid, "rigid geometry does not acquire a skin position");
+    call.vertex_type = 1u << 9u;
+    std::uint8_t raw{};
+    call.raw_vertices = &raw;
+    check(!summarize(call, true).skin_position_valid, "raw GPU skinning keeps its existing interpolation path");
+    call.raw_vertices = nullptr;
+    call.vertices.clear();
+    check(!summarize(call, true).skin_position_valid, "an empty skin has no centroid");
+
+    for (const float camera_angle : {0.0f, 24.0f}) {
+        for (const float distance : {0.0f, 119.0f, 121.0f, 1100.0f}) {
+            auto older = scene(40u), newer = scene(40u, camera_angle);
+            auto from = base, to = base;
+            to.view = draw(90u, 0.0f, camera_angle).view;
+            // Skinning moves vertices while the root transform stays fixed.
+            const Matrix camera = multiply(to.view, transform(0.0f, 0.0f, 0.0f, 0.0f));
+            for (std::size_t row = 0; row < 3u; ++row)
+                to.skin_position[row] =
+                    camera[row] * distance + camera[4u + row] * 2.0f - camera[8u + row] * 500.0f + camera[12u + row];
+            older.push_back(from);
+            newer.push_back(to);
+            mark_eligible(older, kShown);
+            mark_eligible(newer, kShown);
+            CutThresholds opt_in{};
+            opt_in.max_skinned_pose_motion = 120.0f;
+            Matcher candidate;
+            const auto &matched = candidate.match(older, newer, opt_in);
+            const bool jump = distance > 120.0f;
+            check(matched.newer_of[40] == (jump ? Matching::kFollowCamera : 40) &&
+                    matched.rejected_poses == (jump ? 1u : 0u),
+                "the pose guard holds a centroid jump hidden in CPU skinning after camera compensation");
+            check(
+                near(matched.max_skinned_motion, distance, 0.02f) && matched.cut == nullptr && matched.newer_of[0] == 0,
+                "skin motion is measured independently and does not cut the rest of the scene");
+            Matcher default_matcher;
+            check(default_matcher.match(older, newer, {}).newer_of[40] == 40,
+                "the experimental pose guard is disabled by default");
+            newer[40].skin_position_valid = false;
+            Matcher missing;
+            check(missing.match(older, newer, opt_in).newer_of[40] == 40,
+                "missing decoded positions retain root-transform matching");
+            opt_in.max_own_motion = opt_in.max_skinned_angle_degrees = 0.0f;
+            newer[40].skin_position_valid = true;
+            Matcher independent;
+            check(independent.match(older, newer, opt_in).newer_of[40] == (jump ? Matching::kFollowCamera : 40),
+                "the experimental pose guard can run without the root guards");
+        }
+    }
+}
+
 void guards() {
     // The brazier fire in the gathering hall steps its offset by a quarter
     // of the texture each game frame; water scrolls by 0.004.
@@ -741,6 +823,7 @@ int main() {
     turning();
     turn_boundaries();
     skinned_turn_guard();
+    skinned_pose_guard();
     rigid();
     guards();
     matching();

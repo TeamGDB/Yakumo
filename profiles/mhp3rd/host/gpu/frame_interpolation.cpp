@@ -14,7 +14,7 @@ float length3(const float *v) noexcept {
 
 } // namespace
 
-DrawSummary summarize(const DrawCall &call) {
+DrawSummary summarize(const DrawCall &call, bool measure_skin_position) {
     DrawSummary draw{};
     draw.vertex_address = call.vertex_address;
     draw.index_address = call.index_address;
@@ -33,6 +33,25 @@ DrawSummary summarize(const DrawCall &call) {
     draw.key_hash = Matcher::hash_of(draw);
     draw.eye_translation = Matcher::eye_translation_of(draw);
     draw.prepared = true;
+    if (measure_skin_position && draw.skinned && call.raw_vertices == nullptr && !call.vertices.empty()) {
+        const std::size_t count = call.indices.empty() ? call.vertices.size() : call.indices.size();
+        std::array<double, 3> sum{};
+        for (std::size_t i = 0; i < count; ++i) {
+            const std::size_t index = call.indices.empty() ? i : call.indices[i];
+            if (index >= call.vertices.size()) return draw;
+            const auto &position = call.vertices[index].position;
+            for (std::size_t axis = 0; axis < 3u; ++axis) sum[axis] += position[axis];
+        }
+        const Matrix eye = multiply(draw.view, draw.world);
+        for (std::size_t row = 0; row < 3u; ++row) {
+            double position = eye[12u + row];
+            for (std::size_t axis = 0; axis < 3u; ++axis)
+                position += eye[axis * 4u + row] * (sum[axis] / static_cast<double>(count));
+            draw.skin_position[row] = static_cast<float>(position);
+            if (!std::isfinite(draw.skin_position[row])) return draw;
+        }
+        draw.skin_position_valid = true;
+    }
     return draw;
 }
 
@@ -183,7 +202,9 @@ const Matching &Matcher::match(
 
     // Each pair's own motion: where the camera's motion would have taken the
     // older draw against where the newer one is, in eye space.
-    if (out.camera_found && (thresholds.max_own_motion > 0.0f || thresholds.max_skinned_angle_degrees > 0.0f)) {
+    if (out.camera_found &&
+        (thresholds.max_own_motion > 0.0f || thresholds.max_skinned_angle_degrees > 0.0f ||
+            thresholds.max_skinned_pose_motion > 0.0f)) {
         const Matrix &c = out.camera;
         // Only the translation column of view times world is used; summarize()
         // stores it (eye_translation_of, the same sums as multiply()).
@@ -198,6 +219,22 @@ const Matching &Matcher::match(
                 if (rotation_angle_degrees(predicted, after) > thresholds.max_skinned_angle_degrees) {
                     out.newer_of[i] = Matching::kFollowCamera;
                     ++out.rejected_turns;
+                    continue;
+                }
+            }
+            if (thresholds.max_skinned_pose_motion > 0.0f && from.skin_position_valid && to.skin_position_valid) {
+                float squared = 0.0f;
+                for (std::size_t row = 0; row < 3u; ++row) {
+                    const float predicted = c[row] * from.skin_position[0] + c[4u + row] * from.skin_position[1] +
+                        c[8u + row] * from.skin_position[2] + c[12u + row];
+                    const float d = to.skin_position[row] - predicted;
+                    squared += d * d;
+                }
+                const float motion = std::sqrt(squared);
+                out.max_skinned_motion = std::max(out.max_skinned_motion, motion);
+                if (motion > thresholds.max_skinned_pose_motion) {
+                    out.newer_of[i] = Matching::kFollowCamera;
+                    ++out.rejected_poses;
                     continue;
                 }
             }

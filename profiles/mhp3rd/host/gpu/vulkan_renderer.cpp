@@ -1799,14 +1799,16 @@ struct VulkanRenderer::Impl {
         std::uint32_t blocked{};     // not made: the display had no image free
         std::uint32_t over_budget{}; // not made: presents while the code ran took half a frame
         // Why presents showed a frame as it is rather than a blend.
-        std::uint32_t plain_newest{};    // at or past the newest frame's moment (1 per frame at 60/90/120)
-        std::uint32_t plain_oldest{};    // at the older frame's moment
-        std::uint32_t plain_cut{};       // the pair is not blended (cut, not recorded)
-        std::uint32_t plain_textures{};  // a texture the older frame drew with was dropped
-        std::uint64_t groups{};          // draw calls recorded again
-        std::uint64_t flipbook_steps{};  // texture offsets not blended: a flipbook's step
-        std::uint64_t followed{};        // draw calls without a partner moved with the camera only
-        std::uint32_t rejected{};        // pairs given up: moved too far on their own
+        std::uint32_t plain_newest{};   // at or past the newest frame's moment (1 per frame at 60/90/120)
+        std::uint32_t plain_oldest{};   // at the older frame's moment
+        std::uint32_t plain_cut{};      // the pair is not blended (cut, not recorded)
+        std::uint32_t plain_textures{}; // a texture the older frame drew with was dropped
+        std::uint64_t groups{};         // draw calls recorded again
+        std::uint64_t flipbook_steps{}; // texture offsets not blended: a flipbook's step
+        std::uint64_t followed{};       // draw calls without a partner moved with the camera only
+        std::uint32_t rejected{};       // pairs given up: moved too far on their own
+        std::uint32_t rejected_poses{};
+        float max_skinned_motion{};
         std::uint32_t rejected_turns{};  // sharp skinned basis changes held with the camera
         std::uint32_t rejected_shared{}; // of those, with other draws of the same mesh
         std::uint32_t repaired{};        // instances of a mesh given a nearer partner than drawing order's
@@ -2451,6 +2453,8 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
     impl.sharp_screen = player.sharp_screen;
     impl.sharp_textures = player.sharp_textures;
     impl.trace_interpolation = std::getenv("MHP3RD_TRACE_INTERPOLATION") != nullptr;
+    if (std::getenv("MHP3RD_INTERPOLATION_SKIN_MOTION_GUARD") != nullptr)
+        impl.cut_thresholds.max_skinned_pose_motion = 120.0f;
     if (std::getenv("MHP3RD_INTERPOLATION_LEGACY_TURNS") != nullptr)
         impl.cut_thresholds.max_skinned_angle_degrees = 0.0f;
     if (std::getenv("MHP3RD_INTERPOLATION_NO_MOTION_GUARD") != nullptr) impl.cut_thresholds.max_own_motion = 0.0f;
@@ -8004,7 +8008,7 @@ void VulkanRenderer::Impl::record_draw_for_replay(const DrawCall &call, bool lit
         frame.groups.push_back(added);
     }
     ++frame.groups.back().draws;
-    frame.summaries.push_back(interpolation::summarize(call));
+    frame.summaries.push_back(interpolation::summarize(call, cut_thresholds.max_skinned_pose_motion > 0.0f));
     frame.group_of.push_back(static_cast<std::uint32_t>(frame.groups.size() - 1u));
 }
 
@@ -8084,6 +8088,8 @@ void VulkanRenderer::Impl::finish_interpolated_frame(VkImage source, std::uint32
     stats.rejected += matching.rejected;
     stats.rejected_shared += matching.rejected_shared;
     stats.rejected_turns += matching.rejected_turns;
+    stats.rejected_poses += matching.rejected_poses;
+    stats.max_skinned_motion = std::max(stats.max_skinned_motion, matching.max_skinned_motion);
     stats.repaired += matching.repaired;
     stats.max_own_motion = std::max(stats.max_own_motion, matching.max_own_motion);
     if (matching.camera_found) {
@@ -8573,6 +8579,9 @@ void VulkanRenderer::Impl::report_interpolation() {
             stats.blended != 0u ? static_cast<double>(stats.followed) / stats.blended : 0.0,
             stats.blended != 0u ? static_cast<double>(stats.flipbook_steps) / stats.blended : 0.0);
         std::printf("[interp] skin turns: %u abrupt local-basis changes held with the camera\n", stats.rejected_turns);
+        if (cut_thresholds.max_skinned_pose_motion > 0.0f)
+            std::printf("[interp] skin poses: %u centroid jumps held, up to %.1f units after camera compensation\n",
+                stats.rejected_poses, static_cast<double>(stats.max_skinned_motion));
         std::fflush(stdout);
     }
     const perf::Summary &summary = perf::last_second();
