@@ -19,13 +19,15 @@ std::optional<std::pair<std::uint32_t, std::uint32_t>> find_table(const Ram &ram
     const std::uint32_t table = block + read32(ram, entry);
     if (!ram.contains(table, 8u)) return std::nullopt;
     // The game's tables: the first offset points just past the list and its
-    // end marker. A table mods made longer (mods/mhp3rd_texts.hpp) keeps its
-    // strings where they were: its list is read to the end marker.
+    // end marker, which must be there. A table mods made longer
+    // (mods/mhp3rd_texts.hpp) keeps its strings where they were, so its first
+    // offset points elsewhere: its list is read to the end marker.
     const std::uint32_t first = read32(ram, table);
     if (first >= 8u && first % 4u == 0u && first / 4u - 1u <= kMostEntries) {
         const std::uint32_t count = first / 4u - 1u;
         if (ram.contains(table, first) && read32(ram, table + count * 4u) == kTableEnd)
             return std::make_pair(table, count);
+        return std::nullopt;
     }
     for (std::uint32_t count = 0; count <= kMostEntries && ram.contains(table + count * 4u, 4u); ++count)
         if (read32(ram, table + count * 4u) == kTableEnd) return std::make_pair(table, count);
