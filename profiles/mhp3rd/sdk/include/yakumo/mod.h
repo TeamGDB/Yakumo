@@ -387,6 +387,18 @@ typedef struct ymod_hit_sphere {
 /* `monster` is the monster's object. Return YMOD_RETURN when it has done the
  * part itself, YMOD_CONTINUE to have the base's run as well (after it). */
 typedef int (*ymod_monster_fn)(ymod_cpu *cpu, uint32_t monster, void *user);
+/* A capsule of a monster's body, where hunters' hits land (docs/MONSTERS.md,
+ * "A monster's body capsules"): from `from` in joint `joint`'s frame to `to`
+ * in joint `joint_to`'s, `radius` round, or a sphere at `from` when joint_to
+ * is -1. `part` is the body part and `zone` the hit zone word, as the base
+ * kind's own capsules give them. */
+typedef struct ymod_body_capsule {
+    int32_t joint, joint_to;
+    int32_t part;
+    uint32_t zone;
+    float radius;
+    ymod_vec3 from, to;
+} ymod_body_capsule;
 typedef struct ymod_monsters {
     uint32_t version;
     uint32_t size;
@@ -457,6 +469,11 @@ typedef struct ymod_monsters {
     /* Its health now and at most (either may be NULL); now is 0 once it has
      * fallen. 0, or -1 for an address that is not guest memory. */
     int (*health)(uint32_t monster, int32_t *now, int32_t *most);
+    /* Gives a kind this mod added its own body capsules (1 to 64), in place
+     * of the base kind's, which are on the base's joints: where hunters'
+     * hits land. Call at start; it takes effect in monsters with a part of
+     * behaviour. 0, or -1 (the reason is in the log). */
+    int (*body_shapes)(ymod_mod *mod, int32_t kind, const ymod_body_capsule *capsules, int32_t count);
 } ymod_monsters;
 
 /* --------------------------------------------------------------------------
@@ -479,6 +496,12 @@ typedef struct ymod_quest_texts {
     /* Shown in every language for now; NUL-terminated UTF-8, "\n" for a new line. */
     const char *name, *objective, *failure, *description, *monsters, *client;
 } ymod_quest_texts;
+typedef struct ymod_quest_reward {
+    const char *item; /* the item, by its name as the game shows it in English: "Wyvern Gem" */
+    uint32_t count;   /* how many, 1 to 99 */
+    uint32_t chance;  /* percent: a line's chances add up to 100 */
+    uint32_t line;    /* the reward line it is drawn in, from 0; each line is one draw */
+} ymod_quest_reward;
 typedef struct ymod_quest {
     uint32_t size; /* set to sizeof(ymod_quest) before passing one */
     uint32_t id;   /* 62000 to 65535 */
@@ -492,6 +515,9 @@ typedef struct ymod_quest {
     ymod_quest_texts texts;
     const char *area; /* NULL, or an area of the mod's (yakumo.maps, added first) the quest is played in; `map`
                          is then that area's map, and its monsters start in its area of that map */
+    const ymod_quest_reward *rewards; /* the main reward's items, by line; the quest is built again with them once
+                                         the game's text is loaded, so they are named as the game names them */
+    uint32_t reward_count;
 } ymod_quest;
 /* --------------------------------------------------------------------------
  * "yakumo.equipment" 1: weapons mods add. A weapon starts from one of the

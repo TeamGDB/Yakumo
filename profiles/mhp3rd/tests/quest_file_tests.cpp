@@ -258,6 +258,28 @@ void test_builder() {
             !build_quest(game, &why) && why.find("62000") != std::string::npos && !build_quest(wordy, &why) &&
             why.find("larger") != std::string::npos,
         "builder: no monsters, too many, a game quest's id and texts too long are refused");
+
+    // Rewards: a group of lines, then each line's items (chance, count, item).
+    QuestSpec paid = spec;
+    paid.rewards = {{{252u, 2u, 100u}}, {{595u, 1u, 20u}, {247u, 2u, 80u}}};
+    const std::optional<Bytes> rewarded = build_quest(paid, &why);
+    const std::size_t table = rewarded ? word(*rewarded, 0x08u) : 0u;
+    check(rewarded && word(*rewarded, table) == 0x200u && word(*rewarded, table + 4u) == 0u &&
+            (*rewarded)[table + 8u] == 0xFFu && (*rewarded)[table + 16u] == 100u && (*rewarded)[table + 17u] == 2u &&
+            half(*rewarded, table + 18u) == 252u && word(*rewarded, table + 20u) == 0xFFFFFFFFu &&
+            (*rewarded)[table + 24u] == 20u && half(*rewarded, table + 26u) == 595u &&
+            (*rewarded)[table + 28u] == 80u && half(*rewarded, table + 30u) == 247u &&
+            word(*rewarded, table + 32u) == 0xFFFFFFFFu,
+        "builder: the main reward's lines, each item's chance, count and id, each line ended");
+    QuestSpec uneven = spec;
+    uneven.rewards = {{{252u, 1u, 60u}}};
+    QuestSpec nothing = spec;
+    nothing.rewards = {{{0u, 1u, 100u}}};
+    QuestSpec endless = spec;
+    endless.rewards.assign(41u, {{252u, 1u, 100u}});
+    check(!build_quest(uneven, &why) && why.find("100") != std::string::npos && !build_quest(nothing) &&
+            !build_quest(endless, &why) && why.find("reward lines") != std::string::npos,
+        "builder: a line whose chances do not add up to 100, an item 0 and too many lines are refused");
 }
 
 } // namespace

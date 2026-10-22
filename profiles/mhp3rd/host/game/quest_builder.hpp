@@ -6,8 +6,9 @@
 // way, a hunt in the arena (map 8) loaded, spawned its monster with the
 // health and size asked for, and was cleared when the monster fell.
 //
-// The game's quest files hold more (rewards, supplies, small monsters,
-// gathering): a built quest has none of those yet.
+// The game's quest files hold more (supplies, small monsters, gathering,
+// sub-rewards): a built quest has none of those yet. Its main reward is the
+// lines it is given.
 
 #include <cstdint>
 #include <optional>
@@ -29,6 +30,15 @@ struct QuestTexts {
     std::string name, objective, failure, description, monsters, client;
 };
 
+// One item of a reward line: drawn with `chance` percent, `count` of item `item`.
+struct QuestRewardItem {
+    std::uint16_t item{};
+    std::uint8_t count{1};
+    std::uint8_t chance{100};
+};
+// A reward line: one draw from its items, whose chances add up to 100.
+using QuestRewardLine = std::vector<QuestRewardItem>;
+
 struct QuestSpec {
     std::uint16_t id{};          // 62000 to 65535, as mods' quests are
     std::uint8_t map{};
@@ -40,6 +50,7 @@ struct QuestSpec {
     std::uint16_t count{1};
     std::vector<QuestMonster> monsters; // large monsters, up to 5; the first ones are the main monsters
     QuestTexts texts;            // in every language the game has, for now
+    std::vector<QuestRewardLine> rewards; // the main reward's lines, drawn when the quest is cleared
 };
 
 // The payload, or nothing (with the reason in `why`) for a description the

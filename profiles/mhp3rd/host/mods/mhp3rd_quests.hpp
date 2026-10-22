@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -57,8 +58,16 @@ bool install(psprecomp::Runtime &runtime, const std::map<FileId, Resolution::Sou
 bool add(
     psprecomp::Runtime &runtime, std::vector<std::uint8_t> payload, const std::string &mod, std::string *why = nullptr);
 
+// Builds quest `id` again once the game's text is loaded, which some of its
+// parts are named by (reward items): `build` is called once lobby_task loads
+// and its payload, encrypted, replaces the one served. A build that fails
+// leaves the first payload served, with the reason in the log.
+using Rebuild = std::function<std::optional<std::vector<std::uint8_t>>(psprecomp::Runtime &, std::string *why)>;
+void rebuild_later(std::uint32_t id, Rebuild build);
+
 // Writes mods' quests into the event quest list once lobby_task, where it
-// is, has loaded (after tables::overlay_loaded() moved it).
+// is, has loaded (after tables::overlay_loaded() moved it); first builds again
+// the quests rebuild_later() named.
 void overlay_loaded(psprecomp::Runtime &runtime);
 
 // The quests being served, by id.

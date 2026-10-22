@@ -191,3 +191,9 @@ Other code compares a kind with 75 and leaves a larger one out: a byte per kind 
 - The kind's name, icon and the hunter's notes on it: the developer tools show a new kind as "Monster 75".
 - Its rewards, its parts and their damage, and its entries in the save's hunting records.
 - Small monsters, which share the kind numbers.
+
+## A monster's body capsules
+
+Where hunters' hits land: the kind's data a monster keeps (at `+0xD50`) points twice, at `+0x1C` and `+0x20`, at a list of capsules, 44 bytes each: u16 joint, u16 second joint, u16 shape (0 a sphere at the first joint, 2 a capsule between the two), u16 body part, u32 hit zone word, a word, f32 radius, then the two ends (x, y, z each, in their joints' frames). The list ends with 0xFFFF in each u16 and in the zone word. Read from the Tigrex's (30 capsules: head, neck, belly, back, tail, legs, arms, a sphere round the whole body).
+
+A kind made from another starts with the base's capsules, on the base's joints. On Fatalis's skeleton the Tigrex's joint numbers are other places, and no hit landed: a lance's thrusts took nothing off it while the same run on a Tigrex did. `yakumo.monsters`'s `body_shapes` gives a kind its own capsules: its monsters keep a copy of the kind's data that lists them (with any attack shapes the mod gave). With its own, Fatalis took the hits.

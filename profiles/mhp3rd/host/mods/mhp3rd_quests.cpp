@@ -61,6 +61,7 @@ constexpr std::uint32_t kEventsGame = 0x0A188B1Cu;
 struct State {
     std::map<std::uint32_t, FileId> files; // by quest id
     std::vector<Quest> served;
+    std::map<std::uint32_t, Rebuild> rebuilds; // quests to build again once the text is loaded
     ymod_mod *host{};
     ymod_hook hook{};
     ymod_hook event_hook{};
@@ -199,8 +200,40 @@ bool install(psprecomp::Runtime &runtime, const std::map<FileId, Resolution::Sou
     return true;
 }
 
+void rebuild_later(std::uint32_t id, Rebuild build) {
+    state().rebuilds[id] = std::move(build);
+}
+
+namespace {
+
+// Builds the quests named to rebuild_later() and serves the new payloads.
+void rebuild(psprecomp::Runtime &runtime) {
+    State &s = state();
+    game::GuestRam ram(runtime.memory());
+    const std::optional<game::QuestKeys> keys = game::read_quest_keys(ram);
+    for (auto &[id, build] : s.rebuilds) {
+        const auto file = s.files.find(id);
+        std::string why;
+        const std::optional<std::vector<std::uint8_t>> payload = build(runtime, &why);
+        if (file == s.files.end() || !keys || !payload || payload->size() > game::kQuestMaxPayload ||
+            !added::replace(file->second, game::encrypt_quest(*payload, *keys))) {
+            std::cerr << "[mods] quest " << id << " is not built again" << (why.empty() ? "" : ": " + why)
+                      << "; it is served as it was first built\n";
+            continue;
+        }
+        std::cout << "[mods] quest " << id << " is built again with the game's text\n";
+    }
+    s.rebuilds.clear();
+}
+
+} // namespace
+
 void overlay_loaded(psprecomp::Runtime &runtime) {
     State &s = state();
+    if (!s.rebuilds.empty()) {
+        const std::optional<LoadedOverlay> lobby = overlay_at(runtime.memory(), kEventsGame);
+        if (lobby && iequals(lobby->name, "lobby_task")) rebuild(runtime);
+    }
     if (!s.events) return;
     const std::optional<LoadedOverlay> overlay = overlay_at(runtime.memory(), kEventsGame);
     const std::optional<tables::Placement> list = tables::placement(kEvents);

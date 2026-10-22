@@ -11,6 +11,8 @@
 #include "mods/mhp3rd_tables.hpp"
 #include "mods/mod_ini.hpp"
 
+#include "game/game_data.hpp"
+#include "game/guest_ram.hpp"
 #include "game/quest_builder.hpp"
 #include "install/user_data.hpp"
 #include "kernel/kernel.hpp"
@@ -275,6 +277,9 @@ std::uint32_t tables_extend(ymod_mod *mod, const char *name, std::uint32_t rows)
     return address.value_or(0u);
 }
 
+// The main text block's table of item names, by item id (docs/DEBUG_MENU.md).
+constexpr int kItemNames = 3;
+
 // --- Monsters ---
 
 std::optional<std::vector<std::uint8_t>> mod_bytes(
@@ -387,6 +392,22 @@ int monsters_target(uint32_t monster, ymod_vec3 *out) {
     return put_vec3(runtime != nullptr ? monsters::target(*runtime, monster) : std::nullopt, out);
 }
 
+int monsters_body_shapes(ymod_mod *mod, int32_t kind, const ymod_body_capsule *capsules, int32_t count) {
+    if (mod == nullptr || mod->failed) return -1;
+    std::vector<monsters::BodyCapsule> list;
+    if (capsules != nullptr && count > 0 && count <= 64)
+        for (int32_t i = 0; i < count; ++i) {
+            const ymod_body_capsule &c = capsules[i];
+            list.push_back({c.joint < 0 ? 0x100u : static_cast<std::uint32_t>(c.joint), c.joint_to,
+                c.part < 0 ? 0x100u : static_cast<std::uint32_t>(c.part), c.zone, c.radius,
+                {c.from.x, c.from.y, c.from.z}, {c.to.x, c.to.y, c.to.z}});
+        }
+    std::string why = "no such kind";
+    if (kind >= 0 && kind <= 0xFF && monsters::body_shapes(mod, static_cast<std::uint8_t>(kind), list, &why)) return 0;
+    report(mod, "monster " + std::to_string(kind) + " is not given body capsules: " + why, true);
+    return -1;
+}
+
 int monsters_attack_shape(ymod_mod *mod, int32_t kind, int32_t shape, const ymod_hit_sphere *spheres, int32_t count) {
     if (mod == nullptr || mod->failed) return -1;
     std::vector<monsters::HitSphere> list;
@@ -488,11 +509,54 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
     const ymod_quest_texts &t = quest->texts;
     spec.texts = {
         text(t.name), text(t.objective), text(t.failure), text(t.description), text(t.monsters), text(t.client)};
+    // Its rewards, named as the game names its items: kept, and given once
+    // the game's text is loaded (the quest is built again then).
+    struct Named {
+        std::string item;
+        std::uint8_t count, chance;
+        std::uint32_t line;
+    };
+    std::vector<Named> rewards;
+    const bool has_rewards =
+        quest->size >= offsetof(ymod_quest, reward_count) + sizeof(quest->reward_count) && quest->rewards != nullptr;
+    for (std::uint32_t i = 0; has_rewards && i < quest->reward_count; ++i) {
+        const ymod_quest_reward &r = quest->rewards[i];
+        if (r.item == nullptr || r.count == 0u || r.count > 99u || r.chance == 0u || r.chance > 100u || r.line >= 40u)
+            return refuse("a reward's item, count, chance or line is out of range");
+        rewards.push_back({r.item, static_cast<std::uint8_t>(r.count), static_cast<std::uint8_t>(r.chance), r.line});
+    }
+    // Each line from 0 up has items whose chances add up to 100.
+    std::vector<unsigned> totals;
+    for (const Named &n : rewards) {
+        if (totals.size() <= n.line) totals.resize(n.line + 1u, 0u);
+        totals[n.line] += n.chance;
+    }
+    if (std::any_of(totals.begin(), totals.end(), [](unsigned total) { return total != 100u; }))
+        return refuse("a reward line's chances do not add up to 100, or a line between has none");
     std::string why;
     const std::optional<std::vector<std::uint8_t>> payload = game::build_quest(spec, &why);
     if (!payload) return refuse(why);
     if (!mhp3rd::mods::quests::add(*runtime, *payload, mod->name, &why)) return refuse(why);
     if (area != nullptr) maps::play_quest_in(area->id, quest->id);
+    if (!rewards.empty()) {
+        mhp3rd::mods::quests::rebuild_later(
+            quest->id, [spec, rewards](Runtime &r, std::string *reason) -> std::optional<std::vector<std::uint8_t>> {
+                game::GuestRam ram(r.memory());
+                const std::vector<std::string> names = game::text_table(ram, game::kTextBlock, kItemNames);
+                game::QuestSpec full = spec;
+                for (const Named &n : rewards) {
+                    const auto found = std::find(names.begin(), names.end(), n.item);
+                    if (found == names.end() || found == names.begin()) {
+                        if (reason != nullptr) *reason = "the game has no item named \"" + n.item + "\"";
+                        return std::nullopt;
+                    }
+                    if (full.rewards.size() <= n.line) full.rewards.resize(n.line + 1u);
+                    full.rewards[n.line].push_back(
+                        {static_cast<std::uint16_t>(found - names.begin()), n.count, n.chance});
+                }
+                return game::build_quest(full, reason);
+            });
+    }
     return static_cast<int32_t>(quest->id);
 }
 
@@ -560,7 +624,7 @@ const ymod_monsters kMonsters{1u, sizeof(ymod_monsters), &monsters_add, &monster
     &monsters_behave, &monsters_play_motion, &monsters_motion_finished, &monsters_motion_frame, &monsters_at_frame,
     &monsters_position, &monsters_facing, &monsters_set_facing, &monsters_target, &monsters_aim,
     &monsters_turn_to_target, &monsters_move, &monsters_attack, &monsters_end_attack, &monsters_attack_shape,
-    &monsters_effect, &monsters_health};
+    &monsters_effect, &monsters_health, &monsters_body_shapes};
 
 const ymod_memory kMemory{
     1u, sizeof(ymod_memory), &memory_read, &memory_write, &memory_allocate, &memory_release, &memory_code_changed};

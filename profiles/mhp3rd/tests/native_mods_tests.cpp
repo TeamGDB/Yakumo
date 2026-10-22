@@ -5,6 +5,7 @@
 #include "mods/mhp3rd_added_files.hpp"
 #include "mods/mhp3rd_equipment.hpp"
 #include "mods/mhp3rd_maps.hpp"
+#include "mods/mhp3rd_mod_format.hpp"
 #include "mods/mhp3rd_monsters.hpp"
 #include "mods/mod_native.hpp"
 #include "mods/mhp3rd_quests.hpp"
@@ -1524,6 +1525,36 @@ void test_monsters(psprecomp::Runtime &runtime) {
         "monsters: the monster keeps a copy of the kind's data with the mod's spheres, the base's left as it was");
     (void)call(runtime, attacking_stub, kMonster);
     check(runtime.memory().load32(kMonster + 0xD50u) == own_data, "monsters: and keeps the same copy afterwards");
+
+    // Body capsules: the kind's data a monster keeps points at the mod's, twice.
+    const auto shapes_of = [](psprecomp::Runtime &r, std::uint32_t data) {
+        return r.memory().load32(r.memory().load32(data + 0xA4u) + 0x5Cu);
+    };
+    const ymod_body_capsule body[] = {{51, 55, 0, 0x0u, 110.0f, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 20.0f}},
+        {0, -1, 0, 0x120000u, 260.0f, {0.0f, 10.0f, 0.0f}, {0.0f, 0.0f, 0.0f}}};
+    const ymod_body_capsule thin[] = {{51, 55, 0, 0u, 0.0f, {}, {}}};
+    check(service != nullptr && service->body_shapes(mod, 58, body, 2) == -1 &&
+            service->body_shapes(mod, 78, body, 0) == -1 && service->body_shapes(mod, 78, nullptr, 2) == -1 &&
+            service->body_shapes(mod, 78, thin, 1) == -1 &&
+            logged(
+                "monster 78 is not given body capsules: a capsule needs joints, a part, a radius above 0 and its ends"),
+        "monsters: body capsules only for the mod's kind, 1 to 64 of them, each usable");
+    runtime.memory().store32(kMonster + 0xD50u, kKindData);
+    check(service != nullptr && service->body_shapes(mod, 78, body, 2) == 0,
+        "monsters: a kind the mod added takes body capsules of its own");
+    (void)call(runtime, attacking_stub, kMonster);
+    const std::uint32_t bodied = runtime.memory().load32(kMonster + 0xD50u);
+    const std::uint32_t capsules = runtime.memory().load32(bodied + 0x1Cu);
+    check(bodied != kKindData && runtime.memory().load32(bodied + 0x20u) == capsules &&
+            runtime.memory().load16(capsules) == 51u && runtime.memory().load16(capsules + 2u) == 55u &&
+            runtime.memory().load16(capsules + 4u) == 2u && real(capsules + 16u) == 110.0f &&
+            real(capsules + 40u) == 20.0f && runtime.memory().load16(capsules + 44u) == 0u &&
+            runtime.memory().load16(capsules + 48u) == 0u && runtime.memory().load32(capsules + 52u) == 0x120000u &&
+            real(capsules + 68u) == 10.0f && runtime.memory().load16(capsules + 88u) == 0xFFFFu &&
+            runtime.memory().load32(capsules + 96u) == 0xFFFFu &&
+            runtime.memory().load32(runtime.memory().load32(shapes_of(runtime, bodied) + 8u)) == 51u,
+        "monsters: its copy of the kind's data lists the mod's capsules (a sphere where joint_to is -1), ended, with "
+        "its attack shapes kept");
     runtime.memory().store32(0x0A09E884u, 0u);
     const ymod_monster_fn changed = [](ymod_cpu *, std::uint32_t monster, void *user) -> int {
         const auto *a = static_cast<Acting *>(user);
@@ -1623,6 +1654,51 @@ void test_monsters(psprecomp::Runtime &runtime) {
             quest_service->add(mod, &quest) == -1 && quest_service->add(mod, &old_quest) == -1 &&
             quest_service->add(mod, nullptr) == -1,
         "quests: an unknown monster, no monsters, a number out of range, a served id and short structs are refused");
+
+    // Rewards named as the game names its items: the quest is built again
+    // with them once lobby_task loads, and its file replaced.
+    const ymod_quest_reward prizes[] = {{"Wyvern Gem", 1u, 100u, 0u}};
+    const ymod_quest_reward odd[] = {{"Wyvern Gem", 1u, 60u, 0u}};
+    const ymod_quest_reward unknown_item[] = {{"Unknown Thing", 1u, 100u, 0u}};
+    ymod_quest rich = quest;
+    rich.id = 62014u;
+    rich.rewards = prizes;
+    rich.reward_count = 1u;
+    ymod_quest uneven = rich;
+    uneven.id = 62015u;
+    uneven.rewards = odd;
+    ymod_quest absent = rich;
+    absent.id = 62016u;
+    absent.rewards = unknown_item;
+    check(quest_service != nullptr && quest_service->add(mod, &uneven) == -1 &&
+            logged(
+                "quest 62015 is not added: a reward line's chances do not add up to 100, or a line between has none") &&
+            quest_service->add(mod, &rich) == 62014 && quest_service->add(mod, &absent) == 62016,
+        "quests: rewards are checked, then kept for when the game's text is loaded");
+    const mhp3rd::mods::FileId rich_file = *mhp3rd::mods::p3rd::quest_file(62014u);
+    const auto served_size = [&runtime](mhp3rd::mods::FileId file) {
+        runtime.cpu().gpr[5] = file;
+        return call(runtime, 0x08864E8Cu, 0x08B3F040u);
+    };
+    const std::uint32_t first_size = served_size(rich_file);
+    // The text block's item names (table 3): 0 a placeholder, 1 the gem.
+    constexpr std::uint32_t kBlock = 0x08A40640u, kNames = kBlock + 0x3000u;
+    runtime.memory().store32(kBlock + 3u * 4u, 0x3000u);
+    runtime.memory().store32(kNames, 12u);
+    runtime.memory().store32(kNames + 4u, 14u);
+    runtime.memory().store32(kNames + 8u, 0xFFFFFFFFu);
+    for (const auto &[at, text] : {std::pair<std::uint32_t, const char *>{12u, "-"}, {14u, "Wyvern Gem"}}) {
+        std::uint32_t i = 0;
+        for (; text[i] != '\0'; ++i) runtime.memory().store8(kNames + at + i, static_cast<std::uint8_t>(text[i]));
+        runtime.memory().store8(kNames + at + i, 0u);
+    }
+    place_overlay(runtime, 0x0A05E600u, "lobby_task.ovl", 0x00200000u);
+    mhp3rd::mods::quests::overlay_loaded(runtime);
+    const std::uint32_t second_size = served_size(rich_file);
+    check(second_size > first_size && second_size == ((second_size + 15u) & ~15u),
+        "quests: once lobby_task loads, a quest with rewards is built again with them and its file replaced");
+    check(served_size(*mhp3rd::mods::p3rd::quest_file(62016u)) == served_size(*mhp3rd::mods::p3rd::quest_file(62010u)),
+        "quests: a reward naming no item of the game's leaves the quest as first built");
     std::error_code ec;
     std::filesystem::remove_all(folder, ec);
     monsters::reset_for_tests();

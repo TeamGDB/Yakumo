@@ -39,6 +39,10 @@ bool install(psprecomp::Runtime &runtime, const std::map<FileId, Resolution::Sou
 // when the id is taken, the file is empty, or the loader cannot be taken over.
 bool add(psprecomp::Runtime &runtime, FileId file, std::vector<std::uint8_t> bytes);
 
+// Gives a file added from memory new bytes, for its next load. False when
+// `file` is not one added from memory or the bytes are empty.
+bool replace(FileId file, std::vector<std::uint8_t> bytes);
+
 // Asked at each load of one of the disc's files (its size, then its copy), with
 // its id: the bytes to serve instead, or null for the disc's own. It must give
 // the same answer to both questions of one load.

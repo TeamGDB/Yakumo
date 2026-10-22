@@ -97,6 +97,26 @@ struct HitSphere {
 [[nodiscard]] bool attack_shape(const void *owner, std::uint8_t kind, std::uint32_t shape,
     std::span<const HitSphere> spheres, std::string *why = nullptr);
 
+// A capsule (or a sphere) of a monster's body, where hunters' hits land: from
+// `from` in joint `joint`'s frame to `to` in joint `joint_to`'s, `radius`
+// round; a sphere at `from` when joint_to is negative. `part` is the body part
+// it belongs to and `zone` the hit zone word, as the base's own capsules give
+// them (docs/MONSTERS.md, "A monster's body capsules").
+struct BodyCapsule {
+    std::uint32_t joint{};
+    std::int32_t joint_to{-1};
+    std::uint32_t part{};
+    std::uint32_t zone{};
+    float radius{};
+    float from[3]{}, to[3]{};
+};
+// Gives a kind a mod added its own body capsules in place of the base's
+// (which are on the base's joints). Applies to its monsters while it has a
+// part of behaviour. False when the kind is not the mod's, there are none or
+// more than 64, or one is not usable.
+[[nodiscard]] bool body_shapes(
+    const void *owner, std::uint8_t kind, std::span<const BodyCapsule> capsules, std::string *why = nullptr);
+
 // During a part of behaviour (inside its fn): queues the game's motion setter
 // for `monster`, carried out once fn returns. False outside a part.
 [[nodiscard]] bool play_motion(std::uint32_t monster, std::uint16_t motion, std::uint32_t blend);

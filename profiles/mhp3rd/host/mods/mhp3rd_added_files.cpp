@@ -221,6 +221,15 @@ bool stand_in(Runtime &runtime, StandIn provider) {
     return true;
 }
 
+bool replace(FileId file, std::vector<std::uint8_t> bytes) {
+    const auto found = state().files.find(file);
+    if (found == state().files.end() || !found->second.bytes || bytes.empty() || bytes.size() > 0x7FFFFFFFu)
+        return false;
+    found->second.size = static_cast<std::uint32_t>(bytes.size());
+    found->second.bytes = std::make_shared<const std::vector<std::uint8_t>>(std::move(bytes));
+    return true;
+}
+
 FileId free_id() {
     // From the top of the ids mods may add down, away from the ids mods choose
     // themselves (mod.ini's [Add] starts near the disc's last file).

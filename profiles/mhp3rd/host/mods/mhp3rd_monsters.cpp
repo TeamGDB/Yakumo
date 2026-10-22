@@ -201,6 +201,12 @@ constexpr std::uint32_t kShapeList = 0x5Cu;    // in the attack tables: a pointe
 constexpr std::uint32_t kShapes = 32u;         // shape pointers copied
 constexpr std::uint32_t kSphereSize = 40u;     // joint (u16), kind (0: sphere), 0, radius, x, y, z, 0...
 constexpr std::uint32_t kLastSphere = 0xFFFFu; // the joint that ends a shape
+// The body capsules, where hunters' hits land: the kind's data points at the
+// list twice; 44 bytes each (joint u16, joint u16, kind u16 (0 sphere, 2
+// capsule), part u16, zone u32, 0, radius, from x/y/z, to x/y/z), ended by
+// 0xFFFF in every u16 and the zone.
+constexpr std::array<std::uint32_t, 2> kBodyLists{0x1Cu, 0x20u};
+constexpr std::uint32_t kCapsuleSize = 44u;
 // The monster's body (docs/MONSTERS.md, "A monster's body").
 constexpr std::uint32_t kPosition = 0x80u; // x, y, z as floats
 constexpr std::uint32_t kFacing = 0x74u;   // 65536 a turn, from +z towards +x
@@ -239,6 +245,7 @@ struct Added {
     std::array<FileId, 3> files{};
     std::array<std::uint8_t, 2> check_kind{};               // user data for the kind check hooks: {kind, base}
     std::map<std::uint32_t, std::vector<HitSphere>> shapes; // by the base's shape number
+    std::vector<BodyCapsule> body;                          // its own body capsules, or none for the base's
     std::map<std::uint32_t, std::uint32_t> kind_data;       // the base's kind data -> the kind's copy
     std::vector<bool> effects;                              // which effect numbers its pack has
 };
@@ -396,11 +403,13 @@ void run_chain(psprecomp::AllegrexContext &ctx, const std::shared_ptr<Chain> &ch
 
 // A part's stub, in the kind's own vtable: `j` to the base's function. The
 // mod's function runs first through a hook on the stub, then what it queued.
-// A monster of a kind with attack shapes of its own: the kind's data it
-// keeps becomes a copy of the base's whose shapes are the mod's.
+// A monster of a kind with attack shapes or body capsules of its own: the
+// kind's data it keeps becomes a copy of the base's with the mod's in it.
 void give_kind_data(Added &added, std::uint32_t monster) {
     State &s = state();
-    if (added.shapes.empty() || s.runtime == nullptr || !s.runtime->memory().contains(monster + kKindData, 4u)) return;
+    if ((added.shapes.empty() && added.body.empty()) || s.runtime == nullptr ||
+        !s.runtime->memory().contains(monster + kKindData, 4u))
+        return;
     auto &memory = s.runtime->memory();
     const std::uint32_t base = memory.load32(monster + kKindData);
     if (base == 0u) return; // the game has not looked it up yet
@@ -418,6 +427,7 @@ void give_kind_data(Added &added, std::uint32_t monster) {
         std::uint32_t size = kKindDataSize + kAttackTablesSize + kShapes * 4u;
         for (const auto &[shape, spheres] : added.shapes)
             size += static_cast<std::uint32_t>(spheres.size() + 1u) * kSphereSize;
+        if (!added.body.empty()) size += static_cast<std::uint32_t>(added.body.size() + 1u) * kCapsuleSize;
         const auto *memory_service = static_cast<const ymod_memory *>(native::host()->service(s.host, YMOD_MEMORY, 1u));
         copy = memory_service != nullptr ? memory_service->allocate(s.host, size, 16u) : 0u;
         added.kind_data[base] = copy;
@@ -448,6 +458,31 @@ void give_kind_data(Added &added, std::uint32_t monster) {
             memory.store32(list_copy + shape * 4u, at);
             for (const HitSphere &sphere : spheres) put(sphere.joint, sphere.radius, sphere.x, sphere.y, sphere.z);
             put(kLastSphere, 0.0f, 0.0f, 0.0f, 0.0f);
+        }
+        if (!added.body.empty()) {
+            for (const std::uint32_t list_field : kBodyLists) memory.store32(copy + list_field, at);
+            const auto put_float = [&memory](std::uint32_t to, float v) {
+                memory.store32(to, std::bit_cast<std::uint32_t>(v));
+            };
+            for (const BodyCapsule &b : added.body) {
+                for (std::uint32_t word = 0; word < kCapsuleSize; word += 4u) memory.store32(at + word, 0u);
+                const bool sphere = b.joint_to < 0;
+                memory.store16(at, static_cast<std::uint16_t>(b.joint));
+                memory.store16(at + 2u, static_cast<std::uint16_t>(sphere ? 0 : b.joint_to));
+                memory.store16(at + 4u, static_cast<std::uint16_t>(sphere ? 0u : 2u));
+                memory.store16(at + 6u, static_cast<std::uint16_t>(b.part));
+                memory.store32(at + 8u, b.zone);
+                put_float(at + 16u, b.radius);
+                for (std::uint32_t k = 0; k < 3u; ++k) {
+                    put_float(at + 20u + 4u * k, b.from[k]);
+                    put_float(at + 32u + 4u * k, b.to[k]);
+                }
+                at += kCapsuleSize;
+            }
+            for (std::uint32_t word = 0; word < 12u; word += 4u) memory.store32(at + word, 0xFFFFFFFFu);
+            for (std::uint32_t word = 12u; word < kCapsuleSize; word += 4u) memory.store32(at + word, 0u);
+            memory.store32(at + 8u, 0xFFFFu);
+            at += kCapsuleSize;
         }
     }
     if (copy != 0u) memory.store32(monster + kKindData, copy);
@@ -762,6 +797,28 @@ bool attack_shape(
             return fail("a sphere needs a joint, a radius above 0 and a centre");
     added->shapes[shape].assign(spheres.begin(), spheres.end());
     added->kind_data.clear(); // made again with the new shapes
+    return true;
+}
+
+bool body_shapes(const void *owner, std::uint8_t number, std::span<const BodyCapsule> capsules, std::string *why) {
+    const auto fail = [why](std::string reason) {
+        if (why != nullptr) *why = std::move(reason);
+        return false;
+    };
+    Added *added = nullptr;
+    for (Added &k : state().kinds)
+        if (k.kind == number) added = &k;
+    if (added == nullptr || added->owner != owner) return fail("the kind was not added by this mod");
+    if (capsules.empty() || capsules.size() > 64u) return fail("a body has 1 to 64 capsules");
+    const auto finite = [](const float *v) {
+        return std::isfinite(v[0]) && std::isfinite(v[1]) && std::isfinite(v[2]);
+    };
+    for (const BodyCapsule &b : capsules)
+        if (b.joint > 0xFFu || b.joint_to > 0xFF || b.part > 0xFFu || !(b.radius > 0.0f) || !std::isfinite(b.radius) ||
+            !finite(b.from) || !finite(b.to))
+            return fail("a capsule needs joints, a part, a radius above 0 and its ends");
+    added->body.assign(capsules.begin(), capsules.end());
+    added->kind_data.clear(); // made again with the new capsules
     return true;
 }
 

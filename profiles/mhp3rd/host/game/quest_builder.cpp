@@ -14,6 +14,8 @@ constexpr std::size_t kRecordSize = 0x48u;
 constexpr std::size_t kLanguages = 7u;
 constexpr std::size_t kSpawnSize = 0x30u;
 constexpr std::size_t kMaxMonsters = 5u;
+// The disc's hunts draw up to 35 lines for their main reward (0x23).
+constexpr std::size_t kMostRewardLines = 40u;
 constexpr std::uint32_t kFramesPerMinute = 1800u;
 // The record's quest type (+0): a hunt; its objective count (+0x27) and kind
 // (+0x28, 1: hunt or slay).
@@ -67,6 +69,15 @@ std::optional<std::vector<std::uint8_t>> build_quest(const QuestSpec &spec, std:
     };
     if (!is_mod_quest(spec.id)) return fail("its id is not a mod quest's (62000 to 65535)");
     if (spec.monsters.empty() || spec.monsters.size() > kMaxMonsters) return fail("it needs 1 to 5 large monsters");
+    if (spec.rewards.size() > kMostRewardLines) return fail("it has more reward lines than the game draws");
+    for (const QuestRewardLine &line : spec.rewards) {
+        unsigned total = 0;
+        for (const QuestRewardItem &i : line) total += i.chance;
+        if (line.empty() || total != 100u || std::any_of(line.begin(), line.end(), [](const QuestRewardItem &i) {
+                return i.item == 0u || i.count == 0u;
+            }))
+            return fail("a reward line's chances do not add up to 100, or it names no item");
+    }
 
     Writer w;
     w.zeros(kHeader);
@@ -98,9 +109,25 @@ std::optional<std::vector<std::uint8_t>> build_quest(const QuestSpec &spec, std:
     for (std::size_t i = 0; i < kLanguages; ++i) w.put32(static_cast<std::uint32_t>(set));
     w.u32(record + 0x18u, static_cast<std::uint32_t>(languages));
 
-    // No rewards, supplies or gathering yet: each table as the game reads it empty.
-    const std::size_t rewards = w.put32(0xFFu);
+    // The main reward: a group header (kind 0, its line count; the word after
+    // it not traced, 0 here), the end of the groups (0xFF), then each line's
+    // items (chance, count, item) ended by 0xFFFFFFFF.
+    const std::size_t rewards = w.here();
+    if (!spec.rewards.empty()) {
+        w.put32(static_cast<std::uint32_t>(spec.rewards.size()) << 8u);
+        w.put32(0u);
+    }
+    w.put32(0xFFu);
     w.zeros(4u);
+    for (const QuestRewardLine &line : spec.rewards) {
+        for (const QuestRewardItem &i : line) {
+            w.bytes.push_back(i.chance);
+            w.bytes.push_back(i.count);
+            w.put16(i.item);
+        }
+        w.put32(0xFFFFFFFFu);
+    }
+    // No supplies or gathering yet: each table as the game reads it empty.
     const std::size_t supplies = w.here();
     w.zeros(8u);
     const std::size_t gathering = w.put16(0xFFFFu);
