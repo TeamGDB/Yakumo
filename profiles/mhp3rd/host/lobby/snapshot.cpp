@@ -42,6 +42,10 @@ void read_hunter(const game::Ram &ram, Snapshot &snapshot) {
     if (const std::optional<game::Piece> weapon = game::carried_weapon(ram)) {
         snapshot.weapon = Weapon{weapon->kind, weapon->id, game::equipment_name(ram, weapon->kind, weapon->id)};
     }
+
+    snapshot.hr = static_cast<int>(hunter_rank(ram));
+    if (!snapshot.name.empty()) guild_card(ram, snapshot.name, snapshot.title, snapshot.guild_card);
+    snapshot.quests = posted_quests(ram);
 }
 
 } // namespace mhp3rd::lobby

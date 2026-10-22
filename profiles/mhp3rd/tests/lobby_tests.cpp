@@ -1,6 +1,7 @@
 // The lobby report (lobby/report.hpp): the JSON sent to the dashboard, when it
 // is sent, and the hunter's own data read from a buffer standing for guest
 // memory. No game data, no socket and no game run.
+#include "lobby/quests.hpp"
 #include "lobby/report.hpp"
 #include "lobby/snapshot.hpp"
 
@@ -12,6 +13,14 @@
 #include <iostream>
 #include <string>
 #include <vector>
+
+namespace mhp3rd::lobby {
+// The app reads the quest details from DATA.BIN; the tests below do not need
+// them, so the test binary provides the empty definition.
+std::vector<PostedQuest> posted_quests(const game::Ram &) {
+    return {};
+}
+} // namespace mhp3rd::lobby
 
 namespace {
 using namespace mhp3rd;
@@ -51,6 +60,8 @@ lobby::Snapshot sample() {
     snapshot.token = "secret";
     snapshot.equipment = {{"head", 12u, "Hunter Helm"}};
     snapshot.weapon = lobby::Weapon{5u, 3u, "Iron Sword"};
+    snapshot.quests = {{1u, 10522u, 5u, 800u, 9600u, 36000u, "The Festival of Fear", "Repel the Jhen Mohran",
+        "Jhen Mohran", "Guildmaster"}};
     return snapshot;
 }
 
@@ -67,6 +78,11 @@ void test_report_line() {
     check(has(line, "\"equipment\":[{\"slot\":\"head\",\"id\":12,\"name\":\"Hunter Helm\"}]"),
         "the report carries the worn armor");
     check(has(line, "\"weapon\":{\"kind\":5,\"id\":3,\"name\":\"Iron Sword\"}"), "the report carries the weapon");
+    check(has(line,
+              "\"quests\":[{\"slot\":1,\"id\":10522,\"stars\":5,\"fee\":800,\"reward\":9600,\"time_limit\":36000,"
+              "\"name\":\"The Festival of Fear\",\"objective\":\"Repel the Jhen Mohran\",\"monsters\":\"Jhen Mohran\","
+              "\"client\":\"Guildmaster\"}]"),
+        "the report carries the posted quests");
     check(has(line, "\"ts\":1000"), "the report carries the time");
 
     lobby::Snapshot empty;
@@ -131,11 +147,13 @@ void test_read_hunter() {
     ram.store8(weapon, 1u);
     ram.store8(weapon + 1u, 5u);
     ram.store16(weapon + 2u, 3u);
+    ram.store32(character + 0x20u, 7u); // hunter rank
 
     lobby::Snapshot snapshot;
     lobby::read_hunter(ram, snapshot);
     check(snapshot.name == "Tester", "the hunter's name is read");
     check(snapshot.sex == "male", "the hunter's sex is read");
+    check(snapshot.hr == 7, "the hunter rank is read");
     check(snapshot.equipment.size() == 1u && snapshot.equipment[0].slot == "head" && snapshot.equipment[0].id == 12u,
         "the worn head piece is read");
     check(snapshot.weapon && snapshot.weapon->kind == 5u && snapshot.weapon->id == 3u, "the weapon is read");
@@ -143,7 +161,44 @@ void test_read_hunter() {
     game::BufferRam empty(kBase, kSize);
     lobby::Snapshot none;
     lobby::read_hunter(empty, none);
-    check(none.name.empty() && none.equipment.empty() && !none.weapon, "no character reads as no data");
+    check(none.name.empty() && none.equipment.empty() && !none.weapon && none.hr == 0, "no character reads as no data");
+}
+
+void write_utf16(game::Ram &ram, std::uint32_t at, const char *text) {
+    for (std::size_t i = 0; text[i] != '\0'; ++i)
+        ram.store16(at + static_cast<std::uint32_t>(i * 2u), static_cast<std::uint16_t>(text[i]));
+}
+
+void test_hunter_rank_and_guild_card() {
+    game::BufferRam character(kBase, kSize);
+    character.store32(game::kCharacter + 0x20u, 7u);
+    check(lobby::hunter_rank(character) == 7u, "the hunter rank is read from the character block");
+    check(lobby::hunter_rank(game::BufferRam(kBase, 0x100u)) == 0u, "a missing character reads as rank 0");
+
+    game::BufferRam board(lobby::kQuestBoardBase, lobby::kQuestBoardBytes);
+    write_utf16(board, lobby::kQuestBoardBase + 0x100u, "Tester");
+    write_utf16(board, lobby::kQuestBoardBase + 0x100u + 0x1Au, "Hero");
+    write_utf16(board, lobby::kQuestBoardBase + 0x100u + 0x34u, "Hello");
+    std::string title;
+    std::string comment;
+    lobby::guild_card(board, "Tester", title, comment);
+    check(title == "Hero" && comment == "Hello", "the guild card title and comment are read");
+    lobby::guild_card(board, "Nobody", title, comment);
+    check(title.empty() && comment.empty(), "another name reads no guild card");
+}
+
+void test_posted_quest_ids() {
+    game::BufferRam board(lobby::kQuestBoardBase, lobby::kQuestBoardBytes);
+    board.store16(lobby::kQuestBoardBase + 0x00u, 10101u);
+    board.store16(lobby::kQuestBoardBase + 0x02u, 10102u);
+    board.store16(lobby::kQuestBoardBase + 0x04u, 10101u); // duplicate
+    board.store16(lobby::kQuestBoardBase + 0x06u, 10500u);
+    board.store16(lobby::kQuestBoardBase + 0x08u, 10501u);
+    const std::vector<std::uint16_t> ids = lobby::posted_quest_ids(board);
+    check(ids.size() == 4u && ids[0] == 10101u && ids[1] == 10102u && ids[2] == 10500u && ids[3] == 10501u,
+        "the board's ids are read in order, without duplicates");
+    check(lobby::posted_quest_ids(game::BufferRam(lobby::kQuestBoardBase, 0x100u)).empty(),
+        "a missing board reads no quests");
 }
 
 } // namespace
@@ -154,6 +209,8 @@ int main() {
     test_leave_line();
     test_planner();
     test_read_hunter();
+    test_hunter_rank_and_guild_card();
+    test_posted_quest_ids();
     if (failures == 0) std::cout << "lobby tests passed\n";
     return failures == 0 ? 0 : 1;
 }

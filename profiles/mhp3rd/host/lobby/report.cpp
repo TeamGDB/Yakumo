@@ -86,6 +86,22 @@ std::string report_line(const Snapshot &snapshot, std::int64_t unix_seconds) {
         append_string_field(out, "name", snapshot.weapon->name);
         out.push_back('}');
     }
+    if (!snapshot.quests.empty()) {
+        out += ",\"quests\":[";
+        for (std::size_t i = 0; i < snapshot.quests.size(); ++i) {
+            const PostedQuest &quest = snapshot.quests[i];
+            if (i > 0u) out.push_back(',');
+            out += "{\"slot\":" + std::to_string(quest.slot) + ",\"id\":" + std::to_string(quest.id) +
+                ",\"stars\":" + std::to_string(quest.stars) + ",\"fee\":" + std::to_string(quest.fee) +
+                ",\"reward\":" + std::to_string(quest.reward) + ",\"time_limit\":" + std::to_string(quest.time_limit);
+            append_string_field(out, "name", quest.name);
+            append_string_field(out, "objective", quest.objective);
+            append_string_field(out, "monsters", quest.monsters);
+            append_string_field(out, "client", quest.client);
+            out.push_back('}');
+        }
+        out.push_back(']');
+    }
     out += ",\"ts\":" + std::to_string(unix_seconds) + "}\n";
     return out;
 }

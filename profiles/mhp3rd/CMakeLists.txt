@@ -212,6 +212,8 @@ set(MHP3RD_HOST_SOURCES
     host/platform/utf8_path.cpp
     host/overlays.cpp
     host/mhp3rd_profile.cpp
+    host/lobby/quests.cpp
+    host/lobby/quests_data.cpp
     host/lobby/report.cpp
     host/lobby/reporter.cpp
     host/lobby/snapshot.cpp
@@ -762,6 +764,7 @@ endif()
 # hunter's own data read from a buffer standing for guest memory. No game data.
 add_executable(mhp3rd_lobby_tests
     tests/lobby_tests.cpp
+    host/lobby/quests.cpp
     host/lobby/report.cpp
     host/lobby/snapshot.cpp
     host/game/game_data.cpp
