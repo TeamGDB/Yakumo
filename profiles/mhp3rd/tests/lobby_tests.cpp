@@ -153,7 +153,7 @@ void test_read_hunter() {
     ram.store8(weapon, 1u);
     ram.store8(weapon + 1u, 5u);
     ram.store16(weapon + 2u, 3u);
-    ram.store8(0x09FAC8C5u, 7u); // hunter rank
+    ram.store8(character + 0x8Du, 7u); // hunter rank
 
     lobby::Snapshot snapshot;
     lobby::read_hunter(ram, snapshot);
@@ -179,19 +179,20 @@ void write_utf16(game::Ram &ram, std::uint32_t at, const char *text) {
 
 void test_hunter_rank_and_guild_card() {
     game::BufferRam character(kBase, kSize);
-    character.store8(0x09FAC8C5u, 7u);
-    check(lobby::hunter_rank(character) == 7u, "the hunter rank is read beside the point balances");
+    character.store8(game::kCharacter + 0x8Du, 7u);
+    check(lobby::hunter_rank(character) == 7u, "the hunter rank is read from the character block");
     check(lobby::hunter_rank(game::BufferRam(kBase, 0x100u)) == 0u, "a missing rank byte reads as rank 0");
 
-    game::BufferRam board(lobby::kQuestBoardBase, lobby::kQuestBoardBytes);
-    write_utf16(board, lobby::kQuestBoardBase + 0x100u, "Tester");
-    write_utf16(board, lobby::kQuestBoardBase + 0x100u + 0x1Au, "Hero");
-    write_utf16(board, lobby::kQuestBoardBase + 0x100u + 0x34u, "Hello");
+    game::BufferRam cards(lobby::kGuildCardListBase, lobby::kGuildCardListBytes);
+    const std::uint32_t own_card = lobby::kGuildCardListBase + 0x0DBAu;
+    write_utf16(cards, own_card, "Tester");
+    write_utf16(cards, own_card + 0x54u, "Hero");
+    write_utf16(cards, own_card + 0x6Eu, "Hello");
     std::string title;
     std::string comment;
-    lobby::guild_card(board, "Tester", title, comment);
+    lobby::guild_card(cards, "Tester", title, comment);
     check(title == "Hero" && comment == "Hello", "the guild card title and comment are read");
-    lobby::guild_card(board, "Nobody", title, comment);
+    lobby::guild_card(cards, "Nobody", title, comment);
     check(title.empty() && comment.empty(), "another name reads no guild card");
 }
 

@@ -46,16 +46,22 @@ struct PostedQuest {
 // The ids are the game's; the details come from the DATA.BIN quest lists.
 [[nodiscard]] std::vector<PostedQuest> posted_quests(const game::Ram &ram);
 
-// The hunter rank kept beside the money and the two point balances.
+// The hunter rank, a byte in the character block.
 [[nodiscard]] std::uint32_t hunter_rank(const game::Ram &ram);
 
-// The guild card title and comment of the hunter called `name`, when the
-// board's player record for it is in memory. Empty when it is not.
+// The guild card title and comment of the hunter called `name`, from the
+// hall's own-card list. The local hunter's card is its first record. Empty
+// when the list is not in memory.
 void guild_card(const game::Ram &ram, const std::string &name, std::string &title, std::string &comment);
 
 // The board's memory: the posted entries live in this window. Exposed for the
 // tests and for a future trace when a game update moves it.
 inline constexpr std::uint32_t kQuestBoardBase = 0x09F56000u;
 inline constexpr std::uint32_t kQuestBoardBytes = 0x00001000u;
+
+// The hall's guild-card list. The local hunter's card is the first record;
+// the live records use the title at +0x54 and the comment at +0x6E.
+inline constexpr std::uint32_t kGuildCardListBase = 0x09FA8000u;
+inline constexpr std::uint32_t kGuildCardListBytes = 0x00005000u;
 
 } // namespace mhp3rd::lobby

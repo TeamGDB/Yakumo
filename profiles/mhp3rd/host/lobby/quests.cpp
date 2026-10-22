@@ -37,20 +37,25 @@ bool printable(const std::string &text) {
 } // namespace
 
 std::uint32_t hunter_rank(const game::Ram &ram) {
-    // The rank sits beside the money and the two point balances. The field
-    // beside the character's name is not it: a rank 4 hunter reads 7 there.
-    constexpr std::uint32_t kRank = 0x09FAC8C5u;
-    return ram.contains(kRank, 1u) ? ram.load8(kRank) : 0u;
+    // The hunter rank is a byte in the character block; an HR4 save has 4
+    // there and an early save has 0. The field beside the name is village
+    // progress, not the hunter rank.
+    constexpr std::uint32_t kRankOffset = 0x8Du;
+    const std::uint32_t at = game::kCharacter + kRankOffset;
+    return ram.contains(at, 1u) ? ram.load8(at) : 0u;
 }
 
 void guild_card(const game::Ram &ram, const std::string &name, std::string &title, std::string &comment) {
     title.clear();
     comment.clear();
-    if (name.empty() || !ram.contains(kQuestBoardBase, kQuestBoardBytes)) return;
-    for (std::uint32_t at = kQuestBoardBase; at + 0x80u <= kQuestBoardBase + kQuestBoardBytes; at += 2u) {
+    if (name.empty() || !ram.contains(kGuildCardListBase, kGuildCardListBytes)) return;
+    // The hall keeps the local hunter's own card first, then the received
+    // cards. The name is at the record's start, the title 0x54 bytes later and
+    // the comment at 0x6E (traced on a live hall dump).
+    for (std::uint32_t at = kGuildCardListBase; at + 0x8Cu <= kGuildCardListBase + kGuildCardListBytes; at += 2u) {
         if (utf16_to_utf8(ram, at, 12u) != name) continue;
-        const std::string found_title = utf16_to_utf8(ram, at + 0x1Au, 13u);
-        const std::string found_comment = utf16_to_utf8(ram, at + 0x34u, 24u);
+        const std::string found_title = utf16_to_utf8(ram, at + 0x54u, 13u);
+        const std::string found_comment = utf16_to_utf8(ram, at + 0x6Eu, 24u);
         if (printable(found_title) && printable(found_comment)) {
             title = found_title;
             comment = found_comment;

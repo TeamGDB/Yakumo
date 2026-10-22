@@ -1165,7 +1165,7 @@ The renderer then leaves out the HUD packets' draws, and nothing else: their oth
 | `MHP3RD_LOBBY` | off | `1` turns the lobby report on (menu: Lobby) |
 | `MHP3RD_LOBBY_SERVER` | none | Lobby dashboard report address, `host` or `host:port` (menu: Lobby Server) |
 | `MHP3RD_LOBBY_TOKEN` | none | Shared secret the dashboard requires, when it has one (menu: Lobby Token) |
-| `MHP3RD_LOBBY_EXPERIMENTAL` | off | `1` enables the guild-card and posted-quest readers while their offsets are still being traced |
+| `MHP3RD_LOBBY_EXPERIMENTAL` | off | `1` enables the posted-quest reader while its board slots are still being traced |
 | `MHP3RD_LOBBY_DUMP` | none | A folder for a one-shot diagnostic dump of the hall's live memory, written once per hall entered; `1` uses `logs/` |
 | `MHP3RD_LOBBY_DUMP_TEXT` | `Zinogre` | Text the diagnostic dump searches for beside the hunter name (a quest or monster name) |
 

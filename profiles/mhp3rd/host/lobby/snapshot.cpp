@@ -50,13 +50,11 @@ void read_hunter(const game::Ram &ram, Snapshot &snapshot) {
     }
 
     snapshot.hr = static_cast<int>(hunter_rank(ram));
-    // Untraced fields stay off until a dump from a live hall identifies them;
-    // MHP3RD_LOBBY_EXPERIMENTAL=1 turns the old guesses on for a trace run.
+    if (!snapshot.name.empty()) guild_card(ram, snapshot.name, snapshot.title, snapshot.guild_card);
+    // The posted quest board is still being traced; MHP3RD_LOBBY_EXPERIMENTAL=1
+    // turns its old guess on for a trace run.
     const char *experimental = std::getenv("MHP3RD_LOBBY_EXPERIMENTAL");
-    if (experimental != nullptr && std::strcmp(experimental, "1") == 0) {
-        if (!snapshot.name.empty()) guild_card(ram, snapshot.name, snapshot.title, snapshot.guild_card);
-        snapshot.quests = posted_quests(ram);
-    }
+    if (experimental != nullptr && std::strcmp(experimental, "1") == 0) snapshot.quests = posted_quests(ram);
     maybe_dump(ram, snapshot);
 }
 

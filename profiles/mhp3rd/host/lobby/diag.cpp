@@ -206,6 +206,9 @@ void write_summary(const std::filesystem::path &path, const game::Ram &ram, cons
         << (snapshot.weapon ? snapshot.weapon->type : "") << "\n";
     out << "character block (kCharacter = 0x" << std::hex << game::kCharacter << std::dec << ")\n";
     hex_dump(out, ram, game::kCharacter, 0x200u);
+    out << "  character+0x8D u8 (hunter rank candidate): "
+        << static_cast<unsigned>(ram.contains(game::kCharacter + 0x8Du, 1u) ? ram.load8(game::kCharacter + 0x8Du) : 0u)
+        << "\n";
     out << "\nsmall values in the character block:\n";
     small_values(out, ram, game::kCharacter, 0x200u);
     out << "\n0x09FAC8B0..0x09FAC8F0:\n";
@@ -257,6 +260,11 @@ void write_summary(const std::filesystem::path &path, const game::Ram &ram, cons
     const std::size_t found_texts = text_hits(texts, ram, needle);
     std::ofstream text_file(path.parent_path() / "text_hits.txt");
     text_file << texts.str();
+    out << "\nguild card list candidate at 0x09FA8DBA:\n";
+    hex_dump(out, ram, 0x09FA8DBAu, 0xA0u);
+    out << "  name: \"" << utf16_text(ram, 0x09FA8DBAu, 12u) << "\" title: \""
+        << utf16_text(ram, 0x09FA8DBAu + 0x54u, 13u) << "\" comment: \"" << utf16_text(ram, 0x09FA8DBAu + 0x6Eu, 24u)
+        << "\"\n";
     out << "\nsearch: " << found_names << " name hit(s), " << found_texts << " \"" << needle << "\" hit(s)\n";
     out << "files: character.bin, hunter_records.bin, save_copy.bin, questboard_9f.bin, questboard_a2.bin, "
            "name_hits.txt, text_hits.txt\n";

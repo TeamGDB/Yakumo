@@ -342,7 +342,8 @@ came back to the village. Hunter rank points were not checked.
   that looked like the rank (`0x09FAC8C5`: 6 on a rank 6 hunter, but 0 on a
   rank 1 hunter) did not change the Status screen's HR when written, so
   neither is understood well enough to write without risking an
-  inconsistent save.
+  inconsistent save. The lobby reporter reads the rank, without writing it,
+  from `0x09F4FCAC + 0x8D`: an HR4 save has 4 there and an early save has 0.
 - The quest addresses were traced on a gathering quest in the Misty Peaks,
   and the page's switches verified on a low-rank hunting quest there: with infinite health on, health written down
   to 20 was back at its most by the next read; stamina stayed at 900 while
