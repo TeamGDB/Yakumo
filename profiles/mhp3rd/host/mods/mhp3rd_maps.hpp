@@ -26,6 +26,9 @@ class Runtime;
 // - the map's collision pack (0x125A + the map), with the area's two blocks
 //   the mod's: its ground (1 + 2 x area) and its walls (2 + 2 x area).
 //
+// An area whose GE data is larger than the game's is not served: the game puts
+// the large monsters' GE data right after it in video memory.
+//
 // The quest played is the accepted quest's id beside the character, which the
 // game itself reads to choose a quest's collision (0x0A065388). The files go
 // through the loader the files mods add are served by (mhp3rd_added_files.hpp).

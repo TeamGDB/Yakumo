@@ -36,6 +36,7 @@ constexpr std::uint32_t kQuestIdOffset = 0x60472u;
 struct Added {
     Area area;
     std::vector<std::uint8_t> model, geometry, textures, ground, walls;
+    std::optional<bool> fits; // its GE data fits where the game's goes, once known
 };
 
 struct Served {
@@ -77,6 +78,23 @@ std::optional<FileId> area_file(const psprecomp::GuestMemory &memory, std::uint3
     const std::optional<LoadedOverlay> sub = overlay_at(memory, row);
     if (!sub || !iequals(sub->name, "game_sub") || !memory.contains(row, 2u)) return std::nullopt;
     return static_cast<FileId>(memory.load16(row) + 2u * area.area);
+}
+
+// The game copies an area's GE data into video memory with the large monsters'
+// after it: larger than the game's own, it runs into theirs and the quest
+// hangs. Such an area is not served at all, so its model never names GE data
+// that is not there.
+bool fits(Added &a, const psprecomp::GuestMemory &memory) {
+    if (a.fits) return *a.fits;
+    const std::optional<FileId> file = area_file(memory, kAreaGeometry, a.area);
+    if (!file) return false; // asked again once game_sub is there
+    const std::optional<std::vector<std::uint8_t>> base = game_file(*file);
+    a.fits = base && a.geometry.size() <= base->size();
+    if (!*a.fits)
+        std::cerr << "[mods] " << a.area.mod << "'s area " << a.area.id << ": its GE data (" << a.geometry.size()
+                  << " bytes) is larger than the game's (" << (base ? base->size() : 0u)
+                  << "); the game's area is loaded instead\n";
+    return *a.fits;
 }
 
 std::shared_ptr<const std::vector<std::uint8_t>> compose(
@@ -164,7 +182,9 @@ std::shared_ptr<const std::vector<std::uint8_t>> serve(Runtime &runtime, FileId 
     // The size and then the copy of one load ask in turn: composed once.
     if (const auto cached = s.cache.find(file); cached != s.cache.end() && cached->second.quest == *quest)
         return cached->second.bytes;
-    auto bytes = compose(s.areas[played->second], file, runtime.memory());
+    Added &area = s.areas[played->second];
+    if (!fits(area, runtime.memory())) return nullptr;
+    auto bytes = compose(area, file, runtime.memory());
     if (bytes) s.cache[file] = {*quest, bytes};
     return bytes;
 }

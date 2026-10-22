@@ -196,7 +196,7 @@
     "reason": "Declarations only. mhp3rd_texts.cpp is covered by mhp3rd_native_mods_tests (names and descriptions placed in a stand-in text block, and again when it reloads)."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_maps.hpp": {
-    "sha256": "483060d2e1b24367205f71730ac9cf8e8f48f12b07bcdd9cfbb239812478f66b",
+    "sha256": "a0c801fcb5983a36d359422b87e3247eff222e4e4f7a8800a9a914b8fa93ce59",
     "reason": "Declarations only. mhp3rd_maps.cpp is covered by mhp3rd_native_mods_tests (adding areas through the maps service and refusals; serving the area pack, GE data and collision pack composed with the mod's while a quest is played in the area, on stand-ins for game_sub's tables and the loader)."
   },
   "profiles/mhp3rd/host/game/pack_file.hpp": {

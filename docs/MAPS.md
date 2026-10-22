@@ -56,7 +56,7 @@ A native mod adds an area with `yakumo.maps` (`mods/mhp3rd_maps.cpp`, [MODDING.m
 - the area's GE data, the mod's;
 - the map's collision pack, the game's with the area's two blocks the mod's ground and walls.
 
-On any other quest the game's files load as they are. A mod's model fills the base area's meshes: the mod's sky in meshes 0 and 1 and the rest in mesh 6, with the meshes the scene names left empty, so the scene's nodes draw it.
+On any other quest the game's files load as they are. An area whose GE data is larger than the base area's is not served at all: the game copies an area's GE data into video memory (the arena's to `0x04136000`) with the large monsters' right after it (`0x041AA600`), and a castle built 50 KB larger than the arena's ran into Fatalis's and hung the quest's loading. A mod's model fills the base area's meshes: the mod's sky in meshes 0 and 1 and the rest in mesh 6, with the meshes the scene names left empty, so the scene's nodes draw it.
 
 Checked on macOS (2026-10-21) with the Fatalis mod's Castle Schrade, from Freedom Unite, in place of the arena's area 1: on the mod's quest the castle drew with its walls, gate tower, paved floor and sky, the hunter stood on its collision, and Fatalis fought in it; the arena quests that did not name it loaded the arena.
 

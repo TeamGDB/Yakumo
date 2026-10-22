@@ -936,6 +936,8 @@ void test_maps(psprecomp::Runtime &runtime) {
         if (file == 0x138Bu) return area_pack;
         if (file == 0x1262u) return hits_pack;
         if (file == 0x1263u) return bytes("not a pack");
+        if (file == 0x138Au) return bytes("THEIR GE"); // the arena's first area's GE data
+        if (file == 0x138Cu) return Bytes(0x10000u, 0u);
         return std::nullopt;
     });
     auto &memory = runtime.memory();
@@ -979,6 +981,15 @@ void test_maps(psprecomp::Runtime &runtime) {
     runtime.cpu().gpr[5] = 0x138Cu;
     check(call(runtime, 0x08864E8Cu, 0x08B3F040u) == 0x777u && maps::serve(runtime, 0x138Bu) == nullptr,
         "maps: on another quest the game's own files load");
+    // GE data larger than the game's is not served, nor the rest of the area.
+    check(
+        maps::add_area(runtime, {"big", 8, 0, pmo, Bytes(64, 1u), bytes(".TMH"), bytes("4.00"), bytes("4.00")}, &why) &&
+            maps::play_quest_in("big", 62604u),
+        "maps: an area with large GE data is added");
+    memory.store16(0x09000000u + 0x60472u, 62604u);
+    check(maps::serve(runtime, 0x138Au) == nullptr && maps::serve(runtime, 0x1389u) == nullptr &&
+            maps::serve(runtime, 0x1262u) == nullptr,
+        "maps: GE data larger than the game's area's is refused, and the area's other files with it");
     // An area of a map whose collision pack is not as expected.
     check(maps::add_area(
               runtime, {"odd", 9, 0, pmo, bytes("g"), bytes(".TMH"), bytes("4.00"), bytes("4.00"), "Map test"}, &why) &&
