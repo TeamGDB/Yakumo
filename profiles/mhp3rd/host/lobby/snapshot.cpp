@@ -2,6 +2,10 @@
 
 #include "game/equipment_models.hpp"
 #include "game/game_data.hpp"
+#include "lobby/diag.hpp"
+
+#include <cstdlib>
+#include <cstring>
 
 namespace mhp3rd::lobby {
 namespace {
@@ -40,12 +44,20 @@ void read_hunter(const game::Ram &ram, Snapshot &snapshot) {
 
     snapshot.weapon.reset();
     if (const std::optional<game::Piece> weapon = game::carried_weapon(ram)) {
-        snapshot.weapon = Weapon{weapon->kind, weapon->id, game::equipment_name(ram, weapon->kind, weapon->id)};
+        const game::EquipmentKind *kind = game::equipment_kind(weapon->kind);
+        snapshot.weapon = Weapon{weapon->kind, weapon->id, game::equipment_name(ram, weapon->kind, weapon->id),
+            kind != nullptr ? kind->label : std::string()};
     }
 
     snapshot.hr = static_cast<int>(hunter_rank(ram));
-    if (!snapshot.name.empty()) guild_card(ram, snapshot.name, snapshot.title, snapshot.guild_card);
-    snapshot.quests = posted_quests(ram);
+    // Untraced fields stay off until a dump from a live hall identifies them;
+    // MHP3RD_LOBBY_EXPERIMENTAL=1 turns the old guesses on for a trace run.
+    const char *experimental = std::getenv("MHP3RD_LOBBY_EXPERIMENTAL");
+    if (experimental != nullptr && std::strcmp(experimental, "1") == 0) {
+        if (!snapshot.name.empty()) guild_card(ram, snapshot.name, snapshot.title, snapshot.guild_card);
+        snapshot.quests = posted_quests(ram);
+    }
+    maybe_dump(ram, snapshot);
 }
 
 } // namespace mhp3rd::lobby

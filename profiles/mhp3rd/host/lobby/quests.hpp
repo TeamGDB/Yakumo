@@ -46,7 +46,7 @@ struct PostedQuest {
 // The ids are the game's; the details come from the DATA.BIN quest lists.
 [[nodiscard]] std::vector<PostedQuest> posted_quests(const game::Ram &ram);
 
-// The hunter rank kept beside the character's name.
+// The hunter rank kept beside the money and the two point balances.
 [[nodiscard]] std::uint32_t hunter_rank(const game::Ram &ram);
 
 // The guild card title and comment of the hunter called `name`, when the

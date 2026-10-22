@@ -10,7 +10,11 @@
 #include "game/guest_ram.hpp"
 
 #include <cstdint>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -59,7 +63,7 @@ lobby::Snapshot sample() {
     snapshot.title = "Village Hero";
     snapshot.token = "secret";
     snapshot.equipment = {{"head", 12u, "Hunter Helm"}};
-    snapshot.weapon = lobby::Weapon{5u, 3u, "Iron Sword"};
+    snapshot.weapon = lobby::Weapon{5u, 3u, "Iron Sword", "Great Sword"};
     snapshot.quests = {{1u, 10522u, 5u, 800u, 9600u, 36000u, "The Festival of Fear", "Repel the Jhen Mohran",
         "Jhen Mohran", "Guildmaster"}};
     return snapshot;
@@ -69,6 +73,7 @@ void test_report_line() {
     const std::string line = lobby::report_line(sample(), 1000);
     check(line.back() == '\n', "the report line ends in a newline");
     check(has(line, "\"type\":\"report\""), "the report names its type");
+    check(has(line, "\"full\":true"), "the report is a full snapshot");
     check(has(line, "\"mac\":\"02:00:00:00:00:01\""), "the report carries the MAC");
     check(has(line, "\"hall\":\"MHP3Q000\""), "the report carries the hall");
     check(has(line, "\"name\":\"Tester\""), "the report carries the hunter name");
@@ -77,7 +82,8 @@ void test_report_line() {
     check(has(line, "\"token\":\"secret\""), "the report carries the shared token");
     check(has(line, "\"equipment\":[{\"slot\":\"head\",\"id\":12,\"name\":\"Hunter Helm\"}]"),
         "the report carries the worn armor");
-    check(has(line, "\"weapon\":{\"kind\":5,\"id\":3,\"name\":\"Iron Sword\"}"), "the report carries the weapon");
+    check(has(line, "\"weapon\":{\"kind\":5,\"id\":3,\"name\":\"Iron Sword\",\"type\":\"Great Sword\"}"),
+        "the report carries the weapon and its class");
     check(has(line,
               "\"quests\":[{\"slot\":1,\"id\":10522,\"stars\":5,\"fee\":800,\"reward\":9600,\"time_limit\":36000,"
               "\"name\":\"The Festival of Fear\",\"objective\":\"Repel the Jhen Mohran\",\"monsters\":\"Jhen Mohran\","
@@ -127,7 +133,7 @@ void test_planner() {
 }
 
 constexpr std::uint32_t kBase = 0x09F40000u;
-constexpr std::size_t kSize = 0x00020000u; // up to 0x09F60000
+constexpr std::size_t kSize = 0x00090000u; // up to 0x09FD0000, including the rank byte
 
 void test_read_hunter() {
     game::BufferRam ram(kBase, kSize);
@@ -147,7 +153,7 @@ void test_read_hunter() {
     ram.store8(weapon, 1u);
     ram.store8(weapon + 1u, 5u);
     ram.store16(weapon + 2u, 3u);
-    ram.store32(character + 0x20u, 7u); // hunter rank
+    ram.store8(0x09FAC8C5u, 7u); // hunter rank
 
     lobby::Snapshot snapshot;
     lobby::read_hunter(ram, snapshot);
@@ -156,7 +162,9 @@ void test_read_hunter() {
     check(snapshot.hr == 7, "the hunter rank is read");
     check(snapshot.equipment.size() == 1u && snapshot.equipment[0].slot == "head" && snapshot.equipment[0].id == 12u,
         "the worn head piece is read");
-    check(snapshot.weapon && snapshot.weapon->kind == 5u && snapshot.weapon->id == 3u, "the weapon is read");
+    check(snapshot.weapon && snapshot.weapon->kind == 5u && snapshot.weapon->id == 3u &&
+            snapshot.weapon->type == "Great Sword",
+        "the weapon and its class are read");
 
     game::BufferRam empty(kBase, kSize);
     lobby::Snapshot none;
@@ -171,9 +179,9 @@ void write_utf16(game::Ram &ram, std::uint32_t at, const char *text) {
 
 void test_hunter_rank_and_guild_card() {
     game::BufferRam character(kBase, kSize);
-    character.store32(game::kCharacter + 0x20u, 7u);
-    check(lobby::hunter_rank(character) == 7u, "the hunter rank is read from the character block");
-    check(lobby::hunter_rank(game::BufferRam(kBase, 0x100u)) == 0u, "a missing character reads as rank 0");
+    character.store8(0x09FAC8C5u, 7u);
+    check(lobby::hunter_rank(character) == 7u, "the hunter rank is read beside the point balances");
+    check(lobby::hunter_rank(game::BufferRam(kBase, 0x100u)) == 0u, "a missing rank byte reads as rank 0");
 
     game::BufferRam board(lobby::kQuestBoardBase, lobby::kQuestBoardBytes);
     write_utf16(board, lobby::kQuestBoardBase + 0x100u, "Tester");
@@ -201,6 +209,55 @@ void test_posted_quest_ids() {
         "a missing board reads no quests");
 }
 
+void set_env(const char *name, const char *value) {
+#ifdef _WIN32
+    _putenv_s(name, value);
+#else
+    setenv(name, value, 1);
+#endif
+}
+
+void test_diagnostic_dump() {
+    const std::filesystem::path root = std::filesystem::temp_directory_path() / "yakumo-lobby-diag-test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root, error);
+    set_env("MHP3RD_LOBBY_DUMP", root.string().c_str());
+    set_env("MHP3RD_LOBBY_DUMP_TEXT", "Zinogre");
+
+    game::BufferRam ram(kBase, kSize);
+    write_utf16(ram, game::kCharacter, "Tester");
+    const char *text = "Zinogre";
+    for (std::size_t i = 0u; text[i] != '\0'; ++i)
+        ram.store8(lobby::kQuestBoardBase + static_cast<std::uint32_t>(i), static_cast<std::uint8_t>(text[i]));
+    lobby::Snapshot snapshot;
+    snapshot.hall = "MHP3QTEST";
+    lobby::read_hunter(ram, snapshot);
+
+    std::filesystem::path dump;
+    for (const auto &entry : std::filesystem::directory_iterator(root)) {
+        if (entry.is_directory()) {
+            dump = entry.path();
+            break;
+        }
+    }
+    check(!dump.empty(), "a diagnostic dump folder is written");
+    if (!dump.empty()) {
+        check(std::filesystem::exists(dump / "summary.txt"), "the dump has a summary");
+        check(std::filesystem::exists(dump / "character.bin"), "the dump has the character block");
+        check(std::filesystem::exists(dump / "name_hits.txt"), "the dump has the name hits");
+        check(std::filesystem::exists(dump / "text_hits.txt"), "the dump has the text hits");
+        std::ifstream summary(dump / "summary.txt");
+        const std::string text((std::istreambuf_iterator<char>(summary)), std::istreambuf_iterator<char>());
+        check(has(text, "name: Tester"), "the summary names the hunter");
+        check(has(text, "Zinogre"), "the summary mentions the searched text");
+    }
+
+    set_env("MHP3RD_LOBBY_DUMP", "");
+    set_env("MHP3RD_LOBBY_DUMP_TEXT", "");
+    std::filesystem::remove_all(root, error);
+}
+
 } // namespace
 
 int main() {
@@ -211,6 +268,7 @@ int main() {
     test_read_hunter();
     test_hunter_rank_and_guild_card();
     test_posted_quest_ids();
+    test_diagnostic_dump();
     if (failures == 0) std::cout << "lobby tests passed\n";
     return failures == 0 ? 0 : 1;
 }

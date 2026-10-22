@@ -57,7 +57,7 @@ void append_string_field(std::string &out, const char *name, const std::string &
 } // namespace
 
 std::string report_line(const Snapshot &snapshot, std::int64_t unix_seconds) {
-    std::string out = "{\"v\":1,\"type\":\"report\"";
+    std::string out = "{\"v\":1,\"type\":\"report\",\"full\":true";
     append_string_field(out, "mac", snapshot.mac);
     append_string_field(out, "nickname", snapshot.nickname);
     append_string_field(out, "product", snapshot.product);
@@ -84,6 +84,7 @@ std::string report_line(const Snapshot &snapshot, std::int64_t unix_seconds) {
         out += ",\"weapon\":{\"kind\":" + std::to_string(snapshot.weapon->kind) +
             ",\"id\":" + std::to_string(snapshot.weapon->id);
         append_string_field(out, "name", snapshot.weapon->name);
+        append_string_field(out, "type", snapshot.weapon->type);
         out.push_back('}');
     }
     if (!snapshot.quests.empty()) {

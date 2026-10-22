@@ -36,9 +36,10 @@ struct Weapon {
     std::uint8_t kind{};
     std::uint16_t id{};
     std::string name;
+    std::string type; // the game's weapon class, for example "Great Sword"
 
     [[nodiscard]] bool operator==(const Weapon &other) const {
-        return kind == other.kind && id == other.id && name == other.name;
+        return kind == other.kind && id == other.id && name == other.name && type == other.type;
     }
 };
 

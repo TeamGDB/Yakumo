@@ -37,8 +37,10 @@ bool printable(const std::string &text) {
 } // namespace
 
 std::uint32_t hunter_rank(const game::Ram &ram) {
-    const std::uint32_t at = game::kCharacter + 0x20u;
-    return ram.contains(at, 4u) ? ram.load32(at) : 0u;
+    // The rank sits beside the money and the two point balances. The field
+    // beside the character's name is not it: a rank 4 hunter reads 7 there.
+    constexpr std::uint32_t kRank = 0x09FAC8C5u;
+    return ram.contains(kRank, 1u) ? ram.load8(kRank) : 0u;
 }
 
 void guild_card(const game::Ram &ram, const std::string &name, std::string &title, std::string &comment) {
