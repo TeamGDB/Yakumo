@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -50,6 +51,12 @@ struct LoadResult {
 bool write_save(const std::filesystem::path &memory_stick, const SaveFiles &files, const SaveContents &contents,
     std::string &error);
 bool delete_save(const std::filesystem::path &memory_stick, const SaveFiles &files);
+
+// Diagnostic: writes decrypted `data` to `folder/<file_name>.plain` and creates
+// `folder`. For tracing a live save; it is personal data, so it is never
+// written unless a caller asks for it.
+bool write_plain_dump(const std::filesystem::path &folder, const std::string &file_name,
+    std::span<const std::uint8_t> data, std::string &error);
 
 // Total size of the folder's files in bytes, 0 when it does not exist.
 [[nodiscard]] std::uint64_t save_size(const std::filesystem::path &memory_stick, const SaveFiles &files);

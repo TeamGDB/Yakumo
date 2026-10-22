@@ -1264,6 +1264,7 @@ With the setting off nothing is hooked into the display lists, no input is read 
 | `MHP3RD_TRACE_LAYERED_ARMOR=1` | Each armor part [layered armor](#layered-armor) draws differently (`[layered] Chest: model 22 instead of the worn piece's`), and each time a changed look makes the hunter load its models again |
 | `MHP3RD_LAYERED_PREVIEW_FIX=0` | Disable the Smithy preview appearance consistency guard for diagnosis; normal play should leave it enabled |
 | `MHP3RD_TRACE_SAVEDATA=1` | Log every field of each save-data request and each status poll |
+| `MHP3RD_SAVE_DUMP` | A folder for the decrypted save (`MHP3RD.BIN.plain`) on each load, for tracing; personal data, so keep it local |
 | `MHP3RD_TRACE_SYNC=1` | Trace semaphores, event flags and mutexes; `MHP3RD_TRACE_SYNC_LIMIT` caps the lines (default 4000) |
 | `MHP3RD_STARVATION_INTERVAL` | Dispatches between virtual-clock advances in code that never calls an import |
 | `MHP3RD_TRACE_GE=1` | Log the first draws of the run with their state |

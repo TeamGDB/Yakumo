@@ -217,6 +217,29 @@ bool write_save(const std::filesystem::path &memory_stick, const SaveFiles &file
     return true;
 }
 
+bool write_plain_dump(const std::filesystem::path &folder, const std::string &file_name,
+    std::span<const std::uint8_t> data, std::string &error) {
+    std::error_code failure;
+    std::filesystem::create_directories(folder, failure);
+    if (failure) {
+        error = "cannot create " + path_to_utf8(folder);
+        return false;
+    }
+    const std::filesystem::path path = folder / (file_name + ".plain");
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        error = "cannot write " + path_to_utf8(path);
+        return false;
+    }
+    if (!data.empty())
+        out.write(reinterpret_cast<const char *>(data.data()), static_cast<std::streamsize>(data.size()));
+    if (!out) {
+        error = "cannot write " + path_to_utf8(path);
+        return false;
+    }
+    return true;
+}
+
 bool delete_save(const std::filesystem::path &memory_stick, const SaveFiles &files) {
     std::error_code ec;
     const auto removed = std::filesystem::remove_all(save_folder(memory_stick, files), ec);

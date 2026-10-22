@@ -168,6 +168,17 @@ std::vector<std::uint8_t> file_bytes(const std::filesystem::path &path) {
     return std::vector<std::uint8_t>((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 }
 
+void test_plain_dump() {
+    const auto root = std::filesystem::temp_directory_path() / "mhp3rd_savedata_plain_dump_tests";
+    std::filesystem::remove_all(root);
+    const std::vector<std::uint8_t> data{1u, 2u, 3u, 4u, 5u};
+    std::string error;
+    check(write_plain_dump(root / "nested", "DATA.BIN", data, error), "the plaintext dump is written");
+    check(error.empty(), "the plaintext dump reports no error");
+    check(file_bytes(root / "nested" / "DATA.BIN.plain") == data, "the plaintext dump keeps the bytes");
+    std::filesystem::remove_all(root);
+}
+
 // Writes a save the way the game does, under <memory_stick>/PSP/SAVEDATA.
 void make_save(const std::filesystem::path &memory_stick, const std::string &game, const std::string &save,
     const Block &key, std::uint8_t fill) {
@@ -398,6 +409,7 @@ int main(int argc, char **argv) {
     test_param_sfo();
     test_encryption();
     test_store();
+    test_plain_dump();
     test_transfer();
     test_release_of();
     std::printf("%d failure(s)\n", failures);
