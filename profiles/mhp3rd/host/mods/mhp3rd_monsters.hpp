@@ -192,9 +192,10 @@ bool move(psprecomp::Runtime &runtime, std::uint32_t monster, float x, float z);
 // check (0x0887A118, for motion channel 0) works it out.
 [[nodiscard]] std::optional<bool> at_frame(psprecomp::Runtime &runtime, std::uint32_t monster, float frame);
 // During a part of behaviour: queues an attack of the base kind's (its number
-// in the kind's attack table) in one of the monster's attack slots, or the end
-// of the attack in a slot. False outside a part or when the game's code is not
-// as traced.
+// in the kind's attack table, below kMostAttackRows) in one of the monster's
+// two attack slots (0 or 1), or the end of the attack in a slot. False outside
+// a part, for a slot or row past those, or when the game's code is not as
+// traced.
 [[nodiscard]] bool attack(std::uint32_t monster, std::uint8_t slot, std::uint32_t number);
 // During a part of behaviour: queues one of the kind's own effects (entries of
 // its model pack), by number, on one of its joints, `offset` from it, at

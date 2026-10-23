@@ -1790,11 +1790,13 @@ void test_monsters(psprecomp::Runtime &runtime) {
         "monsters: attacks only from a part of behaviour");
     const ymod_monster_fn attacking = [](ymod_cpu *, std::uint32_t monster, void *user) -> int {
         const auto *a = static_cast<Acting *>(user);
+        // A monster has attack slots 0 and 1, and a kind 64 attack rows at most.
         if (a->service->attack(monster, 256, 6) != -1 || a->service->attack(monster, 1, -1) != -1 ||
-            a->service->end_attack(monster, -1) != -1)
+            a->service->end_attack(monster, -1) != -1 || a->service->attack(monster, 2, 6) != -1 ||
+            a->service->attack(monster, 1, 64) != -1 || a->service->end_attack(monster, 2) != -1)
             return YMOD_CONTINUE;
-        (void)a->service->attack(monster, 2, 23);
-        (void)a->service->end_attack(monster, 1);
+        (void)a->service->attack(monster, 1, 23);
+        (void)a->service->end_attack(monster, 0);
         (void)a->service->aim(monster);
         return YMOD_RETURN;
     };
@@ -1807,7 +1809,7 @@ void test_monsters(psprecomp::Runtime &runtime) {
     runtime.memory().store8(kMonster + 0x62u, 78u);
     (void)call(runtime, 0x0A090AE0u, 0u);
     const std::uint32_t attacking_stub = runtime.memory().load32(runtime.memory().load32(kMonster) + 32u * 4u);
-    runtime.memory().store32(kAttacked + 12u, 0u);
+    runtime.memory().store32(kAttacked + 12u, 0xFFFFFFFFu);
     // Its own attack shape: the kind's data the monster keeps becomes a copy
     // whose shape 2 is the mod's spheres.
     constexpr std::uint32_t kKindData = 0x08B51000u, kTables = 0x08B51100u, kShapeList = 0x08B51200u;
@@ -1831,9 +1833,9 @@ void test_monsters(psprecomp::Runtime &runtime) {
     check(service != nullptr && service->attack_shape(mod, 78, 2, jaws, 2) == 0,
         "monsters: a kind the mod added takes an attack shape of its own");
     const std::uint32_t attacked_v0 = call(runtime, attacking_stub, kMonster);
-    check(attacked_v0 != 7u && runtime.memory().load32(kAttacked) == 2u &&
+    check(attacked_v0 != 7u && runtime.memory().load32(kAttacked) == 1u &&
             runtime.memory().load32(kAttacked + 4u) == 23u && runtime.memory().load32(kAttacked + 8u) == 0u &&
-            runtime.memory().load32(kAttacked + 12u) == 4u && runtime.memory().load32(kAttacked + 16u) == kMonster &&
+            runtime.memory().load32(kAttacked + 12u) == 0u && runtime.memory().load32(kAttacked + 16u) == kMonster &&
             runtime.cpu().pc == kSentinel,
         "monsters: the attack starts in its slot, the other slot's ends, and the target is brought up to date");
     const std::uint32_t own_data = runtime.memory().load32(kMonster + 0xD50u);

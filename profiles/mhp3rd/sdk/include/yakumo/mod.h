@@ -472,9 +472,11 @@ typedef struct ymod_monsters {
      * moves it, a little each frame. */
     int (*move)(uint32_t monster, float x, float z);
     /* Attacks, queued as play_motion is: starts attack `attack` (a row of the
-     * base kind's attack table, until a mod can give its own) in one of the
-     * monster's attack slots, or ends the attack in a slot. 0, or -1 outside
-     * a part of behaviour. */
+     * kind's attack table, 0 to 63: the base's, or one given with attack_row)
+     * in one of the monster's two attack slots, 0 or 1, or ends the attack in
+     * a slot. 0, or -1 outside a part of behaviour or for a slot or row past
+     * those. Past the base's own rows, a row the kind was not given is what
+     * follows them in memory. */
     int (*attack)(uint32_t monster, int32_t slot, int32_t attack);
     int (*end_attack)(uint32_t monster, int32_t slot);
     /* Gives a kind this mod added its own spheres (1 to 16) for one of the

@@ -192,6 +192,11 @@ constexpr std::array<std::uint32_t, 2> kStartAttackWords{0x27BDFFE0u, 0xAFB60018
 constexpr std::uint32_t kAim = 0x0A0AFEB0u;
 constexpr std::array<std::uint32_t, 2> kAimWords{0x27BDFF80u, 0xAFB10064u};
 constexpr std::uint32_t kEndAttack = 0x0A09B47Cu;
+// A monster's attack slots: the attack objects at +0x174 and +0x178. The
+// game's own loops over them (the monster's reset at 0x0A0B4A04, an attack
+// object leaving its slot at 0x0A133864) cover these two, and the Tigrex's AI
+// uses slots 0 and 1; a slot past them is never cleared.
+constexpr std::uint32_t kAttackSlots = 2u;
 constexpr std::array<std::uint32_t, 2> kEndAttackWords{0x30A500FFu, 0x00052880u};
 // game_sub's effect starter: start(bank, effect, monster, joint, t0 offset
 // and t1 scale (vec4s), t2, t3, then two halfwords on the stack: flags (2) and
@@ -1227,6 +1232,7 @@ bool move(Runtime &runtime, std::uint32_t monster, float x, float z) {
 }
 
 bool attack(std::uint32_t monster, std::uint8_t slot, std::uint32_t number) {
+    if (slot >= kAttackSlots || number >= kMostAttackRows) return false;
     return queue(kStartAttack, kStartAttackWords, {monster, slot, number, 0u});
 }
 
@@ -1267,6 +1273,7 @@ bool aim(std::uint32_t monster) {
 }
 
 bool end_attack(std::uint32_t monster, std::uint8_t slot) {
+    if (slot >= kAttackSlots) return false;
     return queue(kEndAttack, kEndAttackWords, {monster, slot, 0u, 0u});
 }
 
