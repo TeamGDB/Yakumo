@@ -39,6 +39,7 @@
 #include "install/installer.hpp"
 #include "install/user_data.hpp"
 #include "kernel/fast_forward.hpp"
+#include "lobby/reporter.hpp"
 #include "platform/utf8_path.hpp"
 #include "perf/frame_stats.hpp"
 #include "save_data/save_transfer.hpp"
@@ -1363,9 +1364,31 @@ void Menu::network() {
         settings::save();
         adhoc_apply_settings();
     }
+    if (toggle_row("Lobby", s.lobby,
+            options_for("network.lobby",
+                "Sends the hunter's name and current equipment to a lobby dashboard "
+                "when entering a gathering hall. The dashboard shows who is in each "
+                "hall; it is not the ad hoc server. Off, nothing is sent."))) {
+        s.lobby = !s.lobby;
+        settings::save();
+    }
+    if (text_row("lobby_server", "Lobby server", s.lobby_server, 100u, true, host_character,
+            options_for("network.lobby_server",
+                "The lobby dashboard's report address: host, host:port if it is not "
+                "on 8090. Only used while the lobby is on."))) {
+        settings::save();
+    }
 
     section("Status:");
     info_row("Connection", connection_text(d));
+    {
+        const lobby::Status lobby_status = lobby::status();
+        if (lobby_status.enabled)
+            info_row("Lobby",
+                (lobby_status.connected ? "reporting to " : "waiting for ") + lobby_status.server +
+                    (lobby_status.last_error.empty() ? "" : "   " + lobby_status.last_error) + ", " +
+                    std::to_string(lobby_status.reports_sent) + " reports sent");
+    }
     if (adhoc_hosting()) {
         const adhoc::ServerStatus st = adhoc_host_status();
         info_row("Server",

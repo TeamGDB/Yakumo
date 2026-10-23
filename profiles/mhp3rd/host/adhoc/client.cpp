@@ -31,6 +31,36 @@ namespace {
 using Clock = std::chrono::steady_clock;
 using std::chrono::milliseconds;
 
+void trace_payload(const char *direction, int handle, const void *data, std::size_t size) {
+    static const bool enabled = std::getenv("MHP3RD_ADHOC_TRACE_PAYLOAD") != nullptr;
+    if (!enabled || size == 0u) return;
+    static std::mutex mutex;
+    static std::ofstream out = [] {
+        std::error_code error;
+        std::filesystem::create_directories("logs", error);
+        return std::ofstream("logs/adhoc_payload.log", std::ios::binary | std::ios::app);
+    }();
+    std::lock_guard lock(mutex);
+    if (!out) return;
+    const auto *bytes = static_cast<const std::uint8_t *>(data);
+    const std::size_t shown = std::min<std::size_t>(size, 2048u);
+    out << "=== " << direction << " handle " << handle << " size " << size << " ===\n";
+    for (std::size_t offset = 0u; offset < shown; offset += 16u) {
+        char hex[3 * 16 + 1];
+        char ascii[17];
+        std::size_t i = 0u;
+        for (; i < 16u && offset + i < shown; ++i) {
+            std::snprintf(hex + i * 3u, 4u, "%02x ", bytes[offset + i]);
+            ascii[i] =
+                bytes[offset + i] >= 0x20u && bytes[offset + i] < 0x7Fu ? static_cast<char>(bytes[offset + i]) : '.';
+        }
+        hex[i * 3u] = '\0';
+        ascii[i] = '\0';
+        out << hex << " " << ascii << "\n";
+    }
+    out << "\n";
+}
+
 // How long the network thread sleeps in poll(). Short, because it is also how
 // long queued data can wait before it is written.
 constexpr int kPollIntervalMs = 2;
@@ -375,6 +405,19 @@ struct Client::Impl {
     bool resolving{};
     std::optional<Address> server; // the adhocctl address that last worked
     std::uint16_t relay_port{kRelayPort};
+    bool relay_connected{};
+    bool relay_fallback{};
+    void relay_failed() {
+        if (identity.relay_port != 0u || relay_connected || relay_fallback || !server ||
+            server->port() == kAdhocctlPort)
+            return;
+        // A one-port gateway (the Railway server) classifies the relay on the
+        // same public port. Direct servers keep the historical next port, so
+        // try that first and fall back only when it never opened.
+        relay_port = server->port();
+        relay_fallback = true;
+        trace("relay did not open on the next port; trying the server port");
+    }
     Link ctl;
     bool logged_in{};
     bool stop_ctl{}; // close `ctl` on the network thread
@@ -710,6 +753,7 @@ struct Client::Impl {
     void maintain_datagrams(Clock::time_point now) {
         for (auto it = datagrams.begin(); it != datagrams.end();) {
             DatagramSocket &socket = it->second;
+            if (socket.link.open) relay_connected = true;
             if (socket.closing) {
                 socket.link.close();
                 it = datagrams.erase(it);
@@ -717,6 +761,7 @@ struct Client::Impl {
             }
             if (socket.link.failed) {
                 socket.link.failed = false;
+                relay_failed();
                 parse_datagrams(it->first, socket);
                 socket.link.close();
                 socket.partial.reset();
@@ -759,6 +804,7 @@ struct Client::Impl {
             Datagram datagram = std::move(*socket.partial);
             socket.partial.reset();
             datagram.data.assign(in.data() + offset, socket.partial_size);
+            trace_payload("pdp-recv", handle, datagram.data.data(), datagram.data.size());
             offset += socket.partial_size;
             trace("relay < pdp " + std::to_string(handle) + " from " + format_mac(datagram.source) + " port " +
                 std::to_string(datagram.port) + " size " + std::to_string(datagram.data.size()));
@@ -780,6 +826,7 @@ struct Client::Impl {
         for (auto it = streams.begin(); it != streams.end();) {
             const int handle = it->first;
             StreamSocket &socket = it->second;
+            if (socket.link.open) relay_connected = true;
             if (socket.closing) {
                 socket.link.close();
                 it = streams.erase(it);
@@ -789,6 +836,7 @@ struct Client::Impl {
             case StreamKind::Listen:
                 if (socket.link.failed) {
                     socket.link.failed = false;
+                    relay_failed();
                     parse_stream(handle, socket);
                     socket.link.close();
                     const auto delay = socket.backoff.next();
@@ -808,6 +856,7 @@ struct Client::Impl {
                 if (socket.state == StreamState::Opening) {
                     if (socket.link.failed) {
                         socket.link.failed = false;
+                        relay_failed();
                         parse_stream(handle, socket);
                         socket.link.close();
                         if (socket.state == StreamState::Opening) {
@@ -847,6 +896,7 @@ struct Client::Impl {
                 }
                 if (socket.link.failed) {
                     socket.link.failed = false;
+                    relay_failed();
                     parse_stream(handle, socket);
                     socket.link.close();
                     if (socket.state == StreamState::Established) {
@@ -901,6 +951,7 @@ struct Client::Impl {
                 return;
             }
             if (in.size() - offset - relay::kPtpHeaderSize < size) break;
+            trace_payload("ptp-recv", handle, in.data() + offset + relay::kPtpHeaderSize, size);
             socket.received.append(in.data() + offset + relay::kPtpHeaderSize, size);
             socket.received_total += size;
             ++traffic.packets_in;
@@ -1077,7 +1128,9 @@ struct Client::Impl {
                 split_server(to_resolve, host, port);
                 {
                     std::lock_guard lock(mutex);
-                    relay_port = relay_port_for(port);
+                    relay_port = identity.relay_port != 0u ? identity.relay_port : relay_port_for(port);
+                    relay_connected = false;
+                    relay_fallback = false;
                 }
                 trace("resolving " + host);
                 std::vector<Address> found = resolve(host, port);
@@ -1242,7 +1295,8 @@ void Client::start(const Identity &identity) {
     std::lock_guard lock(impl_->mutex);
     Impl &s = *impl_;
     const bool same = s.active && s.identity.server == identity.server && s.identity.mac == identity.mac &&
-        s.identity.nickname == identity.nickname && s.identity.product == identity.product;
+        s.identity.nickname == identity.nickname && s.identity.product == identity.product &&
+        s.identity.relay_port == identity.relay_port;
     if (same) return;
     s.stop_ctl = true;
     s.logged_in = false;
@@ -1415,6 +1469,7 @@ bool Client::pdp_send(int handle, const Mac &destination, std::uint16_t port, co
         ++s.dropped;
         return true;
     }
+    trace_payload("pdp-send", handle, data, size);
     const auto queue = [&](const Mac &target) {
         if (socket.link.output.size() > kMaxQueuedOutput) {
             trace("pdp " + std::to_string(handle) + " send queue full; datagram dropped");
@@ -1565,6 +1620,7 @@ std::size_t Client::ptp_send(int handle, const void *data, std::size_t size) {
     const std::size_t room = queued >= socket.capacity ? 0u : socket.capacity - queued;
     const std::size_t count = std::min(size, room);
     const char *bytes = static_cast<const char *>(data);
+    trace_payload("ptp-send", handle, data, count);
     for (std::size_t done = 0; done < count;) {
         const std::size_t block = std::min(count - done, relay::kPtpBlockMax);
         wire::put32(socket.link.output, static_cast<std::uint32_t>(block));

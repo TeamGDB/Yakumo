@@ -223,6 +223,16 @@ std::uint32_t do_load(psprecomp::GuestMemory &memory, std::uint32_t params, cons
         return result::kLoadDataBroken;
     }
     const auto &data = loaded.contents.data;
+    if (const char *dump = std::getenv("MHP3RD_SAVE_DUMP"); dump != nullptr && *dump != '\0') {
+        const std::filesystem::path folder = "logs/save";
+        std::string error;
+        if (savedata::write_plain_dump(folder, files.file_name, data, error)) {
+            std::cerr << "[savedata] wrote plaintext save to " << path_to_utf8(folder / (files.file_name + ".plain"))
+                      << "\n";
+        } else {
+            std::cerr << "[savedata] plaintext save dump failed: " << error << "\n";
+        }
+    }
     const auto count = static_cast<std::uint32_t>(std::min<std::size_t>(data.size(), capacity));
     memory.copy_in(buffer, std::span<const std::uint8_t>(data.data(), count));
     memory.store32(params + param::kDataSize, count);

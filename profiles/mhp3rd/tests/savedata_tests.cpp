@@ -143,6 +143,10 @@ void test_store() {
     const auto loaded = load_save(root, files);
     check(loaded.status == LoadStatus::Ok && loaded.contents.data == contents.data, "the save loads back");
     check(loaded.contents.title == "Title" && loaded.contents.detail == "Detail", "the titles load back");
+    std::string dump_error;
+    const auto dump_folder = root / "plain";
+    check(write_plain_dump(dump_folder, files.file_name, contents.data, dump_error), "a plain save dump is written");
+    check(std::filesystem::exists(dump_folder / (files.file_name + ".plain")), "the plain save has its data");
 
     // A changed data file must be reported as broken.
     {
@@ -166,6 +170,17 @@ void test_store() {
 std::vector<std::uint8_t> file_bytes(const std::filesystem::path &path) {
     std::ifstream in(path, std::ios::binary);
     return std::vector<std::uint8_t>((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
+void test_plain_dump() {
+    const auto root = std::filesystem::temp_directory_path() / "mhp3rd_savedata_plain_dump_tests";
+    std::filesystem::remove_all(root);
+    const std::vector<std::uint8_t> data{1u, 2u, 3u, 4u, 5u};
+    std::string error;
+    check(write_plain_dump(root / "nested", "DATA.BIN", data, error), "the plaintext dump is written");
+    check(error.empty(), "the plaintext dump reports no error");
+    check(file_bytes(root / "nested" / "DATA.BIN.plain") == data, "the plaintext dump keeps the bytes");
+    std::filesystem::remove_all(root);
 }
 
 // Writes a save the way the game does, under <memory_stick>/PSP/SAVEDATA.
@@ -398,6 +413,7 @@ int main(int argc, char **argv) {
     test_param_sfo();
     test_encryption();
     test_store();
+    test_plain_dump();
     test_transfer();
     test_release_of();
     std::printf("%d failure(s)\n", failures);

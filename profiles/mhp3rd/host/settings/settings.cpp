@@ -502,6 +502,21 @@ const std::vector<Field> &fields() {
                 return true;
             },
             [](const Settings &s) { return s.adhoc_mac; }, [](Settings &s, const char *t) { s.adhoc_mac = t; }},
+        {"network.lobby", "MHP3RD_LOBBY", [](Settings &s, const std::string &t) { return parse_bool(t, s.lobby); },
+            [](const Settings &s) { return std::string(s.lobby ? "1" : "0"); },
+            [](Settings &s, const char *t) { s.lobby = variable_flag(t); }},
+        {"network.lobby_server", "MHP3RD_LOBBY_SERVER",
+            [](Settings &s, const std::string &t) {
+                s.lobby_server = t;
+                return true;
+            },
+            [](const Settings &s) { return s.lobby_server; }, [](Settings &s, const char *t) { s.lobby_server = t; }},
+        {"network.lobby_token", "MHP3RD_LOBBY_TOKEN",
+            [](Settings &s, const std::string &t) {
+                s.lobby_token = t;
+                return true;
+            },
+            [](const Settings &s) { return s.lobby_token; }, [](Settings &s, const char *t) { s.lobby_token = t; }},
         {"ui.menu_pause", "MHP3RD_MENU_PAUSE",
             [](Settings &s, const std::string &t) { return parse_bool(t, s.menu_pause); },
             [](const Settings &s) { return std::string(s.menu_pause ? "1" : "0"); },
@@ -533,6 +548,18 @@ const std::vector<Field> &fields() {
             [](Settings &s, const char *t) {
                 std::uint32_t value = s.adhoc_host_port;
                 if (parse_uint(t, 1024u, 65534u, value)) s.adhoc_host_port = value;
+            }},
+        {"network.relay_port", "MHP3RD_ADHOC_RELAY_PORT",
+            [](Settings &s, const std::string &t) {
+                std::uint32_t value = s.adhoc_relay_port;
+                const bool ok = parse_uint(t, 0u, 65535u, value);
+                if (ok) s.adhoc_relay_port = static_cast<std::uint16_t>(value);
+                return ok;
+            },
+            [](const Settings &s) { return std::to_string(s.adhoc_relay_port); },
+            [](Settings &s, const char *t) {
+                std::uint32_t value = s.adhoc_relay_port;
+                if (parse_uint(t, 0u, 65535u, value)) s.adhoc_relay_port = static_cast<std::uint16_t>(value);
             }},
         {"look.layered_armor", "MHP3RD_LAYERED_ARMOR",
             [](Settings &s, const std::string &t) { return parse_bool(t, s.layered_armor); },

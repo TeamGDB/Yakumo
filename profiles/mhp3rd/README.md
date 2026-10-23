@@ -509,6 +509,9 @@ The Android app starts from other defaults where a phone differs, with the same 
 | Network | Ad Hoc Play | `network.adhoc` | `MHP3RD_ADHOC` | Off (default) or on; off, the game reports the wireless switch as off |
 | Network | Server | `network.server` | `MHP3RD_ADHOC_SERVER` | Host name or address of a PSP ad hoc server, optionally `host:port`; empty by default |
 | Network | Nickname | `network.nickname` | `MHP3RD_ADHOC_NICKNAME` | The name other players see; empty uses the hunter name |
+| Network | Lobby | `network.lobby` | `MHP3RD_LOBBY` | Off (default) or on; on, the hunter's name, equipment, guild card summary and hall are sent to a lobby dashboard when entering a gathering hall |
+| Network | Lobby Server | `network.lobby_server` | `MHP3RD_LOBBY_SERVER` | The dashboard's report address, `host` or `host:port` (8090); empty by default |
+| Network | Lobby Token | `network.lobby_token` | `MHP3RD_LOBBY_TOKEN` | The dashboard's shared secret, when it has one; empty by default |
 
 Everything applies without a restart, apart from mods that change a file's size (see [Mods](#mods)); the name settings take effect the next time the game asks for a name. The System section has *Resume*, *Take a Screenshot* and *Open the Screenshots Folder* (see [Screenshots](#screenshots)), *Open the Data Folder*, *Set Up Game Data Again…* and *Quit Game* (both of the last two ask first), the *Saves* rows described under [Saving and loading](#importing-a-save-from-a-psp), and the build version, the data and saves folders and the GPU. Each section but Mods has a button that restores its defaults.
 
@@ -802,6 +805,12 @@ docker run --rm -it -p 27312:27312 -p 27313:27313 -p 8888:8888 \
 ```
 
 Then use `127.0.0.1` as the server on the same machine, or the machine's LAN address on the others. Open TCP 27312 and 27313 in its firewall for other machines. The server log shows every login, group join and relay session, and `http://<server>:8888/` lists who is on line.
+
+### Lobby dashboard
+
+A lobby dashboard is a separate web service beside the ad hoc server: it shows who is in which gathering hall, with the hunter's name and current equipment. It is not part of the game's own protocol: each Yakumo client reads its own data from the game's memory and reports it when it enters a hall, over a plain TCP line protocol, and the dashboard keeps the last report of every player in memory. Nothing is sent while **Lobby** is off.
+
+Turn **Lobby** on in the Network section and enter the dashboard's **Lobby Server** address (its report port, 8090 by default; **Lobby Token** when the dashboard sets one). The data is self-reported by each client, so treat it as informational. The dashboard service, its protocol and a Railway setup beside the ad hoc server are in the [yakumo-adhoc-server](https://github.com/devdouglasonofre/yakumo-adhoc-server) repository.
 
 ### Two instances on one machine
 
@@ -1149,10 +1158,20 @@ The renderer then leaves out the HUD packets' draws, and nothing else: their oth
 | --- | --- | --- |
 | `MHP3RD_ADHOC` | off | `1` turns ad hoc play on (menu: Ad Hoc Play) |
 | `MHP3RD_ADHOC_SERVER` | none | PSP ad hoc server, `host` or `host:port` (menu: Server) |
+| `MHP3RD_ADHOC_RELAY_PORT` | none | Relay port when the server uses one shared port for matchmaking and relay, such as the Railway gateway; empty uses the next port (settings key `network.relay_port`) |
 | `MHP3RD_ADHOC_NICKNAME` | the hunter name | Name other players see (menu: Nickname) |
 | `MHP3RD_ADHOC_MAC` | made up once | The address other players know you by, `xx:xx:xx:xx:xx:xx` |
 | `MHP3RD_ADHOC_OVERLAY` | off | `1` shows the network overlay from the start |
 | `MHP3RD_ADHOC_HOST_PORT` | `27312` | TCP port of the built-in server's matchmaking service; the relay uses the next one (`network.host_port`) |
+| `MHP3RD_LOBBY` | off | `1` turns the lobby report on (menu: Lobby) |
+| `MHP3RD_LOBBY_SERVER` | none | Lobby dashboard report address, `host` or `host:port` (menu: Lobby Server) |
+| `MHP3RD_LOBBY_TOKEN` | none | Shared secret the dashboard requires, when it has one (menu: Lobby Token) |
+| `MHP3RD_LOBBY_DUMP` | off | `1` writes up to three diagnostic dumps of the hall's live memory, ten seconds apart, under `logs/lobby-dump-*` |
+| `MHP3RD_LOBBY_DUMP_TEXT` | `Zinogre` | Text the diagnostic dump searches for beside the hunter name (a quest or monster name) |
+| `MHP3RD_LOBBY_DUMP_FULL` | off | `1` also writes the whole 64 MiB guest RAM on the second and third hall dump |
+| `MHP3RD_LOBBY_DUMP_ANY` | off | `1` also dumps outside a hall, e.g. on the hall-creation screen |
+
+The dump can contain the hunter's name and other live game data. Keep it local; do not attach it to a public issue.
 
 ### Analog camera
 
@@ -1247,6 +1266,8 @@ With the setting off nothing is hooked into the display lists, no input is read 
 | `MHP3RD_TRACE_LAYERED_ARMOR=1` | Each armor part [layered armor](#layered-armor) draws differently (`[layered] Chest: model 22 instead of the worn piece's`), and each time a changed look makes the hunter load its models again |
 | `MHP3RD_LAYERED_PREVIEW_FIX=0` | Disable the Smithy preview appearance consistency guard for diagnosis; normal play should leave it enabled |
 | `MHP3RD_TRACE_SAVEDATA=1` | Log every field of each save-data request and each status poll |
+| `MHP3RD_ADHOC_TRACE_PAYLOAD` | `1` appends the first 2 KiB of every ad hoc payload the game sends or receives, as hex and ASCII, to `logs/adhoc_payload.log`, for tracing the hall and quest packets |
+| `MHP3RD_SAVE_DUMP` | `1` writes the decrypted save (`MHP3RD.BIN.plain`) to `logs/save/` on each load, for tracing; personal data, so keep it local |
 | `MHP3RD_TRACE_SYNC=1` | Trace semaphores, event flags and mutexes; `MHP3RD_TRACE_SYNC_LIMIT` caps the lines (default 4000) |
 | `MHP3RD_STARVATION_INTERVAL` | Dispatches between virtual-clock advances in code that never calls an import |
 | `MHP3RD_TRACE_GE=1` | Log the first draws of the run with their state |

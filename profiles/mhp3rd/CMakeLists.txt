@@ -212,6 +212,13 @@ set(MHP3RD_HOST_SOURCES
     host/platform/utf8_path.cpp
     host/overlays.cpp
     host/mhp3rd_profile.cpp
+    host/lobby/diag.cpp
+    host/lobby/quest_file.cpp
+    host/lobby/quests.cpp
+    host/lobby/quests_data.cpp
+    host/lobby/report.cpp
+    host/lobby/reporter.cpp
+    host/lobby/snapshot.cpp
     host/kernel/kernel.cpp
     host/kernel/load_trace.cpp
     host/kernel/fast_loading.cpp
@@ -753,6 +760,35 @@ target_include_directories(mhp3rd_equipment_models_tests PRIVATE "${MHP3RD_PROFI
 set_target_properties(mhp3rd_equipment_models_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 if(PSPRECOMP_BUILD_TESTS)
     add_test(NAME mhp3rd_equipment_models_tests COMMAND mhp3rd_equipment_models_tests)
+endif()
+
+# The lobby report: the JSON sent to the dashboard, when it is sent, and the
+# hunter's own data read from a buffer standing for guest memory. No game data.
+add_executable(mhp3rd_lobby_tests
+    tests/lobby_tests.cpp
+    host/lobby/diag.cpp
+    host/lobby/quest_file.cpp
+    host/lobby/quests.cpp
+    host/lobby/report.cpp
+    host/lobby/reporter.cpp
+    host/lobby/snapshot.cpp
+    host/game/game_data.cpp
+    host/game/equipment_models.cpp
+    host/game/guest_ram.cpp
+    host/input/bindings.cpp
+    host/input/chords.cpp
+    host/input/presets.cpp
+    host/input/touch_action.cpp
+    host/input/touch_controls.cpp
+    host/adhoc/client.cpp)
+target_include_directories(mhp3rd_lobby_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+target_link_libraries(mhp3rd_lobby_tests PRIVATE psprecomp_core Threads::Threads)
+if(WIN32)
+    target_link_libraries(mhp3rd_lobby_tests PRIVATE ws2_32 iphlpapi)
+endif()
+set_target_properties(mhp3rd_lobby_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_lobby_tests COMMAND mhp3rd_lobby_tests)
 endif()
 
 # Original game sound options and live music gain on synthetic guest memory.

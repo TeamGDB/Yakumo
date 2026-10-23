@@ -381,6 +381,11 @@ bool exits_cleanly(const char *self, const char *mode) {
 
 int main(int argc, char **argv) {
     WinsockSession winsock;
+#ifdef _WIN32
+    _putenv_s("MHP3RD_ADHOC_TRACE_PAYLOAD", "1");
+#else
+    setenv("MHP3RD_ADHOC_TRACE_PAYLOAD", "1", 1);
+#endif
     if (argc > 1 && std::string(argv[1]) == "--exit-while-hosting") return exit_while_hosting(false);
     if (argc > 1 && std::string(argv[1]) == "--exit-after-shutdown") return exit_while_hosting(true);
     if (argc > 1 && std::string(argv[1]) == "--exit-with-owned-server") return exit_while_hosting(false, true);

@@ -243,6 +243,7 @@ void start_client() {
     identity.nickname = nickname();
     identity.mac = own_mac();
     identity.product = state().product;
+    identity.relay_port = s.adhoc_relay_port;
     Client::get().start(identity);
 }
 

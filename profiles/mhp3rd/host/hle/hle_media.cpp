@@ -29,6 +29,7 @@
 #include "camera/game_camera.hpp"
 #include "camera/lock_on.hpp"
 #include "input/bindings.hpp"
+#include "lobby/reporter.hpp"
 #include "settings/settings.hpp"
 #include "gpu/game_hud.hpp"
 #include "text/translation.hpp"
@@ -456,6 +457,8 @@ void present_frame(Runtime &rt) {
     game::sound::trace(game::GuestRam(rt.memory()));
     // Layered armor puts its wrappers in place here, between two frames.
     game::layered::frame(rt);
+    // The lobby reporter reads the hunter's own data here, about once a second.
+    lobby::frame(rt);
     // The game's text, in the player's language when one is chosen: applied
     // once the game has loaded its text block, between two frames.
     text::frame(rt.memory(), [](std::size_t bytes) -> std::optional<text::Arena> {
