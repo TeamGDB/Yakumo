@@ -174,7 +174,7 @@ JitFunction jit_compile_detached(Runtime &runtime, std::uint32_t pc) {
     State &state = state_of(runtime);
     Compiled compiled;
     compiled.entry = pc;
-    const jit::Compilation compilation = jit::compile(runtime, state.jit, pc, state.hooked, compiled);
+    const jit::Compilation compilation = jit::compile(runtime, state.jit, pc, state.hooked, compiled, true);
     if (compilation.code == nullptr) return nullptr;
     compiled.code = compilation.code;
     state.detached.push_back(std::move(compiled));

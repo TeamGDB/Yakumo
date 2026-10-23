@@ -400,6 +400,46 @@ void preemption(Generator &g) {
             std::to_string(compiled_boundaries) + " scheduler boundaries) and computes what it did");
 }
 
+// Detached code (the game's code behind a hook registered at its entry)
+// whose first instruction is a loop's head goes round there without leaving:
+// leaving at the entry would run the hook again, partway through the call.
+int g_hook_entries = 0;
+psprecomp::JitFunction g_behind_hook = nullptr;
+void hook_at_entry(Runtime &runtime, AllegrexContext &ctx) {
+    ++g_hook_entries;
+    g_behind_hook(runtime, ctx);
+}
+void detached_loop_at_entry() {
+    psprecomp::set_jit_enabled(true);
+    Runtime &runtime = engine(true);
+    constexpr std::uint32_t kAt = kCode + 0x3000u;
+    psprecomp::jit_invalidate(runtime, kAt, kAt + 32u);
+    const std::uint32_t code[] = {
+        0x2508FFFFu, // addiu t0, t0, -1
+        0x1500FFFEu, // bne t0, zero, -2: to the entry
+        0u,          // nop
+        0x03E00008u, // jr ra
+        0u,          // nop
+    };
+    for (std::uint32_t i = 0; i < 5u; ++i) runtime.memory().store32(kAt + 4u * i, code[i]);
+    runtime.register_function(kAt, &hook_at_entry, "test_hook");
+    g_behind_hook = psprecomp::jit_compile_detached(runtime, kAt);
+    g_hook_entries = 0;
+    runtime.cpu() = {};
+    runtime.cpu().gpr[8] = 5000u;
+    runtime.cpu().gpr[31] = kSentinel;
+    std::ostringstream quiet;
+    std::streambuf *previous = std::cerr.rdbuf(quiet.rdbuf());
+    if (g_behind_hook != nullptr) runtime.run(kAt, 1000000u);
+    std::cerr.rdbuf(previous);
+    check(
+        g_behind_hook != nullptr && g_hook_entries == 1 && runtime.cpu().gpr[8] == 0u && runtime.cpu().pc == kSentinel,
+        "preemption: detached code looping at its entry does not leave there, so its hook runs once a call (" +
+            std::to_string(g_hook_entries) + ")");
+    runtime.unregister_functions(kAt, kAt + 4u);
+    psprecomp::jit_invalidate(runtime, kAt, kAt + 32u);
+}
+
 // Code that cannot be compiled (a jump in its first jump's delay slot) is
 // not compiled again at every dispatch, only once its memory changed.
 void failed_compiles() {
@@ -839,6 +879,7 @@ int main(int argc, char **argv) {
     branches(g);
     loop(g);
     preemption(g);
+    detached_loop_at_entry();
     self_modifying(g);
     leading_bits(g);
     failed_compiles();

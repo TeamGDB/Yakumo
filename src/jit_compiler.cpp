@@ -249,9 +249,9 @@ void call_instruction_hook(Runtime *runtime, AllegrexContext *ctx, std::uint32_t
 
 class Function {
 public:
-    Function(Runtime &runtime, std::uint32_t entry, const std::set<std::uint32_t> &hooked)
+    Function(Runtime &runtime, std::uint32_t entry, const std::set<std::uint32_t> &hooked, bool detached)
         : runtime_(runtime), memory_(runtime.memory()), entry_(entry), window_(entry & ~(kWindow - 1u)),
-          hooked_(hooked) {}
+          hooked_(hooked), detached_(detached) {}
 
     // The instructions reachable from the entry. False when the code cannot be
     // compiled here (not in memory, or a jump in a delay slot).
@@ -482,10 +482,12 @@ private:
     // A branch taken from `from` to `pc`: one back (a loop goes round) counts
     // down, and every kBackEdges of them the code leaves to the dispatcher at
     // `pc`, so that a loop that never calls out still lets the scheduler
-    // switch threads, as the interpreter's bounded runs do.
+    // switch threads, as the interpreter's bounded runs do. Detached code
+    // goes round at its entry without leaving: the hook registered there
+    // would run again, partway through the call.
     void go_from(std::uint32_t from, std::uint32_t pc) {
         const auto found = labels_.find(pc);
-        if (found == labels_.end() || pc > from || !settings().preempt) {
+        if (found == labels_.end() || pc > from || !settings().preempt || (detached_ && pc == entry_)) {
             go(pc);
             return;
         }
@@ -1187,6 +1189,7 @@ private:
     std::uint32_t entry_;
     std::uint32_t window_;
     const std::set<std::uint32_t> &hooked_;
+    bool detached_;
     std::map<std::uint32_t, Node> nodes_;
     std::set<std::uint32_t> cut_; // branches with a jump in their slot
     std::map<std::uint32_t, Label> labels_;
@@ -1229,9 +1232,9 @@ const Settings &settings() {
 }
 
 Compilation compile(Runtime &runtime, asmjit::JitRuntime &jit, std::uint32_t entry,
-    const std::set<std::uint32_t> &hooked, Compiled &out) {
+    const std::set<std::uint32_t> &hooked, Compiled &out, bool detached) {
     Compilation result;
-    Function function(runtime, entry, hooked);
+    Function function(runtime, entry, hooked, detached);
     if (!function.discover()) return result;
     result.code = function.compile(jit, out);
     if (result.code == nullptr) {

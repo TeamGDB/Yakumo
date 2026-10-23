@@ -63,8 +63,11 @@ struct Compilation {
 
 // Compiles the guest code at `entry` into `jit`, with calls to the
 // instruction hook before the addresses in `hooked`; fills in `out`.
+// `detached` code is called by whatever is registered at `entry` (a hook),
+// so a loop back to the entry never leaves to the dispatcher there, which
+// would run that again.
 [[nodiscard]] Compilation compile(Runtime &runtime, asmjit::JitRuntime &jit, std::uint32_t entry,
-    const std::set<std::uint32_t> &hooked, Compiled &out);
+    const std::set<std::uint32_t> &hooked, Compiled &out, bool detached = false);
 
 // What compiled code calls before a hooked instruction.
 void set_instruction_hook(JitInstructionHook hook) noexcept;
