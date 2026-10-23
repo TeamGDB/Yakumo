@@ -768,6 +768,10 @@ PatchOutcome apply_patch(std::vector<std::uint8_t> &bytes, const Blocks &patch) 
         const auto length = static_cast<std::uint32_t>(block.bytes.size());
         const std::uint32_t guest = address & kMirrorMask;
         const bool in_ram = guest >= kRamStart && guest < kRamEnd;
+        if (in_ram && !ram_range(address, length)) {
+            outcome.problems.push_back("the block for " + hex8(address) + " runs past the end of the game's memory");
+            continue;
+        }
         if (block.run && !in_ram) {
             outcome.problems.push_back(
                 "the block for " + hex8(address) + " is code to run as it loads, but its address is in the file");

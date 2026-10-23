@@ -558,6 +558,20 @@ void test_patches(const fs::path &root) {
             outcome.run == std::vector<std::uint32_t>{0x0BFF3800u},
         "patch: a data file's patch writes memory and runs code after the file is read");
     check(outcome.problems.size() == 2u, "patch: a block past the end, and code to run inside the file, are refused");
+
+    // A block that starts in memory and runs past its end is refused, not
+    // left to stop the game when it is written.
+    patch.clear();
+    block(0x0BFFFFF0u, Bytes(32u, 0x11u));
+    block(0x4BFFFFFCu, {1, 2, 3, 4}); // the last word, through the mirror: fits
+    write(root / "patches" / "r", patch);
+    data = pattern(256, 6);
+    outcome = p3::apply_patch(data, root / "patches" / "r");
+    check(outcome.after_load.size() == 1u && outcome.after_load[0].address == 0x0BFFFFFCu &&
+            outcome.problems ==
+                std::vector<std::string>{"the block for 0x0BFFFFF0 runs past the end of the game's "
+                                         "memory"},
+        "patch: a block running past the end of memory is refused; one ending at it is kept");
 }
 
 void test_yakumo_format(const fs::path &root) {

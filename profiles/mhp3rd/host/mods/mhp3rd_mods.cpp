@@ -414,6 +414,11 @@ void write_after_load(psprecomp::Runtime &runtime, FileId file, const FileConten
             problem(s.format.file_name(file) + ": its overlay has no recompiled code; it runs in the interpreter");
     }
     for (const MemoryWrite &write : content.after_load) {
+        if (!memory.contains(write.address, static_cast<std::uint32_t>(write.bytes.size()))) {
+            problem(s.format.file_name(file) + ": the write at 0x" + hex(write.address) +
+                " is skipped: it runs past the end of the game's memory");
+            continue;
+        }
         if (!write.expect.empty()) {
             std::vector<std::uint8_t> found(write.expect.size());
             for (std::size_t i = 0; i < found.size(); ++i)
