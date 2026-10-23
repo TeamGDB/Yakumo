@@ -213,6 +213,7 @@ set(MHP3RD_HOST_SOURCES
     host/overlays.cpp
     host/mhp3rd_profile.cpp
     host/lobby/diag.cpp
+    host/lobby/quest_file.cpp
     host/lobby/quests.cpp
     host/lobby/quests_data.cpp
     host/lobby/report.cpp
@@ -766,6 +767,7 @@ endif()
 add_executable(mhp3rd_lobby_tests
     tests/lobby_tests.cpp
     host/lobby/diag.cpp
+    host/lobby/quest_file.cpp
     host/lobby/quests.cpp
     host/lobby/report.cpp
     host/lobby/snapshot.cpp

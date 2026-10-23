@@ -1,6 +1,7 @@
 // The lobby report (lobby/report.hpp): the JSON sent to the dashboard, when it
 // is sent, and the hunter's own data read from a buffer standing for guest
 // memory. No game data, no socket and no game run.
+#include "lobby/quest_file.hpp"
 #include "lobby/quests.hpp"
 #include "lobby/report.hpp"
 #include "lobby/snapshot.hpp"
@@ -226,6 +227,37 @@ void write_ascii(game::Ram &ram, std::uint32_t at, const char *text) {
         ram.store8(at + static_cast<std::uint32_t>(i), static_cast<std::uint8_t>(text[i]));
 }
 
+void test_quest_file_objective_across_padding() {
+    std::vector<std::uint8_t> file(8u, 0u);
+    const auto put32 = [&](std::size_t at, std::uint32_t value) {
+        for (std::size_t byte = 0u; byte < 4u; ++byte)
+            file[at + byte] = static_cast<std::uint8_t>(value >> (8u * byte));
+    };
+    put32(0u, 8u); // one record, starting after the offset list
+    file.resize(8u + 0x48u, 0u);
+    put32(8u + 4u, 500u);
+    put32(8u + 8u, 8196u);
+    put32(8u + 0x10u, 90'000u);
+    file[8u + 0x1Cu] = 0x0Du;
+    file[8u + 0x1Du] = 0x29u; // quest 10509
+    file[8u + 0x1Eu] = 5u;
+    for (const char *text : {"Warrior's Hunt", "Hunt the Zinogre", "Reward Zero\nTime Over",
+             "The thunder wyvern waits on the island.", "Ludroth\nJaggia", "Guild Manager"}) {
+        for (const char *c = text; *c != '\0'; ++c) file.push_back(static_cast<std::uint8_t>(*c));
+        file.push_back(0u);
+        while (file.size() % 4u != 0u) file.push_back(0u);
+    }
+    file.insert(file.end(), {0x90u, 0x01u, 0u, 0u});
+    const std::vector<lobby::QuestFileEntry> quests = lobby::parse_quest_file(file);
+    check(quests.size() == 1u, "a quest list record is parsed");
+    check(quests.size() == 1u && quests[0].id == 10509u && quests[0].stars == 5u, "the record's id and stars are read");
+    check(quests.size() == 1u && quests[0].name == "Warrior's Hunt", "the title is read from before the padded gap");
+    check(quests.size() == 1u && quests[0].objective == "Hunt the Zinogre",
+        "the objective is read past the padding between fields");
+    check(quests.size() == 1u && quests[0].monsters == "Ludroth\nJaggia" && quests[0].client == "Guild Manager",
+        "the later fields are read past their padding");
+}
+
 void test_active_quest_id() {
     game::BufferRam record(lobby::kActiveQuestRecord, 0x100u);
     record.store16(lobby::kActiveQuestRecord + lobby::kActiveQuestIdOffset, 10509u);
@@ -335,6 +367,7 @@ int main() {
     test_posted_quest_ids();
     test_latest_quest_id();
     test_active_quest_id();
+    test_quest_file_objective_across_padding();
     test_guild_stats();
     test_diagnostic_dump();
     if (failures == 0) std::cout << "lobby tests passed\n";
