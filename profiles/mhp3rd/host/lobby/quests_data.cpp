@@ -1,5 +1,6 @@
 #include "lobby/quests.hpp"
 
+#include "game/guest_ram.hpp"
 #include "lobby/quest_file.hpp"
 #include "mods/mhp3rd_data_bin.hpp"
 #include "mods/mhp3rd_mods.hpp"
@@ -80,6 +81,20 @@ std::vector<PostedQuest> posted_quests(const game::Ram &ram) {
         quest.objective = info->objective;
         quest.monsters = info->monsters;
         quest.client = info->client;
+    }
+    // The selected record carries the star level and the map beside its id;
+    // prefer it when it is in memory, so a modded or translated catalog cannot
+    // change what the board is showing. DATA.BIN remains the fallback.
+    if (ram.contains(kActiveQuestRecord + kActiveQuestStarsOffset, 1u)) {
+        const std::uint8_t stars = ram.load8(kActiveQuestRecord + kActiveQuestStarsOffset);
+        if (stars >= 1u && stars <= 8u) {
+            quest.stars = stars;
+            quest.min_hr = minimum_rank(stars);
+        }
+    }
+    if (ram.contains(kActiveQuestRecord + kActiveQuestZoneOffset, 1u)) {
+        const std::uint8_t zone = ram.load8(kActiveQuestRecord + kActiveQuestZoneOffset);
+        if (zone != 0u) quest.zone = zone_name(zone);
     }
     result.push_back(std::move(quest));
     return result;

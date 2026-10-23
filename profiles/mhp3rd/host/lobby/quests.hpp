@@ -88,6 +88,8 @@ struct PostedQuest {
 // selected quest's info at 0x0A2E9600; the id is at +0x24.
 inline constexpr std::uint32_t kActiveQuestRecord = 0x0A2E9600u;
 inline constexpr std::uint32_t kActiveQuestIdOffset = 0x24u;
+inline constexpr std::uint32_t kActiveQuestStarsOffset = 0x26u;
+inline constexpr std::uint32_t kActiveQuestZoneOffset = 0x28u;
 [[nodiscard]] std::uint16_t active_quest_id(const game::Ram &ram);
 
 // The quests posted on the hall board, at most four, in the board's order.

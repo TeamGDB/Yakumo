@@ -30,4 +30,8 @@ struct QuestFileEntry {
 
 [[nodiscard]] std::vector<QuestFileEntry> parse_quest_file(std::span<const std::uint8_t> data);
 
+// The catalog record's map byte and star level, named for the dashboard.
+[[nodiscard]] std::string zone_name(std::uint8_t id);
+[[nodiscard]] std::uint8_t minimum_rank(std::uint8_t stars);
+
 } // namespace mhp3rd::lobby

@@ -27,7 +27,7 @@ std::uint32_t load32(std::span<const std::uint8_t> data, std::size_t at) {
 // The catalog record's +0x20 byte is the map and time-of-day variant. These
 // are the game's map ids, named in English so the dashboard does not need a
 // translation file.
-std::string zone_name(std::uint8_t id) {
+std::string zone_name_impl(std::uint8_t id) {
     switch (id) {
     case 0x01:
         return "Deserted Island (Day)";
@@ -75,7 +75,7 @@ std::string zone_name(std::uint8_t id) {
 // The Hall's star levels gate the hunter rank: 1-2 stars at HR1, 3-4 at
 // HR2, 5 at HR3, 6 at HR4, 7 at HR5, and 8 at HR6. A normal quest has no
 // separate join condition beyond this; the dashboard shows the star gate.
-std::uint8_t minimum_rank(std::uint8_t stars) {
+std::uint8_t minimum_rank_impl(std::uint8_t stars) {
     if (stars <= 2u) return 1u;
     if (stars <= 4u) return 2u;
     if (stars <= 8u) return static_cast<std::uint8_t>(stars - 2u);
@@ -83,6 +83,14 @@ std::uint8_t minimum_rank(std::uint8_t stars) {
 }
 
 } // namespace
+
+std::string zone_name(std::uint8_t id) {
+    return zone_name_impl(id);
+}
+
+std::uint8_t minimum_rank(std::uint8_t stars) {
+    return minimum_rank_impl(stars);
+}
 
 std::vector<QuestFileEntry> parse_quest_file(std::span<const std::uint8_t> data) {
     std::vector<QuestFileEntry> quests;
