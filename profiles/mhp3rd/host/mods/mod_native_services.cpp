@@ -512,15 +512,14 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
         return -1;
     };
     game::QuestSpec spec;
-    if (quest->id > 0xFFFFu || quest->map < 0 || quest->map > 0xFF || quest->stars < 0)
+    // Played in an area of the mod's: on that area's map, whatever `map` says.
+    const bool has_area = quest->size >= offsetof(ymod_quest, area) + sizeof(quest->area) && quest->area != nullptr;
+    if (quest->id > 0xFFFFu || (!has_area && (quest->map < 0 || quest->map > 0xFF)) || quest->stars < 0)
         return refuse("a number is out of range");
     spec.id = static_cast<std::uint16_t>(quest->id);
-    spec.map = static_cast<std::uint8_t>(quest->map);
-    // Played in an area of the mod's: on that area's map.
-    const bool has_area = quest->size >= offsetof(ymod_quest, area) + sizeof(quest->area) && quest->area != nullptr;
     const maps::Area *area = has_area ? maps::find(quest->area) : nullptr;
     if (has_area && area == nullptr) return refuse("its area \"" + text(quest->area) + "\" has not been added");
-    if (area != nullptr) spec.map = area->map;
+    spec.map = area != nullptr ? area->map : static_cast<std::uint8_t>(quest->map);
     spec.stars = static_cast<std::uint16_t>(quest->stars);
     spec.minutes = quest->minutes;
     spec.fee = quest->fee;
@@ -536,9 +535,10 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
         if (m.area < 0 || m.area > 0xFF || m.health < 0 || m.health > 0xFF || m.attack < 0 || m.attack > 0xFF ||
             m.size < 0 || m.size > 0xFFFF)
             return refuse("a monster's area, levels or size are out of range");
-        spec.monsters.push_back(
-            {*kind, static_cast<std::uint16_t>(m.area), m.at.x, m.at.y, m.at.z, static_cast<std::uint8_t>(m.health),
-                static_cast<std::uint8_t>(m.attack), static_cast<std::uint16_t>(m.size == 0 ? 100 : m.size)});
+        // In a quest played in an added area, area 0 is that area's.
+        const auto starts_in = static_cast<std::uint16_t>(area != nullptr && m.area == 0 ? area->area : m.area);
+        spec.monsters.push_back({*kind, starts_in, m.at.x, m.at.y, m.at.z, static_cast<std::uint8_t>(m.health),
+            static_cast<std::uint8_t>(m.attack), static_cast<std::uint16_t>(m.size == 0 ? 100 : m.size)});
     }
     const ymod_quest_texts &t = quest->texts;
     spec.texts = {

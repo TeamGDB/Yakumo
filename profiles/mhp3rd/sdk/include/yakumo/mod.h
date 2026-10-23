@@ -526,7 +526,8 @@ typedef struct ymod_monsters {
 #define YMOD_QUESTS "yakumo.quests"
 typedef struct ymod_quest_monster {
     const char *monster; /* a kind by id, the game's or a mod's: "fatalis" */
-    int32_t area;        /* the area of the quest's map it starts in */
+    int32_t area;        /* the area of the quest's map it starts in; 0 in a quest played in an added area
+                            (ymod_quest.area): that area's */
     ymod_vec3 at;        /* and where in it */
     int32_t health;      /* the game's health level: higher is more (0x1E: a Tigrex-based kind's 5400) */
     int32_t attack;      /* the game's attack level (0x13: a low rank hunt; 0x30 hits three times as hard) */
@@ -550,7 +551,7 @@ typedef struct ymod_quest_supply {
 typedef struct ymod_quest {
     uint32_t size; /* set to sizeof(ymod_quest) before passing one */
     uint32_t id;   /* 62000 to 65535 */
-    int32_t map;   /* the game's map number: 8 is the arena */
+    int32_t map;   /* the game's map number: 8 is the arena; not read when `area` names an added area */
     int32_t stars;
     uint32_t minutes, fee, reward;
     const char *target; /* the objective: hunt `count` of this kind, by id */
@@ -559,7 +560,8 @@ typedef struct ymod_quest {
     uint32_t monster_count;
     ymod_quest_texts texts;
     const char *area; /* NULL, or an area of the mod's (yakumo.maps, added first) the quest is played in; `map`
-                         is then that area's map, and its monsters start in its area of that map */
+                         is then that area's map, whatever it says, and a monster whose area is 0 starts in its
+                         area of that map */
     const ymod_quest_reward *rewards; /* its rewards' items, by group; the quest is built again with them once
                                          the game's text is loaded, so they are named as the game names them */
     uint32_t reward_count;

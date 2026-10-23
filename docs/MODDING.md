@@ -458,7 +458,7 @@ mod.maps()->add_area(mod.handle(), &castle); // 0, or -1 with the reason in the 
 quest.area = "castle_schrade";             // and the quest is played in it
 ```
 
-Add it at start, before the quests that name it. While such a quest is played, the base area's files are served with the mod's in them; the area's scene, camera paths and minimap stay the game's, and every other quest loads the game's area. The files' formats are in [MAPS.md](MAPS.md); an area from another game is converted into them by a tool of the mod's own.
+Add it at start, before the quests that name it. A quest that names an area is on that area's map, so it needs no `map`, and a monster of it whose `area` is 0 starts in the added area; another area number is kept. While such a quest is played, the base area's files are served with the mod's in them; the area's scene, camera paths and minimap stay the game's, and every other quest loads the game's area. The files' formats are in [MAPS.md](MAPS.md); an area from another game is converted into them by a tool of the mod's own.
 
 ## Panels and overlays
 

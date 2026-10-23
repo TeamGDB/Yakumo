@@ -1274,6 +1274,38 @@ void test_maps(psprecomp::Runtime &runtime) {
     check(quests != nullptr && quests->add(mod, &quest) == -1 &&
             logged("quest 62603 is not added: its area \"nowhere\" has not been added"),
         "maps: a quest naming an area that was not added is refused");
+    // One that names an added area is on its map, whatever `map` says, and a
+    // monster of area 0 starts in the added area; another area is kept.
+    const ymod_quest_monster pair[] = {
+        {"tigrex", 0, {0.0f, 0.0f, 0.0f}, 0x1E, 0x13, 100}, {"tigrex", 3, {0.0f, 0.0f, 0.0f}, 0x1E, 0x13, 100}};
+    ymod_quest in_castle = quest;
+    in_castle.id = 62605u;
+    in_castle.map = 300;
+    in_castle.area = "castle";
+    in_castle.monsters = pair;
+    in_castle.monster_count = 2u;
+    std::optional<std::vector<std::uint8_t>> built;
+    if (quests != nullptr && quests->add(mod, &in_castle) == 62605) {
+        const mhp3rd::mods::FileId file = *mhp3rd::mods::p3rd::quest_file(62605u);
+        runtime.cpu().gpr[5] = file;
+        const std::uint32_t size = call(runtime, 0x08864E8Cu, 0x08B3F040u);
+        runtime.cpu().gpr[5] = file;
+        runtime.cpu().gpr[6] = 0x08C00000u;
+        (void)call(runtime, 0x08863CDCu, 0x08B3F040u);
+        std::vector<std::uint8_t> encrypted(size);
+        memory.copy_out(0x08C00000u, encrypted);
+        game::GuestRam keys_ram(memory);
+        if (const auto keys = game::read_quest_keys(keys_ram)) built = game::decrypt_quest(encrypted, *keys);
+    }
+    const auto u32_at = [&built](std::size_t at) { return word_at(*built, at); };
+    const auto area_of = [&](std::size_t monster) {
+        const std::uint32_t spawns = u32_at(u32_at(0x20u) + 12u);
+        return static_cast<std::uint32_t>(
+            (*built)[spawns + 0x30u * monster + 6u] | ((*built)[spawns + 0x30u * monster + 7u] << 8u));
+    };
+    const std::optional<game::QuestRecord> record = built ? game::read_quest_record(*built) : std::nullopt;
+    check(built && record && record->map == 8u && area_of(0) == 1u && area_of(1) == 3u,
+        "maps: a quest in an added area is on its map, its monsters of area 0 in the added area");
 
     std::error_code ec;
     std::filesystem::remove_all(folder, ec);
