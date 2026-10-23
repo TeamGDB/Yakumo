@@ -274,7 +274,8 @@ void write_summary(const std::filesystem::path &path, const game::Ram &ram, cons
     for (const std::string &recent : card.recent_quests) out << "  recent: " << recent << "\n";
     out << "\nsearch: " << found_names << " name hit(s), " << found_texts << " \"" << needle << "\" hit(s)\n";
     out << "files: character.bin, hunter_records.bin, save_copy.bin, questboard_9f.bin, questboard_a2.bin, "
-           "name_hits.txt, text_hits.txt\n";
+           "name_hits.txt, text_hits.txt; ram.bin on the second and third dump with "
+           "MHP3RD_LOBBY_DUMP_FULL=1\n";
 }
 
 } // namespace
@@ -319,6 +320,8 @@ void maybe_dump(const game::Ram &ram, const Snapshot &snapshot) {
     write_range(directory / "save_copy.bin", ram, 0x095B0000u, 0x10000u);
     write_range(directory / "questboard_9f.bin", ram, kQuestBoardBase, 0x2000u);
     write_range(directory / "questboard_a2.bin", ram, 0x0A2E6000u, 0x2000u);
+    if (std::getenv("MHP3RD_LOBBY_DUMP_FULL") != nullptr && dumps >= 2)
+        write_range(directory / "ram.bin", ram, 0x08000000u, 0x04000000u);
     write_summary(directory / "summary.txt", ram, snapshot);
     std::cout << "[lobby] diagnostic dump written to " << directory.string() << std::endl;
 }

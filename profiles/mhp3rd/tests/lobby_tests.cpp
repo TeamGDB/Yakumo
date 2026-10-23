@@ -249,8 +249,6 @@ void test_guild_stats() {
     const std::uint8_t levels[] = {6u, 6u, 3u, 4u, 4u};
     for (std::size_t i = 0u; i < 5u; ++i)
         ram.store8(lobby::kFelyneLevelsBase + static_cast<std::uint32_t>(i) * lobby::kFelyneLevelStride, levels[i]);
-    ram.store8(lobby::kAwardsBase, 1u);
-    ram.store8(lobby::kAwardsBase + 2u, 1u);
     write_ascii(ram, lobby::kRecentQuestsBase + 0x100u, "Hunting x2 Arzuros is Hard");
     write_ascii(ram, lobby::kRecentQuestsBase + 0x200u, "The Festival of Fear");
 
@@ -263,7 +261,7 @@ void test_guild_stats() {
     check(stats.weapons.size() == 3u && stats.weapons[0].label == "Sword and Shield" && stats.weapons[0].count == 10u &&
             stats.weapons[1].label == "Dual Blades" && stats.weapons[1].count == 4u,
         "the weapon usage is read and sorted");
-    check(stats.awards == 2u, "the award count is read");
+    check(stats.awards == 0u, "the award count is left unset until it is traced");
     check(stats.recent_quests.size() == 2u && stats.recent_quests[0] == "The Festival of Fear",
         "the recent quests are read newest first");
 }

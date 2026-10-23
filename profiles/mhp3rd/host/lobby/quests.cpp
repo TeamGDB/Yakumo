@@ -108,11 +108,9 @@ void guild_stats(const game::Ram &ram, GuildStats &stats) {
         for (std::uint32_t i = 0u; i < 5u; ++i) stats.fs_level += ram.load8(kFelyneLevelsBase + i * kFelyneLevelStride);
     }
 
-    // The award block has one non-zero entry per award shown on the card.
-    if (ram.contains(kAwardsBase, kAwardsBytes)) {
-        for (std::uint32_t i = 0u; i < kAwardsBytes; ++i)
-            if (ram.load8(kAwardsBase + i) != 0u) ++stats.awards;
-    }
+    // The card's award count is not the non-zero bytes at 0x09FA8344; that
+    // block is the monster log. Leave awards at zero until the real award
+    // flags are traced, rather than showing a made-up count.
 
     // The recent-quest block carries the quest titles as ASCII strings. Skip
     // the short player names and the card greeting between them.

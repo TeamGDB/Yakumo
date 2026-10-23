@@ -1167,6 +1167,7 @@ The renderer then leaves out the HUD packets' draws, and nothing else: their oth
 | `MHP3RD_LOBBY_TOKEN` | none | Shared secret the dashboard requires, when it has one (menu: Lobby Token) |
 | `MHP3RD_LOBBY_DUMP` | none | A folder for up to three diagnostic dumps of the hall's live memory, ten seconds apart; `1` uses `logs/` |
 | `MHP3RD_LOBBY_DUMP_TEXT` | `Zinogre` | Text the diagnostic dump searches for beside the hunter name (a quest or monster name) |
+| `MHP3RD_LOBBY_DUMP_FULL` | off | `1` also writes the whole 64 MiB guest RAM on the second and third hall dump |
 
 The dump can contain the hunter's name and other live game data. Keep it local; do not attach it to a public issue.
 

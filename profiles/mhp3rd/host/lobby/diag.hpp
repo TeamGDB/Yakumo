@@ -9,7 +9,8 @@
 // folder in the working directory) and enter a gathering hall. Up to three
 // dumps are written per hall, ten seconds apart, so the board can be captured
 // after a quest is posted. MHP3RD_LOBBY_DUMP_TEXT adds a text to search for
-// (default "Zinogre").
+// (default "Zinogre"); MHP3RD_LOBBY_DUMP_FULL also writes the whole 64 MiB of
+// guest RAM on the second and third dump.
 
 #include "lobby/report.hpp"
 
