@@ -28,6 +28,10 @@ void start(psprecomp::Runtime &runtime, const std::vector<Resolution::Source> &s
 // long gone; an error raised there would be unprotected.
 [[nodiscard]] bool out_of_time(int gc_state);
 
+// Lets each script hold at most `extra` bytes more than it holds now, for
+// tests of a script out of memory; 0 gives back the usual limit.
+void limit_memory_for_tests(std::size_t extra);
+
 // Forgets the scripts, so tests can start again.
 void reset_for_tests();
 

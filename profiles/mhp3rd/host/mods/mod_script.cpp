@@ -19,7 +19,6 @@ const ymod_widgets *g_widgets = nullptr;
 
 namespace {
 
-constexpr auto kCallBudget = std::chrono::milliseconds(5);
 constexpr auto kStartBudget = std::chrono::milliseconds(250);
 constexpr std::size_t kMemoryLimit = 64u * 1024u * 1024u;
 constexpr int kCpuTag = 1;
@@ -47,7 +46,7 @@ void *allocate(void *user, void *block, std::size_t old_size, std::size_t new_si
         script->used -= old_size;
         return nullptr;
     }
-    if (script->used - old_size + new_size > kMemoryLimit) return nullptr;
+    if (script->used - old_size + new_size > (script->limit != 0u ? script->limit : kMemoryLimit)) return nullptr;
     void *grown = std::realloc(block, new_size);
     if (grown != nullptr) script->used = script->used - old_size + new_size;
     return grown;
@@ -167,6 +166,21 @@ void log(Script &script, const std::string &line, int level) {
     script.host->log(script.mod, level, line.c_str());
 }
 
+namespace {
+
+// A call that failed, with its error on the thread's stack: the script stops
+// being called.
+void stop(Script &script) {
+    const char *message = lua_tostring(script.thread, -1);
+    log(script, std::string("script error, it stops: ") + (message != nullptr ? message : "?"), YMOD_LOG_ERROR);
+    lua_pop(script.thread, 1);
+    script.failed = true;
+    // Its hooks, events, panels and overlays go: none would call it again.
+    native::withdraw(script.mod);
+}
+
+} // namespace
+
 // Runs what is on the thread's stack; on an error the script stops being called.
 bool call(Script &script, int arguments, int results, Clock::duration budget) {
     if (script.failed) {
@@ -175,12 +189,7 @@ bool call(Script &script, int arguments, int results, Clock::duration budget) {
     }
     g_deadline = Clock::now() + budget;
     if (lua_pcall(script.thread, arguments, results, 0) == LUA_OK) return true;
-    const char *message = lua_tostring(script.thread, -1);
-    log(script, std::string("script error, it stops: ") + (message != nullptr ? message : "?"), YMOD_LOG_ERROR);
-    lua_pop(script.thread, 1);
-    script.failed = true;
-    // Its hooks, events, panels and overlays go: none would call it again.
-    native::withdraw(script.mod);
+    stop(script);
     return false;
 }
 
@@ -202,20 +211,41 @@ std::uint32_t word_argument(lua_State *state, int index) {
     return static_cast<std::uint32_t>(static_cast<std::int64_t>(value));
 }
 
+namespace {
+
+// A hook's call, made in protected mode with everything it allocates (the
+// CPU's proxy): a script at its memory limit gets an error of its own, not
+// an exception through the game's compiled code.
+struct HookCall {
+    const Callback *callback{};
+    ymod_cpu *cpu{};
+    ymod_cpu **box{}; // the proxy, cleared once the call is over
+    int result{YMOD_CONTINUE};
+};
+
+int run_hook(lua_State *state) {
+    auto *hook = static_cast<HookCall *>(lua_touserdata(state, 1));
+    lua_getref(state, hook->callback->ref);
+    hook->box = push_cpu(state, hook->cpu);
+    lua_call(state, 1, 1);
+    if (lua_toboolean(state, -1)) hook->result = YMOD_RETURN;
+    return 0;
+}
+
+} // namespace
+
 int hook_callback(ymod_cpu *cpu, void *user) {
     auto *callback = static_cast<Callback *>(user);
     if (callback->script == nullptr) return YMOD_CONTINUE; // removed
     Script &script = *callback->script;
     if (script.failed) return YMOD_CONTINUE;
-    lua_getref(script.thread, callback->ref);
-    ymod_cpu **box = push_cpu(script.thread, cpu);
-    int result = YMOD_CONTINUE;
-    if (call(script, 1, 1)) {
-        if (lua_toboolean(script.thread, -1)) result = YMOD_RETURN;
-        lua_pop(script.thread, 1);
-    }
-    *box = nullptr;
-    return result;
+    HookCall hook{callback, cpu};
+    g_deadline = Clock::now() + kCallBudget;
+    const int status = lua_cpcall(script.thread, &run_hook, &hook);
+    if (hook.box != nullptr) *hook.box = nullptr;
+    if (status == LUA_OK) return hook.result;
+    stop(script);
+    return YMOD_CONTINUE;
 }
 
 void event_callback(int, std::uint32_t value, void *user) {
@@ -329,6 +359,10 @@ std::size_t running() {
     for (const auto &script : scripts())
         if (!script->failed) ++count;
     return count;
+}
+
+void limit_memory_for_tests(std::size_t extra) {
+    for (const auto &script : scripts()) script->limit = extra != 0u ? script->used + extra : 0u;
 }
 
 void reset_for_tests() {

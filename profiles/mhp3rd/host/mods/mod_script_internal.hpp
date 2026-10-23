@@ -38,6 +38,7 @@ struct Script {
     lua_State *state{};
     lua_State *thread{};                           // the sandboxed thread everything runs on
     std::size_t used{};                            // bytes the script's Luau state holds
+    std::size_t limit{};                           // bytes it may hold; 0: kMemoryLimit
     std::map<std::string, char> setting_kinds;     // 's'witch, 'n'umber, 'c'hoice, as declared
     std::map<ymod_hook, struct Callback *> hooked; // the script's hooks in place, and their callbacks
     int widgets{};                                 // ref of the table draw callbacks get

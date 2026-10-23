@@ -292,6 +292,28 @@ yakumo.on("frame", function() if kept_ui then yakumo.log("widgets outside a draw
     check(logged("stale cpu refused true"), "scripts: the CPU cannot be used after its callback");
     check(mhp3rd::mods::scripts::running() == 2u, "scripts: only the working scripts keep running");
 
+    // A script at its memory limit when its hook is called: the proxy for the
+    // CPU cannot be made, and the script stops with an error of its own
+    // instead of an exception through the game's code.
+    store(runtime, 0x08A00400u, {0x24020003u, 0x03E00008u, 0u}); // addiu v0, zero, 3; jr ra
+    const fs::path hungry = write_script(folder, "hungry.luau", R"(
+yakumo.hook(0x08A00400, "before", function(cpu) cpu.a0 = 1 end)
+yakumo.log("hungry hooked")
+)");
+    mhp3rd::mods::scripts::start(runtime, {{"hungry", hungry, {}}});
+    mhp3rd::mods::scripts::limit_memory_for_tests(1u);
+    bool threw = false;
+    std::uint32_t result = 0u;
+    try {
+        result = call(runtime, 0x08A00400u, 0u);
+    } catch (...) {
+        threw = true;
+    }
+    mhp3rd::mods::scripts::limit_memory_for_tests(0u);
+    check(logged("hungry hooked") && !threw && result == 3u && logged("not enough memory") &&
+            mhp3rd::mods::scripts::running() == 2u,
+        "scripts: a script out of memory when its hook is called stops with an error, and the game goes on");
+
     mhp3rd::mods::scripts::reset_for_tests();
     std::error_code ec;
     fs::remove_all(folder, ec);
