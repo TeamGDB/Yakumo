@@ -200,6 +200,15 @@ ymod_hook add_hook(ymod_mod *mod, const char *overlay, std::uint32_t address, in
     if (s.runtime == nullptr || callback == nullptr || (address & 3u) != 0u || (mod != nullptr && mod->failed))
         return 0u;
     if (!instruction && kind != YMOD_HOOK_BEFORE && kind != YMOD_HOOK_AFTER && kind != YMOD_HOOK_REPLACE) return 0u;
+    // Only code the JIT compiles calls instruction hooks; the interpreter
+    // does not.
+    if (instruction && !psprecomp::jit_enabled()) {
+        report(mod,
+            "the instruction hook at " + psprecomp::hex32(address) +
+                " is refused: the JIT is off (PSPRECOMP_NO_JIT), and only compiled code runs instruction hooks",
+            true);
+        return 0u;
+    }
     const ymod_hook id = s.next_hook++;
     const Hook hook{id, mod, kind, callback, user, overlay != nullptr ? overlay : ""};
     if (instruction)
@@ -208,6 +217,20 @@ ymod_hook add_hook(ymod_mod *mod, const char *overlay, std::uint32_t address, in
         s.sites[address].hooks.push_back(hook);
     s.hook_sites[id] = {address, instruction};
     reconcile();
+    // A function hook that applies now must be in place; one for an overlay
+    // that is not loaded is installed when it loads.
+    if (!instruction) {
+        const Site &site = s.sites[address];
+        if (!site.installed && applies(hook, overlay_for(s.runtime->memory(), {hook}, address))) {
+            if (!site.refused)
+                report(mod,
+                    "the hook at " + psprecomp::hex32(address) +
+                        " is refused: the game's code there cannot be compiled to run under it",
+                    true);
+            hooks_remove(mod, id);
+            return 0u;
+        }
+    }
     return id;
 }
 
@@ -303,20 +326,22 @@ void reconcile() {
     }
 }
 
-void hooks_remove(ymod_mod *, ymod_hook hook) {
+void hooks_remove(ymod_mod *mod, ymod_hook hook) {
     State &s = state();
     const auto found = s.hook_sites.find(hook);
     if (found == s.hook_sites.end()) return;
     const auto [address, instruction] = found->second;
+    std::vector<Hook> &hooks = instruction ? s.instructions[address].hooks : s.sites[address].hooks;
+    const auto owned = std::find_if(hooks.begin(), hooks.end(), [hook](const Hook &h) { return h.id == hook; });
+    // Only the mod that added a hook takes it off.
+    if (owned == hooks.end() || owned->mod != mod) {
+        report(mod, "hook " + std::to_string(hook) + " is not removed: another mod added it", true);
+        return;
+    }
+    hooks.erase(owned);
     s.hook_sites.erase(found);
-    const auto drop = [hook](std::vector<Hook> &hooks) {
-        std::erase_if(hooks, [hook](const Hook &h) { return h.id == hook; });
-    };
-    if (instruction) {
-        drop(s.instructions[address].hooks);
-    } else {
+    if (!instruction) {
         Site &site = s.sites[address];
-        drop(site.hooks);
         // The last hook gone: the game's own code again, or the host feature.
         if (site.hooks.empty()) uninstall(address, site);
     }

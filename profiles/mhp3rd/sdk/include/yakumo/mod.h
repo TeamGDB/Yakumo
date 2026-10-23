@@ -139,10 +139,16 @@ typedef struct ymod_hooks {
     uint32_t version;
     uint32_t size;
     /* `overlay`: NULL for the executable, or the overlay's name ("game_task").
-     * `address` is the guest address the code runs at. */
+     * `address` is the guest address the code runs at. 0 when the hook
+     * cannot be installed: the code there is not the known function there,
+     * or cannot be compiled to run under the hook. A hook in an overlay that
+     * is not loaded now is installed when it loads. */
     ymod_hook (*function)(
         ymod_mod *mod, const char *overlay, uint32_t address, int kind, ymod_hook_fn callback, void *user);
+    /* 0 also when the JIT is off (PSPRECOMP_NO_JIT=1): the interpreter does
+     * not run instruction hooks. */
     ymod_hook (*instruction)(ymod_mod *mod, const char *overlay, uint32_t address, ymod_hook_fn callback, void *user);
+    /* Removes a hook this mod added; another mod's stays. */
     void (*remove)(ymod_mod *mod, ymod_hook hook);
 } ymod_hooks;
 

@@ -241,8 +241,8 @@ The script's main chunk runs once at start, before the game's first frame; it se
 | `allocate(size)` | Guest memory reserved for the mod from the game's allocator: its address, or `nil` |
 | `code_changed(address, length)` | Tells the JIT that instructions there were rewritten |
 | `hook(target, kind, function [, overlay])` | Runs `function(cpu)` at a guest function's entry. `target` is an address or a [known function's name](#the-games-functions-by-name) (`"armor.model_of_part"`), which brings its overlay with it. `kind` is `"before"`, `"after"` (when it returns, `v0`/`v1` hold its result) or `"replace"` (return `true` to return to the caller with what you set; anything else runs the game's function after all). With `overlay` (`"game_task"`), the hook is there whenever that overlay is loaded. Returns a hook number, or `nil` when the address cannot be hooked or the name is not known |
-| `hook_instruction(target, function [, overlay])` | Runs `function(cpu)` just before the instruction at `target`, anywhere in a function. On a jump or a branch, the instruction in its delay slot has not run yet: an argument it sets still holds its old value |
-| `unhook(number)` | Removes a hook |
+| `hook_instruction(target, function [, overlay])` | Runs `function(cpu)` just before the instruction at `target`, anywhere in a function. On a jump or a branch, the instruction in its delay slot has not run yet: an argument it sets still holds its old value. Only code the JIT compiles runs instruction hooks: with `PSPRECOMP_NO_JIT=1` this returns `nil` |
+| `unhook(number)` | Removes a hook the script added |
 | `symbol(name)` | A known function's or data's address and its overlay (or `nil` for the executable); `nil` when the name is not known |
 | `symbol_name(address)` | The name of what is known at exactly `address`, or `nil` |
 | `overlay_at(address)` | The code overlay loaded now over `address`, by name, and its load address; `nil` when none is |

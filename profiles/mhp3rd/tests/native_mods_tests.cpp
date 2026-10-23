@@ -457,10 +457,39 @@ void test_host_returns(psprecomp::Runtime &runtime) {
     // j, with a j in its delay slot: the game's code there cannot be compiled.
     store(runtime, 0x08A00600u, {0x08280184u, 0x08280188u, 0u});
     runtime.register_function(0x08A00600u, &host_feature, "mhp3rd_test_uncompilable");
-    (void)hooks->function(mod, nullptr, 0x08A00600u, YMOD_HOOK_BEFORE, &count_added, nullptr);
+    const ymod_hook refused = hooks->function(mod, nullptr, 0x08A00600u, YMOD_HOOK_BEFORE, &count_added, nullptr);
     native::frame(runtime);
+    check(refused == 0u &&
+            logged("the hook at 0x08A00600 is refused: the game's code there cannot be compiled to run "
+                   "under it"),
+        "native: a hook that cannot be installed is refused, with 0, and the reason is logged");
     check(call(runtime, 0x08A00600u, 4u) == 8u && g_added_seen == 1 && runtime.cpu().pc == kSentinel,
         "native: a hook that cannot be installed leaves the host feature in place");
+    const ymod_hook later = hooks->function(mod, "game_task", 0x0A05E700u, YMOD_HOOK_BEFORE, &count_added, nullptr);
+    check(later != 0u, "native: a hook in an overlay not loaded now is taken, to be installed when it loads");
+    hooks->remove(mod, later);
+
+    // Only the mod that added a hook removes it.
+    ymod_mod *other = native::add_mod("other_remover", "Other Remover", ".");
+    const ymod_hook kept = hooks->function(mod, nullptr, 0x08A00500u, YMOD_HOOK_BEFORE, &count_added, nullptr);
+    hooks->remove(other, kept);
+    native::frame(runtime);
+    (void)call(runtime, 0x08A00500u, 3u);
+    check(g_added_seen == 2 && logged("hook " + std::to_string(kept) + " is not removed: another mod added it"),
+        "native: a mod cannot remove another mod's hook");
+    hooks->remove(mod, kept);
+    native::frame(runtime);
+    (void)call(runtime, 0x08A00500u, 3u);
+    check(g_added_seen == 2, "native: its own mod removes it");
+
+    // With the JIT off, nothing would call an instruction hook.
+    psprecomp::set_jit_enabled(false);
+    const ymod_hook interpreted = hooks->instruction(mod, nullptr, 0x08A00504u, &count_added, nullptr);
+    psprecomp::set_jit_enabled(true);
+    check(interpreted == 0u &&
+            logged("the instruction hook at 0x08A00504 is refused: the JIT is off "
+                   "(PSPRECOMP_NO_JIT), and only compiled code runs instruction hooks"),
+        "native: an instruction hook is refused while the JIT is off");
 }
 
 // Hooks on one address in two overlays that load there: each applies while
@@ -2010,6 +2039,16 @@ int main() {
     store(runtime, 0x08A00100u, {0x24020005u, 0x03E00008u, 0u});              // addiu v0, zero, 5; jr ra
     store(runtime, 0x08A00200u, {0x24090007u, 0x25290001u, 0x03E00008u, 0u}); // t1 = 7; t1 += 1; jr ra
 
+    // The template mod hooks armor.model_of_part by name. This memory holds a
+    // stand-in function there, not the game's, so the mods start with a table
+    // that does not check its bytes; a hook over bytes that differ is refused.
+    namespace symbols = mhp3rd::mods::symbols;
+    std::vector<symbols::Symbol> unchecked = symbols::all();
+    for (symbols::Symbol &symbol : unchecked)
+        if (symbol.name == "armor.model_of_part") symbol.check.reset();
+    symbols::use_table_for_tests(unchecked);
+    store(runtime, 0x08869778u, {0x00801021u, 0x03E00008u, 0u}); // addu v0, a0, zero; jr ra
+
     // Built next to this test; on a device, pushed into its working directory.
     const auto built = [](std::filesystem::path path) {
         return std::filesystem::is_regular_file(path) ? path : std::filesystem::current_path() / path.filename();
@@ -2017,6 +2056,7 @@ int main() {
     mhp3rd::mods::native::start(runtime,
         {{"bad", "/nonexistent/library.so", {}}, {"test", built(MHP3RD_NATIVE_TEST_MOD), {}},
             {"template", built(MHP3RD_TEMPLATE_TEST_MOD), {}}, {"future", built(MHP3RD_FUTURE_TEST_MOD), {}}});
+    symbols::reset_for_tests();
     check(logged("cannot load library.so: ") || mhp3rd::mods::native::reports().front().problem,
         "native: a library that cannot be loaded is reported");
     check(logged("started"), "native: the test mod starts");
