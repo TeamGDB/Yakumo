@@ -244,8 +244,8 @@ void test_builder() {
     const std::size_t waves = word(q, 0x24u);
     check(word(q, waves) == word(q, waves + 8u) && word(q, word(q, waves) + 4u) == 0x9999u &&
             q[word(q, 0x08u)] == 0xFFu && half(q, word(q, 0x1Cu)) == 0xFFFFu && half(q, word(q, 0x28u)) == 0xFFFFu &&
-            q[word(q, 0x2Cu)] == 0xFFu,
-        "builder: no rewards, gathering or small monsters, each table in the form the game reads as empty");
+            q[word(q, 0x2Cu)] == 0xFFu && word(q, word(q, 0x60u)) == 0u && word(q, word(q, 0x60u) + 4u) == 0u,
+        "builder: no supplies, rewards, gathering or small monsters, each table in the form the game reads as empty");
     QuestSpec none = spec;
     none.monsters.clear();
     QuestSpec many = spec;
@@ -259,27 +259,56 @@ void test_builder() {
             why.find("larger") != std::string::npos,
         "builder: no monsters, too many, a game quest's id and texts too long are refused");
 
-    // Rewards: a group of lines, then each line's items (chance, count, item).
+    // Rewards (+0x1C): groups (0x8000 plus the group, its rows, a count, a
+    // pointer to its items), ended by 0xFFFF; each item (chance, item, count).
     QuestSpec paid = spec;
     paid.rewards = {{{252u, 2u, 100u}}, {{595u, 1u, 20u}, {247u, 2u, 80u}}};
     const std::optional<Bytes> rewarded = build_quest(paid, &why);
-    const std::size_t table = rewarded ? word(*rewarded, 0x08u) : 0u;
-    check(rewarded && word(*rewarded, table) == 0x200u && word(*rewarded, table + 4u) == 0u &&
-            (*rewarded)[table + 8u] == 0xFFu && (*rewarded)[table + 16u] == 100u && (*rewarded)[table + 17u] == 2u &&
-            half(*rewarded, table + 18u) == 252u && word(*rewarded, table + 20u) == 0xFFFFFFFFu &&
-            (*rewarded)[table + 24u] == 20u && half(*rewarded, table + 26u) == 595u &&
-            (*rewarded)[table + 28u] == 80u && half(*rewarded, table + 30u) == 247u &&
-            word(*rewarded, table + 32u) == 0xFFFFFFFFu,
-        "builder: the main reward's lines, each item's chance, count and id, each line ended");
+    const std::size_t groups = rewarded ? word(*rewarded, 0x1Cu) : 0u;
+    const std::size_t main_items = rewarded ? word(*rewarded, groups + 8u) : 0u;
+    const std::size_t more_items = rewarded ? word(*rewarded, groups + 20u) : 0u;
+    check(rewarded && half(*rewarded, groups) == 0x8000u && (*rewarded)[groups + 2u] == 0u &&
+            (*rewarded)[groups + 3u] == 5u && word(*rewarded, groups + 4u) == 3u &&
+            half(*rewarded, groups + 12u) == 0x8001u && word(*rewarded, groups + 16u) == 0u &&
+            half(*rewarded, groups + 24u) == 0xFFFFu && half(*rewarded, main_items) == 100u &&
+            half(*rewarded, main_items + 2u) == 252u && half(*rewarded, main_items + 4u) == 2u &&
+            half(*rewarded, main_items + 6u) == 0xFFFFu && half(*rewarded, more_items) == 20u &&
+            half(*rewarded, more_items + 2u) == 595u && half(*rewarded, more_items + 6u) == 80u &&
+            half(*rewarded, more_items + 8u) == 247u && half(*rewarded, more_items + 10u) == 2u &&
+            half(*rewarded, more_items + 12u) == 0xFFFFu && (*rewarded)[word(*rewarded, 0x08u)] == 0xFFu,
+        "builder: the reward groups, the main one first with its rows and count, each item's chance, id and count, "
+        "each list ended, and no supplies");
     QuestSpec uneven = spec;
     uneven.rewards = {{{252u, 1u, 60u}}};
     QuestSpec nothing = spec;
     nothing.rewards = {{{0u, 1u, 100u}}};
     QuestSpec endless = spec;
-    endless.rewards.assign(41u, {{252u, 1u, 100u}});
+    endless.rewards.assign(4u, {{252u, 1u, 100u}});
+    QuestSpec crowded = spec;
+    crowded.rewards = {QuestRewardGroup(25u, {252u, 1u, 4u})};
     check(!build_quest(uneven, &why) && why.find("100") != std::string::npos && !build_quest(nothing) &&
-            !build_quest(endless, &why) && why.find("reward lines") != std::string::npos,
-        "builder: a line whose chances do not add up to 100, an item 0 and too many lines are refused");
+            !build_quest(crowded) && !build_quest(endless, &why) && why.find("reward groups") != std::string::npos,
+        "builder: a group whose chances do not add up to 100, an item 0, too many items and too many groups are "
+        "refused");
+
+    // Supplies (+0x08): a group (kind 0, the box at the start; its count; a
+    // pointer to its items, each item and count), ended by 0xFF.
+    QuestSpec supplied = spec;
+    supplied.supplies = {{670u, 1u}, {671u, 3u}};
+    const std::optional<Bytes> boxed = build_quest(supplied, &why);
+    const std::size_t box = boxed ? word(*boxed, 0x08u) : 0u;
+    const std::size_t box_items = boxed ? word(*boxed, box + 4u) : 0u;
+    check(boxed && (*boxed)[box] == 0u && (*boxed)[box + 1u] == 2u && (*boxed)[box + 8u] == 0xFFu &&
+            half(*boxed, box_items) == 670u && half(*boxed, box_items + 2u) == 1u &&
+            half(*boxed, box_items + 4u) == 671u && half(*boxed, box_items + 6u) == 3u &&
+            half(*boxed, word(*boxed, 0x1Cu)) == 0xFFFFu,
+        "builder: the supply box's items and their group, and no rewards");
+    QuestSpec overfull = spec;
+    overfull.supplies.assign(33u, {670u, 1u});
+    QuestSpec unnamed = spec;
+    unnamed.supplies = {{0u, 1u}};
+    check(!build_quest(overfull, &why) && why.find("supplies") != std::string::npos && !build_quest(unnamed),
+        "builder: more supplies than the box holds, and an item 0, are refused");
 }
 
 } // namespace

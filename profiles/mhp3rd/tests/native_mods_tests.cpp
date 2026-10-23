@@ -1695,17 +1695,45 @@ void test_monsters(psprecomp::Runtime &runtime) {
     ymod_quest absent = rich;
     absent.id = 62016u;
     absent.rewards = unknown_item;
+    const ymod_quest_reward fourth_group[] = {{"Wyvern Gem", 1u, 100u, 3u}};
+    ymod_quest too_many_groups = rich;
+    too_many_groups.id = 62017u;
+    too_many_groups.rewards = fourth_group;
+    // Five: what they add passes the 16 bytes the payload is padded to.
+    const ymod_quest_supply box[] = {
+        {"Wyvern Gem", 2u}, {"Wyvern Gem", 1u}, {"Wyvern Gem", 3u}, {"Wyvern Gem", 4u}, {"Wyvern Gem", 5u}};
+    const ymod_quest_supply empty_box[] = {{"Wyvern Gem", 0u}};
+    ymod_quest supplied = quest;
+    supplied.id = 62018u;
+    supplied.supplies = box;
+    supplied.supply_count = 5u;
+    ymod_quest bad_supply = supplied;
+    bad_supply.id = 62019u;
+    bad_supply.supplies = empty_box;
+    ymod_quest crowded_box = supplied;
+    crowded_box.id = 62020u;
+    crowded_box.supply_count = 33u;
     check(quest_service != nullptr && quest_service->add(mod, &uneven) == -1 &&
-            logged(
-                "quest 62015 is not added: a reward line's chances do not add up to 100, or a line between has none") &&
-            quest_service->add(mod, &rich) == 62014 && quest_service->add(mod, &absent) == 62016,
-        "quests: rewards are checked, then kept for when the game's text is loaded");
+            logged("quest 62015 is not added: a reward group's chances do not add up to 100, or a group between has "
+                   "none") &&
+            quest_service->add(mod, &too_many_groups) == -1 &&
+            logged("quest 62017 is not added: a reward's item, count, chance or group is out of range") &&
+            quest_service->add(mod, &bad_supply) == -1 &&
+            logged("quest 62019 is not added: a supply's item or count is out of range") &&
+            quest_service->add(mod, &crowded_box) == -1 &&
+            logged("quest 62020 is not added: it has more supplies than the box holds") &&
+            quest_service->add(mod, &rich) == 62014 && quest_service->add(mod, &absent) == 62016 &&
+            quest_service->add(mod, &supplied) == 62018,
+        "quests: rewards (in up to three groups) and supplies are checked, then kept for when the game's text is "
+        "loaded");
     const mhp3rd::mods::FileId rich_file = *mhp3rd::mods::p3rd::quest_file(62014u);
     const auto served_size = [&runtime](mhp3rd::mods::FileId file) {
         runtime.cpu().gpr[5] = file;
         return call(runtime, 0x08864E8Cu, 0x08B3F040u);
     };
     const std::uint32_t first_size = served_size(rich_file);
+    const mhp3rd::mods::FileId supplied_file = *mhp3rd::mods::p3rd::quest_file(62018u);
+    const std::uint32_t first_supplied = served_size(supplied_file);
     // The text block's item names (table 3): 0 a placeholder, 1 the gem.
     constexpr std::uint32_t kBlock = 0x08A40640u, kNames = kBlock + 0x3000u;
     runtime.memory().store32(kBlock + 3u * 4u, 0x3000u);
@@ -1722,6 +1750,7 @@ void test_monsters(psprecomp::Runtime &runtime) {
     const std::uint32_t second_size = served_size(rich_file);
     check(second_size > first_size && second_size == ((second_size + 15u) & ~15u),
         "quests: once lobby_task loads, a quest with rewards is built again with them and its file replaced");
+    check(served_size(supplied_file) > first_supplied, "quests: and one with supplies, with them");
     check(served_size(*mhp3rd::mods::p3rd::quest_file(62016u)) == served_size(*mhp3rd::mods::p3rd::quest_file(62010u)),
         "quests: a reward naming no item of the game's leaves the quest as first built");
     std::error_code ec;

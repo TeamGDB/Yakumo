@@ -14,8 +14,13 @@ constexpr std::size_t kRecordSize = 0x48u;
 constexpr std::size_t kLanguages = 7u;
 constexpr std::size_t kSpawnSize = 0x30u;
 constexpr std::size_t kMaxMonsters = 5u;
-// The disc's hunts draw up to 35 lines for their main reward (0x23).
-constexpr std::size_t kMostRewardLines = 40u;
+// The reward groups' words: 0x8000 plus the group, then its rows on the reward
+// screen and a count the disc's hunts give (5 and 3 in most; 0 and 0 for the
+// groups after the main one).
+constexpr std::uint16_t kRewardGroup = 0x8000u;
+constexpr std::uint8_t kRewardRows = 5u;
+constexpr std::uint32_t kRewardDraws = 3u;
+constexpr std::size_t kMostRewardItems = 24u; // the disc's groups have up to 12
 constexpr std::uint32_t kFramesPerMinute = 1800u;
 // The record's quest type (+0): a hunt; its objective count (+0x27) and kind
 // (+0x28, 1: hunt or slay).
@@ -69,15 +74,20 @@ std::optional<std::vector<std::uint8_t>> build_quest(const QuestSpec &spec, std:
     };
     if (!is_mod_quest(spec.id)) return fail("its id is not a mod quest's (62000 to 65535)");
     if (spec.monsters.empty() || spec.monsters.size() > kMaxMonsters) return fail("it needs 1 to 5 large monsters");
-    if (spec.rewards.size() > kMostRewardLines) return fail("it has more reward lines than the game draws");
-    for (const QuestRewardLine &line : spec.rewards) {
+    if (spec.rewards.size() > kMostRewardGroups) return fail("it has more reward groups than the game has");
+    for (const QuestRewardGroup &group : spec.rewards) {
         unsigned total = 0;
-        for (const QuestRewardItem &i : line) total += i.chance;
-        if (line.empty() || total != 100u || std::any_of(line.begin(), line.end(), [](const QuestRewardItem &i) {
-                return i.item == 0u || i.count == 0u;
-            }))
-            return fail("a reward line's chances do not add up to 100, or it names no item");
+        for (const QuestRewardItem &i : group) total += i.chance;
+        const bool unnamed = std::any_of(
+            group.begin(), group.end(), [](const QuestRewardItem &i) { return i.item == 0u || i.count == 0u; });
+        if (group.empty() || group.size() > kMostRewardItems || total != 100u || unnamed)
+            return fail("a reward group's chances do not add up to 100, or it has no items, too many or one naming "
+                        "none");
     }
+    const bool unnamed_supply = std::any_of(
+        spec.supplies.begin(), spec.supplies.end(), [](const QuestSupply &s) { return s.item == 0u || s.count == 0u; });
+    if (spec.supplies.size() > kMostSupplies || unnamed_supply)
+        return fail("it has more supplies than the box holds, or one names no item");
 
     Writer w;
     w.zeros(kHeader);
@@ -109,29 +119,47 @@ std::optional<std::vector<std::uint8_t>> build_quest(const QuestSpec &spec, std:
     for (std::size_t i = 0; i < kLanguages; ++i) w.put32(static_cast<std::uint32_t>(set));
     w.u32(record + 0x18u, static_cast<std::uint32_t>(languages));
 
-    // The main reward: a group header (kind 0, its line count; the word after
-    // it not traced, 0 here), the end of the groups (0xFF), then each line's
-    // items (chance, count, item) ended by 0xFFFFFFFF.
-    const std::size_t rewards = w.here();
-    if (!spec.rewards.empty()) {
-        w.put32(static_cast<std::uint32_t>(spec.rewards.size()) << 8u);
-        w.put32(0u);
+    // The supply box: its items (item, count), then the groups (kind 0, the
+    // box at the start; its item count; a pointer to them), ended by 0xFF.
+    const std::size_t supply_items = w.here();
+    for (const QuestSupply &s : spec.supplies) {
+        w.put16(s.item);
+        w.put16(s.count);
+    }
+    const std::size_t supplies = w.here();
+    if (!spec.supplies.empty()) {
+        w.put32(static_cast<std::uint32_t>(spec.supplies.size()) << 8u);
+        w.put32(static_cast<std::uint32_t>(supply_items));
     }
     w.put32(0xFFu);
     w.zeros(4u);
-    for (const QuestRewardLine &line : spec.rewards) {
-        for (const QuestRewardItem &i : line) {
-            w.bytes.push_back(i.chance);
-            w.bytes.push_back(i.count);
+    // The rewards: each group's items (chance, item, count as u16s) ended by
+    // 0xFFFF, then the groups (0x8000 plus the group, its rows and count, a
+    // pointer to its items) ended by 0xFFFF.
+    std::vector<std::size_t> reward_items;
+    for (const QuestRewardGroup &group : spec.rewards) {
+        reward_items.push_back(w.here());
+        for (const QuestRewardItem &i : group) {
+            w.put16(i.chance);
             w.put16(i.item);
+            w.put16(i.count);
         }
-        w.put32(0xFFFFFFFFu);
+        w.put16(0xFFFFu);
+        w.align(4u);
     }
-    // No supplies or gathering yet: each table as the game reads it empty.
-    const std::size_t supplies = w.here();
-    w.zeros(8u);
-    const std::size_t gathering = w.put16(0xFFFFu);
+    const std::size_t rewards = w.here();
+    for (std::size_t g = 0; g < spec.rewards.size(); ++g) {
+        w.put16(static_cast<std::uint16_t>(kRewardGroup + g));
+        w.bytes.push_back(0u);
+        w.bytes.push_back(g == 0u ? kRewardRows : 0u);
+        w.put32(g == 0u ? kRewardDraws : 0u);
+        w.put32(static_cast<std::uint32_t>(reward_items[g]));
+    }
+    w.put16(0xFFFFu);
     w.zeros(10u);
+    // No gathering yet: no points in any area.
+    const std::size_t gathering = w.here();
+    w.zeros(8u);
     const std::size_t small_index = w.put32(0u);
     w.put32(kNoSmallMonsters);
     w.zeros(16u);
@@ -176,8 +204,8 @@ std::optional<std::vector<std::uint8_t>> build_quest(const QuestSpec &spec, std:
     // The header: where each table is, and each large monster's stats.
     w.u32(0x00u, static_cast<std::uint32_t>(record));
     std::memcpy(w.bytes.data() + 4u, "v005", 4u);
-    w.u32(0x08u, static_cast<std::uint32_t>(rewards));
-    w.u32(0x1Cu, static_cast<std::uint32_t>(gathering));
+    w.u32(0x08u, static_cast<std::uint32_t>(supplies));
+    w.u32(0x1Cu, static_cast<std::uint32_t>(rewards));
     w.u32(0x20u, static_cast<std::uint32_t>(large));
     w.u32(0x24u, static_cast<std::uint32_t>(small_waves));
     w.u32(0x28u, static_cast<std::uint32_t>(small_extra));
@@ -191,7 +219,7 @@ std::optional<std::vector<std::uint8_t>> build_quest(const QuestSpec &spec, std:
     }
     w.u32(0x58u, kSmallMonsterStats);
     w.u32(0x5Cu, kSmallMonsterLevels);
-    w.u32(0x60u, static_cast<std::uint32_t>(supplies));
+    w.u32(0x60u, static_cast<std::uint32_t>(gathering));
     w.u32(0x70u, 0x01000000u);
     w.u32(0x78u, 0x02000000u);
     w.u32(0x7Cu, 150u);

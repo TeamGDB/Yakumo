@@ -6,9 +6,9 @@
 // way, a hunt in the arena (map 8) loaded, spawned its monster with the
 // health and size asked for, and was cleared when the monster fell.
 //
-// The game's quest files hold more (supplies, small monsters, gathering,
-// sub-rewards): a built quest has none of those yet. Its main reward is the
-// lines it is given.
+// The game's quest files hold more (small monsters, gathering, supplies
+// delivered later): a built quest has none of those yet. Its rewards and the
+// supplies in its box are what it is given.
 
 #include <cstdint>
 #include <optional>
@@ -30,14 +30,23 @@ struct QuestTexts {
     std::string name, objective, failure, description, monsters, client;
 };
 
-// One item of a reward line: drawn with `chance` percent, `count` of item `item`.
+// One item of a reward group: drawn with `chance` percent, `count` of item `item`.
 struct QuestRewardItem {
     std::uint16_t item{};
     std::uint8_t count{1};
     std::uint8_t chance{100};
 };
-// A reward line: one draw from its items, whose chances add up to 100.
-using QuestRewardLine = std::vector<QuestRewardItem>;
+// A reward group: items whose chances add up to 100, drawn from. The game's
+// quests have up to three: the main reward, drawn several times, and two more
+// (a guild's commendation, say).
+using QuestRewardGroup = std::vector<QuestRewardItem>;
+inline constexpr std::size_t kMostRewardGroups = 3u;
+// What the supply box holds at the start: `count` of item `item`.
+struct QuestSupply {
+    std::uint16_t item{};
+    std::uint8_t count{1};
+};
+inline constexpr std::size_t kMostSupplies = 32u;
 
 struct QuestSpec {
     std::uint16_t id{};          // 62000 to 65535, as mods' quests are
@@ -50,12 +59,14 @@ struct QuestSpec {
     std::uint16_t count{1};
     std::vector<QuestMonster> monsters; // large monsters, up to 5; the first ones are the main monsters
     QuestTexts texts;            // in every language the game has, for now
-    std::vector<QuestRewardLine> rewards; // the main reward's lines, drawn when the quest is cleared
+    std::vector<QuestRewardGroup> rewards; // drawn from when the quest is cleared: the main reward first
+    std::vector<QuestSupply> supplies;     // in the supply box
 };
 
 // The payload, or nothing (with the reason in `why`) for a description the
 // game could not take: no monsters or more than five, an id outside mods'
-// quests, a payload over the size the game reads.
+// quests, rewards or supplies the game does not have room for or naming no
+// item, a payload over the size the game reads.
 [[nodiscard]] std::optional<std::vector<std::uint8_t>> build_quest(const QuestSpec &spec, std::string *why = nullptr);
 
 } // namespace mhp3rd::game

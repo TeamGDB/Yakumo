@@ -392,14 +392,17 @@ quest.monsters = &fatalis;
 quest.monster_count = 1;
 quest.texts = {"The Black Dragon", "Hunt the Fatalis", "Reward Zero\nTime Over", "...", "Fatalis", "Guild Master"};
 quest.area = nullptr;       // or an area of the mod's to play it in (see Maps)
-static const ymod_quest_reward rewards[] = {{"ElderDragonBlood", 2, 100, 0}, {"Rainbow Crystal", 1, 30, 1},
-                                            {"Earth Crystal", 3, 70, 1}};  // item, count, chance, line
-quest.rewards = rewards;    // each line one draw; a line's chances add up to 100
-quest.reward_count = 3;
+static const ymod_quest_reward rewards[] = {{"Rainbow Crystal", 1, 30, 0}, {"Earth Crystal", 3, 70, 0},
+                                            {"ElderDragonBlood", 1, 100, 1}};  // item, count, chance, group
+quest.rewards = rewards;    // group 0 the main reward, drawn several times; 1 and 2 two more;
+quest.reward_count = 3;     // a group's chances add up to 100
+static const ymod_quest_supply box[] = {{"First-aid Med", 2}, {"Ration", 2}};
+quest.supplies = box;       // the supply box at the start, up to 32
+quest.supply_count = 2;
 mod.quests()->add(mod.handle(), &quest); // the id, or -1 with the reason in the log
 ```
 
-Add it at start, after the monsters it names. A built quest is a hunt with no rewards, supplies or small monsters yet, and its texts are the same in every language. A monster's `health(monster, now, most)` says when it has fallen, so a mod's behaviour can play its fall.
+Add it at start, after the monsters it names. A built quest is a hunt with its rewards and supply box but no small monsters, gathering or supplies delivered later yet, and its texts are the same in every language ([QUESTS.md](QUESTS.md#quests-a-mod-describes)). A monster's `health(monster, now, most)` says when it has fallen, so a mod's behaviour can play its fall.
 
 ## Weapons
 

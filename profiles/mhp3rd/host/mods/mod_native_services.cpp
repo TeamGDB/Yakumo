@@ -523,30 +523,42 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
     const ymod_quest_texts &t = quest->texts;
     spec.texts = {
         text(t.name), text(t.objective), text(t.failure), text(t.description), text(t.monsters), text(t.client)};
-    // Its rewards, named as the game names its items: kept, and given once
-    // the game's text is loaded (the quest is built again then).
+    // Its rewards and supplies, named as the game names its items: kept, and
+    // given once the game's text is loaded (the quest is built again then).
     struct Named {
         std::string item;
         std::uint8_t count, chance;
-        std::uint32_t line;
+        std::uint32_t line; // the reward group; kSupply for the supply box
     };
+    constexpr std::uint32_t kSupply = 0xFFFFFFFFu;
     std::vector<Named> rewards;
     const bool has_rewards =
         quest->size >= offsetof(ymod_quest, reward_count) + sizeof(quest->reward_count) && quest->rewards != nullptr;
     for (std::uint32_t i = 0; has_rewards && i < quest->reward_count; ++i) {
         const ymod_quest_reward &r = quest->rewards[i];
-        if (r.item == nullptr || r.count == 0u || r.count > 99u || r.chance == 0u || r.chance > 100u || r.line >= 40u)
-            return refuse("a reward's item, count, chance or line is out of range");
+        if (r.item == nullptr || r.count == 0u || r.count > 99u || r.chance == 0u || r.chance > 100u ||
+            r.line >= game::kMostRewardGroups)
+            return refuse("a reward's item, count, chance or group is out of range");
         rewards.push_back({r.item, static_cast<std::uint8_t>(r.count), static_cast<std::uint8_t>(r.chance), r.line});
     }
-    // Each line from 0 up has items whose chances add up to 100.
+    // Each group from 0 up has items whose chances add up to 100.
     std::vector<unsigned> totals;
     for (const Named &n : rewards) {
         if (totals.size() <= n.line) totals.resize(n.line + 1u, 0u);
         totals[n.line] += n.chance;
     }
     if (std::any_of(totals.begin(), totals.end(), [](unsigned total) { return total != 100u; }))
-        return refuse("a reward line's chances do not add up to 100, or a line between has none");
+        return refuse("a reward group's chances do not add up to 100, or a group between has none");
+    const bool has_supplies =
+        quest->size >= offsetof(ymod_quest, supply_count) + sizeof(quest->supply_count) && quest->supplies != nullptr;
+    if (has_supplies && quest->supply_count > game::kMostSupplies)
+        return refuse("it has more supplies than the box holds");
+    for (std::uint32_t i = 0; has_supplies && i < quest->supply_count; ++i) {
+        const ymod_quest_supply &s = quest->supplies[i];
+        if (s.item == nullptr || s.count == 0u || s.count > 99u)
+            return refuse("a supply's item or count is out of range");
+        rewards.push_back({s.item, static_cast<std::uint8_t>(s.count), 0u, kSupply});
+    }
     std::string why;
     const std::optional<std::vector<std::uint8_t>> payload = game::build_quest(spec, &why);
     if (!payload) return refuse(why);
@@ -564,9 +576,13 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
                         if (reason != nullptr) *reason = "the game has no item named \"" + n.item + "\"";
                         return std::nullopt;
                     }
+                    const auto item = static_cast<std::uint16_t>(found - names.begin());
+                    if (n.line == kSupply) {
+                        full.supplies.push_back({item, n.count});
+                        continue;
+                    }
                     if (full.rewards.size() <= n.line) full.rewards.resize(n.line + 1u);
-                    full.rewards[n.line].push_back(
-                        {static_cast<std::uint16_t>(found - names.begin()), n.count, n.chance});
+                    full.rewards[n.line].push_back({item, n.count, n.chance});
                 }
                 return game::build_quest(full, reason);
             });

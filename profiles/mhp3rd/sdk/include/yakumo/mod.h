@@ -507,9 +507,14 @@ typedef struct ymod_quest_texts {
 typedef struct ymod_quest_reward {
     const char *item; /* the item, by its name as the game shows it in English: "Wyvern Gem" */
     uint32_t count;   /* how many, 1 to 99 */
-    uint32_t chance;  /* percent: a line's chances add up to 100 */
-    uint32_t line;    /* the reward line it is drawn in, from 0; each line is one draw */
+    uint32_t chance;  /* percent: a group's chances add up to 100 */
+    uint32_t line;    /* the reward group it is drawn from: 0 the main reward, drawn several times; 1 and 2
+                         two more, as the game's quests have (a commendation, say) */
 } ymod_quest_reward;
+typedef struct ymod_quest_supply {
+    const char *item; /* by its name as the game shows it in English: "First-aid Med" */
+    uint32_t count;   /* how many, 1 to 99 */
+} ymod_quest_supply;
 typedef struct ymod_quest {
     uint32_t size; /* set to sizeof(ymod_quest) before passing one */
     uint32_t id;   /* 62000 to 65535 */
@@ -523,9 +528,11 @@ typedef struct ymod_quest {
     ymod_quest_texts texts;
     const char *area; /* NULL, or an area of the mod's (yakumo.maps, added first) the quest is played in; `map`
                          is then that area's map, and its monsters start in its area of that map */
-    const ymod_quest_reward *rewards; /* the main reward's items, by line; the quest is built again with them once
+    const ymod_quest_reward *rewards; /* its rewards' items, by group; the quest is built again with them once
                                          the game's text is loaded, so they are named as the game names them */
     uint32_t reward_count;
+    const ymod_quest_supply *supplies; /* what the supply box holds at the start (up to 32), named as rewards are */
+    uint32_t supply_count;
 } ymod_quest;
 /* --------------------------------------------------------------------------
  * "yakumo.equipment" 1: weapons mods add. A weapon starts from one of the
