@@ -1279,6 +1279,7 @@ With the setting off nothing is hooked into the display lists, no input is read 
 | `PSPRECOMP_NO_JIT=1` | Interpret code without recompiled functions (code mods changed, a mod's own code) instead of compiling it with the JIT |
 | `PSPRECOMP_JIT_LOG=1`, `PSPRECOMP_JIT_TRACE=1` | The native code of each function the JIT compiles; a line per compiled function with its size and range |
 | `PSPRECOMP_JIT_NO_REGISTER_CACHE=1`, `PSPRECOMP_JIT_NO_NATIVE_FPU=1` | Compile without keeping guest registers in host registers, or without native single-precision instructions, to compare against |
+| `PSPRECOMP_JIT_NO_PREEMPTION=1` | Let a loop in compiled code run until it leaves, instead of returning to the dispatcher (where threads can switch) every 1024 times round |
 | `PSPRECOMP_MAX_DISPATCHES` | Stop after this many dispatches |
 | `PSPRECOMP_HLE_HISTOGRAM=1` | Print import call counts on exit |
 

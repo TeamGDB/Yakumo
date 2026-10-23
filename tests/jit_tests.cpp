@@ -373,6 +373,33 @@ void loop(Generator &g) {
     compare(g.start(code), "loop");
 }
 
+// A loop that never calls out: compiled, it returns to the dispatcher every
+// so many times round, where the scheduler may switch threads, as the
+// interpreter's bounded runs do; and leaves the same registers.
+int g_boundaries = 0;
+void count_boundary(Runtime &, AllegrexContext &) {
+    ++g_boundaries;
+}
+void preemption(Generator &g) {
+    const std::vector<std::uint32_t> code = {
+        0x3C080004u, // lui t0, 4: 0x40000 times round
+        0x25290003u, // addiu t1, t1, 3
+        0x2508FFFFu, // addiu t0, t0, -1
+        0x1500FFFDu, // bne t0, zero, -3
+        0u,          // nop
+    };
+    const Setup setup = g.start(code);
+    psprecomp::set_runtime_starvation_hook(&count_boundary, 1u);
+    g_boundaries = 0;
+    const Outcome jit = run(setup, true, 10000000u);
+    const int compiled_boundaries = g_boundaries;
+    psprecomp::set_runtime_starvation_hook(nullptr, 0u);
+    // 0x40000 times round, 1024 jumps back a dispatch: about 256 of them.
+    check(jit.stopped_normally && compiled_boundaries >= 200 && jit.ctx.gpr[9] == setup.ctx.gpr[9] + 3u * 0x40000u,
+        "preemption: a compiled loop returns to the dispatcher every 1024 times round (" +
+            std::to_string(compiled_boundaries) + " scheduler boundaries) and computes what it did");
+}
+
 // A loop around a call, as games write them: the function the JIT compiles
 // for the call's return address starts with the loop's backward branch.
 void loop_with_call(Generator &g) {
@@ -699,6 +726,7 @@ int main(int argc, char **argv) {
     floating_point(g);
     branches(g);
     loop(g);
+    preemption(g);
     loop_with_call(g);
     calls(g);
     invalidation(g);

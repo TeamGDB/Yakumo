@@ -18,7 +18,10 @@ class Runtime;
 // from it inside the same 16 KiB window, with native branches, until control
 // leaves that code, reaches an address something else is registered at (an
 // import, a host function, a generated unit) or the runtime stops. It then
-// sets ctx.pc and returns. Each instruction has the meaning the interpreter
+// sets ctx.pc and returns. It also returns every 1024 branches back (a loop
+// going round), at the loop's head, so that a loop that never calls out still
+// reaches the dispatcher, where the scheduler can switch threads
+// (PSPRECOMP_JIT_NO_PREEMPTION=1 lets loops run until they leave). Each instruction has the meaning the interpreter
 // gives it: what the JIT does not emit itself, it runs through the same shared
 // function.
 //

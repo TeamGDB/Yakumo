@@ -35,14 +35,23 @@ struct Compiled {
     std::vector<std::uint8_t> source;                         // the guest bytes in [low, high) it was compiled from
 };
 
-// PSPRECOMP_JIT_LOG, _TRACE, and the off switches of the two optimisations,
-// _NO_REGISTER_CACHE and _NO_NATIVE_FPU, to compare against.
+// PSPRECOMP_JIT_LOG, _TRACE, the off switches of the two optimisations,
+// _NO_REGISTER_CACHE and _NO_NATIVE_FPU, to compare against, and
+// _NO_PREEMPTION, which lets a loop run until it leaves, as before loops
+// returned to the dispatcher.
 struct Settings {
     bool log{};
     bool trace{};
     bool cache_registers{true};
     bool native_fpu{true};
+    bool preempt{true};
 };
+
+// How many times compiled code jumps back (goes round a loop) before it
+// returns to the dispatcher, which counts that as a dispatch and lets the
+// scheduler switch threads: about the interpreter's 1024 instructions a run
+// for a short loop.
+constexpr std::uint32_t kBackEdges = 1024u;
 [[nodiscard]] const Settings &settings();
 
 struct Compilation {

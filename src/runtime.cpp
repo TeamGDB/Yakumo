@@ -217,10 +217,11 @@ bool Runtime::run_starvation_boundary(AllegrexContext &ctx) {
 
 bool Runtime::run_interpreter_fallback(AllegrexContext &ctx) {
     // Native code first: compiled and registered, the dispatch retries.
+    // Compiled code returns every so many loops round, and each interpreted
+    // entry is bounded, so a long stretch of either still returns to the
+    // dispatcher often enough for the starvation hook to preempt the thread.
     if (jit_compile(*this, ctx.pc)) return true;
     if (!interpreter_fallback_enabled()) return false;
-    // Each entry is bounded, so a long interpreted stretch still returns to the
-    // dispatcher often enough for the starvation hook to preempt the thread.
     return interpret_allegrex(*this, ctx) != InterpreterExit::Unreachable;
 }
 

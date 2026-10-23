@@ -45,6 +45,10 @@ constexpr std::size_t kMaxInstructions = 4096u;
 // it after the calls that can fail, and returns.
 std::uint8_t g_fault = 0u;
 
+// Jumps back left before compiled code returns to the dispatcher; shared by
+// all compiled code, which runs on one thread.
+std::uint32_t g_back_edges = kBackEdges;
+
 JitInstructionHook g_instruction_hook = nullptr;
 
 // --- Helpers called from compiled code --------------------------------------
@@ -474,6 +478,27 @@ private:
             uc_->j(found->second);
         else
             exit_to(pc);
+    }
+    // A branch taken from `from` to `pc`: one back (a loop goes round) counts
+    // down, and every kBackEdges of them the code leaves to the dispatcher at
+    // `pc`, so that a loop that never calls out still lets the scheduler
+    // switch threads, as the interpreter's bounded runs do.
+    void go_from(std::uint32_t from, std::uint32_t pc) {
+        const auto found = labels_.find(pc);
+        if (found == labels_.end() || pc > from || !settings().preempt) {
+            go(pc);
+            return;
+        }
+        Gp at = value();
+        Gp left = value();
+        uc_->mov(at, Imm(reinterpret_cast<std::uint64_t>(&g_back_edges)));
+        uc_->load_u32(left.r32(), ujit::mem_ptr(at));
+        uc_->sub(left.r32(), left.r32(), Imm(1));
+        uc_->store_u32(ujit::mem_ptr(at), left.r32());
+        uc_->j(found->second, ujit::test_nz(left.r32(), left.r32()));
+        uc_->mov(left.r32(), Imm(kBackEdges));
+        uc_->store_u32(ujit::mem_ptr(at), left.r32());
+        exit_to(pc);
     }
     void check_fault(const Label &to) {
         Gp flag = value();
@@ -1042,7 +1067,7 @@ private:
             if (d.kind == OpcodeKind::Jal)
                 exit_to(target);
             else
-                go(target);
+                go_from(pc, target);
             return;
         }
         case OpcodeKind::Jr:
@@ -1125,7 +1150,7 @@ private:
             go(return_pc); // not taken: the slot is annulled
             uc.bind(taken);
             emit_slot(node, pc, out);
-            go(target);
+            go_from(pc, target);
             return;
         }
         // The condition is taken from the saved operands after the slot.
@@ -1138,7 +1163,7 @@ private:
         uc.j(taken, ujit::test_nz(flag.r32(), flag.r32()));
         go(return_pc);
         uc.bind(taken);
-        go(target);
+        go_from(pc, target);
     }
 
     Runtime &runtime_;
@@ -1180,6 +1205,7 @@ const Settings &settings() {
         s.trace = std::getenv("PSPRECOMP_JIT_TRACE") != nullptr;
         s.cache_registers = std::getenv("PSPRECOMP_JIT_NO_REGISTER_CACHE") == nullptr;
         s.native_fpu = std::getenv("PSPRECOMP_JIT_NO_NATIVE_FPU") == nullptr;
+        s.preempt = std::getenv("PSPRECOMP_JIT_NO_PREEMPTION") == nullptr;
         return s;
     }();
     return loaded;

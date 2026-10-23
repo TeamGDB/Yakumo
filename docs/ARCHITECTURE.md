@@ -42,9 +42,11 @@ for the rest. Compiled code is dropped when its memory changes (an instruction c
 flush whose bytes differ) or when something else is registered over it; dropped code is
 kept until the runtime ends, because a guest thread may still be inside it.
 
-What the JIT cannot compile, or everything with `PSPRECOMP_NO_JIT=1`, is interpreted
-instead of stopping, in bounded slices so scheduling and preemption still happen between
-them. Reaching any registered address - an AOT unit, a host override or a PSP import
+Compiled code returns to the dispatcher every 1024 branches back (a loop going round),
+so a loop that never calls out still lets the scheduler preempt its thread
+(`PSPRECOMP_JIT_NO_PREEMPTION=1` turns that off). What the JIT cannot compile, or
+everything with `PSPRECOMP_NO_JIT=1`, is interpreted instead of stopping, in bounded
+slices so scheduling and preemption still happen between them. Reaching any registered address - an AOT unit, a host override or a PSP import
 stub - leaves compiled or interpreted code through normal dispatch, so imports still run
 their HLE wrappers and thread switching is unaffected. `PSPRECOMP_NO_INTERPRETER=1`
 restores the strict stop, and the end-of-run report names the addresses that ran
