@@ -66,6 +66,12 @@ lobby::Snapshot sample() {
     snapshot.weapon = lobby::Weapon{5u, 3u, "Iron Sword", "Great Sword"};
     snapshot.quests = {{1u, 10522u, 5u, 800u, 9600u, 36000u, "The Festival of Fear", "Repel the Jhen Mohran",
         "Jhen Mohran", "Guildmaster"}};
+    snapshot.stats.quests = {{"Village", 12u}, {"Low Rank", 34u}};
+    snapshot.stats.fs_level = 23u;
+    snapshot.stats.play_seconds = 3661u;
+    snapshot.stats.weapons = {{"Sword and Shield", 10u}, {"Lance", 4u}};
+    snapshot.stats.recent_quests = {"The Festival of Fear"};
+    snapshot.stats.awards = 2u;
     return snapshot;
 }
 
@@ -89,6 +95,11 @@ void test_report_line() {
               "\"name\":\"The Festival of Fear\",\"objective\":\"Repel the Jhen Mohran\",\"monsters\":\"Jhen Mohran\","
               "\"client\":\"Guildmaster\"}]"),
         "the report carries the posted quests");
+    check(has(line,
+              "\"stats\":{\"quests\":[{\"label\":\"Village\",\"count\":12},{\"label\":\"Low Rank\",\"count\":34}],"
+              "\"fs_level\":23,\"play_seconds\":3661,\"weapons\":[{\"label\":\"Sword and Shield\",\"count\":10},"
+              "{\"label\":\"Lance\",\"count\":4}],\"recent_quests\":[\"The Festival of Fear\"],\"awards\":2}"),
+        "the report carries the guild card summary");
     check(has(line, "\"ts\":1000"), "the report carries the time");
 
     lobby::Snapshot empty;
@@ -210,6 +221,42 @@ void test_posted_quest_ids() {
         "a missing board reads no quests");
 }
 
+void write_ascii(game::Ram &ram, std::uint32_t at, const char *text) {
+    for (std::size_t i = 0; text[i] != '\0'; ++i)
+        ram.store8(at + static_cast<std::uint32_t>(i), static_cast<std::uint8_t>(text[i]));
+}
+
+void test_guild_stats() {
+    game::BufferRam ram(kBase, kSize);
+    const std::uint16_t counts[] = {12u, 34u, 56u, 7u, 8u};
+    for (std::size_t i = 0u; i < 5u; ++i)
+        ram.store16(lobby::kQuestCountsBase + static_cast<std::uint32_t>(i * 2u), counts[i]);
+    ram.store32(lobby::kPlayTime, 3661u);
+    ram.store16(lobby::kWeaponUsageBase + (5u - 5u) * 2u, 2u);
+    ram.store16(lobby::kWeaponUsageBase + (6u - 5u) * 2u, 10u);
+    ram.store16(lobby::kWeaponUsageBase + (16u - 5u) * 2u, 4u);
+    const std::uint8_t levels[] = {6u, 6u, 3u, 4u, 4u};
+    for (std::size_t i = 0u; i < 5u; ++i)
+        ram.store8(lobby::kFelyneLevelsBase + static_cast<std::uint32_t>(i) * lobby::kFelyneLevelStride, levels[i]);
+    ram.store8(lobby::kAwardsBase, 1u);
+    ram.store8(lobby::kAwardsBase + 2u, 1u);
+    write_ascii(ram, lobby::kRecentQuestsBase + 0x100u, "Hunting x2 Arzuros is Hard");
+    write_ascii(ram, lobby::kRecentQuestsBase + 0x200u, "The Festival of Fear");
+
+    lobby::GuildStats stats;
+    lobby::guild_stats(ram, stats);
+    check(stats.quests.size() == 5u && stats.quests[1].label == "Low Rank" && stats.quests[1].count == 34u,
+        "the guild card quest counts are read");
+    check(stats.fs_level == 23u, "the FS level sums the felyne levels");
+    check(stats.play_seconds == 3661u, "the play time is read");
+    check(stats.weapons.size() == 3u && stats.weapons[0].label == "Sword and Shield" && stats.weapons[0].count == 10u &&
+            stats.weapons[1].label == "Dual Blades" && stats.weapons[1].count == 4u,
+        "the weapon usage is read and sorted");
+    check(stats.awards == 2u, "the award count is read");
+    check(stats.recent_quests.size() == 2u && stats.recent_quests[0] == "The Festival of Fear",
+        "the recent quests are read newest first");
+}
+
 void set_env(const char *name, const char *value) {
 #ifdef _WIN32
     _putenv_s(name, value);
@@ -269,6 +316,7 @@ int main() {
     test_read_hunter();
     test_hunter_rank_and_guild_card();
     test_posted_quest_ids();
+    test_guild_stats();
     test_diagnostic_dump();
     if (failures == 0) std::cout << "lobby tests passed\n";
     return failures == 0 ? 0 : 1;

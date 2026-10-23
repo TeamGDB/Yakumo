@@ -509,7 +509,7 @@ The Android app starts from other defaults where a phone differs, with the same 
 | Network | Ad Hoc Play | `network.adhoc` | `MHP3RD_ADHOC` | Off (default) or on; off, the game reports the wireless switch as off |
 | Network | Server | `network.server` | `MHP3RD_ADHOC_SERVER` | Host name or address of a PSP ad hoc server, optionally `host:port`; empty by default |
 | Network | Nickname | `network.nickname` | `MHP3RD_ADHOC_NICKNAME` | The name other players see; empty uses the hunter name |
-| Network | Lobby | `network.lobby` | `MHP3RD_LOBBY` | Off (default) or on; on, the hunter's name and current equipment are sent to a lobby dashboard when entering a gathering hall |
+| Network | Lobby | `network.lobby` | `MHP3RD_LOBBY` | Off (default) or on; on, the hunter's name, equipment, guild card summary and hall are sent to a lobby dashboard when entering a gathering hall |
 | Network | Lobby Server | `network.lobby_server` | `MHP3RD_LOBBY_SERVER` | The dashboard's report address, `host` or `host:port` (8090); empty by default |
 | Network | Lobby Token | `network.lobby_token` | `MHP3RD_LOBBY_TOKEN` | The dashboard's shared secret, when it has one; empty by default |
 

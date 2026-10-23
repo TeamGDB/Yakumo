@@ -61,12 +61,13 @@ struct Snapshot {
     std::vector<Piece> equipment;
     std::optional<Weapon> weapon;
     std::vector<PostedQuest> quests;
+    GuildStats stats;
 
     [[nodiscard]] bool operator==(const Snapshot &other) const {
         return mac == other.mac && nickname == other.nickname && product == other.product && server == other.server &&
             hall == other.hall && name == other.name && sex == other.sex && hr == other.hr && title == other.title &&
             guild_card == other.guild_card && token == other.token && equipment == other.equipment &&
-            weapon == other.weapon && quests == other.quests;
+            weapon == other.weapon && quests == other.quests && stats == other.stats;
     }
     [[nodiscard]] bool operator!=(const Snapshot &other) const { return !(*this == other); }
 };

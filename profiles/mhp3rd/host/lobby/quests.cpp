@@ -34,6 +34,17 @@ bool printable(const std::string &text) {
         std::all_of(text.begin(), text.end(), [](unsigned char c) { return c >= 0x20u && c != 0x7Fu; });
 }
 
+std::string ascii_text(const game::Ram &ram, std::uint32_t address, std::size_t max_bytes) {
+    std::string text;
+    for (std::size_t i = 0u; i < max_bytes; ++i) {
+        if (!ram.contains(address + static_cast<std::uint32_t>(i), 1u)) break;
+        const std::uint8_t c = ram.load8(address + static_cast<std::uint32_t>(i));
+        if (c == 0u || c < 0x20u || c == 0x7Fu) break;
+        text.push_back(static_cast<char>(c));
+    }
+    return text;
+}
+
 } // namespace
 
 std::uint32_t hunter_rank(const game::Ram &ram) {
@@ -61,6 +72,59 @@ void guild_card(const game::Ram &ram, const std::string &name, std::string &titl
             comment = found_comment;
             return;
         }
+    }
+}
+
+void guild_stats(const game::Ram &ram, GuildStats &stats) {
+    stats = GuildStats{};
+
+    // The guild card lists the quest counts in this order.
+    if (ram.contains(kQuestCountsBase, 5u * 2u)) {
+        static const char *const labels[] = {"Village", "Low Rank", "High Rank", "Training", "Hot Spring"};
+        for (std::size_t i = 0u; i < 5u; ++i)
+            stats.quests.push_back(
+                StatCount{labels[i], ram.load16(kQuestCountsBase + static_cast<std::uint32_t>(i * 2u))});
+    }
+
+    if (ram.contains(kPlayTime, 4u)) stats.play_seconds = ram.load32(kPlayTime);
+
+    if (ram.contains(kWeaponUsageBase, 13u * 2u)) {
+        for (std::uint8_t kind = 5u; kind <= 17u; ++kind) {
+            if (kind == 10u) continue; // the game's unused weapon kind
+            const std::uint16_t count = ram.load16(kWeaponUsageBase + static_cast<std::uint32_t>(kind - 5u) * 2u);
+            if (count == 0u) continue;
+            const game::EquipmentKind *info = game::equipment_kind(kind);
+            stats.weapons.push_back(StatCount{info != nullptr ? info->label : "Weapon", count});
+        }
+        std::sort(stats.weapons.begin(), stats.weapons.end(), [](const StatCount &a, const StatCount &b) {
+            return a.count != b.count ? a.count > b.count : a.label < b.label;
+        });
+    }
+
+    // The guild card's FS level is the sum of the five felyne levels.
+    if (ram.contains(kFelyneLevelsBase + 4u * kFelyneLevelStride, 1u)) {
+        for (std::uint32_t i = 0u; i < 5u; ++i) stats.fs_level += ram.load8(kFelyneLevelsBase + i * kFelyneLevelStride);
+    }
+
+    // The award block has one non-zero entry per award shown on the card.
+    if (ram.contains(kAwardsBase, kAwardsBytes)) {
+        for (std::uint32_t i = 0u; i < kAwardsBytes; ++i)
+            if (ram.load8(kAwardsBase + i) != 0u) ++stats.awards;
+    }
+
+    // The recent-quest block carries the quest titles as ASCII strings. Skip
+    // the short player names and the card greeting between them.
+    if (ram.contains(kRecentQuestsBase, kRecentQuestsBytes)) {
+        for (std::uint32_t at = kRecentQuestsBase; at + 8u < kRecentQuestsBase + kRecentQuestsBytes; ++at) {
+            if (!ram.contains(at, 1u) || ram.load8(at) < 0x20u || ram.load8(at) == 0x7Fu) continue;
+            const bool start = at == kRecentQuestsBase || ram.load8(at - 1u) < 0x20u || ram.load8(at - 1u) == 0x7Fu;
+            if (!start) continue;
+            const std::string text = ascii_text(ram, at, 64u);
+            if (text.size() < 8u || text.find("gathering") != std::string::npos) continue;
+            if (std::find(stats.recent_quests.begin(), stats.recent_quests.end(), text) == stats.recent_quests.end())
+                stats.recent_quests.push_back(text);
+        }
+        std::reverse(stats.recent_quests.begin(), stats.recent_quests.end());
     }
 }
 

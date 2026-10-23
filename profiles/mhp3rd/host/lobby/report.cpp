@@ -54,6 +54,20 @@ void append_string_field(std::string &out, const char *name, const std::string &
     out += json_string(value);
 }
 
+void append_counts(std::string &out, const char *name, const std::vector<StatCount> &counts, bool &first) {
+    if (counts.empty()) return;
+    if (!first) out.push_back(',');
+    first = false;
+    out += "\"";
+    out += name;
+    out += "\":[";
+    for (std::size_t i = 0; i < counts.size(); ++i) {
+        if (i > 0u) out.push_back(',');
+        out += "{\"label\":" + json_string(counts[i].label) + ",\"count\":" + std::to_string(counts[i].count) + "}";
+    }
+    out.push_back(']');
+}
+
 } // namespace
 
 std::string report_line(const Snapshot &snapshot, std::int64_t unix_seconds) {
@@ -99,9 +113,44 @@ std::string report_line(const Snapshot &snapshot, std::int64_t unix_seconds) {
             append_string_field(out, "objective", quest.objective);
             append_string_field(out, "monsters", quest.monsters);
             append_string_field(out, "client", quest.client);
+            append_string_field(out, "accepted", quest.accepted);
+            append_string_field(out, "password", quest.password);
+            append_string_field(out, "started_at", quest.started_at);
             out.push_back('}');
         }
         out.push_back(']');
+    }
+    if (!snapshot.stats.empty()) {
+        out += ",\"stats\":{";
+        bool first = true;
+        append_counts(out, "quests", snapshot.stats.quests, first);
+        if (snapshot.stats.fs_level > 0u) {
+            if (!first) out.push_back(',');
+            first = false;
+            out += "\"fs_level\":" + std::to_string(snapshot.stats.fs_level);
+        }
+        if (snapshot.stats.play_seconds > 0u) {
+            if (!first) out.push_back(',');
+            first = false;
+            out += "\"play_seconds\":" + std::to_string(snapshot.stats.play_seconds);
+        }
+        append_counts(out, "weapons", snapshot.stats.weapons, first);
+        if (!snapshot.stats.recent_quests.empty()) {
+            if (!first) out.push_back(',');
+            first = false;
+            out += "\"recent_quests\":[";
+            for (std::size_t i = 0; i < snapshot.stats.recent_quests.size(); ++i) {
+                if (i > 0u) out.push_back(',');
+                out += json_string(snapshot.stats.recent_quests[i]);
+            }
+            out.push_back(']');
+        }
+        if (snapshot.stats.awards > 0u) {
+            if (!first) out.push_back(',');
+            first = false;
+            out += "\"awards\":" + std::to_string(snapshot.stats.awards);
+        }
+        out.push_back('}');
     }
     out += ",\"ts\":" + std::to_string(unix_seconds) + "}\n";
     return out;
