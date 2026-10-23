@@ -568,6 +568,13 @@ std::optional<std::vector<std::uint8_t>> original_file(FileId file) {
     return s.view->original(file);
 }
 
+std::optional<std::vector<std::uint8_t>> modded_file(FileId file) {
+    State &s = state();
+    if (s.serving && s.overlay && s.overlay->touches(file))
+        if (const std::shared_ptr<const FileContent> content = s.overlay->content(file)) return content->bytes;
+    return original_file(file);
+}
+
 std::uint32_t disc_files() {
     const State &s = state();
     return s.directory ? static_cast<std::uint32_t>(s.directory->entries()) : 0u;
@@ -581,7 +588,8 @@ std::string pending_note() {
     State &s = state();
     if (!s.session) return {};
     if (s.session->restart_pending())
-        return "Restart Yakumo to apply: a file changes size in a way the running game cannot take.";
+        return "Restart Yakumo to apply: the change starts code, a native or script mod, an added file or quest, or "
+               "changes a file's size in a way the running game cannot take.";
     if (s.waiting) return "Applies once the game finishes loading the file it is reading.";
     if (s.switched_live)
         return "Applied: each file changes the next time the game loads it, usually at the next area or menu. "

@@ -23,9 +23,12 @@
 #include <cstddef>
 #include <cmath>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
+#include <set>
 
 // The services besides hooks: guest memory, events, files, settings,
 // services between mods, the game's symbols and drawing in the interface.
@@ -101,6 +104,9 @@ int files_replace(ymod_mod *mod, std::uint32_t file, const void *data, std::uint
     if (file >= mods::disc_files()) return refuse("the disc has no file with that id");
     if (library.find(mod->id) == nullptr || !library.enabled(mod->id))
         return refuse("only a mod turned on on the Mods page replaces files");
+    // The game switches to the mods' files all at once, and not while a
+    // change waits for a restart.
+    if (session->restart_pending()) return refuse("another change on the Mods page waits for a restart");
     fs::path folder;
     try {
         folder = install::user_data_directory() / "mods-cache" / from_utf8(mod->id);
@@ -108,10 +114,15 @@ int files_replace(ymod_mod *mod, std::uint32_t file, const void *data, std::uint
         return -1;
     }
     std::error_code ec;
+    // What an earlier run wrote ended with it.
+    static std::set<std::string> cleared;
+    if (cleared.insert(mod->id).second) fs::remove_all(folder, ec);
     fs::create_directories(folder, ec);
     // A path of its own each time: the bytes served now stay until the
-    // change replacing them is taken.
+    // change replacing them is taken, and a file the game is halfway through
+    // reading keeps them to its end. Older ones are removed.
     static std::uint32_t written = 0u;
+    static std::map<std::pair<std::string, std::uint32_t>, std::deque<fs::path>> kept;
     const fs::path path = folder / from_utf8(name + "-" + std::to_string(++written) + ".bin");
     {
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
@@ -130,9 +141,12 @@ int files_replace(ymod_mod *mod, std::uint32_t file, const void *data, std::uint
             library.remove_runtime_change(mod->id, file, FileChange::Kind::Replace);
         session->commit();
         fs::remove(path, ec);
-        return refuse("the running game cannot take it (the file's size changes where the archive keeps it, the file "
-                      "outgrows its blocks, or another change waits for a restart)");
+        return refuse("the running game cannot take it (the file's size changes where the archive keeps it, or the "
+                      "file outgrows its blocks)");
     }
+    std::deque<fs::path> &paths = kept[{mod->id, file}];
+    paths.push_back(path);
+    for (; paths.size() > 2u; paths.pop_front()) fs::remove(paths.front(), ec);
     return 0;
 }
 

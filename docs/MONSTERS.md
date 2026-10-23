@@ -206,7 +206,7 @@ A quest's description at the counter shows a 42 by 42 picture for each of the qu
 
 Texture 3 is image 3 of the bank of menu textures, file 4074 (`0x0FEA`), a TMH of six images: 352 by 352 pixels, 4-bit indices swizzled as the GE reads them (blocks 16 bytes wide and 8 rows high; the first pixel of a byte in its low half), with 64 palettes of 16 RGBA8888 colours. The cells are a grid of 8 by 8; the game's rows use every cell but one, (7, 2), and every palette but 62 and 63.
 
-A kind a mod adds gets a row in `monster.pictures`: its base's, or with a picture of its own (`ymod_monster.picture`), the free cell and palette, the picture written into them when the game loads file 4074 (through the loader the files mods add go through). The kinds between the game's and it get row 0's. As there is one free cell, a second picture is refused and that kind shows its base's.
+A kind a mod adds gets a row in `monster.pictures`: its base's, or with a picture of its own (`ymod_monster.picture`), the free cell and palette, the picture written into them when the game loads file 4074 (through the loader the files mods add go through), over the file as the other mods have it: a replacement or patches of it are kept, though memory writes a patch makes after the file loads are not made then. The kinds between the game's and it get row 0's. As there is one free cell, a second picture is refused and that kind shows its base's.
 
 ## Not traced yet
 

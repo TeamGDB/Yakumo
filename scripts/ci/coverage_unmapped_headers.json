@@ -16,8 +16,8 @@
     "reason": "Function declarations and aggregate fields have no standalone LLVM line map; corresponding implementation mappings remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_mods.hpp": {
-    "sha256": "c643aaae0b25fdabe0466b7328c7e81ea2d91e446e249af868cb75952b70786d",
-    "reason": "Function declarations and aggregate fields have no standalone LLVM line map. Reviewed additions declare a bounded archive read, write_code(), which writes code mods at start, and code_loaded() returning the mods' code to call; executable implementations, archive and code-writing regressions in mhp3rd_mods_tests remain subject to the normal diff gate. disc_files(), the disc's file count that files.replace checks ids against, is covered by the renderer UI mod session test."
+    "sha256": "8492c933d596c8db6eb97ec549234185ea1f7b0dab45dda5e97107a0aa0b6b0a",
+    "reason": "Function declarations and aggregate fields have no standalone LLVM line map. Reviewed additions declare a bounded archive read, write_code(), which writes code mods at start, and code_loaded() returning the mods' code to call; executable implementations, archive and code-writing regressions in mhp3rd_mods_tests remain subject to the normal diff gate. disc_files(), the disc's file count that files.replace checks ids against, is covered by the renderer UI mod session test. modded_file(), a file as the mods have it, which mod pictures are composed over, is covered by the same test."
   },
   "profiles/mhp3rd/host/platform/android_documents.hpp": {
     "sha256": "439162292faf29450277ddea46b5d0eebbeee8fdc263286495a4b905605e522d",

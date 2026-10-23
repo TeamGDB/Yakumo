@@ -51,6 +51,7 @@ struct State {
     std::vector<Given> given;
     std::uint32_t rows_filled{kGameRows}; // rows past the game's given the unknown picture
     std::function<std::optional<std::vector<std::uint8_t>>(FileId)> reader;
+    std::vector<std::uint8_t> source; // the bank `served` was made from
     std::shared_ptr<const std::vector<std::uint8_t>> served;
     bool installed{};
 };
@@ -225,14 +226,18 @@ bool give(Runtime &runtime, std::uint8_t kind, std::uint8_t like, const Pixels *
 std::shared_ptr<const std::vector<std::uint8_t>> serve(Runtime &, FileId file) {
     State &s = state();
     if (file != kTextureFile || s.given.empty()) return nullptr;
-    if (s.served) return s.served;
-    std::optional<std::vector<std::uint8_t>> bank = s.reader ? s.reader(file) : original_file(file);
+    // The bank as the other mods have it (a replacement, a patch), made again
+    // when that changes.
+    std::optional<std::vector<std::uint8_t>> bank = s.reader ? s.reader(file) : modded_file(file);
     if (!bank) return nullptr;
+    if (s.served && *bank == s.source) return s.served;
+    std::vector<std::uint8_t> source = *bank;
     for (const Given &g : s.given) {
         std::optional<std::vector<std::uint8_t>> next = compose(*bank, g.column, g.row, g.palette, g.pixels);
-        if (!next) return nullptr; // not the bank traced: the game's, untouched
+        if (!next) return nullptr; // not the bank traced: the mods' or the game's, untouched
         bank = std::move(next);
     }
+    s.source = std::move(source);
     s.served = std::make_shared<const std::vector<std::uint8_t>>(std::move(*bank));
     return s.served;
 }

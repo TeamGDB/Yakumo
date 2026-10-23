@@ -2545,6 +2545,12 @@ void mods_screen_contracts(
         // can take it, since the change ends with the game.
         session->library().set_enabled(id, true);
         session->commit();
+        const auto text = [](const std::optional<std::vector<std::uint8_t>> &bytes) {
+            return bytes ? std::string(bytes->begin(), bytes->end()) : std::string("(none)");
+        };
+        expect(text(mods::modded_file(0u)) == "CHANGED!" && text(mods::original_file(0u)) == "PUBLIC!!" &&
+                text(mods::modded_file(1u)) == "SECOND!!" && !mods::modded_file(2u),
+            "a file as the mods have it is the replacement, the game's own where no mod changes it");
         ymod_mod *replacer = mods::native::add_mod(id, "Public", folder.string());
         const auto *files = static_cast<const ymod_files *>(mods::native::host()->service(replacer, YMOD_FILES, 1u));
         const std::string same = "SAMESIZE", longer = "NINEBYTES", elsewhere = "NONESUCH";
@@ -2579,9 +2585,21 @@ void mods_screen_contracts(
         session->library().set_enabled("Scripted", true);
         session->commit();
         const bool waits = session->restart_pending();
+        // While it waits, the game takes no file a mod replaces either.
+        session->library().set_enabled(id, true);
+        session->commit();
+        ymod_mod *replacer = mods::native::add_mod(id, "Public", folder.string());
+        const auto *files = static_cast<const ymod_files *>(mods::native::host()->service(replacer, YMOD_FILES, 1u));
+        const bool refused = files->replace(replacer, 1u, "SAMESIZE", 8u) == -1 &&
+            std::any_of(mods::native::reports().begin(), mods::native::reports().end(), [](const auto &report) {
+                return report.line.ends_with("is not replaced: another change on the Mods page waits for a restart");
+            });
+        mods::native::reset_for_tests();
+        session->library().set_enabled(id, false);
         session->library().set_enabled("Scripted", false);
         session->commit();
         expect(waits && !session->restart_pending(), "turning a script mod on while running waits for a restart");
+        expect(refused, "a file a mod replaces while a restart waits is refused, and why");
         std::error_code ec;
         std::filesystem::remove_all(scripted, ec);
         session->rescan();

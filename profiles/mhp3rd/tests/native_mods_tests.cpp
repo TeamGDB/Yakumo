@@ -1613,7 +1613,8 @@ void test_monsters(psprecomp::Runtime &runtime) {
             runtime.memory().load16(at), runtime.memory().load16(at + 2u), runtime.memory().load16(at + 4u)};
     };
     check(tables::placement("monster.pictures")->rows == 77u && picture_row(76u) != picture_row(58u) &&
-            !reported("Monster test", "monster black_fatalis: it has no picture"),
+            std::none_of(mhp3rd::mods::native::reports().begin(), mhp3rd::mods::native::reports().end(),
+                [](const auto &report) { return report.line.starts_with("monster black_fatalis: it"); }),
         "monsters: a kind given a picture gets a cell of its own for it");
     ymod_monster escape = spec;
     escape.id = "escaped";
@@ -2522,6 +2523,18 @@ void test_pictures(psprecomp::Runtime &runtime) {
         "pictures: the bank is served with the picture in it, made once, and no other file");
     runtime.cpu().gpr[5] = pictures::kTextureFile;
     check(call(runtime, 0x08864E8Cu, 0x08B3F040u) == bank.size(), "pictures: the game's loader is given that bank");
+    // Another mod's change to the bank (a replacement, a patch) is kept.
+    std::vector<std::uint8_t> changed = bank;
+    changed[kData] = 0x22u;
+    pictures::read_files_with_for_tests(
+        [&changed](mhp3rd::mods::FileId file) -> std::optional<std::vector<std::uint8_t>> {
+            if (file != pictures::kTextureFile) return std::nullopt;
+            return changed;
+        });
+    const auto remade = pictures::serve(runtime, pictures::kTextureFile);
+    check(remade && remade != served && (*remade)[kData] == 0x22u &&
+            ((*remade)[kData + 119u * 128u + 5u * 16u + 3u] >> 4) == 1u,
+        "pictures: a bank another mod changed is made again, with its change and the picture");
     check(
         !pictures::give(runtime, 77u, 58u, &picture, &why) && why == "the pictures' image has no cell or palette left",
         "pictures: once the cells are taken, another picture is refused");
