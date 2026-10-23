@@ -238,18 +238,55 @@ struct BlockTransfer {
     std::uint32_t bytes_per_pixel{};
 };
 
+// Per-display-list control state survives stalls independently for each GE
+// list submitted by the guest. Register and draw state remains in GeState.
+struct ListExecutionState {
+    struct CallFrame {
+        std::uint32_t return_pc{};
+        std::uint32_t offset_address{};
+    };
+    std::vector<CallFrame> call_stack;
+    std::uint32_t offset_address{};
+};
+
+// One END command the GE reached, for GeState::set_end_sink: where it is, the
+// whole command word before it, and whether it completed the list.
+struct EndEvent {
+    std::uint32_t end_address{};
+    std::uint32_t preceding_command{}; // 0 when there is no mapped command before END
+    bool finished{};
+};
+
+// MHP3RD_GE_STRICT_LISTS: strict list handling is on unless the variable is
+// exactly "0". `value` is the variable's text, null when it is not set.
+[[nodiscard]] constexpr bool strict_lists_from_text(const char *value) noexcept {
+    return value == nullptr || value[0] != '0' || value[1] != '\0';
+}
+
 // Executes display lists and reports the draw calls they produce. The backend
 // installs a sink; with no sink the lists are still parsed (for callbacks).
 class GeState {
 public:
+    using ListExecutionState = ::mhp3rd::gpu::ListExecutionState;
     using DrawSink = std::function<void(const DrawCall &)>;
     using SignalSink = std::function<void(std::uint32_t signal, std::uint32_t pc)>;
     using TransferSink = std::function<void(const BlockTransfer &)>;
+    using EndSink = std::function<void(const EndEvent &)>;
 
     void set_draw_sink(DrawSink sink) { draw_sink_ = std::move(sink); }
     void set_signal_sink(SignalSink sink) { signal_sink_ = std::move(sink); }
     // Block transfers are carried out by the sink, which can write guest memory.
     void set_transfer_sink(TransferSink sink) { transfer_sink_ = std::move(sink); }
+    // Sees every END command, whether or not it completes the list.
+    void set_end_sink(EndSink sink) { end_sink_ = std::move(sink); }
+    // On (the default): every list keeps its own CALL stack and OFFSET_ADDR,
+    // only FINISH or SIGNAL followed by END completes a list, and a list that
+    // reaches unmapped memory, nests CALLs past the limit or runs past the
+    // command budget throws. Off restores the earlier behaviour: one state
+    // shared by all lists, any END completes the list, those failures return
+    // quietly with `finished` false and CALLs nest without limit.
+    void set_strict_lists(bool strict) noexcept { strict_lists_ = strict; }
+    [[nodiscard]] bool strict_lists() const noexcept { return strict_lists_; }
     // Sees every transformed draw before the sink and may change its view
     // matrix, which is how the free camera (camera/free_camera.hpp) moves the
     // scene without the game knowing. Null, the default, costs nothing.
@@ -267,6 +304,8 @@ public:
     // Runs commands from `pc` until `stall` (0 = no stall) or END. Returns the
     // address execution stopped at; `finished` reports whether the list ended.
     std::uint32_t execute(const GuestMemory &memory, std::uint32_t pc, std::uint32_t stall, bool &finished);
+    std::uint32_t execute(const GuestMemory &memory, ListExecutionState &list_state, std::uint32_t pc,
+        std::uint32_t stall, bool &finished);
 
     [[nodiscard]] const RenderTarget &target() const noexcept { return target_; }
     [[nodiscard]] std::uint64_t draw_count() const noexcept { return draw_count_; }
@@ -278,7 +317,9 @@ public:
 private:
     // Resolves a display-list address operand against BASE and OFFSET_ADDR.
     [[nodiscard]] std::uint32_t relative_address(std::uint32_t data) const noexcept {
-        return (offset_address_ + (base_extended_ | (data & 0x00FFFFFFu))) & 0x0FFFFFFFu;
+        const std::uint32_t offset =
+            active_list_state_ != nullptr ? active_list_state_->offset_address : legacy_list_state_.offset_address;
+        return (offset + (base_extended_ | (data & 0x00FFFFFFu))) & 0x0FFFFFFFu;
     }
 
     void handle_command(const GuestMemory &memory, std::uint32_t command, std::uint32_t data);
@@ -306,8 +347,9 @@ private:
     std::uint32_t vertex_type_{};
     std::uint32_t vertex_address_{};
     std::uint32_t index_address_{};
-    std::uint32_t base_extended_{};  // BASE: bits 16..19 become address bits 24..27
-    std::uint32_t offset_address_{}; // OFFSET_ADDR: added to every relative address
+    std::uint32_t base_extended_{}; // BASE: bits 16..19 become address bits 24..27
+    ListExecutionState legacy_list_state_;
+    ListExecutionState *active_list_state_{};
     std::array<float, 16> world_{};
     std::array<float, 16> view_{};
     std::array<float, 16> projection_{};
@@ -322,18 +364,19 @@ private:
     std::uint32_t texture_write_index_{};
     std::uint32_t bone_write_index_{};
 
-    std::vector<std::uint32_t> call_stack_;
     std::uint32_t command_pc_{};
     DrawCall call_; // reused by draw_primitive for every draw
     DrawSink draw_sink_;
     SignalSink signal_sink_;
     TransferSink transfer_sink_;
+    EndSink end_sink_;
     ViewHook view_hook_;
     std::uint64_t draw_count_{};
     std::uint64_t vertex_count_{};
     std::uint64_t unhandled_commands_{};
     bool raw_vertices_{};
     bool raw_also_decoded_{};
+    bool strict_lists_{true};
 };
 
 // Copies the game makes out of VRAM with the DMA controller, remembered for

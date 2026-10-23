@@ -12,7 +12,7 @@
   "steps": [],
   "review": [
     {"id": "01-video", "expect": "Video settings are readable without overlapping labels, values or footer. Record window/target size and input method."},
-    {"id": "02-tabs", "expect": "Video, Audio, Controls, Network, QoL, Mods and System are reachable in both directions. The selected tab scrolls into view at the narrowest tested window."},
+    {"id": "02-tabs", "expect": "Video, Audio, Controls, Network, QoL, Mods, Layered Sets and System are reachable in both directions. The selected tab scrolls into view at the narrowest tested window."},
     {"id": "03-qol", "expect": "Fast Loading, Fast-Forward, Lock-On and Free Camera are on QoL. Reversible changes affect the copied settings only; disabled dependent rows cannot change their value."},
     {"id": "04-submenus", "expect": "Back closes the Layered Armor editor to QoL, the Mods browser to Mods and the save/translation browser to System, retaining the parent menu. Cancel without importing personal files."},
     {"id": "05-reopen", "expect": "Close and reopen the menu: selected section, scroll and focus are retained, and gameplay resumes. A separate restart reads the changed copied settings."},

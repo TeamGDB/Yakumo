@@ -61,10 +61,30 @@ if(MHP3RD_GENERATED)
     set(MHP3RD_HUD_INC "${CMAKE_CURRENT_BINARY_DIR}/generated_hooks/hud_functions.inc")
     file(CONFIGURE OUTPUT "${MHP3RD_HUD_INC}" CONTENT "${hud_lines}" @ONLY)
 
-    # Layered armor (host/game/layered_armor_hook.cpp) stands in for the game's
-    # lookup of an armor part's model and wraps the hunter's load step, so
-    # their units are read from the corpus too.
-    set(MHP3RD_LAYERED_FUNCTIONS 08869778 088A5564 088A5324)
+    # The appearance wrappers call the original generated unit first. Resolve
+    # each unit from the local corpus so partition changes cannot bind a stale
+    # function pointer.
+    foreach(binding IN ITEMS "HELPER;08869564" "CONVERTER;088A51E4" "WEAPON;0886A534" "WEAPON_SHARED;0886A568")
+        list(GET binding 0 name)
+        list(GET binding 1 address)
+        foreach(unit IN LISTS MHP3RD_GENERATED)
+            file(STRINGS "${unit}" hit REGEX "register_function\\(0x${address}u, &recomp_unit_[0-9]+," LIMIT_COUNT 1)
+            if(hit)
+                string(REGEX MATCH "recomp_unit_[0-9]+" MHP3RD_TRANSMOG_${name}_UNIT "${hit}")
+                break()
+            endif()
+        endforeach()
+        if(NOT MHP3RD_TRANSMOG_${name}_UNIT)
+            message(FATAL_ERROR "mhp3rd: no generated transmog ${name} helper 0x${address}; regenerate the supported executable")
+        endif()
+    endforeach()
+    if(NOT MHP3RD_TRANSMOG_WEAPON_UNIT STREQUAL MHP3RD_TRANSMOG_WEAPON_SHARED_UNIT)
+        message(FATAL_ERROR "mhp3rd: local weapon entry 0x0886A534 and shared leaf 0x0886A568 use different generated units; bind both original functions before building transmog")
+    endif()
+    # The Smithy preview guard (host/game/layered_armor_hook.cpp) wraps the
+    # game's part-buffer copy, and the developer device-test observation wraps
+    # the hunter's load step, so their units are read from the corpus too.
+    set(MHP3RD_LAYERED_FUNCTIONS 088A5564 088A5324)
     list(JOIN MHP3RD_LAYERED_FUNCTIONS "|" layered_pattern)
     set(layered_lines "")
     foreach(unit IN LISTS MHP3RD_GENERATED)
@@ -137,7 +157,7 @@ if(MHP3RD_RENDERER)
             host/ui/input_script.cpp
             host/ui/layer.cpp
             host/ui/menu.cpp
-            host/ui/layered_armor_screen.cpp
+            host/ui/transmog_screen.cpp
             host/ui/mods_screen.cpp
             host/ui/save_screen.cpp
             host/ui/setup_screens.cpp
@@ -264,6 +284,9 @@ set(MHP3RD_HOST_SOURCES
     host/game/equipment_models.cpp
     host/game/layered_armor.cpp
     host/game/layered_armor_hook.cpp
+    host/mods/transmog.cpp
+    host/mods/transmog_store.cpp
+    host/mods/transmog_weapon.cpp
     third_party/tiny_aes/aes.c
 )
 # tiny-AES-c is C; the project only enables C++, which compiles it unchanged.
@@ -351,6 +374,12 @@ endif()
 if(MHP3RD_LAYERED_INC)
     target_compile_definitions(Yakumo PRIVATE
         "MHP3RD_LAYERED_FUNCTIONS_INC=\"${MHP3RD_LAYERED_INC}\"")
+endif()
+if(MHP3RD_TRANSMOG_HELPER_UNIT)
+    set_property(SOURCE host/main.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+        MHP3RD_TRANSMOG_HELPER_UNIT=${MHP3RD_TRANSMOG_HELPER_UNIT}
+        MHP3RD_TRANSMOG_CONVERTER_UNIT=${MHP3RD_TRANSMOG_CONVERTER_UNIT}
+        MHP3RD_TRANSMOG_WEAPON_UNIT=${MHP3RD_TRANSMOG_WEAPON_UNIT})
 endif()
 # The NID table is compiled in, so the program reads nothing from the checkout
 # it was built in.
@@ -741,6 +770,35 @@ set_target_properties(mhp3rd_mods_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${C
 if(PSPRECOMP_BUILD_TESTS)
     add_test(NAME mhp3rd_mods_tests COMMAND mhp3rd_mods_tests)
 endif()
+
+# Appearance persistence and selectors run entirely on synthetic guest RAM.
+add_executable(mhp3rd_transmog_store_tests
+    tests/transmog_store_tests.cpp
+    host/mods/transmog_store.cpp
+    host/mods/mod_ini.cpp)
+target_include_directories(mhp3rd_transmog_store_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host" "${PROJECT_SOURCE_DIR}/include")
+set_target_properties(mhp3rd_transmog_store_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_transmog_store_tests COMMAND mhp3rd_transmog_store_tests)
+endif()
+foreach(transmog_test IN ITEMS transmog transmog_weapon)
+    add_executable(mhp3rd_${transmog_test}_tests
+        tests/${transmog_test}_tests.cpp
+        tests/transmog_test_support.cpp
+        host/mods/transmog.cpp
+        host/mods/transmog_weapon.cpp
+        host/mods/transmog_store.cpp
+        host/mods/mod_ini.cpp
+        host/input/presets.cpp
+        host/input/touch_action.cpp
+        host/input/touch_controls.cpp)
+    target_include_directories(mhp3rd_${transmog_test}_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+    target_link_libraries(mhp3rd_${transmog_test}_tests PRIVATE psprecomp_core)
+    set_target_properties(mhp3rd_${transmog_test}_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    if(PSPRECOMP_BUILD_TESTS)
+        add_test(NAME mhp3rd_${transmog_test}_tests COMMAND mhp3rd_${transmog_test}_tests)
+    endif()
+endforeach()
 
 # Which file holds a piece of equipment's model, read from the game's tables
 # as equipment mods need it, on a buffer standing for guest memory. No game data.

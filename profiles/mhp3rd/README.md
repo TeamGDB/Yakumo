@@ -409,10 +409,10 @@ The menu's text fields (*Hunter Name*, *Server*, *Nickname*) open the same keybo
 
 Drag the top tabs left or right with a mouse or a finger to scroll them. Releasing a drag does not switch tabs; a click does. Q/W and gamepad shoulder buttons still switch sections and reveal the selected tab. When using touch, the Q/W or shoulder-button hints beside the tabs disappear and the tabs use the full row. The bottom button hints give way to a **Close Menu** button at the bottom right. Pressing a keyboard key, mouse button or gamepad control restores its button hints.
 
-QoL groups Lock-On, Lock-On Marker and Layered Armor under **Modern Features:**, quest HUD visibility, per-block size and positioning under **HUD Settings:**, Fast Loading under **Quality of Life:**, and Fast-Forward and Fast-Forward Speed under **Singleplayer Only Cheats:**. Free-camera options remain under **Experimental Options:**. The page ends with **Reset to Defaults:** and **Restore QoL Defaults**.
+QoL groups Lock-On and Lock-On Marker under **Modern Features:**, quest HUD visibility, per-block size and positioning under **HUD Settings:**, Fast Loading under **Quality of Life:**, and Fast-Forward and Fast-Forward Speed under **Singleplayer Only Cheats:**. Free-camera options remain under **Experimental Options:**. The page ends with **Reset to Defaults:** and **Restore QoL Defaults**.
 
 Restore QoL Defaults also resets the free-camera controls. Explicit environment
-overrides, other settings pages and the separate layered armor editor's choices
+overrides, other settings pages and the Layered Sets choices
 are preserved.
 
 Esc, or L3+R3 on a gamepad, opens Yakumo's menu over the game; the same again, back at its top level or Start closes it. Esc never quits the game: Steam's desktop controller layout on a Steam Deck sends Esc with the B button, so an Esc that arrives together with a gamepad button is ignored.
@@ -486,9 +486,10 @@ The Android app starts from other defaults where a phone differs, with the same 
 | Controls | A control's *Keyboard and Mouse* bindings under [Rebinding](#rebinding) (Move Forward … △ + ○, Fast-Forward, Screenshot, Frame Step, Hide HUD) | `input.bind.<control>` | | Up to four keys, mouse buttons or combinations, see [Keyboard and mouse](#keyboard-and-mouse); part of the preset |
 | QoL (Modern Features) | Lock-On | `input.lock_on` | `MHP3RD_LOCK_ON` | On (default) or off: what the [Lock on](#lock-on) bind does. Off, the bind does nothing |
 | QoL (Modern Features) | Lock-On Marker | `input.lock_on_marker` | | On (default) or off: a ring over the locked monster |
-| QoL (Modern Features → Layered Armor) | Layered Armor | `look.layered_armor` | `MHP3RD_LAYERED_ARMOR` | Off (default) or on: the hunter is drawn in the pieces chosen below; stats, skills and the save keep the real armor. See [Layered armor](#layered-armor) |
-| QoL (Modern Features → Layered Armor) | Head, Chest, Arms, Waist, Legs | `look.layered_head`, `look.layered_chest`, `look.layered_arms`, `look.layered_waist`, `look.layered_legs` | | `real` (default): the piece worn; `0`: nothing; otherwise the id of the armor piece to show |
-| QoL (Modern Features → Layered Armor) | List All Armor | `look.layered_all` | | Off (default): the lists offer the pieces the hunter wears or keeps in the equipment box; on: every piece its sex can wear |
+| Mods | Layered Sets | `look.layered_armor` | `MHP3RD_LAYERED_ARMOR` | Off (default) or on: appearance-only armor and weapon choices; stats, skills, equipment and saves keep the real items. See [Layered Sets](#layered-sets) |
+| Layered Sets | Head, Chest, Arms, Waist, Legs | `transmog.ini` | | Five independent appearance choices with either donor sex, or the real equipped appearance. Existing `look.layered_*` values are imported once when no `transmog.ini` exists |
+| Layered Sets | Weapon | `transmog.ini` | | Optional donor from the equipped weapon's class; a saved donor for another class stays stored but does not change the current weapon |
+| Layered Sets | List All Armor | `look.layered_all` | | Off (default): the lists offer owned pieces; on: every armor appearance with a model for the donor sex |
 | QoL (HUD Settings) | Hide HUD | | `MHP3RD_HIDE_HUD` | Off (default) or on, for this run: the game's HUD, name tags and prompts are left out of the picture; menus and dialogs stay. Same as the Hide HUD key. See [Hiding the HUD](#hiding-the-hud) |
 | QoL (HUD Settings → Edit HUD Layout) | Block Scale; Drag to Move | `hud.status.scale/x/y`, `hud.map.scale/x/y`, `hud.items.scale/x/y` | | Individual scale (50–200%) and offsets from the original corners, as fractions of the game picture; default scale 1, offsets 0 |
 | QoL (HUD Settings) | Restore HUD Defaults | | | Restores the original size and position of all three blocks, including while the HUD is hidden |
@@ -658,15 +659,13 @@ How it works: every file of the game comes from `DATA.BIN`, and the file I/O rea
 
 `MHP3RD_TRACE_MODS=1` logs what the mods change, each read they serve (`[mods] read 0FEE +0 131072 of 628736 bytes: replaced by …`) and each write made after an overlay loads; problems with a mod are logged whether it is set or not. `MHP3RD_TRACE_DATA_BIN=1` logs the id of every file the game reads while a mod is on: change the equipment on screen and the new ids are the files to target.
 
-### Layered armor
+### Layered Sets
 
-**Layered Armor** (QoL → Modern Features → Layered Armor, `look.layered_armor`) draws your hunter in other armor than it wears, part by part, while everything else keeps the real armor: defense, resistances, skills, the Equipment screen, the save and what the game sends to other players. It is off by default, and off it changes nothing at all.
+**Layered Sets** (the menu's Layered Sets tab, `look.layered_armor`) changes the loaded hunter's appearance while keeping defense, skills, decorations, equipment, the game save and what the game sends to other players unchanged. It is off by default. The page offers five independent armor slots, including bare and cross-sex donor models, and an equipped-class weapon picker. A saved weapon donor applies only while its class matches the equipped weapon; armor choices remain active when it does not match.
 
-The page has the switch and a row per part (head, chest, arms, waist, legs). Each row opens a list: *Real Equipment*, *Nothing* (the bare part, or the inner wear where the game shows it), then the pieces your hunter wears or keeps in the equipment box, with the game's own names; *List All Armor* offers every piece a hunter of that sex can wear. A piece the hunter's sex cannot wear shows the real one. The choices are kept in `settings.ini`, not in the game's save, so the save stays exactly what a PSP or another emulator expects. They apply to whichever character is loaded.
+Opening Layered Sets from the paused menu resumes the game with the editor open and the hunter visible. The Layered Sets on/off switch is in Mods. Edits, including Reset All to Default, are staged until Apply; Cancel restores the saved active appearance. Both controls return to a live editor, and named sets survive Reset. The active choices and named sets live in `transmog.ini` under the Yakumo user data directory. Existing `look.layered_*` settings are imported once if this file does not yet exist, after a hunter and the armor catalog have loaded. `look.layered_all` still controls whether the armor picker shows only owned pieces or all available donor models.
 
-A change shows the next time the game loads the hunter: entering another area, starting or leaving a quest, or changing equipment at the item box. Only the parts that changed are read again.
-
-**Other players** see your real armor: layered armor only changes what your own game draws for your own hunter, and other hunters are drawn from what their games sent. [LAYERED_ARMOR.md](../../docs/LAYERED_ARMOR.md) says what was traced and how. `MHP3RD_TRACE_LAYERED_ARMOR=1` logs each part it draws differently.
+The visual refresh waits for the current GE display list and its finish callback before changing resources. **Other players** still see the real armor and weapon. [LAYERED_ARMOR.md](../../docs/LAYERED_ARMOR.md) records the original armor trace; the live refresh and weapon extension use the same appearance-only principle. `MHP3RD_TRACE_TRANSMOG=1` enables diagnostic output for supported builds.
 
 ## Saving and loading
 
@@ -1244,12 +1243,14 @@ With the setting off nothing is hooked into the display lists, no input is read 
 | `MHP3RD_TRACE_LOAD=1` | Four `[loadtrace]` lines a second: real and emulated time, flips, disc and memory stick reads, the loudest audio sample, time spent holding the game to real time, and which guest threads had the CPU. What [Fast loading](#fast-loading) was measured with |
 | `MHP3RD_TRACE_MODS=1` | What the [mods](#mods) change at start and after each change, every `DATA.BIN` read they serve, and each write made after an overlay loads |
 | `MHP3RD_TRACE_DATA_BIN=1` | While a mod is on, the id of every `DATA.BIN` file the game reads (`[mods] data 034B (32768 bytes)`): how to find the file behind a model on screen |
-| `MHP3RD_TRACE_LAYERED_ARMOR=1` | Each armor part [layered armor](#layered-armor) draws differently (`[layered] Chest: model 22 instead of the worn piece's`), and each time a changed look makes the hunter load its models again |
 | `MHP3RD_LAYERED_PREVIEW_FIX=0` | Disable the Smithy preview appearance consistency guard for diagnosis; normal play should leave it enabled |
+| `MHP3RD_TRACE_TRANSMOG=1` | Diagnostic selection, GE fence and native refresh events for [Layered Sets](#layered-sets) |
 | `MHP3RD_TRACE_SAVEDATA=1` | Log every field of each save-data request and each status poll |
 | `MHP3RD_TRACE_SYNC=1` | Trace semaphores, event flags and mutexes; `MHP3RD_TRACE_SYNC_LIMIT` caps the lines (default 4000) |
 | `MHP3RD_STARVATION_INTERVAL` | Dispatches between virtual-clock advances in code that never calls an import |
 | `MHP3RD_TRACE_GE=1` | Log the first draws of the run with their state |
+| `MHP3RD_TRACE_GE_LISTS=1` | One `[ge-list]` line per display list start (`start id=N list=0x... stall=0x...`), per END command the GE reaches (`end id=N list=0x... at=0x... prev=0x... finished=0\|1`, `prev` being the command before END) and per list completion (`done id=N list=0x... pc=0x...`, or `aborted`); `MHP3RD_TRACE_GE_LISTS_LIMIT` caps the lines (default 4000) |
+| `MHP3RD_GE_STRICT_LISTS=0` | Go back to the earlier display-list handling, for comparison: one CALL stack and `OFFSET_ADDR` shared by all lists, any END completes a list, a list that reaches unmapped memory or runs 2,000,000 commands stops quietly instead of being dropped with a `[ge] display list aborted` line, and CALLs nest without limit. By default each list keeps its own CALL stack, only FINISH or SIGNAL followed by END completes it, and CALLs nest at most 1024 deep |
 | `MHP3RD_CHECK_DIRECT_VERTICES=1` | Expand each transformed draw as well and compare it, vertex by vertex and byte for byte, with what its index list names; prints `[direct-check] N draws compared, M differed` every 300 frames. Slow |
 | `MHP3RD_TRACE_STALLS=1` | Where the render thread waits, once a second and for every slow frame; `MHP3RD_TRACE_STALLS_MS` sets what is slow (default 40). See [Where the render thread waits](#where-the-render-thread-waits) |
 | `MHP3RD_TRACE_INTERPOLATION=1` | With a frame rate above 30, an `[interp]` line a second: the rate running and the one chosen, how many draws matched, the camera's largest turn and the eye's largest move, cuts by reason, presents, the time of a blended present and of recording its draw calls, the draw calls and GPU time of one in-between frame, the plain presents, skipped ones, the latest one, and the delay from a frame's moment to its present. A second line says why presents showed a frame as it is (`at the newest frame`: one per game frame at 60, 90 and 120, as it should be; `at the older`, `not blended (cut)`, `textures dropped`) and which were not made (`display busy`: no swapchain image within 3 ms; `over budget`: presents during the game's code had taken half a frame). It also says when the rate steps down or up, and why. `frames` adds a line per game frame, `presents` a line per present with its blend factor |

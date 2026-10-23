@@ -1,16 +1,17 @@
 #include "game/layered_armor.hpp"
 
 #include "game/guest_ram.hpp"
-#include "settings/settings.hpp"
+#include "mods/transmog.hpp"
 
 #include "psprecomp/runtime.hpp"
 
+#include <array>
 #include <cstdlib>
 #include <iostream>
 #include <string>
 
-// The generated unit the game's model lookup was compiled into, found by CMake
-// in the corpus (MHP3RD_LAYERED_FUNCTIONS in CMakeLists.txt).
+// The generated units the game's code was compiled into, found by CMake in the
+// corpus (MHP3RD_LAYERED_FUNCTIONS in CMakeLists.txt).
 #if defined(MHP3RD_LAYERED_FUNCTIONS_INC)
 namespace psprecomp {
 #define MHP3RD_LAYERED_FUNCTION(address, unit) void unit(Runtime &, AllegrexContext &);
@@ -19,6 +20,10 @@ namespace psprecomp {
 } // namespace psprecomp
 #endif
 
+// The appearance selector itself lives in mods/transmog.cpp. This file keeps
+// the two wrappers that do not depend on how the appearance is chosen: the
+// Smithy preview guard (docs/LAYERED_ARMOR.md, "Smithy previews") and the
+// developer device-test observation of the hunter the real loader steps.
 namespace mhp3rd::game::layered {
 namespace {
 
@@ -42,28 +47,11 @@ const Compiled *compiled(std::uint32_t address) {
     return nullptr;
 }
 
-// The first instructions of the lookup, as traced: the record's address from
-// a1 (a1 * 252 + 0x30), the check that the part is below 7, and the jump
-// table by part. A different executable does not get the replacement.
 struct CodeWord {
     std::uint32_t address;
     std::uint32_t word;
 };
-constexpr CodeWord kSignature[] = {
-    {0x08869778u, 0x00051200u},  // sll v0,a1,8
-    {0x0886977Cu, 0x00052880u},  // sll a1,a1,2
-    {0x08869780u, 0x00451023u},  // subu v0,v0,a1
-    {0x08869784u, 0x24420030u},  // addiu v0,v0,0x30
-    {0x08869788u, 0x2CC30007u},  // sltiu v1,a2,7
-    {0x088697C8u, 0x94A20030u},  // lhu v0,0x30(a1): the waist's id
-    {0x08869800u, 0x94A2001Cu},  // lhu v0,0x1C(a1): the chest's id
-    {0x08869858u, 0x94A20044u},  // lhu v0,0x44(a1): the head's id
-    {0x08869890u, 0x94A2003Au},  // lhu v0,0x3A(a1): the legs' id
-    {0x088698C8u, 0x94A20026u},  // lhu v0,0x26(a1): the arms' id
-};
-
-// What starting a hunter's load over relies on: the load step and the game's
-// own request.
+// What the observation relies on: the load step reading the hunter's state.
 constexpr CodeWord kLoadSignature[] = {
     {0x088A5598u, 0x8E230B80u},  // lw v1,0xB80(s1): the step reads the state
     {0x088A55BCu, 0xAE320B80u},  // sw s2,0xB80(s1): 0 becomes 1, the first part
@@ -77,25 +65,12 @@ constexpr CodeWord kLoadSignature[] = {
 };
 
 struct State {
-    bool checked{};
-    bool usable{};
-    bool installed{};
     bool trace{};
-    const Compiled *original{};
-    const Compiled *step{};
     const Compiled *preview_original{};
-    bool preview_installed{};
-    bool step_installed{};
+    const Compiled *step{};
     std::uint32_t observed_object{};
     const psprecomp::GuestMemory *observed_memory{};
     std::array<std::uint32_t, 16> observed_map{};
-    // The settings as of the last flip; the menu changes them between frames.
-    bool on{};
-    Pieces pieces{kReal, kReal, kReal, kReal, kReal};
-    // The look the hunter played here was last loaded with: the one at the
-    // first flip, then the one of each load the game ran on it.
-    bool loaded_known{};
-    Pieces loaded{kReal, kReal, kReal, kReal, kReal};
 };
 State &state() {
     static State s;
@@ -120,144 +95,79 @@ bool device_observations() {
 #endif
 }
 
-void model_of_part(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &ctx) {
-    State &s = state();
-    if (s.on) {
-        const GuestRam ram(runtime.memory());
-        const std::optional<std::uint16_t> model = replacement_model(ram, ctx.gpr[4], ctx.gpr[5], ctx.gpr[6], s.pieces);
-        if (model) {
-            if (s.trace)
-                std::cout << "[layered] " << part_label(static_cast<std::uint8_t>(ctx.gpr[6])) << ": model " << *model
-                          << " instead of the worn piece's (hunter " << ctx.gpr[5] << ", from 0x" << std::hex
-                          << ctx.gpr[31] << std::dec << ")\n";
-            // What the game's function leaves for its caller: the model in v0,
-            // back to the return address. It only reads memory.
-            ctx.gpr[2] = *model;
-            ctx.pc = ctx.gpr[31];
-            return;
-        }
+// The look the live hunter was last loaded with, in the order of the game's
+// parts (chest, arms, waist, legs, head). The Smithy preview is private to
+// one sex, so only a donor of that sex can be described by an equipment id;
+// any other part stays real, which leaves the preview to the game's own code.
+Pieces loaded_pieces(std::uint8_t sex) {
+    Pieces pieces{kReal, kReal, kReal, kReal, kReal};
+    const mods::transmog::Set &applied = mods::transmog::applied_selection();
+    for (std::uint8_t part = 0; part < kParts; ++part) {
+        const auto &armor = applied.armor[part == 4u ? 0u : part + 1u];
+        if (armor && armor->gender == sex) pieces[part] = armor->id;
     }
-    s.original->function(runtime, ctx);
+    return pieces;
 }
 
 void preview_copy_part(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &ctx) {
     State &s = state();
     GuestRam ram(runtime.memory());
     // At this constructor call, s3 holds the live hunter, a0 the preview and
-    // a1 the part. Use the loaded look, even if the menu settings changed later.
-    if (prepare_preview_copy(ram, ctx.gpr[31], ctx.gpr[4], ctx.gpr[19], ctx.gpr[5], s.loaded) && s.trace)
-        std::cout << "[layered-preview] copied part=" << ctx.gpr[5] << " appearance=" << s.loaded[ctx.gpr[5]] << '\n';
+    // a1 the part. Use the look the hunter was loaded with, even if the menu
+    // staged a different one since.
+    const std::uint32_t source = ctx.gpr[19];
+    if (ram.contains(source + 0x458u, 1u)) {
+        const Pieces loaded = loaded_pieces(ram.load8(source + 0x458u));
+        if (prepare_preview_copy(ram, ctx.gpr[31], ctx.gpr[4], source, ctx.gpr[5], loaded) && s.trace)
+            std::cout << "[layered-preview] copied part=" << ctx.gpr[5] << " appearance=" << loaded[ctx.gpr[5]]
+                      << '\n';
+    }
     s.preview_original->function(runtime, ctx);
 }
 
-// The look the hunter is to be drawn in; the real one while off.
-Pieces wanted(const State &s) { return s.on ? s.pieces : Pieces{kReal, kReal, kReal, kReal, kReal}; }
-
-void load_step(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &ctx) {
+void observe_load_step(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &ctx) {
     State &s = state();
-    GuestRam ram(runtime.memory());
+    const GuestRam ram(runtime.memory());
     const std::uint32_t object = ctx.gpr[4];
     if (own_hunter(ram, object)) {
-        if (device_observations()) {
-            s.observed_object = object;
-            s.observed_memory = &runtime.memory();
-            s.observed_map = map_header(runtime.memory());
-        }
-        const Pieces look = wanted(s);
-        if (!load_done(ram, object)) {
-            // A load the game started: it asks for the files with the look as
-            // it is now.
-            s.loaded = look;
-        } else if (s.loaded != look) {
-            restart_load(ram, object);
-            s.loaded = look;
-            if (s.trace) std::cout << "[layered] the look changed: the hunter loads its models again\n";
-        }
+        s.observed_object = object;
+        s.observed_memory = &runtime.memory();
+        s.observed_map = map_header(runtime.memory());
     }
     s.step->function(runtime, ctx);
 }
 
-bool check(psprecomp::Runtime &runtime) {
+} // namespace
+
+void install_guards(psprecomp::Runtime &runtime) {
     State &s = state();
-    s.original = compiled(kModelOfPart);
-    if (s.original == nullptr) {
-        std::cerr << "[layered] the game's armor model lookup is not in the generated code; layered armor "
-                     "unavailable\n";
-        return false;
+    const char *text = std::getenv("MHP3RD_TRACE_TRANSMOG");
+    s.trace = text != nullptr && *text != '\0' && std::string(text) != "0";
+    // This guard stays in place whether or not Layered Sets is on: the live
+    // hunter can still carry the old loaded appearance until the next scene
+    // load. It changes nothing unless a layered part was loaded.
+    const char *preview_fix = std::getenv("MHP3RD_LAYERED_PREVIEW_FIX");
+    if (!(preview_fix && std::string(preview_fix) == "0")) {
+        s.preview_original = compiled(kCopyPart);
+        if (s.preview_original != nullptr && (runtime.memory().load32(kCopyPart) != 0x27BDFFF0u ||
+                                              runtime.memory().load32(kCopyPart + 4u) != 0xAFB20008u))
+            s.preview_original = nullptr;
+        if (s.preview_original != nullptr)
+            runtime.register_function(kCopyPart, &preview_copy_part, "mhp3rd_layered_preview_copy");
+        else if (runtime.has_function(kCopyPart))
+            std::cerr << "[layered] the Smithy preview constructor is not as traced; the preview guard is "
+                         "unavailable\n";
     }
-    for (const CodeWord &expected : kSignature) {
-        const std::uint32_t found = runtime.memory().load32(expected.address);
-        if (found == expected.word) continue;
-        std::cerr << "[layered] game code differs at 0x" << std::hex << expected.address << ": 0x" << found
-                  << ", expected 0x" << expected.word << std::dec << "; layered armor unavailable\n";
-        return false;
-    }
-    s.preview_original = compiled(kCopyPart);
-    if (runtime.memory().load32(kCopyPart) != 0x27BDFFF0u ||
-        runtime.memory().load32(kCopyPart + 4u) != 0xAFB20008u) s.preview_original = nullptr;
+    if (!device_observations()) return;
     s.step = compiled(kLoadStep);
     for (const CodeWord &expected : kLoadSignature)
         if (runtime.memory().load32(expected.address) != expected.word) s.step = nullptr;
-    if (s.step == nullptr)
-        std::cerr << "[layered] the hunter's load step is not as traced; a new look shows after a restart\n";
-    return true;
+    if (s.step == nullptr) {
+        std::cerr << "[layered] the hunter's load step is not as traced; device observations are unavailable\n";
+        return;
+    }
+    runtime.register_function(kLoadStep, &observe_load_step, "mhp3rd_device_hunter_observation");
 }
-
-} // namespace
-
-void frame(psprecomp::Runtime &runtime) {
-    State &s = state();
-    const settings::Settings &settings = settings::current();
-    s.on = settings.layered_armor;
-    s.pieces = settings.layered_pieces;
-    // The look the game starts with: the hunter's first load asks for it.
-    if (!s.loaded_known) {
-        s.loaded_known = true;
-        s.loaded = wanted(s);
-    }
-    // Off from the start: nothing is registered, and the game runs exactly as
-    // it was built.
-    const bool observe = device_observations();
-    if (!s.on && !s.installed && !observe) return;
-    if (!s.checked) {
-        s.checked = true;
-        const char *text = std::getenv("MHP3RD_TRACE_LAYERED_ARMOR");
-        s.trace = text != nullptr && *text != '\0' && std::string(text) != "0";
-        s.usable = check(runtime);
-    }
-    if (!s.usable) return;
-    if (observe && !s.step_installed && s.step != nullptr) {
-        runtime.register_function(kLoadStep, &load_step, "mhp3rd_device_hunter_observation");
-        s.step_installed = true;
-    }
-    // Keep this guard after switching layered armor off: the live hunter can
-    // still carry the old loaded appearance until the next scene load.
-    const char *preview_fix = std::getenv("MHP3RD_LAYERED_PREVIEW_FIX");
-    if (s.on && !s.preview_installed && s.preview_original &&
-        !(preview_fix && std::string(preview_fix) == "0")) {
-        runtime.register_function(kCopyPart, &preview_copy_part, "mhp3rd_layered_preview_copy");
-        s.preview_installed = true;
-    }
-    // Only ever at the flip, from an import: no generated code is running, so
-    // the dispatch tables can change here.
-    if (s.on && !s.installed) {
-        runtime.register_function(kModelOfPart, &model_of_part, "mhp3rd_layered_armor");
-        s.installed = true;
-        // Stays once in place, to show the real look again after turning off.
-        if (s.step != nullptr && !s.step_installed) {
-            runtime.register_function(kLoadStep, &load_step, "mhp3rd_layered_armor_load");
-            s.step_installed = true;
-        }
-        std::cout << "[layered] on\n";
-    } else if (!s.on && s.installed) {
-        // The game's own lookup again, as the generated code registered it.
-        runtime.register_function(kModelOfPart, s.original->function, s.original->name);
-        s.installed = false;
-        std::cout << "[layered] off\n";
-    }
-}
-
-bool installed() { return state().installed; }
 
 std::uint32_t observed_hunter(const psprecomp::GuestMemory &memory) {
     const State &s = state();

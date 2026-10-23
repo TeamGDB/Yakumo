@@ -10,7 +10,6 @@
 #include "game/guest_ram.hpp"
 #include "game/audio_settings.hpp"
 #include "game/layered_armor.hpp"
-#include "ui/layered_armor_screen.hpp"
 #include "ui/font_menu.hpp"
 #include "fonts/game_font.hpp"
 #include "mods/mhp3rd_mods.hpp"
@@ -4676,7 +4675,7 @@ void touch_menu_footer_contracts(gpu::VulkanRenderer &renderer, const std::files
     consume();
     io.AddKeyEvent(ImGuiKey_W, false);
     consume();
-    expect(ui::menu_over_game() && !footer() && !touch_tabs() && selected_tab() == (before + 1) % 7,
+    expect(ui::menu_over_game() && !footer() && !touch_tabs() && selected_tab() == (before + 1) % 8,
         "reopening after a touch close restores keyboard tab navigation and ordinary hints");
     SDL_Event escape{};
     escape.type = SDL_EVENT_KEY_DOWN;
@@ -4725,15 +4724,17 @@ void menu_contracts(gpu::VulkanRenderer &renderer, psprecomp::Runtime &runtime, 
         return nullptr;
     };
     auto *tab_strip = find_tab_strip();
-    expect(tab_strip && tab_strip->ScrollMax.x > 0.0f, "seven menu tabs overflow into a horizontally scrollable strip");
-    for (int tab = 0; tab < 7; ++tab) {
+    expect(tab_strip && tab_strip->ScrollMax.x > 0.0f, "eight menu tabs overflow into a horizontally scrollable strip");
+    for (int tab = 0; tab < 8; ++tab) {
         ImGui::GetIO().AddKeyEvent(ImGuiKey_W, true);
         frame();
         ImGui::GetIO().AddKeyEvent(ImGuiKey_W, false);
         frame();
         expect(ui::menu_over_game() && !ui::take_quit_request(),
             "visiting each page retains menu without requesting quit");
-        if (tab == 5) {
+        if (tab == 6) {
+            // ImGui applies SetScrollX on the frame after the compact preview expands.
+            frame();
             tab_strip = find_tab_strip();
             expect(
                 tab_strip && tab_strip->Scroll.x > 0.0f, "keyboard navigation scrolls the selected last tab into view");
@@ -5365,47 +5366,6 @@ void menu_contracts(gpu::VulkanRenderer &renderer, psprecomp::Runtime &runtime, 
 
     change_video("Network Overlay", ImGuiKey_Space);
     page();
-    const bool layered_before_open = settings::current().layered_armor;
-    change_video("Layered Armor", ImGuiKey_Space);
-    expect(ui::layered_armor_screen_open() && ui::menu_over_game(),
-        "QoL Layered Armor row opens its editor inside the actual menu");
-    expect(settings::current().layered_armor == layered_before_open,
-        "opening the layered editor leaves the armor setting unchanged");
-    // Feed a real SDL virtual pad: the backend replaces synthetic ImGui gamepad keys each frame.
-    SDL_VirtualJoystickDesc back_desc{};
-    SDL_INIT_INTERFACE(&back_desc);
-    back_desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
-    back_desc.naxes = SDL_GAMEPAD_AXIS_COUNT;
-    back_desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
-    back_desc.axis_mask = (1u << SDL_GAMEPAD_AXIS_COUNT) - 1;
-    back_desc.button_mask = (1u << SDL_GAMEPAD_BUTTON_COUNT) - 1;
-    back_desc.name = "Public layered menu controller";
-    const auto back_id = SDL_AttachVirtualJoystick(&back_desc);
-    auto *back_pad = back_id ? SDL_OpenGamepad(back_id) : nullptr;
-    expect(back_pad != nullptr, "layered menu Back fixture opens a real SDL virtual gamepad");
-    if (back_pad) {
-        ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_Manual, &back_pad, 1);
-        renderer.pump_events();
-        frame();
-        frame();
-        auto *back_joystick = SDL_GetGamepadJoystick(back_pad);
-        const auto back_button = ui::Layer::get().confirm_south() ? SDL_GAMEPAD_BUTTON_EAST : SDL_GAMEPAD_BUTTON_SOUTH;
-        expect(SDL_SetJoystickVirtualButton(back_joystick, back_button, true), "layered menu Back button presses");
-        SDL_UpdateJoysticks();
-        renderer.pump_events();
-        frame();
-        expect(SDL_SetJoystickVirtualButton(back_joystick, back_button, false), "layered menu Back button releases");
-        SDL_UpdateJoysticks();
-        renderer.pump_events();
-        frame();
-        ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_AutoAll);
-        SDL_CloseGamepad(back_pad);
-    }
-    if (back_id) SDL_DetachVirtualJoystick(back_id);
-    renderer.pump_events();
-    frame();
-    expect(!ui::layered_armor_screen_open() && ui::menu_over_game() && !ui::take_quit_request(),
-        "back closes the layered editor and returns to QoL without closing the menu");
     if (gpu::hud::available() && gpu::hud::layout_enabled()) {
         const auto saved_hud = settings::current().hud;
         const bool hidden_before_menu = gpu::hud::hidden();
@@ -5481,6 +5441,7 @@ void menu_contracts(gpu::VulkanRenderer &renderer, psprecomp::Runtime &runtime, 
             reset_qol.layered_armor == before_qol_reset.layered_armor,
         "QoL defaults preserve other pages and the separate layered armor editor");
     settings::current() = before_qol_reset;
+    page();
     page();
     page();
     cycle_setting("When the Game Asks for a Name", &settings::Settings::name_entry);
@@ -5630,123 +5591,6 @@ void menu_contracts(gpu::VulkanRenderer &renderer, psprecomp::Runtime &runtime, 
     layer.set_interactive(false);
     menu_io.ConfigFlags =
         (menu_io.ConfigFlags & ~ImGuiConfigFlags_NoMouse) | (saved_config_flags & ImGuiConfigFlags_NoMouse);
-}
-
-void layered_armor_ui_contracts(gpu::VulkanRenderer &renderer, psprecomp::Runtime &runtime) {
-    auto &layer = ui::Layer::get();
-    expect(layer.attach(renderer), "layered fixture attaches the real UI");
-    layer.set_interactive(true);
-    const auto saved = settings::current();
-    settings::current().layered_armor = false;
-    settings::current().layered_all = false;
-    settings::current().layered_pieces.fill(game::layered::kReal);
-    auto frame = [&](const char *focus = nullptr, bool back = false) {
-        layer.begin_frame();
-        ui::begin_panel("##layered-contract", "Public layered armor", "", false);
-        ui::begin_content();
-        if (focus) {
-            auto *w = ImGui::GetCurrentWindow();
-            ImGui::FocusWindow(w);
-            ImGui::SetFocusID(w->GetID(focus), w);
-            ImGui::SetNavCursorVisible(true);
-        }
-        if (ui::layered_armor_screen_open())
-            ui::layered_armor_screen(back);
-        else
-            ui::layered_armor_row();
-        ui::begin_footer();
-        ui::hints({{ui::Control::Confirm, "Choose"}, {ui::Control::Back, "Back"}});
-        ui::end_panel();
-        layer.end_frame();
-        renderer.present_ui(false);
-    };
-    auto select = [&](const char *id) {
-        frame(id);
-        frame(id);
-        ImGui::GetIO().AddKeyEvent(ImGuiKey_Space, true);
-        frame(id);
-        ImGui::GetIO().AddKeyEvent(ImGuiKey_Space, false);
-        frame();
-    };
-    select("Layered Armor");
-    expect(ui::layered_armor_screen_open(), "layered menu opens before any hunter frame is attached");
-    frame();
-    frame(nullptr, true);
-    expect(!ui::layered_armor_screen_open(), "back closes unloaded layered page");
-    auto &memory = runtime.memory();
-    game::attach(runtime);
-    select("Layered Armor");
-    select("Head##layered4");
-    expect(settings::current().layered_pieces[4] == game::layered::kReal,
-        "unloaded hunter cannot choose a disabled armor part");
-    frame(nullptr, true);
-    memory.store16(game::kCharacter, 'P');
-    memory.store8(game::kCharacter + game::kCharacterSex, 0);
-    memory.store8(game::kCharacter + game::kCharacterInnerWear, 0);
-    const auto worn = game::kCharacter + game::kCharacterArmor + 4 * game::kEquipmentRecord;
-    memory.store8(worn, 1);
-    memory.store8(worn + 1, 4);
-    memory.store16(worn + 2, 1);
-    memory.store8(game::kEquipmentBox, 1);
-    memory.store8(game::kEquipmentBox + 1, 4);
-    memory.store16(game::kEquipmentBox + 2, 2);
-    constexpr std::uint32_t table = game::kTextBlock + 0x1000;
-    memory.store32(game::kTextBlock + 29 * 4, 0x1000);
-    const std::array<std::string, 4> names{"", "Public worn head", "Public owned head", "Public unowned head"};
-    std::uint32_t offset = 20;
-    for (unsigned id = 0; id < names.size(); ++id) {
-        memory.store32(table + id * 4, offset);
-        for (char c : names[id]) memory.store8(table + offset++, static_cast<unsigned char>(c));
-        memory.store8(table + offset++, 0);
-        memory.store8(game::kHeadData + id * game::kArmorRecord + 4, 1);
-    }
-    memory.store32(table + 16, 0xffffffff);
-    game::GuestRam guest(memory);
-    const auto offers = game::layered::offers(guest, 4, false);
-    expect(offers.size() == 2 && offers[0].id == 1 && offers[0].worn && offers[1].id == 2 && offers[1].owned,
-        "synthetic loaded hunter offers only its independently named worn and owned armor");
-    std::vector<std::uint8_t> before;
-    for (std::uint32_t at = game::kCharacter; at < game::kEquipmentBox + game::kEquipmentRecord; ++at)
-        before.push_back(memory.load8(at));
-    select("Layered Armor");
-    select("Layered Armor");
-    expect(settings::current().layered_armor, "page toggles the real layered-armor setting");
-    select("Head##layered4");
-    select("##nothing");
-    expect(settings::current().layered_pieces[4] == 0, "Nothing stores exactly the bare-part choice");
-    select("Head##layered4");
-    select("##piece2");
-    expect(settings::current().layered_pieces[4] == 2, "owned armor list selects its exact public piece id");
-    select("Head##layered4");
-    select("##real");
-    expect(settings::current().layered_pieces[4] == game::layered::kReal,
-        "Real equipment restores the sentinel rather than copying worn armor");
-    select("List All Armor");
-    expect(settings::current().layered_all, "all-armor toggle changes the list policy");
-    select("Head##layered4");
-    frame();
-    select("##piece3");
-    expect(settings::current().layered_pieces[4] == 3, "all-armor list allows a wearable unowned piece");
-    select("Show the Real Equipment Everywhere");
-    expect(std::all_of(settings::current().layered_pieces.begin(), settings::current().layered_pieces.end(),
-               [](auto p) { return p == game::layered::kReal; }),
-        "reset restores every part to its real equipment independently");
-    select("Head##layered4");
-    frame(nullptr, true);
-    select("Chest##layered0");
-    frame();
-    frame(nullptr, true);
-    frame(nullptr, true);
-    expect(!ui::layered_armor_screen_open(), "piece-list back returns to page and page back closes it");
-    for (unsigned i = 0; i < before.size(); ++i)
-        expect(
-            memory.load8(game::kCharacter + i) == before[i], "layered UI never modifies the hunter or equipment box");
-    memory.store16(game::kCharacter, 0);
-    memory.store8(worn, 0);
-    memory.store8(game::kEquipmentBox, 0);
-    settings::current() = saved;
-    settings::save();
-    layer.set_interactive(false);
 }
 
 void font_menu_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::path &sandbox) {
@@ -6396,7 +6240,6 @@ int run_contracts(int scripts) {
     }
     expect(ui::take_screenshot().empty(), "UI screenshot without a presented game target reports no picture");
     unavailable_renderer_contracts(sandbox);
-    layered_armor_ui_contracts(renderer, fixture.runtime);
     media_renderer_contracts(fixture, renderer);
     render_contracts(renderer);
     primitive_contracts(renderer);

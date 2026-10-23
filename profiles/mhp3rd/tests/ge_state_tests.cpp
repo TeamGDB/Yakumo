@@ -1,10 +1,13 @@
 // GE contracts against bounded synthetic display lists and vertex data.
 #include "gpu/ge_state.hpp"
 #include "perf/frame_stats.hpp"
+#include "psprecomp/common.hpp"
 
 #include <array>
+#include <cstdint>
 #include <cstdlib>
 #include <sstream>
+#include <string>
 #include <bit>
 #include <cmath>
 #include <iostream>
@@ -51,6 +54,8 @@ void floats(psprecomp::GuestMemory &m, std::uint32_t address, float x, float y, 
     m.store32(address + 8, std::bit_cast<std::uint32_t>(z));
 }
 void execute(GeState &ge, psprecomp::GuestMemory &m, std::vector<std::uint32_t> words) {
+    // A bare END is a marker inside a list: only FINISH or SIGNAL followed by END ends it.
+    words.push_back(command(0x0f));
     words.push_back(command(0x0c));
     store(m, list, words);
     bool finished = false;
@@ -117,7 +122,12 @@ void control_flow() {
     execute(ge, m, {command(0x0b), command(0x09, 0xffffff), command(0x05), command(0x06), command(0xff)});
     expect(
         ge.unhandled_command_count() == 3, "unsupported curves/commands counted; empty RET and conditional jump safe");
-    expect(ge.execute(m, 0, 0, done) == 0 && !done, "invalid command address does not finish");
+    try {
+        (void)ge.execute(m, 0, 0, done);
+        expect(false, "invalid command address fails loudly");
+    } catch (const psprecomp::Error &) {
+        expect(!done, "invalid command address does not finish");
+    }
     execute(ge, m, {command(0x10, 0), command(0x14), command(0x08, 12), command(0xff)});
     expect(ge.unhandled_command_count() == 3, "ORIGIN-relative jump skips intervening command");
 }
@@ -126,8 +136,12 @@ void bounded_list_and_offset_contracts() {
     GeState state;
     bool finished = true;
     store(memory, list, {command(0x10, 0x080000), command(0x08, 0x001004)});
-    expect(state.execute(memory, list, 0, finished) == list + 4 && !finished,
-        "self-jumping display list exhausts its instruction budget without hanging or claiming END");
+    try {
+        (void)state.execute(memory, list, 0, finished);
+        expect(false, "self-jumping display list fails at its instruction budget");
+    } catch (const psprecomp::Error &) {
+        expect(!finished, "self-jumping display list exhausts its instruction budget without hanging or claiming END");
+    }
     floats(memory, vertices, 10, 20, 30);
     DrawCall result;
     state.set_draw_sink([&](const DrawCall &draw) { result = draw; });
@@ -431,6 +445,408 @@ void checked_decode_progress_contract() {
     expect(exact, "comparison progress batch preserves all independently specified vertices");
 }
 
+void test_nested_call_restores_offset() {
+    psprecomp::GuestMemory memory;
+    constexpr std::uint32_t main = 0x08801000u;
+    constexpr std::uint32_t first = 0x08801100u;
+    constexpr std::uint32_t nested = 0x08811100u;
+    constexpr std::uint32_t second = 0x08801200u;
+    constexpr std::uint32_t wrong_second = 0x08821200u;
+
+    memory.store32(main, 0x10080000u);       // BASE 0x08000000
+    memory.store32(main + 4u, 0x0A801100u);  // CALL first
+    memory.store32(main + 8u, 0x0A801200u);  // CALL second after both RETs
+    memory.store32(main + 12u, 0x0F000001u); // FINISH callback
+    memory.store32(main + 16u, 0x0C000000u); // END
+
+    memory.store32(first, 0x13000100u);        // OFFSET_ADDR 0x10000
+    memory.store32(first + 4u, 0x10080000u);   // BASE remains 0x08000000
+    memory.store32(first + 8u, 0x0A801100u);   // CALL nested at 0x08811100
+    memory.store32(first + 12u, 0x0B000000u);  // RET
+    memory.store32(nested, 0x13000200u);       // OFFSET_ADDR 0x20000
+    memory.store32(nested + 4u, 0x0B000000u);  // RET
+    memory.store32(second, 0x0B000000u);       // RET to FINISH
+    memory.store32(wrong_second, 0x0C000000u); // Wrong target terminates without FINISH
+
+    mhp3rd::gpu::GeState ge;
+    mhp3rd::gpu::GeState::ListExecutionState first_state;
+    unsigned finishes = 0u;
+    ge.set_signal_sink([&](std::uint32_t signal, std::uint32_t) {
+        if ((signal & 0x10000u) != 0u) ++finishes;
+    });
+    bool done = false;
+    const std::uint32_t next = ge.execute(memory, first_state, main, 0u, done);
+    expect(done && next == main + 20u, "nested CALL/RET reaches outer END");
+    expect(finishes == 1u, "nested CALL/RET restores OFFSET_ADDR before outer FINISH");
+
+    memory.store32(main + 0x1000u, 0x10080000u);
+    memory.store32(main + 0x1004u, 0x0A801200u);
+    memory.store32(main + 0x1008u, 0x0F000002u);
+    memory.store32(main + 0x100Cu, 0x0C000000u);
+    done = false;
+    mhp3rd::gpu::GeState::ListExecutionState second_state;
+    ge.execute(memory, second_state, main + 0x1000u, 0u, done);
+    expect(done && finishes == 2u, "later display list reaches its own FINISH");
+}
+
+void test_bare_end_inside_call_does_not_finish_list() {
+    psprecomp::GuestMemory memory;
+    constexpr std::uint32_t main = 0x08802000u;
+    constexpr std::uint32_t sublist = 0x08802100u;
+    memory.store32(main, 0x10080000u);         // BASE
+    memory.store32(main + 4u, 0x0A802100u);    // CALL sublist
+    memory.store32(main + 8u, 0x0F000001u);    // FINISH after RET
+    memory.store32(main + 12u, 0x0C000000u);   // END after FINISH
+    memory.store32(sublist, 0xF1D00018u);      // Unhandled command before bare END
+    memory.store32(sublist + 4u, 0x0C8C5E12u); // Bare END with nonzero payload
+    memory.store32(sublist + 8u, 0x0B000000u); // RET
+
+    mhp3rd::gpu::GeState ge;
+    mhp3rd::gpu::GeState::ListExecutionState list_state;
+    unsigned finishes = 0u;
+    ge.set_signal_sink([&](std::uint32_t signal, std::uint32_t) {
+        if ((signal & 0x10000u) != 0u) ++finishes;
+    });
+    bool done = false;
+    const std::uint32_t next = ge.execute(memory, list_state, main, 0u, done);
+    expect(done && next == main + 16u, "bare END inside CALL continues through RET to outer END");
+    expect(finishes == 1u, "bare END inside CALL preserves exactly one outer FINISH callback");
+}
+
+void test_finish_end_across_stall() {
+    psprecomp::GuestMemory memory;
+    constexpr std::uint32_t main = 0x08803000u;
+    memory.store32(main, 0x0F000001u);
+    memory.store32(main + 4u, 0x0C000000u);
+    mhp3rd::gpu::GeState ge;
+    mhp3rd::gpu::GeState::ListExecutionState list_state;
+    unsigned finishes = 0u;
+    ge.set_signal_sink([&](std::uint32_t signal, std::uint32_t) {
+        if ((signal & 0x10000u) != 0u) ++finishes;
+    });
+    bool done = false;
+    const std::uint32_t stalled = ge.execute(memory, list_state, main, main + 4u, done);
+    expect(!done && stalled == main + 4u && finishes == 1u, "list stalls after FINISH before END");
+    const std::uint32_t next = ge.execute(memory, list_state, stalled, 0u, done);
+    expect(done && next == main + 8u && finishes == 1u, "END after resumed FINISH completes without another callback");
+}
+
+void test_top_level_bare_end_does_not_finish_early() {
+    psprecomp::GuestMemory memory;
+    constexpr std::uint32_t main = 0x08803500u;
+    memory.store32(main, 0x0CFFFFFFu);       // Bare END must continue.
+    memory.store32(main + 4u, 0x0E000123u);  // Actual command after END.
+    memory.store32(main + 8u, 0x0F000004u);  // FINISH.
+    memory.store32(main + 12u, 0x0C000000u); // Real FINISH/END completion.
+    mhp3rd::gpu::GeState ge;
+    mhp3rd::gpu::GeState::ListExecutionState list_state;
+    std::vector<std::uint32_t> signals;
+    ge.set_signal_sink([&](std::uint32_t signal, std::uint32_t) { signals.push_back(signal); });
+    bool done = false;
+    const std::uint32_t next = ge.execute(memory, list_state, main, 0u, done);
+    expect(done && next == main + 16u, "top-level bare END continues through commands to FINISH/END");
+    expect(signals.size() == 2u && signals[0] == 0x123u && signals[1] == 0x10004u,
+        "commands after bare END and the real FINISH callback both execute");
+}
+
+void test_interleaved_list_completion_preserves_stalled_call() {
+    psprecomp::GuestMemory memory;
+    constexpr std::uint32_t list_a = 0x08807000u;
+    constexpr std::uint32_t child_a = 0x08807100u;
+    constexpr std::uint32_t continuation_a = 0x08807200u;
+    constexpr std::uint32_t list_b = 0x08807300u;
+
+    memory.store32(list_a, 0x10080000u);       // BASE
+    memory.store32(list_a + 4u, 0x0A807100u);  // CALL child A
+    memory.store32(list_a + 8u, 0x0A807200u);  // CALL continuation after child RET
+    memory.store32(list_a + 12u, 0x0F000001u); // FINISH
+    memory.store32(list_a + 16u, 0x0C000000u); // END
+    memory.store32(child_a, 0x13000100u);      // OFFSET_ADDR 0x10000
+    memory.store32(child_a + 4u, 0x0B000000u); // RET; list A stalls here
+    memory.store32(child_a + 8u, 0x0F000011u); // Wrong path if A's frame was lost
+    memory.store32(child_a + 12u, 0x0C000000u);
+    memory.store32(continuation_a, 0x0B000000u); // RET
+    memory.store32(list_b, 0x13000200u);         // OFFSET_ADDR 0x20000
+    memory.store32(list_b + 4u, 0x0F000002u);    // FINISH
+    memory.store32(list_b + 8u, 0x0C000000u);    // END
+
+    mhp3rd::gpu::GeState ge;
+    mhp3rd::gpu::GeState::ListExecutionState state_a;
+    mhp3rd::gpu::GeState::ListExecutionState state_b;
+    unsigned finishes = 0u;
+    std::uint32_t last_finish_pc = 0u;
+    ge.set_signal_sink([&](std::uint32_t signal, std::uint32_t pc) {
+        if ((signal & 0x10000u) != 0u) {
+            ++finishes;
+            last_finish_pc = pc;
+        }
+    });
+    bool done_a = false;
+    const std::uint32_t stalled = ge.execute(memory, state_a, list_a, child_a + 4u, done_a);
+    expect(!done_a && stalled == child_a + 4u, "list A stalls with its CALL frame at RET");
+
+    bool done_b = false;
+    const std::uint32_t next_b = ge.execute(memory, state_b, list_b, 0u, done_b);
+    expect(done_b && next_b == list_b + 12u, "list B completes while list A remains stalled");
+
+    done_a = false;
+    const std::uint32_t next_a = ge.execute(memory, state_a, stalled, 0u, done_a);
+    expect(done_a && next_a == list_a + 20u, "resumed list A returns through its saved frame to its own END");
+    expect(finishes == 2u && last_finish_pc == list_a + 16u,
+        "list A restores OFFSET_ADDR and reaches its own post-RET continuation");
+}
+
+void test_invalid_list_reports_address() {
+    psprecomp::GuestMemory memory;
+    constexpr std::uint32_t main = 0x08804000u;
+    memory.store32(main, 0x10050000u);      // BASE 0x05000000 is unmapped.
+    memory.store32(main + 4u, 0x0A000000u); // CALL that address.
+    mhp3rd::gpu::GeState ge;
+    mhp3rd::gpu::GeState::ListExecutionState list_state;
+    bool done = false;
+    try {
+        (void)ge.execute(memory, list_state, main, 0u, done);
+        expect(false, "invalid GE CALL must fail loudly");
+    } catch (const psprecomp::Error &error) {
+        const std::string message = error.what();
+        expect(
+            message.find("0x08804000") != std::string::npos && message.find("0x05000000") != std::string::npos && !done,
+            "invalid GE CALL identifies list start and unmapped target");
+    }
+}
+
+void test_completed_call_does_not_leak_into_next_list() {
+    psprecomp::GuestMemory memory;
+    constexpr std::uint32_t first = 0x08805000u;
+    constexpr std::uint32_t sublist = 0x08805100u;
+    constexpr std::uint32_t second = 0x08805200u;
+    memory.store32(first, 0x10080000u);
+    memory.store32(first + 4u, 0x0A805100u);
+    memory.store32(first + 8u, 0x0C000000u);
+    memory.store32(sublist, 0x0F000001u);
+    memory.store32(sublist + 4u, 0x0C000000u); // FINISH+END at CALL depth one.
+    memory.store32(second, 0x0B000000u);       // Empty RET must not return to first list.
+    memory.store32(second + 4u, 0x0F000002u);
+    memory.store32(second + 8u, 0x0C000000u);
+    mhp3rd::gpu::GeState ge;
+    mhp3rd::gpu::GeState::ListExecutionState first_state;
+    mhp3rd::gpu::GeState::ListExecutionState second_state;
+    unsigned finishes = 0u;
+    ge.set_signal_sink([&](std::uint32_t signal, std::uint32_t) {
+        if ((signal & 0x10000u) != 0u) ++finishes;
+    });
+    bool done = false;
+    (void)ge.execute(memory, first_state, first, 0u, done);
+    expect(done && finishes == 1u, "called sublist may finish its list");
+    done = false;
+    const auto next = ge.execute(memory, second_state, second, 0u, done);
+    expect(done && next == second + 12u && finishes == 2u, "completed CALL frames do not redirect a later list");
+}
+
+void test_command_budget_fails_loudly() {
+    psprecomp::GuestMemory memory;
+    constexpr std::uint32_t main = 0x08806000u;
+    memory.store32(main, 0x10080000u);      // BASE 0x08000000.
+    memory.store32(main + 4u, 0x08806004u); // JUMP to itself.
+    mhp3rd::gpu::GeState ge;
+    mhp3rd::gpu::GeState::ListExecutionState list_state;
+    bool done = false;
+    try {
+        (void)ge.execute(memory, list_state, main, 0u, done);
+        expect(false, "cyclic GE list must fail at the command budget");
+    } catch (const psprecomp::Error &error) {
+        const std::string message = error.what();
+        expect(message.find("exceeded 2000000 commands") != std::string::npos &&
+                message.find("0x08806000") != std::string::npos && !done,
+            "command-budget error reports the list and last command location");
+    }
+}
+
+// --- MHP3RD_GE_STRICT_LISTS: strict list handling and its off switch ---------
+
+GeState make_ge(bool strict) {
+    GeState ge;
+    ge.set_strict_lists(strict);
+    return ge;
+}
+
+std::uint32_t base_command() {
+    return command(0x10, 0x080000);
+}
+
+std::uint32_t call_command(std::uint32_t target) {
+    return command(0x0a, target & 0xffffffu);
+}
+
+void strict_lists_switch_parsing() {
+    static_assert(strict_lists_from_text(nullptr), "unset keeps strict lists on");
+    static_assert(!strict_lists_from_text("0"), "0 turns strict lists off");
+    expect(strict_lists_from_text(nullptr), "unset variable keeps strict lists on");
+    expect(!strict_lists_from_text("0"), "exactly 0 turns strict lists off");
+    expect(strict_lists_from_text("1"), "1 keeps strict lists on");
+    expect(strict_lists_from_text(""), "an empty value keeps strict lists on");
+    expect(strict_lists_from_text("00"), "00 is not the documented off value");
+    expect(strict_lists_from_text("0 "), "trailing text after 0 keeps strict lists on");
+    expect(strict_lists_from_text(" 0"), "leading text before 0 keeps strict lists on");
+    expect(strict_lists_from_text("false"), "only 0 turns strict lists off");
+    GeState fresh;
+    expect(fresh.strict_lists(), "strict lists are on by default");
+    GeState legacy = make_ge(false);
+    GeState copy = legacy;
+    expect(!copy.strict_lists(), "a copied GE state (free-camera replay) keeps the switch");
+}
+
+void bare_end_rules(bool strict) {
+    constexpr std::uint32_t start = 0x08820000u;
+    psprecomp::GuestMemory memory;
+    // NOP-like unhandled command, bare END, FINISH, END.
+    store(memory, start, {command(0xff), command(0x0c), command(0x0f, 7), command(0x0c)});
+    GeState ge = make_ge(strict);
+    std::vector<EndEvent> ends;
+    ge.set_end_sink([&](const EndEvent &end) { ends.push_back(end); });
+    bool done = false;
+    const std::uint32_t next = ge.execute(memory, start, 0, done);
+    expect(done, "FINISH followed by END completes the list in both modes");
+    if (strict) {
+        expect(next == start + 16u, "strict: a bare END is skipped and the list ends at FINISH+END");
+        expect(ends.size() == 2u, "strict: both END commands are reported");
+        if (ends.size() == 2u) {
+            expect(ends[0].end_address == start + 4u && ends[0].preceding_command == command(0xff) && !ends[0].finished,
+                "strict: bare END reports its address and preceding command and does not finish");
+            expect(
+                ends[1].end_address == start + 12u && ends[1].preceding_command == command(0x0f, 7) && ends[1].finished,
+                "strict: END after FINISH reports the whole FINISH word and finishes");
+        }
+    } else {
+        expect(next == start + 8u, "legacy: the first END completes the list");
+        expect(ends.size() == 1u && ends[0].end_address == start + 4u && ends[0].finished,
+            "legacy: the bare END is reported as finishing");
+    }
+}
+
+void finish_and_signal_end_in_both_modes(bool strict) {
+    constexpr std::uint32_t start = 0x08821000u;
+    psprecomp::GuestMemory memory;
+    store(memory, start, {command(0x0e, 5), command(0x0c)});
+    GeState ge = make_ge(strict);
+    std::vector<std::uint32_t> signals;
+    ge.set_signal_sink([&](std::uint32_t signal, std::uint32_t) { signals.push_back(signal); });
+    bool done = false;
+    expect(ge.execute(memory, start, 0, done) == start + 8u && done, "SIGNAL followed by END completes the list");
+    expect(signals.size() == 1u && signals[0] == 5u, "SIGNAL reaches the signal sink once");
+
+    store(memory, start, {command(0x0f, 6), command(0x0c)});
+    done = false;
+    signals.clear();
+    expect(ge.execute(memory, start, 0, done) == start + 8u && done, "FINISH followed by END completes the list");
+    expect(signals.size() == 1u && signals[0] == (0x10000u | 6u), "FINISH reaches the signal sink once");
+}
+
+void unmapped_command_handling(bool strict) {
+    psprecomp::GuestMemory memory;
+    GeState ge = make_ge(strict);
+    bool done = true;
+    if (strict) {
+        try {
+            (void)ge.execute(memory, 0, 0, done);
+            expect(false, "strict: an unmapped command address throws");
+        } catch (const psprecomp::Error &error) {
+            const std::string message = error.what();
+            expect(message.find("Display list from 0x00000000") != std::string::npos &&
+                    message.find("reached unmapped command 0x00000000") != std::string::npos && !done,
+                "strict: the error names the list start and the unmapped command");
+        }
+    } else {
+        done = true;
+        expect(ge.execute(memory, 0, 0, done) == 0u && !done,
+            "legacy: an unmapped command address returns quietly without finishing");
+    }
+}
+
+// BASE, then `calls` CALLs each to the next word, then FINISH and END: the
+// stack is `calls` deep when the list ends.
+void store_call_chain(psprecomp::GuestMemory &memory, std::uint32_t start, std::uint32_t calls) {
+    store(memory, start, {base_command()});
+    for (std::uint32_t i = 0; i < calls; ++i) store(memory, start + 4u + i * 4u, {call_command(start + 8u + i * 4u)});
+    store(memory, start + 4u + calls * 4u, {command(0x0f), command(0x0c)});
+}
+
+void call_depth_limit(bool strict) {
+    constexpr std::uint32_t start = 0x08822000u;
+    for (const std::uint32_t calls : {1023u, 1024u}) {
+        psprecomp::GuestMemory memory;
+        store_call_chain(memory, start, calls);
+        GeState ge = make_ge(strict);
+        bool done = false;
+        expect(ge.execute(memory, start, 0, done) == start + 12u + calls * 4u && done,
+            calls == 1023u ? "nesting one below the CALL depth limit works"
+                           : "nesting up to the CALL depth limit works");
+    }
+    psprecomp::GuestMemory memory;
+    store_call_chain(memory, start, 1025u);
+    GeState ge = make_ge(strict);
+    bool done = false;
+    if (strict) {
+        try {
+            (void)ge.execute(memory, start, 0, done);
+            expect(false, "strict: the CALL past the depth limit throws");
+        } catch (const psprecomp::Error &error) {
+            const std::string message = error.what();
+            expect(message.find("CALL depth limit of 1024") != std::string::npos &&
+                    message.find("Display list from 0x08822000") != std::string::npos && !done,
+                "strict: the depth error names the limit and the list start");
+        }
+    } else {
+        expect(ge.execute(memory, start, 0, done) == start + 12u + 1025u * 4u && done,
+            "legacy: CALLs nest past the strict limit");
+    }
+}
+
+void command_budget(bool strict) {
+    constexpr std::uint32_t start = 0x08823000u;
+    psprecomp::GuestMemory memory;
+    store(memory, start, {base_command(), command(0x08, (start + 4u) & 0xffffffu)}); // JUMP to itself
+    GeState ge = make_ge(strict);
+    bool done = true;
+    if (strict) {
+        try {
+            (void)ge.execute(memory, start, 0, done);
+            expect(false, "strict: a runaway list throws at the command budget");
+        } catch (const psprecomp::Error &error) {
+            expect(std::string(error.what()).find("exceeded 2000000 commands") != std::string::npos && !done,
+                "strict: the budget error names the limit");
+        }
+    } else {
+        expect(ge.execute(memory, start, 0, done) == start + 4u && !done,
+            "legacy: a runaway list stops at the budget without throwing or finishing");
+    }
+}
+
+// Two lists, each stalled inside its own CALL, are resumed in turn.
+void per_list_call_stacks(bool strict) {
+    constexpr std::uint32_t list_a = 0x08824000u, sub_a = 0x08824100u;
+    constexpr std::uint32_t list_b = 0x08824200u, sub_b = 0x08824300u;
+    psprecomp::GuestMemory memory;
+    store(memory, list_a, {base_command(), call_command(sub_a), command(0x0f, 1), command(0x0c)});
+    store(memory, sub_a, {command(0x0b)});
+    store(memory, list_b, {base_command(), call_command(sub_b), command(0x0f, 2), command(0x0c)});
+    store(memory, sub_b, {command(0x0b)});
+    GeState ge = make_ge(strict);
+    ListExecutionState state_a, state_b;
+    bool done_a = false, done_b = false;
+    expect(ge.execute(memory, state_a, list_a, sub_a, done_a) == sub_a && !done_a, "list A stalls inside its CALL");
+    expect(ge.execute(memory, state_b, list_b, sub_b, done_b) == sub_b && !done_b, "list B stalls inside its CALL");
+    const std::uint32_t after_a = ge.execute(memory, state_a, sub_a, 0, done_a);
+    if (strict) {
+        expect(done_a && after_a == list_a + 16u, "strict: list A returns through its own CALL stack");
+        expect(ge.execute(memory, state_b, sub_b, 0, done_b) == list_b + 16u && done_b,
+            "strict: list B still returns through its own CALL stack");
+    } else {
+        expect(done_a && after_a == list_b + 16u,
+            "legacy: the stack is shared, so list A returns into list B's continuation");
+    }
+}
+
 }
 int main() {
     const bool checked = std::getenv("MHP3RD_CHECK_DECODE") != nullptr;
@@ -443,6 +859,23 @@ int main() {
     draws();
     registers();
     matrices_transfer_copy();
+    test_nested_call_restores_offset();
+    test_bare_end_inside_call_does_not_finish_list();
+    test_finish_end_across_stall();
+    test_top_level_bare_end_does_not_finish_early();
+    test_interleaved_list_completion_preserves_stalled_call();
+    test_invalid_list_reports_address();
+    test_completed_call_does_not_leak_into_next_list();
+    test_command_budget_fails_loudly();
+    strict_lists_switch_parsing();
+    for (const bool strict : {true, false}) {
+        bare_end_rules(strict);
+        finish_and_signal_end_in_both_modes(strict);
+        unmapped_command_handling(strict);
+        call_depth_limit(strict);
+        command_budget(strict);
+        per_list_call_stacks(strict);
+    }
     if (checked) {
         checked_decode_progress_contract();
         std::cout.rdbuf(original_output);

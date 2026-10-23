@@ -1,9 +1,11 @@
 # Layered armor: how the hunter's look is kept apart from its armor
 
+> Historical trace of the original same-sex, next-load implementation. The current live armor and weapon editor, persistence and GE-fenced refresh are described in the [profile README](../profiles/mhp3rd/README.md#layered-sets) and implemented under `profiles/mhp3rd/host/mods/transmog*`. The original hook below is no longer installed.
+
 Layered armor draws the hunter played on this machine in other armor pieces
 than it wears, part by part, while the game keeps the real pieces for
 everything else. The player's side is in the profile README
-([Layered armor](../profiles/mhp3rd/README.md#layered-armor)); this page says
+([Layered Sets](../profiles/mhp3rd/README.md#layered-sets)); this page says
 what the game does, how that was found, and why the rest of the game cannot
 see the difference.
 
@@ -18,8 +20,11 @@ the 100% test save (a female hunter in the Silver Sol set).
 
 The code is `profiles/mhp3rd/host/game/layered_armor.{hpp,cpp}` (pure
 functions over a `Ram`, tested on made-up tables in
-`tests/equipment_models_tests.cpp`) and `layered_armor_hook.cpp` (what is put
-in the game's place), and the page is `host/ui/layered_armor_screen.cpp`.
+`tests/equipment_models_tests.cpp`). The original model-lookup and load-step
+wrappers and the page behavior described below remain in repository history;
+the current picker routes through `host/ui/transmog_screen.cpp`.
+`host/game/layered_armor_hook.cpp` now holds only the [Smithy preview
+guard](#smithy-previews) and the developer device-test hunter observation.
 
 ## Where the game decides what a hunter looks like
 
@@ -162,6 +167,22 @@ preview selection works without the reproduced hang, with normal performance.
 The log confirms the copy guard ran and the game stopped via its menu. Android
 validation remains pending; this Windows result does not establish behavior on
 other platforms.
+
+Layered Sets keeps this guard. `install_guards` in
+`host/game/layered_armor_hook.cpp` registers it once at startup, whether or not
+Layered Sets is on, and the preview copy takes the look from
+`mods::transmog::applied_selection()`, the set the live hunters were last
+refreshed to show. A donor armor of the hunter's own sex is described by its
+equipment id exactly as before; a part with no appearance or with a donor of the
+other sex is left to the game's own code, because an equipment id cannot name a
+model of the other sex's table. Every check above still applies, including the
+comparison with the source hunter's actual cached model, so a set that was
+staged but not yet loaded changes nothing. `MHP3RD_TRACE_TRANSMOG=1` logs each
+part the guard changed.
+
+The Windows result above was obtained with the original selector. The guard was
+carried over to the Layered Sets selection without a gameplay check, and the
+other-sex donor case is not covered by it.
 
 ## Multiplayer: what other players see
 

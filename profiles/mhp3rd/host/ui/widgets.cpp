@@ -265,13 +265,19 @@ ImGuiStyle make_style(float scale, float font_size) {
     return style;
 }
 
-void begin_panel(const char *id, const std::string &title, const std::string &subtitle, bool dim_game) {
+void begin_panel(const char *id, const std::string &title, const std::string &subtitle, bool dim_game, bool beside_game,
+    bool compact_side) {
     const ImGuiIO &io = ImGui::GetIO();
     if (dim_game) ImGui::GetBackgroundDrawList()->AddRectFilled({0, 0}, io.DisplaySize, colors::kBackdrop);
     const float margin = std::round(std::min(io.DisplaySize.x, io.DisplaySize.y) * 0.03f);
-    const ImVec2 size{std::min(io.DisplaySize.x - 2.0f * margin, font() * 46.0f),
+    const float side_threshold = font() * (compact_side ? 32.0f : 45.0f);
+    const float side_width = compact_side ? 0.40f : 0.45f;
+    const bool side = beside_game && io.DisplaySize.x >= side_threshold;
+    const ImVec2 size{
+        std::min(side ? io.DisplaySize.x * side_width - margin : io.DisplaySize.x - 2.0f * margin, font() * 46.0f),
         std::min(io.DisplaySize.y - 2.0f * margin, font() * 31.0f)};
-    ImGui::SetNextWindowPos({io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f}, ImGuiCond_Always, {0.5f, 0.5f});
+    ImGui::SetNextWindowPos({side ? margin : io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f}, ImGuiCond_Always,
+        {side ? 0.0f : 0.5f, 0.5f});
     ImGui::SetNextWindowSize(size, ImGuiCond_Always);
     ImGui::Begin(id, nullptr,
         ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
@@ -349,7 +355,7 @@ void end_panel() {
     ImGui::End();
 }
 
-bool tab_bar(const char *const *labels, int count, int &selected) {
+bool tab_bar(const char *const *labels, int count, int &selected, bool compact) {
     const int before = selected;
     const bool typing = ImGui::GetIO().WantTextInput;
     if (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) || (!typing && ImGui::IsKeyPressed(ImGuiKey_Q, false)))
@@ -377,9 +383,14 @@ bool tab_bar(const char *const *labels, int count, int &selected) {
     }
     float label_width = 0.0f;
     for (int i = 0; i < count; ++i) label_width = std::max(label_width, ImGui::CalcTextSize(labels[i]).x);
-    const float tab_width = std::max(inner_width / static_cast<float>(std::min(count, 6)), label_width + px(24.0f));
-    const float total_width = tab_width * static_cast<float>(count);
-    const bool scrollable = total_width > inner_width;
+    // Compact (beside the game): three tabs around the selected one, no strip scrolling.
+    const int visible_count = compact ? std::min(3, count) : count;
+    const int first = compact ? (selected + count - 1) % count : 0;
+    const float tab_width = compact
+        ? inner_width / static_cast<float>(visible_count)
+        : std::max(inner_width / static_cast<float>(std::min(count, 6)), label_width + px(24.0f));
+    const float total_width = tab_width * static_cast<float>(visible_count);
+    const bool scrollable = !compact && total_width > inner_width;
     const float strip_height = height + (scrollable ? ImGui::GetStyle().ScrollbarSize : 0.0f);
     ImGui::SetCursorScreenPos({inner_left, start.y});
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{});
@@ -402,12 +413,13 @@ bool tab_bar(const char *const *labels, int count, int &selected) {
         else if (left + tab_width > scroll + inner_width)
             ImGui::SetScrollX(left + tab_width - inner_width);
     }
-    tab_state->SetInt(previous_id, selected);
+    if (!compact) tab_state->SetInt(previous_id, selected);
     draw = ImGui::GetWindowDrawList();
     ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
-    for (int i = 0; i < count; ++i) {
+    for (int i = 0; i < visible_count; ++i) {
+        const int index = compact ? (first + i) % count : i;
         ImGui::SetCursorPos({tab_width * static_cast<float>(i), 0.0f});
-        ImGui::PushID(i);
+        ImGui::PushID(index);
         const bool pressed = ImGui::InvisibleButton("tab", {tab_width, height});
         if (ImGui::IsItemActivated()) {
             tab_state->SetBool(drag_id, false);
@@ -421,16 +433,16 @@ bool tab_bar(const char *const *labels, int count, int &selected) {
                 ImGui::SetScrollX(
                     std::clamp(tab_state->GetFloat(start_scroll_id) - distance, 0.0f, ImGui::GetScrollMaxX()));
         }
-        if (pressed && !tab_state->GetBool(drag_id)) selected = i;
+        if (pressed && !tab_state->GetBool(drag_id)) selected = index;
         const ImVec2 min = ImGui::GetItemRectMin();
         const ImVec2 max = ImGui::GetItemRectMax();
         const bool hovered = ImGui::IsItemHovered();
         ImGui::PopID();
-        const bool active = i == selected;
+        const bool active = index == selected;
         if (hovered && !active) draw->AddRectFilled(min, max, colors::kRowHover, px(6.0f));
-        const ImVec2 size = ImGui::CalcTextSize(labels[i]);
+        const ImVec2 size = ImGui::CalcTextSize(labels[index]);
         draw->AddText({min.x + (tab_width - size.x) * 0.5f, min.y + (height - size.y) * 0.5f},
-            active ? colors::kAccentBright : colors::kTextDim, labels[i]);
+            active ? colors::kAccentBright : colors::kTextDim, labels[index]);
         if (active)
             draw->AddRectFilled({min.x + tab_width * 0.18f, max.y - px(3.0f)}, {max.x - tab_width * 0.18f, max.y},
                 colors::kAccent, px(2.0f));

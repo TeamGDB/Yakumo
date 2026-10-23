@@ -41,6 +41,8 @@ Preview selections update and performance is normal. The local trace confirms
 the preview copy guard ran and the session ended through the game menu. The
 full synthetic equipment-model suite passed. Android and other platforms remain
 unverified for this fix; see [Layered armor](LAYERED_ARMOR.md#smithy-previews).
+The check was made with the original layered armor selector; the guard now reads
+the Layered Sets selection and has not been rechecked in gameplay.
 
 ## Input
 
