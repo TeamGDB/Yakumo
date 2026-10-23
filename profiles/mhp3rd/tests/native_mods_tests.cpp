@@ -2313,6 +2313,23 @@ void test_monster_quest_end(psprecomp::Runtime &runtime) {
     native::overlay_loaded(runtime, kSlot);
     check(during == 0u && call(runtime, act, kMonster) == 5u,
         "monsters: once the quest ends, the base's Act runs again for a monster that thought alone in it");
+    // A monster whose vtable is not in memory keeps it, and the mod is told.
+    place_overlay(runtime, kSlot, "game_task.ovl", 0x00200000u);
+    native::overlay_loaded(runtime, kSlot);
+    runtime.memory().store32(kMonster, 0x10u);
+    (void)call(runtime, 0x0A090AE0u, 0u);
+    check(runtime.memory().load32(kMonster) == 0x10u &&
+            reported("Quest End",
+                "monster lone_rathian: its behaviour cannot be given to its monsters: the base's vtable at 0x00000010 "
+                "is not in memory"),
+        "monsters: a monster made with a vtable outside memory keeps it, and its mod's page says why");
+    // A Tigrex-based kind where the model draw is not as traced keeps the
+    // base's hidden parts hidden, and its mod's page says so.
+    runtime.memory().store32(0x0889EEC4u, 0u);
+    check(monsters::add(runtime, {"plain_tigrex", "tigrex", pack, {'G'}, {'M'}, "test", mod}, nullptr) &&
+            reported("Quest End",
+                "monster plain_tigrex: the model draw is not as traced; the base's hidden parts stay hidden"),
+        "monsters: a model draw not as traced is reported on the mod's page");
     monsters::read_packs_with_for_tests({});
     monsters::reset_for_tests();
     mhp3rd::mods::added::reset_for_tests();
