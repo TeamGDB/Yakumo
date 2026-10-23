@@ -17,6 +17,7 @@
 #include "yakumo/mod.h"
 
 #include <array>
+#include <set>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -65,7 +66,8 @@ struct State {
     ymod_mod *host{};
     ymod_hook hook{};
     ymod_hook event_hook{};
-    bool events{}; // the list was made longer for them
+    bool events{};                  // the event quest loader is hooked
+    std::set<std::uint32_t> listed; // quests the event quest list has a row for: those at the counter
 };
 
 State &state() {
@@ -105,17 +107,32 @@ bool attach(psprecomp::Runtime &runtime) {
         std::cerr << "[mods] the quest hook cannot be installed; quests mods add are not served\n";
         return false;
     }
-    std::string why;
-    if (!code_as_traced(runtime, kEventSignature))
-        why = "the event quest loader is not as traced";
-    else if (s.event_hook == 0u &&
-        (s.event_hook = hooks->instruction(s.host, nullptr, kEventFile, &give_event_file, nullptr)) == 0u)
-        why = "the event quest hook cannot be installed";
-    else if (const tables::Table *list = tables::find(kEvents); list == nullptr ||
-        !tables::extend(runtime, kEvents, list->rows + static_cast<std::uint32_t>(s.files.size()), &why))
-        why = "the event quest list cannot be made longer: " + why;
-    s.events = why.empty();
-    if (!s.events) std::cerr << "[mods] quests mods add are not at the counter: " << why << "\n";
+    if (!s.events) {
+        std::string why;
+        if (!code_as_traced(runtime, kEventSignature))
+            why = "the event quest loader is not as traced";
+        else if (s.event_hook == 0u &&
+            (s.event_hook = hooks->instruction(s.host, nullptr, kEventFile, &give_event_file, nullptr)) == 0u)
+            why = "the event quest hook cannot be installed";
+        s.events = why.empty();
+        if (!s.events) {
+            std::cerr << "[mods] quests mods add are not at the counter: " << why << "\n";
+            return true;
+        }
+    }
+    // A row for each quest that has none yet: one that gets none is left out
+    // of the counter, and the others are there.
+    for (const auto &[quest, file] : s.files) {
+        if (s.listed.contains(quest)) continue;
+        const tables::Table *list = tables::find(kEvents);
+        std::string why = "the table is not known";
+        if (list != nullptr &&
+            tables::extend(runtime, kEvents, list->rows + static_cast<std::uint32_t>(s.listed.size()) + 1u, &why))
+            s.listed.insert(quest);
+        else
+            std::cerr << "[mods] quest " << quest << " is not at the counter: the event quest list cannot be made "
+                      << "longer: " << why << "\n";
+    }
     return true;
 }
 
@@ -247,7 +264,7 @@ void overlay_loaded(psprecomp::Runtime &runtime) {
         if (s.files.contains(memory.load16(list->address + row * 2u))) return;
         ++row;
     }
-    for (const auto &[quest, file] : s.files) {
+    for (const std::uint32_t quest : s.listed) {
         if (row + 1u >= list->rows) break;
         memory.store16(list->address + row++ * 2u, static_cast<std::uint16_t>(quest));
     }

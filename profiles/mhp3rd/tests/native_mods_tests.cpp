@@ -745,6 +745,24 @@ void test_quests(psprecomp::Runtime &runtime) {
             !quests::add(runtime, game_quest, "builder", &why) && why.find("mod's id") != std::string::npos &&
             !quests::add(runtime, {1u, 2u}, "builder", &why),
         "quests: an id served already, a game quest's id and a broken payload are refused");
+
+    // The list reaches 101 rows: the quests past that are served but not at
+    // the counter, and those that got a row stay there.
+    bool all_served = true;
+    for (std::uint16_t id = 64003u; id <= 64062u; ++id) { // ids the later tests do not use
+        spec.id = id;
+        const std::optional<std::vector<std::uint8_t>> another = mhp3rd::game::build_quest(spec);
+        all_served = all_served && another && quests::add(runtime, *another, "builder", &why);
+    }
+    const std::optional<mhp3rd::mods::tables::Placement> full = mhp3rd::mods::tables::placement("quest.events");
+    const std::uint32_t at = full ? full->address : 0u;
+    for (std::uint32_t row = 2u; full && row < full->rows; ++row) runtime.memory().store16(at + row * 2u, 0u);
+    quests::overlay_loaded(runtime);
+    std::uint32_t listed = 0u;
+    while (full && listed + 2u < full->rows && runtime.memory().load16(at + (listed + 2u) * 2u) != 0u) ++listed;
+    check(all_served && full && full->rows == 101u && listed == 59u && runtime.memory().load16(at + 4u) == 62001u &&
+            runtime.memory().load16(at + 60u * 2u) == 64059u,
+        "quests: once the list cannot grow, the quests that got a row are still at the counter, the rest are not");
     mhp3rd::mods::added::reset_for_tests();
     mhp3rd::mods::tables::reset_for_tests();
     std::error_code ec;
