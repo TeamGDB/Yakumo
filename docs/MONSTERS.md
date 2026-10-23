@@ -94,6 +94,8 @@ An AI overlay can serve more than one kind and tell them apart by the kind byte.
 
 An AI overlay comes once for each monster slot it can load in (`m0` to `m3` in its name; the slots' load addresses are the overlay slots in `mhp3rd_profile.hpp`), and which one a monster's AI loads as depends on the slot the quest gives it, which has not been traced: a Tigrex in the second slot loads `em058m1` at `0x0A1EFE80`. Compared word by word on NPJB-40001, `em058m1` is `em058m0` linked `0x34E80` further on: the same code and data, its jumps and address pairs moved, its kind checks at the same offsets from its load address (`0x0A1F0180` and on) and its vtable at `0x0A20E588` instead of `0x0A1D9708`, with that overlay's functions in it. The Tigrex has no `m2` or `m3`. The monsters service hooks the kind checks in each slot's overlay, and gives a kind's monsters a copy of whichever base vtable they were made with.
 
+The kind checks, the materials hidden by number and the meshes written by number are traced for the Tigrex's AI only, which serves `tigrex` (58) and `brute_tigrex` (23): those are the bases the monsters service fully supports. A kind made from any other base is added with a warning on its mod's page, and nothing redirects its base's kind checks: until that base's AI is traced the same way, it may go another kind's way, as kind 75 went kind 23's above, or stop the game.
+
 A new monster of its own then changes its rows: its own model set's files (files a mod adds, [MODDING.md](MODDING.md#add-new-files)), its own AI overlay through `monster.kinds`, its own files in `monster.files`.
 
 ## A monster's model

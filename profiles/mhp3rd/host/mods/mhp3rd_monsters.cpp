@@ -952,6 +952,12 @@ std::optional<std::uint8_t> add(Runtime &runtime, const Spec &spec, std::string 
             if (s.draw_hooked) watch_quest_end();
         }
     }
+    if (behaviour == nullptr)
+        problem(spec.owner, spec.id,
+            "its base " + spec.base +
+                " has no traced behaviour (only tigrex and brute_tigrex do): where the base's AI checks its own kind, "
+                "hides materials or writes meshes by number, the kind is not given the base's way, and it may go "
+                "another kind's way or stop the game");
     std::cout << "[mods] " << (spec.mod.empty() ? std::string("a mod") : spec.mod) << " adds monster " << spec.id
               << " as kind " << int{kind_number} << ", based on " << spec.base << "\n";
     return kind_number;

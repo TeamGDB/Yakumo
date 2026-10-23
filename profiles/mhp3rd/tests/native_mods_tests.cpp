@@ -2183,6 +2183,11 @@ void test_monster_quest_end(psprecomp::Runtime &runtime) {
     const ymod_monster_fn alone = [](ymod_cpu *, std::uint32_t, void *) -> int { return YMOD_RETURN; };
     check(kind && service->behave(mod, *kind, YMOD_MONSTER_THINK, alone, nullptr) == 0,
         "monsters: a kind made from a base without traced behaviour takes a part");
+    check(reported("Quest End",
+              "monster lone_rathian: its base rathian has no traced behaviour (only tigrex and brute_tigrex do): "
+              "where the base's AI checks its own kind, hides materials or writes meshes by number, the kind is not "
+              "given the base's way, and it may go another kind's way or stop the game"),
+        "monsters: a base without traced behaviour is warned of on the mod's page");
     constexpr std::uint32_t kMonster = 0x08B60000u, kTable = 0x08B61000u, kAct = 0x08B62000u;
     for (std::uint32_t slot = 0; slot < 96u; ++slot) runtime.memory().store32(kTable + slot * 4u, kAct);
     store(runtime, kAct, {0x24020005u, 0x03E00008u, 0u}); // v0 = 5
