@@ -4,31 +4,50 @@
 #include "lobby/quest_file.hpp"
 #include "lobby/quests.hpp"
 #include "lobby/report.hpp"
+#include "lobby/reporter.hpp"
 #include "lobby/snapshot.hpp"
 
+#include "adhoc/sockets.hpp"
 #include "game/equipment_models.hpp"
 #include "game/game_data.hpp"
 #include "game/guest_ram.hpp"
+#include "settings/settings.hpp"
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <iterator>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace mhp3rd::lobby {
-// The app reads the quest details from DATA.BIN; the tests below do not need
-// them, so the test binary provides the empty definition.
+// The app reads the quest details from DATA.BIN; the test binary supplies the
+// quests its snapshot tests need.
+std::vector<PostedQuest> test_posted_quests;
 std::vector<PostedQuest> posted_quests(const game::Ram &) {
-    return {};
+    return test_posted_quests;
 }
 } // namespace mhp3rd::lobby
 
+namespace mhp3rd::settings {
+// The reporter only tests its network thread here; frame() is not entered.
+Settings &current() {
+    static Settings settings;
+    return settings;
+}
+} // namespace mhp3rd::settings
+
 namespace {
 using namespace mhp3rd;
+namespace net = mhp3rd::adhoc::net;
 
 int failures{};
 
@@ -48,6 +67,7 @@ void test_json_string() {
     check(lobby::json_string("a\"b\\c") == "\"a\\\"b\\\\c\"", "quotes and backslashes are escaped");
     check(lobby::json_string("a\nb\tc") == "\"a\\nb\\tc\"", "newlines and tabs are escaped");
     check(lobby::json_string(std::string(1u, '\x01')) == "\"\\u0001\"", "control characters are escaped");
+    check(lobby::json_string("\b\f\r") == "\"\\b\\f\\r\"", "backspace, form feed and carriage return are escaped");
     check(lobby::json_string("Jos\xC3\xA9") == "\"Jos\xC3\xA9\"", "UTF-8 passes through");
 }
 
@@ -142,6 +162,9 @@ void test_planner() {
     lines = planner.update(left, 1033);
     check(lines.size() == 1u && has(lines[0], "\"type\":\"leave\""), "leaving a hall sends a leave");
     check(planner.update(left, 1034).empty(), "leaving twice sends nothing");
+    planner.reset();
+    lines = planner.update(snapshot, 1035);
+    check(lines.size() == 1u, "a reset planner sends the next snapshot at once");
 }
 
 constexpr std::uint32_t kBase = 0x09F40000u;
@@ -182,6 +205,34 @@ void test_read_hunter() {
     lobby::Snapshot none;
     lobby::read_hunter(empty, none);
     check(none.name.empty() && none.equipment.empty() && !none.weapon && none.hr == 0, "no character reads as no data");
+}
+
+void write_utf16(game::Ram &ram, std::uint32_t at, const char *text);
+
+void test_snapshot_pieces_and_quest_time() {
+    game::BufferRam ram(kBase, kSize);
+    write_utf16(ram, game::kCharacter, "Tester");
+    ram.store8(game::kCharacter + game::kCharacterSex, 0u);
+    for (std::uint8_t kind = 0u; kind <= 4u; ++kind) {
+        const std::uint32_t piece = game::kCharacter + game::kCharacterArmor + kind * game::kEquipmentRecord;
+        ram.store8(piece, 1u);
+        ram.store8(piece + 1u, kind);
+        ram.store16(piece + 2u, static_cast<std::uint16_t>(kind + 1u));
+    }
+    lobby::Snapshot snapshot;
+    snapshot.hall = "MHP3QTEST";
+    lobby::read_hunter(ram, snapshot);
+    check(snapshot.equipment.size() == 5u && snapshot.equipment[0].slot == "chest" &&
+            snapshot.equipment[1].slot == "arms" && snapshot.equipment[2].slot == "waist" &&
+            snapshot.equipment[3].slot == "legs" && snapshot.equipment[4].slot == "head",
+        "every armor slot gets its dashboard label");
+    lobby::test_posted_quests = {{1u, 10509u, 5u, 3u, 500u, 6000u, 90'000u, "Deserted Island (Night)", "Warrior's Hunt",
+        "Hunt the Zinogre", "Ludroth\nJaggia", "Guild Manager"}};
+    lobby::read_hunter(ram, snapshot);
+    check(
+        snapshot.quests.size() == 1u && !snapshot.quests[0].started_at.empty() && snapshot.quests[0].poster == "Tester",
+        "the snapshot dates the quest and names its poster");
+    lobby::test_posted_quests.clear();
 }
 
 void write_utf16(game::Ram &ram, std::uint32_t at, const char *text) {
@@ -261,6 +312,20 @@ void test_quest_file_objective_across_padding() {
         "the later fields are read past their padding");
 }
 
+void test_quest_zones_and_ranks() {
+    const char *const zones[] = {"Unknown", "Deserted Island (Day)", "Sandy Plains (Day)", "Flooded Forest (Day)",
+        "Tundra (Day)", "Volcano (Day)", "Great Desert", "Lava Canyon", "Land Arena", "Small Arena", "Sacred Land",
+        "Polar Zone", "Misty Peaks (Day)", "Mountain Summit", "Deserted Island (Night)", "Sandy Plains (Night)",
+        "Flooded Forest (Night)", "Tundra (Night)", "Volcano (Night)", "Misty Peaks (Night)"};
+    for (std::uint8_t id = 0u; id < 20u; ++id) check(lobby::zone_name(id) == zones[id], "a quest map has its name");
+    check(lobby::zone_name(0xFFu) == "Unknown", "an unknown quest map falls back");
+    check(lobby::minimum_rank(1u) == 1u && lobby::minimum_rank(2u) == 1u, "one and two stars need HR1");
+    check(lobby::minimum_rank(3u) == 2u && lobby::minimum_rank(4u) == 2u, "three and four stars need HR2");
+    check(lobby::minimum_rank(5u) == 3u && lobby::minimum_rank(6u) == 4u, "five and six stars need HR3 and HR4");
+    check(lobby::minimum_rank(7u) == 5u && lobby::minimum_rank(8u) == 6u, "seven and eight stars need HR5 and HR6");
+    check(lobby::minimum_rank(9u) == 6u, "a high star value keeps the highest gate");
+}
+
 void test_active_quest_id() {
     game::BufferRam record(lobby::kActiveQuestRecord, 0x100u);
     record.store16(lobby::kActiveQuestRecord + lobby::kActiveQuestIdOffset, 10509u);
@@ -317,6 +382,113 @@ void set_env(const char *name, const char *value) {
 #endif
 }
 
+bool wait_until(const std::function<bool()> &ready, int timeout_ms = 5000) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (ready()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return ready();
+}
+
+// A loopback TCP server that keeps what the reporter sends. It exists only to
+// exercise the network thread without a game or the ad hoc server.
+struct TestServer {
+    net::Socket listener{net::kNoSocket};
+    std::uint16_t port{};
+    std::atomic<bool> stop{};
+    std::mutex mutex;
+    std::string received;
+    std::thread thread;
+
+    TestServer() {
+        listener = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (listener == net::kNoSocket) return;
+        net::set_option(listener, SOL_SOCKET, SO_REUSEADDR, 1);
+        const net::Address address = net::Address::ipv4_address(htonl(INADDR_LOOPBACK), 0);
+        if (::bind(listener, reinterpret_cast<const sockaddr *>(&address.storage), address.length) != 0 ||
+            ::listen(listener, 1) != 0) {
+            net::close_socket(listener);
+            listener = net::kNoSocket;
+            return;
+        }
+        net::Address bound;
+        socklen_t length = sizeof(bound.storage);
+        if (getsockname(listener, reinterpret_cast<sockaddr *>(&bound.storage), &length) != 0) {
+            net::close_socket(listener);
+            listener = net::kNoSocket;
+            return;
+        }
+        port = bound.port();
+        net::set_nonblocking(listener);
+        thread = std::thread([this] {
+            while (!stop.load()) {
+                net::PollEntry poll{};
+                poll.fd = listener;
+                poll.events = POLLIN;
+                if (net::poll_sockets(&poll, 1u, 100) <= 0) continue;
+                const net::Socket peer = ::accept(listener, nullptr, nullptr);
+                if (peer == net::kNoSocket) continue;
+                char buffer[4096];
+                for (;;) {
+                    const int count = ::recv(peer, buffer, static_cast<int>(sizeof(buffer)), 0);
+                    if (count <= 0) break;
+                    std::lock_guard lock(mutex);
+                    received.append(buffer, static_cast<std::size_t>(count));
+                }
+                net::close_socket(peer);
+                break;
+            }
+        });
+    }
+
+    ~TestServer() {
+        stop = true;
+        if (listener != net::kNoSocket) net::close_socket(listener);
+        if (thread.joinable()) thread.join();
+    }
+
+    [[nodiscard]] bool ready() const { return listener != net::kNoSocket && port != 0u; }
+    [[nodiscard]] std::string text() {
+        std::lock_guard lock(mutex);
+        return received;
+    }
+};
+
+void test_reporter_network() {
+    TestServer server;
+    check(server.ready(), "the reporter test server listens");
+    if (!server.ready()) return;
+
+    lobby::test::configure(true, "127.0.0.1:" + std::to_string(server.port), "");
+    lobby::test::queue({lobby::report_line(sample(), 1000), lobby::leave_line("02:00:00:00:00:01", "", 1001)});
+    const bool sent = wait_until([&] { return lobby::status().reports_sent >= 2u; });
+    check(sent, "the reporter sends queued lines");
+    const bool received = wait_until([&] {
+        const std::string text = server.text();
+        return text.find("\"type\":\"report\"") != std::string::npos &&
+            text.find("\"type\":\"leave\"") != std::string::npos;
+    });
+    check(received, "the test server receives the report and leave lines");
+    lobby::shutdown();
+
+    lobby::test::configure(true, "127.0.0.1:1", "");
+    lobby::test::queue({"unreachable\n"});
+    check(wait_until([] { return !lobby::status().last_error.empty(); }), "a refused reporter connection is reported");
+    check(lobby::status().last_error.find("cannot connect") != std::string::npos,
+        "a refused connection names the connection failure");
+    lobby::shutdown();
+
+    lobby::test::configure(true, "[127.0.0.1]:1", "");
+    lobby::test::queue({"unreachable\n"});
+    check(wait_until([] { return !lobby::status().last_error.empty(); }), "a bracketed server is parsed");
+    lobby::shutdown();
+
+    lobby::test::configure(false, "", "");
+    check(!lobby::status().enabled, "the reporter can be disabled");
+    lobby::shutdown();
+}
+
 void test_diagnostic_dump() {
     const std::filesystem::path root = std::filesystem::temp_directory_path() / "yakumo-lobby-diag-test";
     const std::filesystem::path previous = std::filesystem::current_path();
@@ -370,12 +542,15 @@ int main() {
     test_leave_line();
     test_planner();
     test_read_hunter();
+    test_snapshot_pieces_and_quest_time();
     test_hunter_rank_and_guild_card();
     test_posted_quest_ids();
     test_latest_quest_id();
     test_active_quest_id();
+    test_quest_zones_and_ranks();
     test_quest_file_objective_across_padding();
     test_guild_stats();
+    test_reporter_network();
     test_diagnostic_dump();
     if (failures == 0) std::cout << "lobby tests passed\n";
     return failures == 0 ? 0 : 1;

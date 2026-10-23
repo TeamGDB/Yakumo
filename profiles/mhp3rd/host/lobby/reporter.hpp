@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace psprecomp {
 class Runtime;
@@ -35,5 +36,12 @@ struct Status {
 // Stops the network thread and waits for it. Called at exit; safe to call
 // more than once.
 void shutdown();
+
+// Test hooks: drive the network thread without a Runtime, a game or a hall.
+// They are compiled in release builds and unused by the game.
+namespace test {
+void configure(bool enabled, std::string server, std::string token);
+void queue(std::vector<std::string> lines);
+} // namespace test
 
 } // namespace mhp3rd::lobby

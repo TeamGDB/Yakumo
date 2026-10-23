@@ -143,6 +143,10 @@ void test_store() {
     const auto loaded = load_save(root, files);
     check(loaded.status == LoadStatus::Ok && loaded.contents.data == contents.data, "the save loads back");
     check(loaded.contents.title == "Title" && loaded.contents.detail == "Detail", "the titles load back");
+    std::string dump_error;
+    const auto dump_folder = root / "plain";
+    check(write_plain_dump(dump_folder, files.file_name, contents.data, dump_error), "a plain save dump is written");
+    check(std::filesystem::exists(dump_folder / (files.file_name + ".plain")), "the plain save has its data");
 
     // A changed data file must be reported as broken.
     {
