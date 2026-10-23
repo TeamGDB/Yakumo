@@ -2305,6 +2305,22 @@ void test_monster_quest_end(psprecomp::Runtime &runtime) {
     tables::reset_for_tests();
 }
 
+// The log on the Mods page keeps its problems however much is logged.
+void test_report_log() {
+    namespace native = mhp3rd::mods::native;
+    native::reset_for_tests();
+    ymod_mod *chatty = native::add_mod("chatty", "Chatty", ".");
+    for (int i = 0; i < 5; ++i) native::host()->log(chatty, YMOD_LOG_WARNING, ("warning " + std::to_string(i)).c_str());
+    for (int i = 0; i < 2000; ++i) native::host()->log(chatty, YMOD_LOG_INFO, "chatter");
+    check(native::reports().size() == 1000u && logged("warning 0") && logged("warning 4"),
+        "native: lines that are not problems do not push problems out of the log");
+    for (int i = 0; i < 1000; ++i) native::host()->log(chatty, YMOD_LOG_ERROR, ("error " + std::to_string(i)).c_str());
+    native::host()->log(chatty, YMOD_LOG_INFO, "one more line");
+    check(native::reports().size() == 1000u && logged("error 0") && !logged("one more line"),
+        "native: with only problems kept, a line that is not one takes none's place");
+    native::reset_for_tests();
+}
+
 int main() {
     psprecomp::Runtime runtime(64u * 1024u * 1024u);
     mhp3rd::kernel().install(runtime, 0u, 0x08900000u);
@@ -2383,6 +2399,7 @@ int main() {
     test_monster_quest_end(runtime);
     test_equipment(runtime);
     test_maps(runtime);
+    test_report_log();
 
     std::printf("%s\n", failures == 0 ? "all native mod checks passed" : "native mod checks FAILED");
     return failures == 0 ? 0 : 1;

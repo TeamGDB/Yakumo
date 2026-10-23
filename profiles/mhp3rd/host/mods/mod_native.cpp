@@ -27,10 +27,13 @@ void report(ymod_mod *mod, const std::string &line, bool problem) {
     const std::string name = mod != nullptr ? mod->name : std::string("native mods");
     std::cout << "[mod " << name << "] " << line << "\n";
     std::vector<Report> &reports = state().reports;
-    // A mod that logs every frame keeps only its latest lines; problems stay.
+    // A mod that logs every frame keeps only its latest lines: the oldest
+    // line that is not a problem goes first, and a line that is not a problem
+    // never takes a problem's place.
     constexpr std::size_t kKept = 1000u;
     if (reports.size() >= kKept) {
         const auto oldest = std::find_if(reports.begin(), reports.end(), [](const Report &r) { return !r.problem; });
+        if (oldest == reports.end() && !problem) return;
         reports.erase(oldest != reports.end() ? oldest : reports.begin());
     }
     reports.push_back({name, line, problem});
