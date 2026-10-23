@@ -758,6 +758,8 @@ std::uint64_t Kernel::vtimer_value(const VTimer &timer) const noexcept {
 std::int32_t Kernel::allocate_block(
     const std::string &name, std::uint32_t type, std::uint32_t size, std::uint32_t address_or_alignment) {
     if (size == 0u) return static_cast<std::int32_t>(error::kIllegalArgument);
+    // A size that rounds up past 4 GiB fits nowhere; rounded, it would be 0.
+    if (size > 0xFFFFFFFFu - (kMemoryGranularity - 1u)) return static_cast<std::int32_t>(error::kNoMemory);
     std::uint32_t alignment = kMemoryGranularity;
     if ((type == 3u || type == 4u) && address_or_alignment != 0u) {
         if ((address_or_alignment & (address_or_alignment - 1u)) != 0u)
@@ -768,10 +770,12 @@ std::int32_t Kernel::allocate_block(
 
     std::optional<std::uint32_t> address;
     if (type == 0u || type == 3u) {
+        // In 64 bits: a large size must not wrap round to fit.
         for (const FreeRange &range : free_ranges_) {
-            const std::uint32_t start = align_up(range.address, alignment);
-            if (start + aligned_size <= range.address + range.size) {
-                address = start;
+            const std::uint64_t start =
+                (static_cast<std::uint64_t>(range.address) + alignment - 1u) & ~std::uint64_t{alignment - 1u};
+            if (start + aligned_size <= static_cast<std::uint64_t>(range.address) + range.size) {
+                address = static_cast<std::uint32_t>(start);
                 break;
             }
         }
@@ -788,7 +792,9 @@ std::int32_t Kernel::allocate_block(
     } else if (type == 2u) {
         const std::uint32_t start = address_or_alignment & ~(kMemoryGranularity - 1u);
         for (const FreeRange &range : free_ranges_) {
-            if (start >= range.address && start + aligned_size <= range.address + range.size) {
+            if (start >= range.address &&
+                static_cast<std::uint64_t>(start) + aligned_size <=
+                    static_cast<std::uint64_t>(range.address) + range.size) {
                 address = start;
                 break;
             }

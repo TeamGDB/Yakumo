@@ -464,6 +464,12 @@ void test_hook_changes(psprecomp::Runtime &runtime) {
                 failing, YMOD_EVENT_FRAME, [](int, std::uint32_t, void *) {}, nullptr) != 0,
         "native: a withdrawn mod cannot register again");
 
+    // An allocation that cannot fit is refused, not rounded down to nothing.
+    const auto *memory = static_cast<const ymod_memory *>(native::host()->service(g_self, YMOD_MEMORY, 1u));
+    check(memory != nullptr && memory->allocate(g_self, 0xFFFFFFF0u, 16u) == 0u &&
+            memory->allocate(g_self, 0xFFFFFF00u, 16u) == 0u,
+        "native: memory.allocate refuses a size past the memory");
+
     // A mod stopped by a callback before its own runs in the same call or
     // event is not called: the lists run from copies.
     static ymod_mod *s_quitter = nullptr;

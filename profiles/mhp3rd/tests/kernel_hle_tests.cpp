@@ -42,6 +42,16 @@ void memory_contracts() {
         "unknown partition type rejected");
     check(static_cast<unsigned>(kernel.allocate_block("bad", 3, 256, 384)) == mhp3rd::error::kIllegalArgument,
         "alignment must be a power of two");
+    // Sizes that round past 4 GiB, or would wrap round an address to fit.
+    for (const std::uint32_t type : {0u, 1u, 2u, 3u, 4u}) {
+        const std::uint32_t where = type == 2u ? 0x09000000u : 0u; // an address for type 2, else an alignment
+        check(static_cast<unsigned>(kernel.allocate_block("huge", type, 0xFFFFFFF0u, where)) ==
+                    mhp3rd::error::kNoMemory &&
+                static_cast<unsigned>(kernel.allocate_block("huge", type, 0xFFFFFF00u, where)) ==
+                    mhp3rd::error::kNoMemory,
+            "a size past the memory is refused, not wrapped round to a small block");
+    }
+    check(kernel.free_memory() == total, "and takes nothing");
     const auto low = kernel.allocate_block("low", 0, 1, 0);
     const auto high = kernel.allocate_block("high", 1, 257, 0);
     check(low > 0 && high > 0, "low/high allocations succeed");
