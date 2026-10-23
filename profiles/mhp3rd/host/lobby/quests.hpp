@@ -62,13 +62,14 @@ struct PostedQuest {
     std::string poster;     // the hunter who posted it in the hall
     std::string accepted;   // who accepted the quest, when the board reports it
     std::string password;   // the hall's password, empty for an open hall
+    std::string note;       // the hall's recruitment note
     std::string started_at; // quest start time, ISO 8601, when the board reports it
 
     [[nodiscard]] bool operator==(const PostedQuest &other) const {
         return slot == other.slot && id == other.id && stars == other.stars && fee == other.fee &&
             reward == other.reward && time_limit == other.time_limit && name == other.name &&
             objective == other.objective && monsters == other.monsters && client == other.client &&
-            poster == other.poster && accepted == other.accepted && password == other.password &&
+            poster == other.poster && accepted == other.accepted && password == other.password && note == other.note &&
             started_at == other.started_at;
     }
 };

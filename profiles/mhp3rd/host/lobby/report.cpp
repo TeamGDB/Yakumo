@@ -116,6 +116,7 @@ std::string report_line(const Snapshot &snapshot, std::int64_t unix_seconds) {
             append_string_field(out, "poster", quest.poster);
             append_string_field(out, "accepted", quest.accepted);
             append_string_field(out, "password", quest.password);
+            append_string_field(out, "note", quest.note);
             append_string_field(out, "started_at", quest.started_at);
             out.push_back('}');
         }
