@@ -170,6 +170,21 @@ A second copy of the money sits at `0x095B1BC8` while the save is being
 loaded; the game copies the character to the addresses above when it enters
 the village.
 
+The lobby reporter reads the Guild Card summary from the live card block:
+
+| What | Where |
+| --- | --- |
+| Village, Low Rank, High Rank, Training, Hot Spring quest counts (u16 each) | `0x09FA82D0` |
+| Play time (u32 seconds) | `0x09F54544` |
+| Weapon usage, one u16 per equipment kind 5 to 17 (10 unused), starting at kind 5 | `0x09FA86C0` |
+| Felyne levels, five u8 with a stride of `0xA0` | `0x09FACF3F` |
+| Recent quest titles, ASCII strings | `0x09FA86F4` to `0x09FA8D80` |
+| Award block, counted by non-zero bytes | `0x09FA8344`, `0x300` bytes |
+| The hunter's own card in the hall's card list, title at +`0x54` and comment at +`0x6E` | `0x09FA8DBA` |
+
+The block from `0x09FA8280` is a copy of the save's own-card block; the save
+offsets are `0x58DD4` and `0x5990E` for the same fields.
+
 ### Item box
 
 1000 slots of `{u16 item id, u16 count}` from `0x09F52CF4`; id 0 is an empty
