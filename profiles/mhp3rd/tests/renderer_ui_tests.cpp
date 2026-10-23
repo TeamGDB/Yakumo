@@ -2541,6 +2541,34 @@ void mods_screen_contracts(
         mods::native::reset_for_tests();
     }
     {
+        // A file replaced while the game runs: only as far as the running game
+        // can take it, since the change ends with the game.
+        session->library().set_enabled(id, true);
+        session->commit();
+        ymod_mod *replacer = mods::native::add_mod(id, "Public", folder.string());
+        const auto *files = static_cast<const ymod_files *>(mods::native::host()->service(replacer, YMOD_FILES, 1u));
+        const std::string same = "SAMESIZE", longer = "NINEBYTES", elsewhere = "NONESUCH";
+        const bool taken = files->replace(replacer, 1u, same.data(), 8u) == 0 && !session->restart_pending();
+        const bool resized = files->replace(replacer, 1u, longer.data(), 9u) == -1 && !session->restart_pending();
+        const bool missing = files->replace(replacer, 2u, elsewhere.data(), 8u) == -1;
+        ymod_mod *stranger = mods::native::add_mod("not-on-the-page", "Stranger", sandbox.string());
+        const bool unknown = files->replace(stranger, 1u, same.data(), 8u) == -1;
+        expect(taken && resized && missing && unknown,
+            "a file replaced while running is taken at its size, refused when its size changes, for an id the disc "
+            "lacks and for a mod not on the Mods page, and no restart is left waiting");
+        const auto kept = session->library().runtime_change(id, 1u, mods::FileChange::Kind::Replace);
+        std::string kept_bytes;
+        if (kept) {
+            std::ifstream in(kept->source, std::ios::binary);
+            kept_bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        }
+        expect(kept_bytes == same, "a refused replacement leaves the one taken before");
+        session->library().remove_runtime_change(id, 1u, mods::FileChange::Kind::Replace);
+        session->library().set_enabled(id, false);
+        session->commit();
+        mods::native::reset_for_tests();
+    }
+    {
         std::ofstream out(folder / "replacement.bin", std::ios::binary);
         out << std::string(block + 17, 'G');
     }

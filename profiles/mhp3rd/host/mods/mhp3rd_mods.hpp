@@ -90,6 +90,8 @@ void start_native(psprecomp::Runtime &runtime);
 
 // The game's own bytes of a DATA.BIN file, decrypted. Nothing without a disc.
 [[nodiscard]] std::optional<std::vector<std::uint8_t>> original_file(FileId file);
+// How many files the disc's DATA.BIN has (ids 0 to that - 1); 0 without one.
+[[nodiscard]] std::uint32_t disc_files();
 
 // The session the menu manages; null when there is no disc.
 [[nodiscard]] ModSession *session();

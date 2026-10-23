@@ -202,7 +202,11 @@ typedef struct ymod_files {
     uint32_t version;
     uint32_t size;
     /* Replaces a file with bytes (copied), from the next time the game loads
-     * it. A larger file applies at the next start. Returns 0 on success. */
+     * it, until the game ends (call it again at each start). Returns 0, or -1
+     * with the reason on the mod's page: for a file the disc does not have,
+     * or a change the running game cannot take (a size the archive keeps
+     * changes, the file outgrows its blocks, or another change waits for a
+     * restart; docs/MODDING.md). */
     int (*replace)(ymod_mod *mod, uint32_t file, const void *data, uint32_t length);
     /* Reads the game's own bytes of a file into `out`, up to `capacity`.
      * Returns the file's size, or -1. */

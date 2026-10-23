@@ -564,6 +564,11 @@ std::optional<std::vector<std::uint8_t>> original_file(FileId file) {
     return s.view->original(file);
 }
 
+std::uint32_t disc_files() {
+    const State &s = state();
+    return s.directory ? static_cast<std::uint32_t>(s.directory->entries()) : 0u;
+}
+
 ModSession *session() {
     return state().session.get();
 }

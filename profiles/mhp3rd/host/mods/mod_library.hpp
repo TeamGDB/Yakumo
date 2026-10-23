@@ -206,8 +206,14 @@ public:
     void set_setting(const std::string &id, const std::string &key, std::int64_t value);
 
     // A change a running mod makes from code (a native mod replacing a file
-    // with bytes it made): part of that mod's changes from now on.
+    // with bytes it made): part of that mod's changes from now on, until
+    // Yakumo ends; it is not kept for the next start.
     void add_runtime_change(const std::string &id, const FileChange &change);
+    // The change of that kind to `file` add_runtime_change() gave, if any, and
+    // taking it back.
+    [[nodiscard]] std::optional<FileChange> runtime_change(
+        const std::string &id, FileId file, FileChange::Kind kind) const;
+    void remove_runtime_change(const std::string &id, FileId file, FileChange::Kind kind);
     // +1 raises the mod's priority by one place, -1 lowers it.
     void move(const std::string &id, int delta);
 

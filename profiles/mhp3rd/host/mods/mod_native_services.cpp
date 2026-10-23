@@ -90,7 +90,16 @@ void events_unsubscribe(ymod_mod *mod, int event, ymod_event_fn callback, void *
 
 int files_replace(ymod_mod *mod, std::uint32_t file, const void *data, std::uint32_t length) {
     ModSession *session = mods::session();
-    if (session == nullptr || data == nullptr || length == 0u) return -1;
+    if (session == nullptr || data == nullptr || length == 0u || mod == nullptr || mod->failed) return -1;
+    ModLibrary &library = session->library();
+    const std::string name = library.format().file_name(file);
+    const auto refuse = [mod, &name](const std::string &why) {
+        report(mod, "file " + name + " is not replaced: " + why, true);
+        return -1;
+    };
+    if (file >= mods::disc_files()) return refuse("the disc has no file with that id");
+    if (library.find(mod->id) == nullptr || !library.enabled(mod->id))
+        return refuse("only a mod turned on on the Mods page replaces files");
     fs::path folder;
     try {
         folder = install::user_data_directory() / "mods-cache" / from_utf8(mod->id);
@@ -99,14 +108,30 @@ int files_replace(ymod_mod *mod, std::uint32_t file, const void *data, std::uint
     }
     std::error_code ec;
     fs::create_directories(folder, ec);
-    const fs::path path = folder / from_utf8(session->library().format().file_name(file) + ".bin");
+    // A path of its own each time: the bytes served now stay until the
+    // change replacing them is taken.
+    static std::uint32_t written = 0u;
+    const fs::path path = folder / from_utf8(name + "-" + std::to_string(++written) + ".bin");
     {
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         out.write(static_cast<const char *>(data), static_cast<std::streamsize>(length));
         if (!out) return -1;
     }
-    session->library().add_runtime_change(mod->id, FileChange{FileChange::Kind::Replace, file, path, {}});
+    const std::optional<FileChange> before = library.runtime_change(mod->id, file, FileChange::Kind::Replace);
+    library.add_runtime_change(mod->id, FileChange{FileChange::Kind::Replace, file, path, {}});
     session->commit();
+    // Not taken now, it would never be: changes made while the game runs end
+    // with it, and the next start does not have them.
+    if (session->restart_pending()) {
+        if (before)
+            library.add_runtime_change(mod->id, *before);
+        else
+            library.remove_runtime_change(mod->id, file, FileChange::Kind::Replace);
+        session->commit();
+        fs::remove(path, ec);
+        return refuse("the running game cannot take it (the file's size changes where the archive keeps it, the file "
+                      "outgrows its blocks, or another change waits for a restart)");
+    }
     return 0;
 }
 

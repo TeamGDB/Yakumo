@@ -250,6 +250,19 @@ void ModLibrary::add_runtime_change(const std::string &id, const FileChange &cha
     changes.push_back(change);
 }
 
+std::optional<FileChange> ModLibrary::runtime_change(const std::string &id, FileId file, FileChange::Kind kind) const {
+    const auto found = runtime_changes_.find(id);
+    if (found == runtime_changes_.end()) return std::nullopt;
+    for (const FileChange &change : found->second)
+        if (change.file == file && change.kind == kind) return change;
+    return std::nullopt;
+}
+
+void ModLibrary::remove_runtime_change(const std::string &id, FileId file, FileChange::Kind kind) {
+    if (const auto found = runtime_changes_.find(id); found != runtime_changes_.end())
+        std::erase_if(found->second, [&](const FileChange &c) { return c.file == file && c.kind == kind; });
+}
+
 void ModLibrary::move(const std::string &id, int delta) {
     const auto it = std::find_if(mods_.begin(), mods_.end(), [&id](const Mod &m) { return m.id == id; });
     if (it == mods_.end()) return;

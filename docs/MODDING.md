@@ -254,7 +254,7 @@ The script's main chunk runs once at start, before the game's first frame; it se
 | `panel(title, function)`, `overlay(title, function)` | Draws in Yakumo's interface: see [Panels and overlays](#panels-and-overlays) |
 | `setting_switch(key, label, fallback)`, `setting_number(key, label, min, max, fallback)`, `setting_choice(key, label, {choices}, fallback)` | Declares a setting on the mod's page and returns its value. Choices count from 1 |
 | `setting(key)` | A declared setting's value now: the player can change it at any time |
-| `replace_file(id, bytes)` | Replaces a file from the next time the game loads it |
+| `replace_file(id, bytes)` | Replaces a file from the next time the game loads it, until the game ends: `false` (the reason in the log) for an id the disc does not have or a change the running game cannot take, such as a file that outgrows its blocks in `DATA.BIN`. A file that grows is replaced through `[Files]` |
 | `original_file(id)` | The game's own bytes of a file, or `nil` |
 | `folder()`, `api_version` | The mod's folder, for its own files; the API's version |
 
@@ -299,7 +299,7 @@ Yakumo calls `yakumo_mod_main` once at start. Everything else is a *service*, a 
 | `yakumo.hooks` | Hooks before, after or instead of a function, and before any instruction, in the executable or an overlay |
 | `yakumo.calls` | Calling a guest function from a REPLACE hook, as guest code on the same thread; the call's result returns to the hooked function's caller. One call per callback; a second, and a call from other callbacks, is refused |
 | `yakumo.events` | Frames, the game's start, whole files read, overlays loaded and unloaded, quests starting and ending; subscribing and unsubscribing |
-| `yakumo.files` | Replacing a file with bytes, reading the game's own bytes of one |
+| `yakumo.files` | Replacing a file with bytes while the game runs, as far as the running game can take it, reading the game's own bytes of one |
 | `yakumo.settings` | Switches, numbers and choices on the mod's page, kept in `mods.ini` |
 | `yakumo.services` | Tables a mod publishes for others to import: a native mod can be a library for other mods |
 | `yakumo.symbols` | [The game's functions and data by name](#the-games-functions-by-name), and the overlay loaded over an address |
