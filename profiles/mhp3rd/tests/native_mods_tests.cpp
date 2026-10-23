@@ -59,6 +59,13 @@ bool logged(const std::string &text) {
     return false;
 }
 
+// On the page of the mod named `mod`, as a problem.
+bool reported(const std::string &mod, const std::string &text) {
+    for (const auto &report : mhp3rd::mods::native::reports())
+        if (report.mod == mod && report.line == text && report.problem) return true;
+    return false;
+}
+
 void store(psprecomp::Runtime &runtime, std::uint32_t address, std::initializer_list<std::uint32_t> words) {
     for (const std::uint32_t word : words) {
         runtime.memory().store32(address, word);
@@ -2097,6 +2104,17 @@ void test_monsters(psprecomp::Runtime &runtime) {
     check(served_size(supplied_file) > first_supplied, "quests: and one with supplies, with them");
     check(served_size(*mhp3rd::mods::p3rd::quest_file(62016u)) == served_size(*mhp3rd::mods::p3rd::quest_file(62010u)),
         "quests: a reward naming no item of the game's leaves the quest as first built");
+
+    // What goes wrong with a kind is on its mod's page: with the JIT off, the
+    // base's kind checks cannot be hooked.
+    ymod_monster unhooked = spec;
+    unhooked.id = "unhooked_fatalis";
+    psprecomp::set_jit_enabled(false);
+    const int32_t unhooked_kind = service != nullptr ? service->add(mod, &unhooked) : -1;
+    psprecomp::set_jit_enabled(true);
+    check(unhooked_kind > 0 &&
+            reported("Monster test", "monster unhooked_fatalis: the base's kind check at 0x0A1BB304 cannot be hooked"),
+        "monsters: a kind's problems are on its mod's page");
     std::error_code ec;
     std::filesystem::remove_all(folder, ec);
     monsters::reset_for_tests();

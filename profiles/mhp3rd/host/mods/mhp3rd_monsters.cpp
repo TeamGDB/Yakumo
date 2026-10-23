@@ -304,6 +304,13 @@ const ymod_hooks *hooks() {
     return static_cast<const ymod_hooks *>(native::host()->service(s.host, YMOD_HOOKS, 1u));
 }
 
+// A problem with a kind, on the page of the mod that added it (and in the
+// log); Yakumo's own when no mod is known.
+void problem(const void *owner, const std::string &id, const std::string &line) {
+    auto *mod = const_cast<ymod_mod *>(static_cast<const ymod_mod *>(owner));
+    native::host()->log(mod, YMOD_LOG_WARNING, ("monster " + id + ": " + line).c_str());
+}
+
 // --- Packs and models ---
 
 std::uint32_t u32(std::span<const std::uint8_t> data, std::size_t at) {
@@ -456,7 +463,7 @@ void give_kind_data(Added &added, std::uint32_t monster) {
         copy = memory_service != nullptr ? memory_service->allocate(s.host, size, 16u) : 0u;
         added.kind_data[base] = copy;
         if (copy == 0u) {
-            std::cerr << "[mods] " << added.id << ": its attack shapes cannot be given\n";
+            problem(added.owner, added.id, "its attack shapes cannot be given: no guest memory for them");
             return;
         }
         const auto copy_words = [&memory](std::uint32_t to, std::uint32_t from, std::uint32_t bytes) {
@@ -540,7 +547,7 @@ bool footstep_tables(Added &added) {
         ? memory_service->allocate(s.host, index_size + rows_size + steps_size + kEventRow, 16u)
         : 0u;
     if (at == 0u) {
-        std::cerr << "[mods] " << added.id << ": its footsteps cannot be given\n";
+        problem(added.owner, added.id, "its footsteps cannot be given: no guest memory for them");
         added.footsteps.clear();
         return false;
     }
@@ -645,7 +652,7 @@ int monster_made(ymod_cpu *cpu, void *) {
             const std::uint32_t size = kVtableSlots * 4u + 8u * kPartSlots.size();
             const std::uint32_t copy = memory_service != nullptr ? memory_service->allocate(s.host, size, 16u) : 0u;
             if (copy == 0u || !memory.contains(base_vtable, kVtableSlots * 4u)) {
-                std::cerr << "[mods] " << added.id << ": its behaviour cannot be given to its monsters\n";
+                problem(added.owner, added.id, "its behaviour cannot be given to its monsters");
                 return YMOD_CONTINUE;
             }
             for (std::uint32_t slot = 0; slot < kVtableSlots; ++slot)
@@ -664,7 +671,7 @@ int monster_made(ymod_cpu *cpu, void *) {
                 if (h == nullptr ||
                     h->function(s.host, nullptr, stub, YMOD_HOOK_REPLACE, follows ? &act_follows_think : &part_called,
                         &added.parts[part]) == 0u)
-                    std::cerr << "[mods] " << added.id << ": a part of its behaviour cannot be hooked\n";
+                    problem(added.owner, added.id, "a part of its behaviour cannot be hooked");
             }
             added.vtable = copy;
         }
@@ -828,7 +835,7 @@ std::optional<std::uint8_t> add(Runtime &runtime, const Spec &spec, std::string 
     if (std::string reason; const auto steps = tables::extend(runtime, kStepScales, kind_number + 1u, &reason))
         runtime.memory().store32(*steps + 4u * kind_number, runtime.memory().load32(*steps + 4u * *base));
     else
-        std::cerr << "[mods] " << spec.id << ": its footsteps' dust keeps no size (" << reason << ")\n";
+        problem(spec.owner, spec.id, "its footsteps' dust keeps no size (" + reason + ")");
 
     Added added{spec.id, spec.owner, {}, 0u, kind_number, *base, behaviour, {}, {kind_number, *base}};
     added.effects = effects_of(pack);
@@ -848,11 +855,10 @@ std::optional<std::uint8_t> add(Runtime &runtime, const Spec &spec, std::string 
         const std::string overlay(behaviour->overlay);
         for (const std::uint32_t at : behaviour->kind_checks)
             if (h == nullptr || h->instruction(s.host, overlay.c_str(), at, &check_kind, kept.check_kind.data()) == 0u)
-                std::cerr << "[mods] " << spec.id << ": the base's kind check at " << psprecomp::hex32(at)
-                          << " cannot be hooked\n";
+                problem(spec.owner, spec.id, "the base's kind check at " + psprecomp::hex32(at) + " cannot be hooked");
         if (behaviour->hides_materials && !s.draw_hooked && h != nullptr) {
             if (runtime.memory().load32(kMaterialAlpha) != kMaterialAlphaWord)
-                std::cerr << "[mods] the model draw is not as traced; the base's hidden parts stay hidden\n";
+                problem(spec.owner, spec.id, "the model draw is not as traced; the base's hidden parts stay hidden");
             else
                 s.draw_hooked = h->instruction(s.host, "game_task", kCompileCall, &compile_called, nullptr) != 0u &&
                     h->instruction(s.host, nullptr, kMaterialAlpha, &alpha_read, nullptr) != 0u;
