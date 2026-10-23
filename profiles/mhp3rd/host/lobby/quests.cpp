@@ -86,7 +86,9 @@ void guild_stats(const game::Ram &ram, GuildStats &stats) {
                 StatCount{labels[i], ram.load16(kQuestCountsBase + static_cast<std::uint32_t>(i * 2u))});
     }
 
-    if (ram.contains(kPlayTime, 4u)) stats.play_seconds = ram.load32(kPlayTime);
+    // Round to minutes: the card shows hours and minutes, and a per-second
+    // change would otherwise make every report differ from the last one.
+    if (ram.contains(kPlayTime, 4u)) stats.play_seconds = (ram.load32(kPlayTime) / 60u) * 60u;
 
     if (ram.contains(kWeaponUsageBase, 13u * 2u)) {
         for (std::uint8_t kind = 5u; kind <= 17u; ++kind) {

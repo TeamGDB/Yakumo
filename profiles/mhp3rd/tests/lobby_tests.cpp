@@ -231,7 +231,7 @@ void test_guild_stats() {
     const std::uint16_t counts[] = {12u, 34u, 56u, 7u, 8u};
     for (std::size_t i = 0u; i < 5u; ++i)
         ram.store16(lobby::kQuestCountsBase + static_cast<std::uint32_t>(i * 2u), counts[i]);
-    ram.store32(lobby::kPlayTime, 3661u);
+    ram.store32(lobby::kPlayTime, 3661u); // rounded down to 3660 by the reader
     ram.store16(lobby::kWeaponUsageBase + (5u - 5u) * 2u, 2u);
     ram.store16(lobby::kWeaponUsageBase + (6u - 5u) * 2u, 10u);
     ram.store16(lobby::kWeaponUsageBase + (16u - 5u) * 2u, 4u);
@@ -248,7 +248,7 @@ void test_guild_stats() {
     check(stats.quests.size() == 5u && stats.quests[1].label == "Low Rank" && stats.quests[1].count == 34u,
         "the guild card quest counts are read");
     check(stats.fs_level == 23u, "the FS level sums the felyne levels");
-    check(stats.play_seconds == 3661u, "the play time is read");
+    check(stats.play_seconds == 3660u, "the play time is read to the minute");
     check(stats.weapons.size() == 3u && stats.weapons[0].label == "Sword and Shield" && stats.weapons[0].count == 10u &&
             stats.weapons[1].label == "Dual Blades" && stats.weapons[1].count == 4u,
         "the weapon usage is read and sorted");
