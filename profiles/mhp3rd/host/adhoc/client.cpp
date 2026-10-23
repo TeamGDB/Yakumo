@@ -31,6 +31,32 @@ namespace {
 using Clock = std::chrono::steady_clock;
 using std::chrono::milliseconds;
 
+void trace_payload(const char *direction, int handle, const void *data, std::size_t size) {
+    static const char *path = std::getenv("MHP3RD_ADHOC_TRACE_PAYLOAD");
+    if (path == nullptr || *path == '\0' || size == 0u) return;
+    static std::mutex mutex;
+    static std::ofstream out(path, std::ios::binary | std::ios::app);
+    std::lock_guard lock(mutex);
+    if (!out) return;
+    const auto *bytes = static_cast<const std::uint8_t *>(data);
+    const std::size_t shown = std::min<std::size_t>(size, 2048u);
+    out << "=== " << direction << " handle " << handle << " size " << size << " ===\n";
+    for (std::size_t offset = 0u; offset < shown; offset += 16u) {
+        char hex[3 * 16 + 1];
+        char ascii[17];
+        std::size_t i = 0u;
+        for (; i < 16u && offset + i < shown; ++i) {
+            std::snprintf(hex + i * 3u, 4u, "%02x ", bytes[offset + i]);
+            ascii[i] =
+                bytes[offset + i] >= 0x20u && bytes[offset + i] < 0x7Fu ? static_cast<char>(bytes[offset + i]) : '.';
+        }
+        hex[i * 3u] = '\0';
+        ascii[i] = '\0';
+        out << hex << " " << ascii << "\n";
+    }
+    out << "\n";
+}
+
 // How long the network thread sleeps in poll(). Short, because it is also how
 // long queued data can wait before it is written.
 constexpr int kPollIntervalMs = 2;
@@ -759,6 +785,7 @@ struct Client::Impl {
             Datagram datagram = std::move(*socket.partial);
             socket.partial.reset();
             datagram.data.assign(in.data() + offset, socket.partial_size);
+            trace_payload("pdp-recv", handle, datagram.data.data(), datagram.data.size());
             offset += socket.partial_size;
             trace("relay < pdp " + std::to_string(handle) + " from " + format_mac(datagram.source) + " port " +
                 std::to_string(datagram.port) + " size " + std::to_string(datagram.data.size()));
@@ -901,6 +928,7 @@ struct Client::Impl {
                 return;
             }
             if (in.size() - offset - relay::kPtpHeaderSize < size) break;
+            trace_payload("ptp-recv", handle, in.data() + offset + relay::kPtpHeaderSize, size);
             socket.received.append(in.data() + offset + relay::kPtpHeaderSize, size);
             socket.received_total += size;
             ++traffic.packets_in;
@@ -1415,6 +1443,7 @@ bool Client::pdp_send(int handle, const Mac &destination, std::uint16_t port, co
         ++s.dropped;
         return true;
     }
+    trace_payload("pdp-send", handle, data, size);
     const auto queue = [&](const Mac &target) {
         if (socket.link.output.size() > kMaxQueuedOutput) {
             trace("pdp " + std::to_string(handle) + " send queue full; datagram dropped");
@@ -1565,6 +1594,7 @@ std::size_t Client::ptp_send(int handle, const void *data, std::size_t size) {
     const std::size_t room = queued >= socket.capacity ? 0u : socket.capacity - queued;
     const std::size_t count = std::min(size, room);
     const char *bytes = static_cast<const char *>(data);
+    trace_payload("ptp-send", handle, data, count);
     for (std::size_t done = 0; done < count;) {
         const std::size_t block = std::min(count - done, relay::kPtpBlockMax);
         wire::put32(socket.link.output, static_cast<std::uint32_t>(block));
