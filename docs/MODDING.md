@@ -248,7 +248,7 @@ The script's main chunk runs once at start, before the game's first frame; it se
 | `overlay_at(address)` | The code overlay loaded now over `address`, by name, and its load address; `nil` when none is |
 | `table(name)` | A [game table](#game-tables)'s address now, its rows and its bytes per row; `nil` when the name is not known |
 | `extend_table(name, rows)` | Gives a game table at least `rows` rows: its new address, or `nil` (the reason is in the log) |
-| `add_monster{id, based_on, model, geometry, motions}` | Adds a [large monster](#large-monsters) from the mod's files: its kind's number, or `nil` (the reason is in the log) |
+| `add_monster{id, based_on, model, geometry, motions, effects, picture}` | Adds a [large monster](#large-monsters) from the mod's files: its kind's number, or `nil` (the reason is in the log) |
 | `monster_kind(id)` | A large monster's kind by id, the game's (`"tigrex"`) or a mod's; `nil` when nothing has the id |
 | `on(event, function)` | `"frame"` between frames, `"start"` before the first, `"file"` when the game has read a whole file (with its id), `"overlay"` when a code overlay is copied to its slot and `"overlay_unloaded"` when it leaves it (with its load address), `"quest_started"` and `"quest_ended"` (with the quest's id) |
 | `panel(title, function)`, `overlay(title, function)` | Draws in Yakumo's interface: see [Panels and overlays](#panels-and-overlays) |
@@ -339,6 +339,7 @@ The mod then writes its rows with the memory functions, at the address `table()`
 | `monster.files` | `game_task` | 8 bytes, by kind | Four more files loaded with it (u16, `0xFFFF` for none) |
 | `monster.models`, `.second`, `.third` | executable | 2 bytes, by model set from 1 | The model set's three files |
 | `monster.step_scales` | executable, read by `game_sub` | 4 bytes, by kind | The size of the dust its footsteps raise (a float). Its one reader is in `game_sub`, pointed at the copy each time `game_sub` loads |
+| `monster.pictures` | executable | 6 bytes, by kind | Its picture in a quest's description: the cell (u16 x, u16 y) and palette (s16) in the image of pictures ([MONSTERS.md](MONSTERS.md#a-kinds-picture)) |
 | `quest.events` | `lobby_task` | 2 bytes | The event quests offered at the counter, by id, 0 after the last. Yakumo adds mods' quests to it itself |
 
 A kind's model set has the kind's number. A new kind made as a copy of the Tigrex (58), with rows copied from 58 in each of these tables and quest files naming it, loads, plays and moves as the Tigrex does: [MONSTERS.md](MONSTERS.md) says how they were traced, what a new kind still lacks, and how to test one.
@@ -354,12 +355,15 @@ fatalis.based_on = "tigrex";          // the game's kind it starts from
 fatalis.model = "model/model.pac";    // in the mod's folder: model pack (skeleton, model, textures),
 fatalis.geometry = "model/model_ge.bin"; // its GE data,
 fatalis.motions = "model/motions.bin";   // and its motions
+fatalis.picture = "picture/fatalis.png"; // optional: its picture, 42 by 42, at most 16 colours
 const int32_t kind = mod.monsters()->add(handle, &fatalis); // -1 when not added; the reason is in the log
 ```
 
-A script does the same with `yakumo.add_monster{id = "fatalis", based_on = "tigrex", model = "model/model.pac", geometry = "model/model_ge.bin", motions = "model/motions.bin"}`. Call it at start (`yakumo_mod_main`, or a script's main chunk). The files' formats are in [MONSTERS.md](MONSTERS.md#a-monsters-model); a monster from another game is converted into them by a tool of the mod's own.
+A script does the same with `yakumo.add_monster{id = "fatalis", based_on = "tigrex", model = "model/model.pac", geometry = "model/model_ge.bin", motions = "model/motions.bin"}` (`effects` and `picture` are optional there too). Call it at start (`yakumo_mod_main`, or a script's main chunk). The files' formats are in [MONSTERS.md](MONSTERS.md#a-monsters-model); a monster from another game is converted into them by a tool of the mod's own.
 
 The game's kinds have ids too, for `based_on` and for anything else that names a monster: `rathian`, `tigrex`, `gold_rathian` and the rest, listed in [MONSTERS.md](MONSTERS.md#the-games-kinds-by-id). `kind(id)` and `id_of(kind)` turn one into the other.
+
+A quest's description shows its main monsters' pictures. A kind takes its base's unless the mod gives `picture`, a PNG of 42 by 42 pixels with at most 16 colours (each RGBA value its own); Yakumo writes it into a cell and a palette of the game's image of pictures that no picture of the game's uses. There is one such cell, so one kind of all the mods loaded can have a picture of its own; the others, and a picture that cannot be used, show their base's, with the reason on the mod's page ([MONSTERS.md](MONSTERS.md#a-kinds-picture)).
 
 The model pack needs only the skeleton, the model and the textures (entries 0 to 2); Yakumo takes the base's other entries, and gives the model as many meshes as the base's behaviour expects. Where the base's behaviour checks for its own kind, or hides parts of its model by material, a monster made from it gets the base's treatment and keeps its own materials shown. That has been traced for the Tigrex's AI only, so the bases it works for are `tigrex` and `brute_tigrex`; another base is accepted, with a warning on the mod's page, and works only as far as its AI does not tell kinds apart, hide materials or write meshes by number ([MONSTERS.md](MONSTERS.md#ai-overlays-that-know-their-kinds)). A kind the mod added can be given its own behaviour, a part at a time. `behave(handle, kind, YMOD_MONSTER_THINK, fn, user)` runs `fn(cpu, monster, user)` each frame for each of its monsters on a quest, where the game asks a monster to think; returning `YMOD_RETURN` means the mod's function did the part, anything else lets the base's behaviour do it after. Give behaviour at start, before any of its monsters is made. Inside the part's function, `play_motion(monster, motion, blend)` asks for one of the kind's motions (by its slot), blended in over `blend` frames: the game plays it as soon as the function returns, before the base's part if that runs. `motion_finished(monster)` says whether the motion playing has reached its last frame, and `at_frame(monster, frame)` whether this frame's step passes a given frame of it, to time what happens during a motion.
 

@@ -7,6 +7,7 @@
 #include "mods/mhp3rd_maps.hpp"
 #include "mods/mhp3rd_mod_format.hpp"
 #include "mods/mhp3rd_monsters.hpp"
+#include "mods/mhp3rd_pictures.hpp"
 #include "mods/mod_native.hpp"
 #include "mods/mhp3rd_quests.hpp"
 #include "mods/mhp3rd_symbols.hpp"
@@ -24,6 +25,8 @@
 #include "psprecomp/jit.hpp"
 #include "psprecomp/runtime.hpp"
 
+#include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstdio>
@@ -37,6 +40,11 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
+#define STBI_WRITE_NO_STDIO
+#define STB_IMAGE_WRITE_STATIC
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 
 namespace {
 
@@ -1577,17 +1585,36 @@ void test_monsters(psprecomp::Runtime &runtime) {
         .write(reinterpret_cast<const char *>(mine.data()), static_cast<std::streamsize>(mine.size()));
     std::ofstream(folder / "model" / "ge.bin", std::ios::binary) << "GE";
     std::ofstream(folder / "model" / "motions.bin", std::ios::binary) << "MOTIONS";
+    // Its picture: a PNG of 42 by 42 pixels in two colours.
+    std::vector<std::uint8_t> picture(42u * 42u * 4u, 0xFFu);
+    std::fill(picture.begin(), picture.begin() + 42u * 4u, std::uint8_t{0x20u});
+    int png_length = 0;
+    unsigned char *png = stbi_write_png_to_mem(picture.data(), 42 * 4, 42, 42, 4, &png_length);
+    std::ofstream(folder / "model" / "picture.png", std::ios::binary)
+        .write(reinterpret_cast<const char *>(png), png_length);
+    STBIW_FREE(png);
+    std::ofstream(folder / "model" / "bad.png", std::ios::binary) << "not a picture";
+    tables::write_traced_code_for_tests(runtime, "monster.pictures");
     monsters::read_packs_with_for_tests([&base](mhp3rd::mods::FileId) { return std::optional(base); });
     ymod_mod *mod = mhp3rd::mods::native::add_mod("test.monsters", "Monster test", folder.string());
     const auto *service =
         static_cast<const ymod_monsters *>(mhp3rd::mods::native::host()->service(mod, YMOD_MONSTERS, 1u));
     ymod_monster spec{
         sizeof(ymod_monster), "black_fatalis", "tigrex", "model/model.pac", "model/ge.bin", "model/motions.bin"};
+    spec.picture = "model/picture.png";
     check(service != nullptr && service->add(mod, &spec) == 76 && service->kind("black_fatalis") == 76 &&
             service->kind("tigrex") == 58 && service->kind("nothing") == -1 && service->kind(nullptr) == -1 &&
             std::string(service->id_of(76)) == "black_fatalis" && service->id_of(255) == nullptr &&
             service->id_of(-1) == nullptr,
         "monsters: the service adds a kind from the mod's files and names kinds");
+    const auto picture_row = [&runtime](std::uint32_t kind) {
+        const std::uint32_t at = tables::placement("monster.pictures")->address + 6u * kind;
+        return std::array<std::uint16_t, 3>{
+            runtime.memory().load16(at), runtime.memory().load16(at + 2u), runtime.memory().load16(at + 4u)};
+    };
+    check(tables::placement("monster.pictures")->rows == 77u && picture_row(76u) != picture_row(58u) &&
+            !reported("Monster test", "monster black_fatalis: it has no picture"),
+        "monsters: a kind given a picture gets a cell of its own for it");
     ymod_monster escape = spec;
     escape.id = "escaped";
     escape.model = "../yakumo_monster_test/model/model.pac";
@@ -1602,9 +1629,12 @@ void test_monsters(psprecomp::Runtime &runtime) {
     ymod_monster unknown = spec;
     unknown.id = "unknown";
     unknown.based_on = "kirin";
+    unknown.picture = "model/bad.png";
     check(service != nullptr && service->add(mod, &unknown) == -1 &&
             logged("monster unknown is not added: the base \"kirin\" is not one of the game's kinds"),
         "monsters: the service says why a kind is not added");
+    check(reported("Monster test", "monster: the picture file model/bad.png is not a PNG of 42 by 42 pixels"),
+        "monsters: a picture that is not a PNG of 42 by 42 pixels is reported");
     // Behaviour: the kind's monsters get a vtable of their own, whose THINK
     // runs the mod's function first.
     struct Seen {
@@ -2330,10 +2360,182 @@ void test_monster_quest_end(psprecomp::Runtime &runtime) {
             reported("Quest End",
                 "monster plain_tigrex: the model draw is not as traced; the base's hidden parts stay hidden"),
         "monsters: a model draw not as traced is reported on the mod's page");
+    // A picture of 17 colours: the base's is shown, and the mod's page says why.
+    std::vector<std::uint8_t> colourful(42u * 42u * 4u);
+    for (std::uint32_t i = 0; i < 17u; ++i) std::memcpy(colourful.data() + 4u * i, &i, 4u);
+    tables::write_traced_code_for_tests(runtime, "monster.pictures");
+    const std::optional<std::uint8_t> colourful_kind =
+        monsters::add(runtime, {"colourful_tigrex", "tigrex", pack, {'G'}, {'M'}, "test", mod, "", colourful}, nullptr);
+    const std::uint32_t pictures = tables::placement("monster.pictures")->address;
+    check(colourful_kind &&
+            reported("Quest End",
+                "monster colourful_tigrex: its picture is not used: its picture has more than 16 colours") &&
+            runtime.memory().load32(pictures + 6u * *colourful_kind) == runtime.memory().load32(pictures + 6u * 58u) &&
+            runtime.memory().load16(pictures + 6u * *colourful_kind + 4u) ==
+                runtime.memory().load16(pictures + 6u * 58u + 4u),
+        "monsters: a picture that cannot be used leaves the kind the base's, and its mod's page says why");
     monsters::read_packs_with_for_tests({});
     monsters::reset_for_tests();
     mhp3rd::mods::added::reset_for_tests();
     tables::reset_for_tests();
+}
+
+// A bank of menu textures as traced: three small images, then the image of
+// pictures (352 by 352 at 4 bits, 64 palettes of 16 RGBA8888 colours).
+std::vector<std::uint8_t> picture_bank() {
+    std::vector<std::uint8_t> bank;
+    const auto u32 = [&bank](std::uint32_t v) {
+        for (int i = 0; i < 4; ++i) bank.push_back(static_cast<std::uint8_t>(v >> (8 * i)));
+    };
+    for (const char c : std::string_view(".TMH0.14")) bank.push_back(static_cast<std::uint8_t>(c));
+    u32(6u);
+    u32(0u);
+    for (int i = 0; i < 3; ++i) {
+        u32(16u);
+        u32(0u);
+        u32(1u);
+        u32(0u);
+    }
+    constexpr std::uint32_t kPixels = 16u + 352u * 352u / 2u, kPalette = 16u + 1024u * 4u;
+    u32(16u + kPixels + kPalette);
+    u32(0u);
+    u32(1u);
+    u32(1u);
+    u32(kPixels);
+    u32(1u);
+    u32(4u);
+    u32(352u | (352u << 16));
+    bank.resize(bank.size() + 352u * 352u / 2u, 0x11u);
+    u32(kPalette);
+    u32(2u);
+    u32(3u);
+    u32(1024u);
+    bank.resize(bank.size() + 1024u * 4u, 0xEEu);
+    return bank;
+}
+
+void test_pictures(psprecomp::Runtime &runtime) {
+    namespace pictures = mhp3rd::mods::pictures;
+    namespace tables = mhp3rd::mods::tables;
+    namespace added = mhp3rd::mods::added;
+    tables::reset_for_tests();
+    added::reset_for_tests();
+    pictures::reset_for_tests();
+    const std::vector<std::uint8_t> bank = picture_bank();
+    // Five colours: a frame of white round red, green, blue and black rows.
+    pictures::Pixels picture(42u * 42u * 4u);
+    const std::array<std::uint32_t, 5> colours{0xFFFFFFFFu, 0xFF0000FFu, 0xFF00FF00u, 0xFFFF0000u, 0xFF000000u};
+    for (std::size_t p = 0; p < 42u * 42u; ++p) {
+        const std::size_t x = p % 42u, y = p / 42u;
+        const std::uint32_t c = x == 0u || y == 0u || x == 41u || y == 41u ? colours[0] : colours[1u + y % 4u];
+        std::memcpy(picture.data() + 4u * p, &c, 4u);
+    }
+
+    // Composing: the picture in its cell, swizzled, its colours in its palette.
+    constexpr std::size_t kData = 16u + 3u * 16u + 32u;
+    constexpr std::size_t kPaletteData = 16u + 3u * 16u + 16u + 16u + 352u * 352u / 2u + 16u;
+    const std::optional<std::vector<std::uint8_t>> out = pictures::compose(bank, 7, 2, 62, picture);
+    const auto colour = [&out](int palette, int index) {
+        std::uint32_t c = 0u;
+        std::memcpy(&c, out->data() + kPaletteData + (static_cast<std::size_t>(palette) * 16u + index) * 4u, 4u);
+        return c;
+    };
+    // Pixel (0, 0) of cell (7, 2) is (294, 84) in the image: byte 147 of row 84,
+    // in block 9 of block row 10, the low half; (1, 0) its high half; (41, 41)
+    // the high half of byte 7, row 5 of block 10 in block row 15.
+    check(out && out->size() == bank.size() && ((*out)[kData + 119u * 128u + 4u * 16u + 3u] & 0x0Fu) == 0u &&
+            ((*out)[kData + 119u * 128u + 4u * 16u + 3u] >> 4) == 0u &&
+            ((*out)[kData + 175u * 128u + 5u * 16u + 7u] >> 4) == 0u &&
+            ((*out)[kData + 175u * 128u + 5u * 16u + 7u] & 0x0Fu) == 0u,
+        "pictures: the picture's pixels go to its cell, swizzled as the GE reads them");
+    // Pixel (1, 1) has the second colour to appear, (1, 2) the third.
+    check(out && ((*out)[kData + 119u * 128u + 5u * 16u + 3u] >> 4) == 1u &&
+            ((*out)[kData + 119u * 128u + 6u * 16u + 3u] >> 4) == 2u && (*out)[kData] == 0x11u &&
+            (*out)[kData + 119u * 128u + 4u * 16u + 2u] == 0x11u,
+        "pictures: each pixel is its colour's index, and the image round the cell is left alone");
+    check(out && colour(62, 0) == colours[0] && colour(62, 1) == colours[2] && colour(62, 4) == colours[1] &&
+            colour(62, 15) == colours[1] && colour(61, 0) == 0xEEEEEEEEu && colour(63, 0) == 0xEEEEEEEEu,
+        "pictures: its colours fill its palette in the order they appear, the last repeated, other palettes kept");
+    pictures::Pixels many = picture;
+    for (std::uint32_t i = 0; i < 17u; ++i) std::memcpy(many.data() + 4u * (43u + i), &i, 4u);
+    std::vector<std::uint8_t> not_tmh = bank;
+    not_tmh[1] = 'X';
+    std::vector<std::uint8_t> other_format = bank;
+    other_format[16u + 48u + 24u] = 5u;
+    check(!pictures::compose(not_tmh, 7, 2, 62, picture) && !pictures::compose(other_format, 7, 2, 62, picture) &&
+            !pictures::compose(bank, 8, 2, 62, picture) && !pictures::compose(bank, 7, -1, 62, picture) &&
+            !pictures::compose(bank, 7, 2, 64, picture) && !pictures::compose(bank, 7, 2, 62, many) &&
+            !pictures::compose(bank, 7, 2, 62, pictures::Pixels(16u)) &&
+            !pictures::compose(std::vector<std::uint8_t>(bank.begin(), bank.begin() + 200), 7, 2, 62, picture),
+        "pictures: a bank not as traced, a cell or palette past the image's, 17 colours or another size compose "
+        "nothing");
+
+    // A PNG of the picture reads back as its pixels; another size does not.
+    const auto png = [](const pictures::Pixels &pixels, int side) {
+        int length = 0;
+        unsigned char *bytes = stbi_write_png_to_mem(pixels.data(), side * 4, side, side, 4, &length);
+        std::vector<std::uint8_t> file(bytes, bytes + length);
+        STBIW_FREE(bytes);
+        return file;
+    };
+    check(pictures::from_png(png(picture, 42)) == picture &&
+            !pictures::from_png(png(pictures::Pixels(40u * 40u * 4u), 40)) &&
+            !pictures::from_png(std::vector<std::uint8_t>{'n', 'o'}) && !pictures::from_png({}),
+        "pictures: a PNG of 42 by 42 pixels is read, another size or not a PNG is not");
+
+    // The game's table: every cell but (7, 2) taken, palettes 0 to 61.
+    std::string why;
+    check(!pictures::give(runtime, 75u, 58u, nullptr, &why) && why.find("cannot grow") != std::string::npos,
+        "pictures: with the game's code not as traced, no kind gets a row");
+    tables::write_traced_code_for_tests(runtime, "monster.pictures");
+    constexpr std::uint32_t kTable = 0x089FCD5Cu;
+    for (std::uint32_t k = 0; k < 69u; ++k) {
+        const std::uint32_t cell = k < 23u ? k : k < 63u ? k + 1u : 0u;
+        runtime.memory().store16(kTable + 6u * k, static_cast<std::uint16_t>(cell % 8u * 42u));
+        runtime.memory().store16(kTable + 6u * k + 2u, static_cast<std::uint16_t>(cell / 8u * 42u));
+        runtime.memory().store16(kTable + 6u * k + 4u, static_cast<std::uint16_t>(std::min(k, 61u)));
+    }
+    const auto row = [&runtime](std::uint32_t kind) {
+        const std::uint32_t at = tables::placement("monster.pictures")->address + 6u * kind;
+        return std::array<std::uint16_t, 3>{
+            runtime.memory().load16(at), runtime.memory().load16(at + 2u), runtime.memory().load16(at + 4u)};
+    };
+    check(pictures::give(runtime, 75u, 58u, nullptr, &why) && tables::placement("monster.pictures")->rows == 76u &&
+            row(75u) == row(58u) && row(69u) == row(0u) && row(74u) == row(0u),
+        "pictures: a kind without a picture takes its base's, the kinds before it the game's unknown one");
+    check(pictures::serve(runtime, pictures::kTextureFile) == nullptr,
+        "pictures: the bank is the game's while no kind has a picture of its own");
+    const pictures::Pixels small(5u);
+    check(!pictures::give(runtime, 76u, 58u, &many, &why) && why == "its picture has more than 16 colours" &&
+            !pictures::give(runtime, 76u, 58u, &small, &why) && why == "its picture is not 42 by 42 pixels",
+        "pictures: a picture of more than 16 colours or another size is refused");
+    loader_stand_ins(runtime);
+    pictures::read_files_with_for_tests([&bank](mhp3rd::mods::FileId file) -> std::optional<std::vector<std::uint8_t>> {
+        if (file != pictures::kTextureFile) return std::nullopt;
+        return bank;
+    });
+    check(pictures::give(runtime, 76u, 58u, &picture, &why) && row(76u) == std::array<std::uint16_t, 3>{294u, 84u, 62u},
+        "pictures: a picture of its own takes the cell and the palette no other uses");
+    const auto served = pictures::serve(runtime, pictures::kTextureFile);
+    check(served && *served == *out && pictures::serve(runtime, pictures::kTextureFile) == served &&
+            pictures::serve(runtime, 0x0FEBu) == nullptr,
+        "pictures: the bank is served with the picture in it, made once, and no other file");
+    runtime.cpu().gpr[5] = pictures::kTextureFile;
+    check(call(runtime, 0x08864E8Cu, 0x08B3F040u) == bank.size(), "pictures: the game's loader is given that bank");
+    check(
+        !pictures::give(runtime, 77u, 58u, &picture, &why) && why == "the pictures' image has no cell or palette left",
+        "pictures: once the cells are taken, another picture is refused");
+    pictures::reset_for_tests();
+    pictures::read_files_with_for_tests(
+        [&not_tmh](mhp3rd::mods::FileId) { return std::optional<std::vector<std::uint8_t>>(not_tmh); });
+    tables::reset_for_tests();
+    tables::write_traced_code_for_tests(runtime, "monster.pictures");
+    check(pictures::give(runtime, 75u, 58u, &picture, &why) &&
+            pictures::serve(runtime, pictures::kTextureFile) == nullptr,
+        "pictures: a bank not as traced is served as the game's");
+    pictures::reset_for_tests();
+    tables::reset_for_tests();
+    added::reset_for_tests();
 }
 
 // The log on the Mods page keeps its problems however much is logged.
@@ -2429,6 +2631,7 @@ int main() {
     test_monster_quest_end(runtime);
     test_equipment(runtime);
     test_maps(runtime);
+    test_pictures(runtime);
     test_report_log();
 
     std::printf("%s\n", failures == 0 ? "all native mod checks passed" : "native mod checks FAILED");

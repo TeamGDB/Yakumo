@@ -124,7 +124,7 @@
     "reason": "Script mod host declarations. mod_script*.cpp is covered by mhp3rd_script_mods_tests through the real Luau engine."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.h": {
-    "sha256": "a2cb7e040320786e892c7deaa87035469a72ef7a96ca34f1c06e439464571dca",
+    "sha256": "fc109abb447f2d9925c60fb7224a6bc3bd2e503d6bb4a0e0adfbfc7a05b9406b",
     "reason": "The C ABI of native mods: types, constants, function-pointer tables and the interface-version macro, no host code. The host implementation in mod_native*.cpp is covered by mhp3rd_native_mods_tests, which also loads a test mod declaring a newer interface."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.hpp": {
@@ -180,8 +180,8 @@
     "reason": "The mod format class, its block aggregates, quest file constants and declarations. mhp3rd_mod_format.cpp, quest_file() and quest_of_file() included, is covered by mhp3rd_mods_tests and mhp3rd_code_mods_tests."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_monsters.hpp": {
-    "sha256": "82a70ccbebee27c01dbbc0bc87f1996f8062f7986b2a66e2d1afe8276fcc0eb9",
-    "reason": "Declarations only. mhp3rd_monsters.cpp is covered by mhp3rd_native_mods_tests (game kinds, model packs, adding a kind with stand-ins for the traced tables and loader, the base behaviour hooks, behaviour parts, the body, frames, attacks, attack shapes and rows, body capsules, footsteps, the service) and mhp3rd_script_mods_tests."
+    "sha256": "ed62386b155c98753d9f91dd78f69a4cae142d1244299881d39951eba5833625",
+    "reason": "Declarations only. mhp3rd_monsters.cpp is covered by mhp3rd_native_mods_tests (game kinds, model packs, adding a kind with stand-ins for the traced tables and loader, the base behaviour hooks, behaviour parts, the body, frames, attacks, attack shapes and rows, body capsules, footsteps, pictures, the service) and mhp3rd_script_mods_tests."
   },
   "profiles/mhp3rd/host/game/quest_builder.hpp": {
     "sha256": "b9a6707f23aa17b5f81f8e4f09b3240e23d1b516a0dae1c9e7ddde43da0d6643",
@@ -202,5 +202,9 @@
   "profiles/mhp3rd/host/game/pack_file.hpp": {
     "sha256": "587a49b9f6462bfd51a0ec2e80b3950cf7219fb094032cd6f54ebf28ede1a70e",
     "reason": "Declarations only. pack_file.cpp is covered by mhp3rd_native_mods_tests (writing, reading and replacing entries, refusals) and through the monsters' model packs."
+  },
+  "profiles/mhp3rd/host/mods/mhp3rd_pictures.hpp": {
+    "sha256": "c163d8653945f88c5774c6ac06ae36eefe57bbd83c58e8b272fa7c7ffd6c0120",
+    "reason": "Constants and declarations only. mhp3rd_pictures.cpp is covered by mhp3rd_native_mods_tests (composing a synthetic bank, PNG reading, table rows, the free cell and palette, the bank served through the loader stand-ins, refusals) and through the monsters service."
   }
 }

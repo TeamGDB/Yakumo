@@ -2,6 +2,7 @@
 
 #include "mods/mhp3rd_added_files.hpp"
 #include "mods/mhp3rd_mods.hpp"
+#include "mods/mhp3rd_pictures.hpp"
 #include "mods/mhp3rd_tables.hpp"
 #include "mods/mod_ini.hpp"
 #include "mods/mod_native.hpp"
@@ -955,6 +956,14 @@ std::optional<std::uint8_t> add(Runtime &runtime, const Spec &spec, std::string 
         runtime.memory().store32(*steps + 4u * kind_number, runtime.memory().load32(*steps + 4u * *base));
     else
         problem(spec.owner, spec.id, "its footsteps' dust keeps no size (" + reason + ")");
+    // Its picture in a quest's description: the mod's, else the base's. Not
+    // fatal either: past the table's rows the description shows none.
+    std::string picture_why;
+    const bool own_picture =
+        !spec.picture.empty() && pictures::give(runtime, kind_number, *base, &spec.picture, &picture_why);
+    if (!spec.picture.empty() && !own_picture) problem(spec.owner, spec.id, "its picture is not used: " + picture_why);
+    if (!own_picture && !pictures::give(runtime, kind_number, *base, nullptr, &picture_why))
+        problem(spec.owner, spec.id, "it has no picture (" + picture_why + ")");
     s.kinds.push_back(std::move(added));
     Added &kept = s.kinds.back();
 
@@ -1351,6 +1360,7 @@ void reset_for_tests() {
     s.in_part = false;
     s.queued.clear();
     s.thought_alone.clear();
+    pictures::reset_for_tests();
 }
 
 } // namespace mhp3rd::mods::monsters

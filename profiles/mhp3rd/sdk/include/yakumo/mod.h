@@ -375,6 +375,10 @@ typedef struct ymod_monster {
      * roar...), when the mod's model pack has none of its own; NULL: the
      * base's. Effects are entries 3 and on of a model pack (docs/MONSTERS.md). */
     const char *effects;
+    /* A path in the mod's folder: the kind's picture in a quest's description,
+     * a PNG of 42 by 42 pixels with at most 16 colours; NULL: the base's. A
+     * picture that cannot be used is reported and the base's shown. */
+    const char *picture;
 } ymod_monster;
 /* The parts of a monster's behaviour a mod can give a kind it added. Each is a
  * function the game calls on the monster; the base's runs where the mod gives

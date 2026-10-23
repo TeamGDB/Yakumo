@@ -315,7 +315,7 @@ int api_table(lua_State *state) {
 }
 
 // Adds a large monster from a table {id, based_on, model, geometry, motions,
-// effects (optional)}:
+// effects and picture (optional)}:
 // its kind's number, or nil (the reason is in the log).
 int api_add_monster(lua_State *state) {
     Script &script = self(state);
@@ -327,9 +327,9 @@ int api_add_monster(lua_State *state) {
         return value;
     };
     const std::string id = field("id"), base = field("based_on"), model = field("model"), geometry = field("geometry"),
-                      motions = field("motions"), effects = field("effects");
+                      motions = field("motions"), effects = field("effects"), picture = field("picture");
     const ymod_monster monster{sizeof(ymod_monster), id.c_str(), base.c_str(), model.c_str(), geometry.c_str(),
-        motions.c_str(), effects.empty() ? nullptr : effects.c_str()};
+        motions.c_str(), effects.empty() ? nullptr : effects.c_str(), picture.empty() ? nullptr : picture.c_str()};
     const int32_t kind = script.monsters != nullptr ? script.monsters->add(script.mod, &monster) : -1;
     if (kind < 0)
         lua_pushnil(state);

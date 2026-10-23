@@ -200,11 +200,19 @@ A monster's effects part (vtable slot 36; the Tigrex's is `0x0A1C2810`) calls ga
 
 The Tigrex's (dumped from memory on a quest): footsteps in 4, effects by ground in 1 to 3; no sound is in them, and where its steps' and roar's sounds come from is not traced. `yakumo.monsters`'s `footsteps` builds a kind's index, rows and table 4 (the others empty) and, after each frame its mod's THINK did alone, queues the player with them. With Fatalis's footsteps (from Freedom Unite's em02, where it strikes the ground), its feet raised dust at the frames given: probes on the effect starter (`0x0A00E39C`) saw effects 95, 104 and 107 (steps of size 2, 4 and 5) at its feet's joints. The size table has a float for each of kinds 0 to 73, and the game's own reader in game_sub has no bound, so it is the game table `monster.step_scales`: a kind added takes its base's. Tables 1 to 3 and 5 are not given yet.
 
+## A kind's picture
+
+A quest's description at the counter shows a 42 by 42 picture for each of the quest's main monsters, the u16 kinds at `+0x3C` of its record ([QUESTS.md](QUESTS.md)). lobby_task counts them (`0x0A0B4700`) and draws each (`0x0A0B2CBC`) through the executable's widget code: `0x08900288` builds a widget of type 3 for the kind, and its draw (`0x08901C28`, then `0x08901888`) reads, by kind, a 6-byte row of the table at `0x089FCD5C` (u16 x, u16 y, s16 palette) and draws that 42 by 42 cell of texture 3 with that palette (`0x08901758`). Kind 66 is drawn apart, 56 by 56 from texture 5. The table has rows for kinds 0 to 68 and nothing checks the kind, so a kind past them reads what follows: it is the game table `monster.pictures`, whose one reference is the pair at `0x08901894`/`0x0890189C`. Row 0 is a question mark, and kinds without a picture of their own (small monsters, 68 for gathering quests) have row 0's cell.
+
+Texture 3 is image 3 of the bank of menu textures, file 4074 (`0x0FEA`), a TMH of six images: 352 by 352 pixels, 4-bit indices swizzled as the GE reads them (blocks 16 bytes wide and 8 rows high; the first pixel of a byte in its low half), with 64 palettes of 16 RGBA8888 colours. The cells are a grid of 8 by 8; the game's rows use every cell but one, (7, 2), and every palette but 62 and 63.
+
+A kind a mod adds gets a row in `monster.pictures`: its base's, or with a picture of its own (`ymod_monster.picture`), the free cell and palette, the picture written into them when the game loads file 4074 (through the loader the files mods add go through). The kinds between the game's and it get row 0's. As there is one free cell, a second picture is refused and that kind shows its base's.
+
 ## Not traced yet
 
 Other code compares a kind with 75 and leaves a larger one out: a byte per kind at `0x08971650` (read at `0x0882A6F4` and `0x0882A898`), a jump table at `0x08968E40` (`0x08813A94`), a jump on a byte at `+397` of an object (`0x0A1112A4`), a flag per kind kept inside a larger structure (`0x0A0B6B0C`), and the checks at `0x0894D3C8`, `0x0894D4B8`. What each one is for, and so what a new kind lacks without it, is not known yet. Neither are:
 
-- The kind's name, icon and the hunter's notes on it: the developer tools show a new kind as "Monster 75".
+- The kind's name, its icons other than the description's picture, and the hunter's notes on it: the developer tools show a new kind as "Monster 75".
 - Its rewards, its parts and their damage, and its entries in the save's hunting records.
 - Small monsters, which share the kind numbers.
 

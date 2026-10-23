@@ -257,6 +257,7 @@ set(MHP3RD_HOST_SOURCES
     host/mods/mhp3rd_mod_format.cpp
     host/mods/mhp3rd_mods.cpp
     host/mods/mhp3rd_monsters.cpp
+    host/mods/mhp3rd_pictures.cpp
     host/mods/mhp3rd_quests.cpp
     host/mods/mhp3rd_equipment.cpp
     host/mods/mhp3rd_maps.cpp

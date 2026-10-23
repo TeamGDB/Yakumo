@@ -165,7 +165,8 @@ local now, more = yakumo.table("monster.models.second")
 yakumo.log("tables", base == 0x08982E64, rows, row, moved ~= nil and moved == now, more, yakumo.table("no.such") == nil,
     yakumo.extend_table("no.such", 3) == nil, yakumo.extend_table("monster.models.second", -1) == nil)
 yakumo.log("monsters", yakumo.monster_kind("tigrex"), yakumo.monster_kind("gold_rathian"), yakumo.monster_kind("nothing") == nil,
-    yakumo.add_monster({id = "scripted", based_on = "tigrex", model = "none.pac", geometry = "none.bin", motions = "none.bin"}) == nil,
+    yakumo.add_monster({id = "scripted", based_on = "tigrex", model = "none.pac", geometry = "none.bin", motions = "none.bin",
+        picture = "../picture.png"}) == nil,
     pcall(yakumo.add_monster, "not a table") == false)
 yakumo.on("quest_started", function(id) yakumo.log("quest started", id) end)
 yakumo.on("quest_ended", function(id) yakumo.log("quest ended", id) end)
@@ -250,8 +251,9 @@ yakumo.on("frame", function() if kept_ui then yakumo.log("widgets outside a draw
     check(logged("unknown hook true true") && logged("no known function called no.such"),
         "scripts: a hook on an unknown name is refused and said");
     check(logged("monsters 58 15 true true true") &&
-            logged("monster: the model file none.pac is not in the mod's folder"),
-        "scripts: monsters by id, and one whose files are missing is not added");
+            logged("monster: the model file none.pac is not in the mod's folder") &&
+            logged("monster: the picture file ../picture.png is not in the mod's folder"),
+        "scripts: monsters by id, and one whose files are missing is not added, its picture's too");
     check(logged("tables true 74 2 true 80 true true true") && logged("table no.such is not extended: no such table"),
         "scripts: a game table where it is, made longer; an unknown one is nil");
     check(logged("overlay at true") && logged("bad event true"),

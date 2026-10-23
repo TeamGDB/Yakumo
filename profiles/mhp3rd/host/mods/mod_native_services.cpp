@@ -6,6 +6,7 @@
 #include "mods/mhp3rd_equipment.hpp"
 #include "mods/mhp3rd_maps.hpp"
 #include "mods/mhp3rd_monsters.hpp"
+#include "mods/mhp3rd_pictures.hpp"
 #include "mods/mhp3rd_quests.hpp"
 #include "mods/mhp3rd_symbols.hpp"
 #include "mods/mhp3rd_tables.hpp"
@@ -332,11 +333,23 @@ int32_t monsters_add(ymod_mod *mod, const ymod_monster *monster) {
     const auto model = mod_bytes(mod, monster->model, "model");
     const auto geometry = mod_bytes(mod, monster->geometry, "geometry");
     const auto motions = mod_bytes(mod, monster->motions, "motions");
+    // A picture that cannot be read leaves the kind the base's.
+    std::vector<std::uint8_t> picture;
+    if (monster->size >= offsetof(ymod_monster, picture) + sizeof(monster->picture) && monster->picture != nullptr) {
+        if (const auto png = mod_bytes(mod, monster->picture, "picture")) {
+            if (std::optional<pictures::Pixels> pixels = pictures::from_png(*png))
+                picture = std::move(*pixels);
+            else
+                report(mod,
+                    std::string("monster: the picture file ") + monster->picture + " is not a PNG of 42 by 42 pixels",
+                    true);
+        }
+    }
     if (!model || !geometry || !motions) return -1;
     const bool has_effects = monster->size >= offsetof(ymod_monster, effects) + sizeof(monster->effects);
     monsters::Spec spec{monster->id != nullptr ? monster->id : "",
         monster->based_on != nullptr ? monster->based_on : "", *model, *geometry, *motions, mod->name, mod,
-        has_effects && monster->effects != nullptr ? monster->effects : ""};
+        has_effects && monster->effects != nullptr ? monster->effects : "", std::move(picture)};
     std::string why;
     const std::optional<std::uint8_t> kind = monsters::add(*runtime, spec, &why);
     if (!kind) report(mod, "monster " + spec.id + " is not added: " + why, true);

@@ -61,6 +61,7 @@ struct Spec {
     std::string mod;                    // who adds it, for the log
     const void *owner{};                // and which mod, for behave()
     std::string effects;                // the game's kind whose effects it takes, by id; empty: the base's
+    std::vector<std::uint8_t> picture;  // its picture, RGBA (mhp3rd_pictures.hpp); empty: the base's
 };
 
 // Adds a kind and returns its number, or nothing (with the reason in `why`)

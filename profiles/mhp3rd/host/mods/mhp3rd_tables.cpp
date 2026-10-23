@@ -87,6 +87,11 @@ const std::vector<Definition> &definitions() {
         // only there. A kind past its rows reads the next table's words.
         {{"monster.step_scales", "", 0x08A21A40u, 4u, 74u}, 256u,
             {{0x0A014710u, 0x3C0208A2u, 0x0A014714u, 0x24421A40u}}, {}, "game_sub"},
+        // The cell and palette of each kind's picture in the quest description
+        // (docs/MONSTERS.md, "A kind's picture"): u16 x, u16 y, s16 palette, by
+        // kind. Read by 0x08901888 only, with no bound.
+        {{"monster.pictures", "", 0x089FCD5Cu, 6u, 69u}, 256u, {{0x08901894u, 0x3C0208A0u, 0x0890189Cu, 0x2442CD5Cu}},
+            {}},
         // Four more files of each kind (u16, 0xFFFF for none), loaded with its
         // model set on a quest. Read by the executable and the quest overlay.
         {{"monster.files", "game_task", 0x0A1834F0u, 8u, 75u}, 256u,
