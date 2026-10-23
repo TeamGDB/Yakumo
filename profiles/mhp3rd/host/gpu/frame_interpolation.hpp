@@ -83,13 +83,17 @@ struct Matching {
     // for scenery that stands still, newer eye transform = camera * older.
     // Taken from the matched draw whose motion the most of a sample agrees
     // with, each draw counted by its vertices, so characters moving on their
-    // own do not count, even where the scenery is a few large draws. The angle is its turn;
-    // the distance is how far the eye itself moved, not how far distant
-    // scenery swings when the camera turns.
+    // own do not count, even where the scenery is a few large draws
+    // (CutThresholds::weighted_camera). The angle is its turn; the distance
+    // is how far the eye itself moved, not how far distant scenery swings
+    // when the camera turns.
     bool camera_found{};
     float camera_angle_degrees{};
     float camera_distance{};
     Matrix camera{};
+    // How many sampled motions were tried on the others: about 64, plus the
+    // large draws.
+    std::uint32_t camera_candidates{};
     // The reason the two frames must not be blended, or null.
     const char *cut{};
     // Blended only because the motion continues the previous pair's: past
@@ -132,6 +136,11 @@ struct CutThresholds {
     // A mesh with more instances than this in either frame keeps the pairing
     // in drawing order, which costs nothing.
     std::uint32_t max_nearest_instances{64u};
+    // The camera's motion is the one the most of the scene's vertices agree
+    // with, large draws always sampled, so that an area of a few large draws
+    // (one a mod adds) outweighs the characters. False takes the median turn
+    // of the sampled draws, as before (MHP3RD_INTERPOLATION_MEDIAN_CAMERA).
+    bool weighted_camera{true};
 };
 
 class Matcher {

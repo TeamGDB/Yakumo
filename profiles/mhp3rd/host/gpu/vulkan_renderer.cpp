@@ -2453,6 +2453,7 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
     if (std::getenv("MHP3RD_INTERPOLATION_NO_MOTION_GUARD") != nullptr) impl.cut_thresholds.max_own_motion = 0.0f;
     if (std::getenv("MHP3RD_INTERPOLATION_NO_NEAREST_INSTANCES") != nullptr)
         impl.cut_thresholds.nearest_instances = false;
+    if (std::getenv("MHP3RD_INTERPOLATION_MEDIAN_CAMERA") != nullptr) impl.cut_thresholds.weighted_camera = false;
     impl.frame_rate = player.frame_rate;
     impl.governor.set_automatic(player.frame_rate_auto);
     const std::uint32_t window_scale = std::clamp<std::uint32_t>(player.window_scale, 1u, settings::kMaxWindowScale);

@@ -295,6 +295,28 @@ void matching() {
         single_matcher.match(large_scene(1u, 0.0f, 0.0f, 60000u), large_scene(1u, 0.0f, 250.0f, 60000u), thresholds);
     check(single.cut == nullptr && near(single.camera_distance, 0.0f, 0.01f),
         "one large draw is tried even when the stride passes it");
+    CutThresholds median = thresholds;
+    median.weighted_camera = false;
+    Matcher median_matcher;
+    const Matching &median_area =
+        median_matcher.match(large_scene(20u, 0.0f, 0.0f), large_scene(20u, 2.0f, 250.0f), median);
+    check(median_area.cut != nullptr && std::strcmp(median_area.cut, "camera moved") == 0,
+        "with the weighted choice off, the median takes the running characters' motion for the camera's, as before");
+    // Many draws below the large ones' size, each on the stride standing for
+    // more vertices than a large draw has: still about 64 are tried.
+    const auto many = [](float camera_degrees) {
+        std::vector<DrawSummary> frame;
+        for (std::uint32_t i = 0; i < 600u; ++i) {
+            frame.push_back(draw(i, static_cast<float>(i % 20u) * 50.0f, camera_degrees));
+            frame.back().count = 600u;
+        }
+        mark_eligible(frame, kShown);
+        return frame;
+    };
+    Matcher many_matcher;
+    const Matching &crowd = many_matcher.match(many(0.0f), many(1.0f), thresholds);
+    check(crowd.cut == nullptr && crowd.camera_candidates > 0u && crowd.camera_candidates <= 2u * 64u,
+        "draws below the large ones' size are tried about 64 at most, however many vertices they stand for");
 
     std::vector<DrawSummary> other = scene(100u);
     for (std::size_t i = 0; i < 60u; ++i) other[i].vertex_address += 0x00100000u;

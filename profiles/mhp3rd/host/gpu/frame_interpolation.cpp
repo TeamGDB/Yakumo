@@ -158,10 +158,14 @@ const Matching &Matcher::match(
     // are not missed between the strides.
     struct Sample {
         float turn;
-        float weight;
+        float weight;           // its vertices, times the stride it stands for
+        std::uint32_t vertices; // its own
         Matrix motion;
         std::array<float, 3> from, to; // eye-space positions in each frame
     };
+    // Off (MHP3RD_INTERPOLATION_MEDIAN_CAMERA): the median turn of the draws
+    // on the stride, as before.
+    const bool weighted = thresholds.weighted_camera;
     constexpr std::uint32_t kLargeDraw = 1024u;
     constexpr std::size_t kMostCandidates = 64u;
     constexpr float kAgreement = 16.0f; // world units: the same motion, up to rounding
@@ -172,7 +176,7 @@ const Matching &Matcher::match(
         const std::int32_t partner = out.newer_of[i];
         if (partner < 0) continue;
         const bool on_stride = seen++ % stride == 0u;
-        if (!on_stride && older[i].count < kLargeDraw) continue;
+        if (!on_stride && (!weighted || older[i].count < kLargeDraw)) continue;
         const DrawSummary &from = older[i];
         const DrawSummary &to = newer[static_cast<std::size_t>(partner)];
         Matrix before_inverse{};
@@ -183,19 +187,31 @@ const Matching &Matcher::match(
         // A draw on the stride stands for the ones skipped after it.
         const float weight = static_cast<float>(std::max(from.count, 1u)) *
             static_cast<float>(on_stride && from.count < kLargeDraw ? stride : 1u);
-        samples.push_back({rotation_angle_degrees(identity, motion), weight, motion,
+        samples.push_back({rotation_angle_degrees(identity, motion), weight, from.count, motion,
             from.prepared ? from.eye_translation : eye_translation_of(from),
             to.prepared ? to.eye_translation : eye_translation_of(to)});
     }
-    if (!samples.empty()) {
+    out.camera_candidates = 0u;
+    if (!samples.empty() && !weighted) {
+        const auto middle = samples.begin() + static_cast<std::ptrdiff_t>(samples.size() / 2u);
+        std::nth_element(
+            samples.begin(), middle, samples.end(), [](const Sample &a, const Sample &b) { return a.turn < b.turn; });
+        out.camera_found = true;
+        out.camera_angle_degrees = middle->turn;
+        out.camera = middle->motion;
+        out.camera_distance = std::sqrt(
+            out.camera[12] * out.camera[12] + out.camera[13] * out.camera[13] + out.camera[14] * out.camera[14]);
+    } else if (!samples.empty()) {
         // Tried in order of their turn, so that among motions as well agreed
-        // with the smallest turn is taken; every large draw is tried.
+        // with the smallest turn is taken: about kMostCandidates of them, and
+        // every draw of kLargeDraw vertices or more.
         std::sort(samples.begin(), samples.end(), [](const Sample &a, const Sample &b) { return a.turn < b.turn; });
         const std::size_t step = std::max<std::size_t>(1u, samples.size() / kMostCandidates);
         const Sample *best = nullptr;
         float best_agreed = -1.0f;
         for (std::size_t c = 0; c < samples.size(); ++c) {
-            if (c % step != 0u && samples[c].weight < static_cast<float>(kLargeDraw)) continue;
+            if (c % step != 0u && samples[c].vertices < kLargeDraw) continue;
+            ++out.camera_candidates;
             const Matrix &m = samples[c].motion;
             float agreed = 0.0f;
             for (const Sample &other : samples) {
