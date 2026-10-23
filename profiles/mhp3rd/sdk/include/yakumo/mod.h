@@ -429,7 +429,8 @@ typedef struct ymod_monsters {
     int (*at_frame)(uint32_t monster, float frame);
     /* The monster's body (docs/MONSTERS.md, "A monster's body"). Facings are
      * in degrees, 0 towards +z and growing towards +x. Each returns 0, or -1
-     * for an address that is not guest memory. */
+     * for an address that is not guest memory. During THINK the position's y
+     * is -20000: the game sets the ground height later in the frame. */
     int (*position)(uint32_t monster, ymod_vec3 *out);
     int (*facing)(uint32_t monster, float *degrees);
     int (*set_facing)(uint32_t monster, float degrees);

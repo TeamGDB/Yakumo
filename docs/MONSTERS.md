@@ -153,7 +153,7 @@ Where a monster is and what it is after, as the monster update and the behaviour
 
 | Offset | What | Notes |
 | --- | --- | --- |
-| `+0x80`, `+0x84`, `+0x88` | Position: x, y (up), z | The previous frame's at `+0x90` |
+| `+0x80`, `+0x84`, `+0x88` | Position: x, y (up), z | The previous frame's at `+0x90`. While THINK runs, y holds -20000: the game puts its ground height there later in the frame (`0x0A0A5518`, found with a write watch), so a behaviour reading the position sees -20000 for y; the same on the Tigrex's own behaviour and in the arena |
 | `+0x74` | Facing, 65536 a turn: 0 towards +z, growing towards +x | A 32-bit word; the turn code keeps it to 16 bits. Turning motions change it (a motion's root rotation is applied); no motion moved the position |
 | `+0x4C0`, `+0x4C4`, `+0x4C8` | Target point: what the monster goes for | Brought up to date by the game only now and then: without the base's THINK it followed the hunter once, then stayed where the hunter had been. `0x0A0AFEB0` fills it from the target's kind at `+0x4D8` (and `+0x4D9`, `+0x4DA`): a hunter, another monster, a point to the side, or by default the first hunter |
 | `+0x18E` | The motion slot playing (u16) | Read by `0x0A0AD31C`; `0x0A0B2ED4` plays a motion only when this is another |
