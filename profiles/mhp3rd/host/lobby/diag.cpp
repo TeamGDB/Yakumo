@@ -5,6 +5,7 @@
 #include "lobby/quests.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
@@ -281,9 +282,23 @@ void write_summary(const std::filesystem::path &path, const game::Ram &ram, cons
 void maybe_dump(const game::Ram &ram, const Snapshot &snapshot) {
     const char *setting = std::getenv("MHP3RD_LOBBY_DUMP");
     if (setting == nullptr || *setting == '\0' || snapshot.hall.empty()) return;
+    // The first dump is taken as the hall opens, before a quest is posted; the
+    // next two, ten seconds apart, capture the board after it is posted.
+    constexpr int kMaxDumps = 3;
+    constexpr auto kDumpInterval = std::chrono::seconds(10);
     static std::string last_hall;
-    if (last_hall == snapshot.hall) return;
-    last_hall = snapshot.hall;
+    static std::chrono::steady_clock::time_point last_dump{};
+    static int dumps{};
+    if (last_hall != snapshot.hall) {
+        last_hall = snapshot.hall;
+        dumps = 0;
+        last_dump = {};
+    }
+    if (dumps >= kMaxDumps) return;
+    const auto now = std::chrono::steady_clock::now();
+    if (dumps > 0 && now - last_dump < kDumpInterval) return;
+    last_dump = now;
+    ++dumps;
 
     std::filesystem::path directory(setting);
     if (directory == "1") directory = "logs";
