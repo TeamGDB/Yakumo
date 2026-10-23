@@ -120,23 +120,22 @@ const QuestInfo *find_quest(std::uint16_t id) {
 
 std::vector<PostedQuest> posted_quests(const game::Ram &ram) {
     std::vector<PostedQuest> result;
-    const std::vector<std::uint16_t> ids = posted_quest_ids(ram);
-    for (std::size_t i = 0u; i < ids.size() && i < 4u; ++i) {
-        PostedQuest quest;
-        quest.slot = static_cast<std::uint8_t>(i + 1u);
-        quest.id = ids[i];
-        if (const QuestInfo *info = find_quest(quest.id)) {
-            quest.stars = info->stars;
-            quest.fee = info->fee;
-            quest.reward = info->reward;
-            quest.time_limit = info->time_limit;
-            quest.name = info->name;
-            quest.objective = info->objective;
-            quest.monsters = info->monsters;
-            quest.client = info->client;
-        }
-        result.push_back(std::move(quest));
+    const std::uint16_t id = latest_quest_id(ram);
+    if (id == 0u) return result;
+    PostedQuest quest;
+    quest.slot = 1u;
+    quest.id = id;
+    if (const QuestInfo *info = find_quest(quest.id)) {
+        quest.stars = info->stars;
+        quest.fee = info->fee;
+        quest.reward = info->reward;
+        quest.time_limit = info->time_limit;
+        quest.name = info->name;
+        quest.objective = info->objective;
+        quest.monsters = info->monsters;
+        quest.client = info->client;
     }
+    result.push_back(std::move(quest));
     return result;
 }
 

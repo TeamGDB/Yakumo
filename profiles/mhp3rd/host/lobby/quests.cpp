@@ -39,7 +39,7 @@ std::string ascii_text(const game::Ram &ram, std::uint32_t address, std::size_t 
     for (std::size_t i = 0u; i < max_bytes; ++i) {
         if (!ram.contains(address + static_cast<std::uint32_t>(i), 1u)) break;
         const std::uint8_t c = ram.load8(address + static_cast<std::uint32_t>(i));
-        if (c == 0u || c < 0x20u || c == 0x7Fu) break;
+        if (c == 0u || c < 0x20u || c >= 0x7Fu) break;
         text.push_back(static_cast<char>(c));
     }
     return text;
@@ -141,6 +141,17 @@ std::vector<std::uint16_t> posted_quest_ids(const game::Ram &ram) {
         ids.push_back(id);
     }
     return ids;
+}
+
+std::uint16_t latest_quest_id(const game::Ram &ram) {
+    if (!ram.contains(kQuestBoardBase, kQuestBoardBytes)) return 0u;
+    std::vector<std::uint16_t> ids;
+    for (std::uint32_t at = kQuestBoardBase; at + 2u <= kQuestBoardBase + kQuestBoardBytes; at += 2u) {
+        const std::uint16_t id = ram.load16(at);
+        if (id < 10101u || id > 10899u) continue;
+        if (std::find(ids.begin(), ids.end(), id) == ids.end()) ids.push_back(id);
+    }
+    return ids.empty() ? 0u : ids.back();
 }
 
 } // namespace mhp3rd::lobby

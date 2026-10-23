@@ -59,6 +59,7 @@ struct PostedQuest {
     std::string objective;
     std::string monsters;
     std::string client;
+    std::string poster;     // the hunter who posted it in the hall
     std::string accepted;   // who accepted the quest, when the board reports it
     std::string password;   // the hall's password, empty for an open hall
     std::string started_at; // quest start time, ISO 8601, when the board reports it
@@ -67,13 +68,18 @@ struct PostedQuest {
         return slot == other.slot && id == other.id && stars == other.stars && fee == other.fee &&
             reward == other.reward && time_limit == other.time_limit && name == other.name &&
             objective == other.objective && monsters == other.monsters && client == other.client &&
-            accepted == other.accepted && password == other.password && started_at == other.started_at;
+            poster == other.poster && accepted == other.accepted && password == other.password &&
+            started_at == other.started_at;
     }
 };
 
 // The ids on the hall board, at most four, in the board's order. Pure: the
 // tests use it on a buffer.
 [[nodiscard]] std::vector<std::uint16_t> posted_quest_ids(const game::Ram &ram);
+
+// The quest most recently posted in the hall. The board keeps older entries
+// in the same window; the last new id is the one on screen.
+[[nodiscard]] std::uint16_t latest_quest_id(const game::Ram &ram);
 
 // The quests posted on the hall board, at most four, in the board's order.
 // The ids are the game's; the details come from the DATA.BIN quest lists.
