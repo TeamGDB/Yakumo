@@ -354,6 +354,15 @@ int call_from_before(ymod_cpu *cpu, void *) {
     return YMOD_CONTINUE;
 }
 
+int g_first_call;
+int g_second_call;
+int call_twice(ymod_cpu *cpu, void *) {
+    const std::uint32_t args[4]{};
+    g_first_call = g_calls->call(cpu, 0x08A00800u, args, nullptr, nullptr); // v0 = 0x63
+    g_second_call = g_calls->call(cpu, 0x08A00100u, args, nullptr, nullptr);
+    return YMOD_RETURN;
+}
+
 void test_hook_changes(psprecomp::Runtime &runtime) {
     namespace native = mhp3rd::mods::native;
     g_self = native::add_mod("hook_changes", "Hook Changes", ".");
@@ -408,6 +417,13 @@ void test_hook_changes(psprecomp::Runtime &runtime) {
     check(g_call_result == -1 && runtime.cpu().gpr[2] == 5u,
         "native: a guest call from a BEFORE hook is refused and the function runs as usual");
     g_hooks->remove(g_self, caller);
+
+    store(runtime, 0x08A00800u, {0x24020063u, 0x03E00008u, 0u}); // addiu v0, zero, 0x63; jr ra
+    const ymod_hook twice = g_hooks->function(g_self, nullptr, 0x08A00300u, YMOD_HOOK_REPLACE, &call_twice, nullptr);
+    const std::uint32_t called = call(runtime, 0x08A00300u, 4u);
+    check(g_first_call == 0 && g_second_call == -1 && called == 0x63u && runtime.cpu().pc == kSentinel,
+        "native: a second guest call from one REPLACE callback is refused; the first runs and returns its result");
+    g_hooks->remove(g_self, twice);
 
     // A mod that fails leaves nothing behind that would call it.
     ymod_mod *failing = native::add_mod("failing", "Failing", ".");

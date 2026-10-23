@@ -247,8 +247,9 @@ ymod_hook hooks_instruction(
 int calls_call(
     ymod_cpu *cpu, std::uint32_t address, const std::uint32_t arguments[4], ymod_call_done_fn done, void *user) {
     // A call returns to the hooked function's caller, so only a replacement,
-    // which decides what the function does, can make one.
-    if (cpu == nullptr || (address & 3u) != 0u || !state().replacing) return -1;
+    // which decides what the function does, can make one, and only one: the
+    // guest runs it when the callback returns.
+    if (cpu == nullptr || (address & 3u) != 0u || !state().replacing || state().call_pending) return -1;
     auto &ctx = *reinterpret_cast<AllegrexContext *>(cpu);
     const std::array<std::uint32_t, 4> args{arguments != nullptr ? arguments[0] : 0u,
         arguments != nullptr ? arguments[1] : 0u, arguments != nullptr ? arguments[2] : 0u,

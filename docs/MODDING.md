@@ -297,7 +297,7 @@ Yakumo calls `yakumo_mod_main` once at start. Everything else is a *service*, a 
 | `yakumo.monsters` | [Large monsters](#large-monsters) by name, and new ones a mod adds from its own model files |
 | `yakumo.memory` | Checked reads and writes of guest memory, allocation from the game's allocator, telling the JIT about rewritten code |
 | `yakumo.hooks` | Hooks before, after or instead of a function, and before any instruction, in the executable or an overlay |
-| `yakumo.calls` | Calling a guest function from a REPLACE hook, as guest code on the same thread; the call's result returns to the hooked function's caller. Refused from other callbacks |
+| `yakumo.calls` | Calling a guest function from a REPLACE hook, as guest code on the same thread; the call's result returns to the hooked function's caller. One call per callback; a second, and a call from other callbacks, is refused |
 | `yakumo.events` | Frames, the game's start, whole files read, overlays loaded and unloaded, quests starting and ending; subscribing and unsubscribing |
 | `yakumo.files` | Replacing a file with bytes, reading the game's own bytes of one |
 | `yakumo.settings` | Switches, numbers and choices on the mod's page, kept in `mods.ini` |

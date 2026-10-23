@@ -155,7 +155,9 @@ typedef struct ymod_hooks {
 /* --------------------------------------------------------------------------
  * "yakumo.calls" 1: calling a guest function from a callback. The call runs
  * when the callback returns, on the same guest thread, as guest code: it may
- * block. `done` then gets its v0. Only from a hook callback.
+ * block. `done` then gets its v0. Only from a REPLACE hook's callback, and
+ * once in it: the call's result returns to the hooked function's caller. A
+ * call from anywhere else, or a second one, is refused (-1).
  */
 #define YMOD_CALLS "yakumo.calls"
 typedef void (*ymod_call_done_fn)(ymod_cpu *cpu, uint32_t result, void *user);
