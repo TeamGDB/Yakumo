@@ -427,6 +427,32 @@ void failed_compiles() {
     runtime.unregister_functions(kAt, kAt + 4u);
 }
 
+// An instruction hook on a unit's first word, the delay slot of a branch at
+// the last word of the unit before: that unit is dropped too, or the slot
+// would run there, compiled in, without the hook.
+void fake_unit(Runtime &, AllegrexContext &) {}
+void fake_unit_after(Runtime &, AllegrexContext &) {}
+void hook_in_slot_of_unit_before() {
+    psprecomp::set_jit_enabled(true);
+    const auto unit_before_kept = [](std::uint32_t last_word_before) {
+        Runtime runtime(32u * 1024u * 1024u);
+        constexpr std::uint32_t kUnit = 0x08A40000u;
+        runtime.register_generated_unit(0, kUnit, 0x4000u, &fake_unit);
+        runtime.register_generated_unit(1, kUnit + 0x4000u, 0x4000u, &fake_unit_after);
+        for (std::uint32_t at = 0; at < 0x4000u; at += 4u) {
+            runtime.register_function(kUnit + at, &fake_unit, "recomp_unit_0000");
+            runtime.register_function(kUnit + 0x4000u + at, &fake_unit_after, "recomp_unit_0001");
+        }
+        runtime.memory().store32(kUnit + 0x3FFCu, last_word_before);
+        psprecomp::jit_hook_instruction(runtime, kUnit + 0x4000u);
+        const bool kept = runtime.has_function(kUnit);
+        psprecomp::jit_unhook_instruction(runtime, kUnit + 0x4000u);
+        return kept;
+    };
+    check(!unit_before_kept(0x10000010u) && unit_before_kept(0x24030001u),
+        "jit: a hook on the delay slot of the unit before's last branch drops that unit too, not otherwise");
+}
+
 // Leading zeros and ones of 0 and all ones are 32, compiled as interpreted.
 // (x86 without LZCNT counts with BSR, which finds no bit in 0: the JIT
 // selects 32 for it.)
@@ -816,6 +842,7 @@ int main(int argc, char **argv) {
     self_modifying(g);
     leading_bits(g);
     failed_compiles();
+    hook_in_slot_of_unit_before();
     loop_with_call(g);
     calls(g);
     invalidation(g);

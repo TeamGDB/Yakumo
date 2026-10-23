@@ -204,6 +204,28 @@ void test_code(const fs::path &root) {
     check(reserved.size() == 6u && reserved[1] == std::pair<std::uint32_t, std::uint32_t>{0x09000000u, 2u} &&
             reserved[5] == std::pair<std::uint32_t, std::uint32_t>{kCode + 0x40FCu, 8u},
         "code: the memory of every block written is reserved");
+
+    // A unit's first word changed under a branch at the last word of the unit
+    // before: that unit has the word compiled in as the branch's delay slot,
+    // and goes too; under any other instruction it stays.
+    const auto retired_with_first_word = [&](std::uint32_t last_word_before) {
+        psprecomp::Runtime fresh(64u * 1024u * 1024u);
+        fresh.register_generated_unit(0, kCode, 0x4000, unit_a);
+        fresh.register_generated_unit(1, kCode + 0x4000u, 0x4000, unit_b);
+        for (std::uint32_t at = 0; at < 0x4000u; at += 4u) {
+            fresh.register_function(kCode + at, unit_a, "recomp_unit_0000");
+            fresh.register_function(kCode + 0x4000u + at, unit_b, "recomp_unit_0001");
+        }
+        fresh.memory().store32(kCode + 0x3FFCu, last_word_before);
+        fresh.memory().store32(kCode + 0x4000u, 0x24020001u);
+        std::vector<std::string> problems;
+        const std::size_t units = p3::retire_code(fresh, kCode + 0x4000u, 4u, "test", problems);
+        return std::pair{units, fresh.has_function(kCode)};
+    };
+    const auto [under_branch, before_kept] = retired_with_first_word(0x10000010u); // beq zero, zero
+    const auto [under_add, add_kept] = retired_with_first_word(0x24030001u);       // addiu v1, zero, 1
+    check(under_branch == 2u && !before_kept && under_add == 1u && add_kept,
+        "code: a change to the delay slot of the unit before's last branch drops that unit too");
 }
 
 // The loader's typed files: a type before each block, main blocks placed

@@ -2,6 +2,7 @@
 
 #include "mods/mhp3rd_mod_format.hpp"
 
+#include "psprecomp/decoder.hpp"
 #include "psprecomp/jit.hpp"
 #include "psprecomp/runtime.hpp"
 
@@ -25,10 +26,16 @@ std::size_t retire_code(psprecomp::Runtime &runtime, std::uint32_t address, std:
     const auto end = static_cast<std::uint32_t>(address + length);
     // Native code the JIT compiled from the old bytes goes too.
     psprecomp::jit_invalidate(runtime, start, end);
+    // A jump or branch just before the change has the change's first word
+    // compiled in as its delay slot, maybe in the unit before: it goes too.
+    std::uint32_t first = start;
+    if (start >= 4u && runtime.memory().contains(start - 4u, 4u) &&
+        psprecomp::decode_allegrex(runtime.memory().load32(start - 4u)).has_delay_slot())
+        first = start - 4u;
     bool code = false;
-    for (std::uint32_t at = start; at < end && !code; at += 4u) code = runtime.has_function(at);
+    for (std::uint32_t at = first; at < end && !code; at += 4u) code = runtime.has_function(at);
     if (!code) return 0u;
-    const std::size_t units = runtime.retire_generated_code(start, end);
+    const std::size_t units = runtime.retire_generated_code(first, end);
     // What is still registered there is the port's own: a function it
     // replaces, or an import. The game never runs those instructions.
     for (std::uint32_t at = start; at < end; at += 4u) {

@@ -189,7 +189,11 @@ void jit_hook_instruction(Runtime &runtime, std::uint32_t address) {
     State &state = state_of(runtime);
     if (!state.hooked.insert(address).second) return;
     const std::uint32_t unit = address & ~(kWindow - 1u);
-    runtime.retire_generated_code(unit, unit + kWindow);
+    // A jump or branch just before the address has it compiled in as its delay
+    // slot: when that is the unit before's last word, that unit goes too.
+    const bool slot_of_unit_before = address == unit && address >= 4u && runtime.memory().contains(address - 4u, 4u) &&
+        decode_allegrex(runtime.memory().load32(address - 4u)).has_delay_slot();
+    runtime.retire_generated_code(slot_of_unit_before ? unit - 4u : unit, unit + kWindow);
     jit_invalidate(runtime, address, address + 4u);
 }
 
