@@ -405,6 +405,17 @@ struct Client::Impl {
     bool resolving{};
     std::optional<Address> server; // the adhocctl address that last worked
     std::uint16_t relay_port{kRelayPort};
+    bool relay_connected{};
+    bool relay_fallback{};
+    void relay_failed() {
+        if (relay_connected || relay_fallback || !server || server->port() == kAdhocctlPort) return;
+        // A one-port gateway (the Railway server) classifies the relay on the
+        // same public port. Direct servers keep the historical next port, so
+        // try that first and fall back only when it never opened.
+        relay_port = server->port();
+        relay_fallback = true;
+        trace("relay did not open on the next port; trying the server port");
+    }
     Link ctl;
     bool logged_in{};
     bool stop_ctl{}; // close `ctl` on the network thread
@@ -740,6 +751,7 @@ struct Client::Impl {
     void maintain_datagrams(Clock::time_point now) {
         for (auto it = datagrams.begin(); it != datagrams.end();) {
             DatagramSocket &socket = it->second;
+            if (socket.link.open) relay_connected = true;
             if (socket.closing) {
                 socket.link.close();
                 it = datagrams.erase(it);
@@ -747,6 +759,7 @@ struct Client::Impl {
             }
             if (socket.link.failed) {
                 socket.link.failed = false;
+                relay_failed();
                 parse_datagrams(it->first, socket);
                 socket.link.close();
                 socket.partial.reset();
@@ -811,6 +824,7 @@ struct Client::Impl {
         for (auto it = streams.begin(); it != streams.end();) {
             const int handle = it->first;
             StreamSocket &socket = it->second;
+            if (socket.link.open) relay_connected = true;
             if (socket.closing) {
                 socket.link.close();
                 it = streams.erase(it);
@@ -820,6 +834,7 @@ struct Client::Impl {
             case StreamKind::Listen:
                 if (socket.link.failed) {
                     socket.link.failed = false;
+                    relay_failed();
                     parse_stream(handle, socket);
                     socket.link.close();
                     const auto delay = socket.backoff.next();
@@ -839,6 +854,7 @@ struct Client::Impl {
                 if (socket.state == StreamState::Opening) {
                     if (socket.link.failed) {
                         socket.link.failed = false;
+                        relay_failed();
                         parse_stream(handle, socket);
                         socket.link.close();
                         if (socket.state == StreamState::Opening) {
@@ -878,6 +894,7 @@ struct Client::Impl {
                 }
                 if (socket.link.failed) {
                     socket.link.failed = false;
+                    relay_failed();
                     parse_stream(handle, socket);
                     socket.link.close();
                     if (socket.state == StreamState::Established) {
@@ -1110,6 +1127,8 @@ struct Client::Impl {
                 {
                     std::lock_guard lock(mutex);
                     relay_port = relay_port_for(port);
+                    relay_connected = false;
+                    relay_fallback = false;
                 }
                 trace("resolving " + host);
                 std::vector<Address> found = resolve(host, port);
