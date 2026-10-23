@@ -162,6 +162,13 @@ struct Resolution {
         return replacements.empty() && patches.empty() && added.empty() && quests.empty() && code.empty() &&
             native.empty() && scripts.empty();
     }
+    // The same of what is taken over only at start: code and memory, added
+    // files and quests, native libraries and scripts. Switching to a
+    // resolution that differs in these needs a restart.
+    [[nodiscard]] bool same_start(const Resolution &other) const {
+        return code == other.code && added == other.added && quests == other.quests && native == other.native &&
+            scripts == other.scripts;
+    }
     // Same files from the same sources; conflicts are not compared.
     [[nodiscard]] bool same_files(const Resolution &other) const {
         return replacements == other.replacements && patches == other.patches && added == other.added &&

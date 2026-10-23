@@ -160,11 +160,10 @@ void activate_now(const Resolution &resolution) {
 bool can_switch(const Resolution &next) {
     State &s = state();
     if (!s.directory) return false;
-    // Code is in memory since the start; it cannot be taken back out.
-    if (s.overlay && next.code != s.overlay->resolution().code) return false;
-    // Added files and quests are taken over at start.
-    if (s.overlay && (next.added != s.overlay->resolution().added || next.quests != s.overlay->resolution().quests))
-        return false;
+    // Code is in memory since the start and cannot be taken back out; added
+    // files and quests are taken over at start, and native libraries and
+    // scripts start then.
+    if (s.overlay && !next.same_start(s.overlay->resolution())) return false;
     const std::shared_ptr<const Layout> wanted = layout_for(next);
     const Layout disc = Layout::build(*s.directory, {});
     const Layout &now = s.layout ? *s.layout : disc;

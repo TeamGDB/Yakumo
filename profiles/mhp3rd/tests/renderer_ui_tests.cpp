@@ -2569,6 +2569,24 @@ void mods_screen_contracts(
         mods::native::reset_for_tests();
     }
     {
+        // A script mod starts with the game: turning it on while running waits
+        // for a restart instead of saying it applied.
+        const auto scripted = sandbox / "mods" / "Scripted";
+        std::filesystem::create_directories(scripted);
+        std::ofstream(scripted / "mod.ini") << "[MOD INFO]\nName=Scripted\nType=\"Yakumo\"\n[Script]\nFile=main.luau\n";
+        std::ofstream(scripted / "main.luau") << "yakumo.log(\"started\")\n";
+        session->rescan();
+        session->library().set_enabled("Scripted", true);
+        session->commit();
+        const bool waits = session->restart_pending();
+        session->library().set_enabled("Scripted", false);
+        session->commit();
+        expect(waits && !session->restart_pending(), "turning a script mod on while running waits for a restart");
+        std::error_code ec;
+        std::filesystem::remove_all(scripted, ec);
+        session->rescan();
+    }
+    {
         std::ofstream out(folder / "replacement.bin", std::ios::binary);
         out << std::string(block + 17, 'G');
     }

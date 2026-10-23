@@ -304,6 +304,21 @@ void test_library(const fs::path &root) {
     check(again.declared_value("b", "undeclared", 7) == 7, "library: a key never declared reads its fallback");
     (void)top;
 
+    // What only the start takes: a native library or a script turned on or
+    // off needs a restart, as code does; a file does not.
+    Resolution started;
+    Resolution files_only = started;
+    files_only.replacements[7u] = {"a", "x.bin", {}};
+    Resolution with_native = started;
+    with_native.native.push_back({"n", "lib.so", {}});
+    Resolution with_script = started;
+    with_script.scripts.push_back({"s", "main.luau", {}});
+    Resolution with_code = started;
+    with_code.code.push_back({"c", "code.bin", {}});
+    check(files_only.same_start(started) && !with_native.same_start(started) && !with_script.same_start(started) &&
+            !with_code.same_start(started),
+        "library: a native library, a script or code differ in what only the start takes; a file does not");
+
     // The session applies at once when the game can take it.
     bool accept = true;
     int activations = 0;
