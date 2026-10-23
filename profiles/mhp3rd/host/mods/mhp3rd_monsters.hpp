@@ -65,7 +65,9 @@ struct Spec {
 
 // Adds a kind and returns its number, or nothing (with the reason in `why`)
 // when the id is taken, the base is not a large monster this knows, a table
-// cannot grow, or the files cannot be served.
+// cannot grow, or the files cannot be served. A kind refused leaves the
+// tables and files as they were; only a table that grew before guest memory
+// ran out for the next stays longer.
 [[nodiscard]] std::optional<std::uint8_t> add(
     psprecomp::Runtime &runtime, const Spec &spec, std::string *why = nullptr);
 

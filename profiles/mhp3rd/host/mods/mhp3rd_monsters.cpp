@@ -898,23 +898,16 @@ std::optional<std::uint8_t> add(Runtime &runtime, const Spec &spec, std::string 
         kind_number);
     if (pack.empty()) return fail("the model pack cannot be read");
 
-    // Every table a row longer; refused before anything is served.
+    // Every table a row longer and the files served, refused before anything
+    // changes when a table cannot grow. The files go first: they can be taken
+    // back if a table fails after all (only for want of guest memory), while a
+    // table that has grown stays longer.
     for (const std::string_view table : kKindTables)
-        if (std::string reason; !tables::extend(runtime, table, kind_number + 1u, &reason))
+        if (std::string reason; !tables::can_extend(runtime, table, kind_number + 1u, &reason))
             return fail("table " + std::string(table) + " cannot grow: " + reason);
-    std::array<std::uint32_t, 3> model_rows{};
-    for (std::size_t i = 0; i < 3u; ++i) {
-        std::string reason;
-        const std::optional<std::uint32_t> at = tables::extend(runtime, kModelTables[i], kind_number, &reason);
-        if (!at) return fail("table " + std::string(kModelTables[i]) + " cannot grow: " + reason);
-        model_rows[i] = *at + (kind_number - 1u) * 2u;
-    }
-    // The size of its footsteps' dust: the base's. Not fatal: past the
-    // table's rows a footstep's dust takes the next table's words.
-    if (std::string reason; const auto steps = tables::extend(runtime, kStepScales, kind_number + 1u, &reason))
-        runtime.memory().store32(*steps + 4u * kind_number, runtime.memory().load32(*steps + 4u * *base));
-    else
-        problem(spec.owner, spec.id, "its footsteps' dust keeps no size (" + reason + ")");
+    for (const std::string_view table : kModelTables)
+        if (std::string reason; !tables::can_extend(runtime, table, kind_number, &reason))
+            return fail("table " + std::string(table) + " cannot grow: " + reason);
 
     Added added;
     added.id = spec.id;
@@ -925,12 +918,38 @@ std::optional<std::uint8_t> add(Runtime &runtime, const Spec &spec, std::string 
     added.check_kind = {kind_number, *base};
     added.effects = effects_of(pack);
     const std::array<std::vector<std::uint8_t>, 3> files{std::move(pack), spec.geometry, spec.motions};
+    const auto take_back = [&added] {
+        for (const FileId id : added.files)
+            if (id != 0u) (void)added::remove(id);
+    };
     for (std::size_t i = 0; i < 3u; ++i) {
         const FileId id = added::free_id();
-        if (id == 0u || !added::add(runtime, id, files[i])) return fail("its files cannot be served");
+        if (id == 0u || !added::add(runtime, id, files[i])) {
+            take_back();
+            return fail("its files cannot be served");
+        }
         added.files[i] = id;
-        runtime.memory().store16(model_rows[i], static_cast<std::uint16_t>(id));
     }
+    for (const std::string_view table : kKindTables)
+        if (std::string reason; !tables::extend(runtime, table, kind_number + 1u, &reason)) {
+            take_back();
+            return fail("table " + std::string(table) + " cannot grow: " + reason);
+        }
+    for (std::size_t i = 0; i < 3u; ++i) {
+        std::string reason;
+        const std::optional<std::uint32_t> at = tables::extend(runtime, kModelTables[i], kind_number, &reason);
+        if (!at) {
+            take_back();
+            return fail("table " + std::string(kModelTables[i]) + " cannot grow: " + reason);
+        }
+        runtime.memory().store16(*at + (kind_number - 1u) * 2u, static_cast<std::uint16_t>(added.files[i]));
+    }
+    // The size of its footsteps' dust: the base's. Not fatal: past the
+    // table's rows a footstep's dust takes the next table's words.
+    if (std::string reason; const auto steps = tables::extend(runtime, kStepScales, kind_number + 1u, &reason))
+        runtime.memory().store32(*steps + 4u * kind_number, runtime.memory().load32(*steps + 4u * *base));
+    else
+        problem(spec.owner, spec.id, "its footsteps' dust keeps no size (" + reason + ")");
     s.kinds.push_back(std::move(added));
     Added &kept = s.kinds.back();
 

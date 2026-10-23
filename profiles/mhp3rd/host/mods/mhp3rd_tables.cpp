@@ -438,6 +438,21 @@ std::optional<Placement> placement(std::string_view name) {
     return Placement{d->table.address, d->table.rows};
 }
 
+bool can_extend(psprecomp::Runtime &runtime, std::string_view name, std::uint32_t rows, std::string *why) {
+    const auto refused = [why](const std::string &reason) {
+        if (why != nullptr) *why = reason;
+        return false;
+    };
+    const Definition *d = definition(name);
+    if (d == nullptr) return refused("no such table");
+    if (rows > d->most_rows) return refused("the game's index reaches " + std::to_string(d->most_rows) + " rows");
+    const auto found = moved().find(d->table.name);
+    const Moved m = found != moved().end() ? found->second : Moved{};
+    if (rows <= std::max(m.rows, d->table.rows)) return true;
+    if (!as_traced(runtime, *d, m)) return refused("the game's code that reads it is not as traced");
+    return true;
+}
+
 std::optional<std::uint32_t> extend(
     psprecomp::Runtime &runtime, std::string_view name, std::uint32_t rows, std::string *why) {
     const auto refused = [why](const std::string &reason) -> std::optional<std::uint32_t> {

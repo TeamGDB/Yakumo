@@ -2180,13 +2180,38 @@ void test_monster_quest_end(psprecomp::Runtime &runtime) {
     constexpr std::uint32_t kSlot = 0x0A05E600u;
     place_overlay(runtime, kSlot, "lobby_task.ovl", 0x00200000u);
     native::overlay_loaded(runtime, kSlot);
-    for (const char *name : {"monster.models", "monster.models.second", "monster.models.third", "monster.kinds",
-             "monster.files", "monster.constructors", "monster.sizes", "monster.carves"})
+    for (const char *name : {"monster.models", "monster.models.second", "monster.kinds", "monster.files",
+             "monster.constructors", "monster.sizes", "monster.carves"})
         tables::write_traced_code_for_tests(runtime, name);
     const std::vector<std::uint8_t> pack = pack_of({{'S'}, small_pmo(2u), {'T'}});
     monsters::read_packs_with_for_tests([&pack](mhp3rd::mods::FileId) { return std::optional(pack); });
     ymod_mod *mod = native::add_mod("test.quest_end", "Quest End", ".");
     const auto *service = static_cast<const ymod_monsters *>(native::host()->service(mod, YMOD_MONSTERS, 1u));
+
+    // The third model table's code is not as traced: the kind is refused
+    // before any table grows or any file is served.
+    std::string why;
+    check(!monsters::add(runtime, {"refused_rathian", "rathian", pack, {'G'}, {'M'}, "test", mod}, &why) &&
+            why == "table monster.models.third cannot grow: the game's code that reads it is not as traced" &&
+            tables::placement("monster.kinds")->rows == 75u && tables::placement("monster.models")->rows == 74u &&
+            !mhp3rd::mods::added::serves(mhp3rd::mods::added::kLastFreeId) && !monsters::kind("refused_rathian"),
+        "monsters: a kind refused for a table that cannot grow leaves every table and file as it was");
+    tables::write_traced_code_for_tests(runtime, "monster.models.third");
+    // Ids for two of its three files only: those two are taken back.
+    namespace added = mhp3rd::mods::added;
+    for (std::uint32_t id = added::kFirstFreeId; id < added::kLastFreeId - 1u; ++id)
+        (void)added::add(runtime, static_cast<mhp3rd::mods::FileId>(id), {1u});
+    check(!monsters::add(runtime, {"crowded_rathian", "rathian", pack, {'G'}, {'M'}, "test", mod}, &why) &&
+            why == "its files cannot be served" && !added::serves(added::kLastFreeId) &&
+            !added::serves(added::kLastFreeId - 1u) && tables::placement("monster.kinds")->rows == 75u,
+        "monsters: a kind whose files cannot all be served takes back those that were, and grows no table");
+    added::reset_for_tests();
+    std::string reason;
+    check(!tables::can_extend(runtime, "no.such.table", 1u, &reason) && reason == "no such table" &&
+            !tables::can_extend(runtime, "monster.kinds", 0x10000u) &&
+            tables::can_extend(runtime, "monster.kinds", 10u) && !added::remove(added::kLastFreeId),
+        "tables: whether a table can grow, for an unknown table, too many rows and rows it has; and no file to take "
+        "back");
     const std::optional<std::uint8_t> kind =
         monsters::add(runtime, {"lone_rathian", "rathian", pack, {'G'}, {'M'}, "test", mod}, nullptr);
     const ymod_monster_fn alone = [](ymod_cpu *, std::uint32_t, void *) -> int { return YMOD_RETURN; };

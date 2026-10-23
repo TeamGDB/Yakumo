@@ -55,6 +55,12 @@ struct Placement {
 [[nodiscard]] std::optional<std::uint32_t> extend(
     psprecomp::Runtime &runtime, std::string_view name, std::uint32_t rows, std::string *why = nullptr);
 
+// Whether extend() could give the table `rows` rows now, changing nothing;
+// the reason in `why` when not. Whether guest memory is left for the copy is
+// the one thing it does not tell.
+[[nodiscard]] bool can_extend(
+    psprecomp::Runtime &runtime, std::string_view name, std::uint32_t rows, std::string *why = nullptr);
+
 // Moves the tables of overlays that have just loaded. Called after an
 // overlay is copied to its slot and before the game runs it.
 void overlay_loaded(psprecomp::Runtime &runtime);

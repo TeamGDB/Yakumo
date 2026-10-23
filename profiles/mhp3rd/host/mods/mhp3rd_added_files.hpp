@@ -39,6 +39,11 @@ bool install(psprecomp::Runtime &runtime, const std::map<FileId, Resolution::Sou
 // when the id is taken, the file is empty, or the loader cannot be taken over.
 bool add(psprecomp::Runtime &runtime, FileId file, std::vector<std::uint8_t> bytes);
 
+// Takes back a file added from memory, for what could not be added after
+// all, before anything asked for it. False when `file` is not one added from
+// memory.
+bool remove(FileId file);
+
 // Gives a file added from memory new bytes, for its next load. False when
 // `file` is not one added from memory or the bytes are empty.
 bool replace(FileId file, std::vector<std::uint8_t> bytes);

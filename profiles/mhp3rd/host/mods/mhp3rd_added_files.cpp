@@ -221,6 +221,13 @@ bool stand_in(Runtime &runtime, StandIn provider) {
     return true;
 }
 
+bool remove(FileId file) {
+    const auto found = state().files.find(file);
+    if (found == state().files.end() || !found->second.bytes) return false;
+    state().files.erase(found);
+    return true;
+}
+
 bool replace(FileId file, std::vector<std::uint8_t> bytes) {
     const auto found = state().files.find(file);
     if (found == state().files.end() || !found->second.bytes || bytes.empty() || bytes.size() > 0x7FFFFFFFu)
