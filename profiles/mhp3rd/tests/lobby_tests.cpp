@@ -456,6 +456,7 @@ struct TestServer {
 };
 
 void test_reporter_network() {
+    net::WinsockSession winsock;
     TestServer server;
     check(server.ready(), "the reporter test server listens");
     if (!server.ready()) return;
