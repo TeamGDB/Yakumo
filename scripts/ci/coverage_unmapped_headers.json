@@ -4,8 +4,8 @@
     "reason": "AudioSink method declarations have no standalone LLVM line map. Their out-of-line implementations and actual SDL output-gain behavior are covered by renderer/audio regression tests and remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/settings/settings.hpp": {
-    "sha256": "471751e697b99c0a1892a932c1cdcbdc0e95dff1a6430ac315406453ed5a58fc",
-    "reason": "Reviewed declarations and aggregate defaults, including local quest HUD placements; no handwritten function body is exempted. HUD settings defaults, round trips and invalid scale/offset values are tested. Out-of-line implementations remain subject to the normal diff gate."
+    "sha256": "482caf2c4fca88056bd76792e096e692803d5c7b294de6ed91774ac42bed5cc3",
+    "reason": "Reviewed settings declarations and aggregate defaults, including the lobby server and token fields; no handwritten function body is exempted. Settings round trips and the reporter network path are tested in settings and lobby tests; out-of-line implementations keep the normal diff gate."
   },
   "profiles/mhp3rd/host/perf/perf_overlay.hpp": {
     "sha256": "48d8fd2b2912a0231e0d8293bf0f9027a091235c0bae95d68845a6d4a058bc79",
@@ -102,5 +102,25 @@
   "profiles/mhp3rd/host/ui/ui.hpp": {
     "sha256": "7e876045929b8a83f9c7bfbc846d5a5bef11c9602da8548130414531ba80e6ac",
     "reason": "Reviewed function declarations and a comment documenting the optional paused-menu refresh callback; no executable body is exempted. Menu and editor implementations remain subject to the normal diff gate. Paused real-game display-list replay requires a separate device check."
+  },
+  "profiles/mhp3rd/host/lobby/diag.hpp": {
+    "sha256": "c2e683ad83e664d65680337ad27a4be5394c9fd1d82f5f38868c024ca99f51d1",
+    "reason": "Reviewed diagnostic dump declaration only; no executable body is exempted. The dump, scan and write branches are exercised by mhp3rd_lobby_tests and remain subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/lobby/quest_file.hpp": {
+    "sha256": "9377e3ddcad9271bfbee0bdf18cbf1434f41d5b75d3d760dc657e41472466310",
+    "reason": "Reviewed quest catalog struct and parser declarations only; no executable body is exempted. Zone names, rank gates, padding and multi-record parsing are tested in mhp3rd_lobby_tests; implementation mappings keep the normal gate."
+  },
+  "profiles/mhp3rd/host/lobby/reporter.hpp": {
+    "sha256": "085d74e52f34c3ae087159f2e71950e07cde40a48e739d0142f7a65bb334a813",
+    "reason": "Reviewed reporter declarations and Status fields only; no executable body is exempted. The network thread, queue, connect failure and disabled state are exercised by mhp3rd_lobby_tests; implementation mappings keep the gate."
+  },
+  "profiles/mhp3rd/host/lobby/snapshot.hpp": {
+    "sha256": "71056ecc4028b272cde06bab6f44e19b4e373c74764afd4ff60dc0882738cee3",
+    "reason": "Reviewed snapshot struct and read_hunter declaration only; no executable body is exempted. Armor slots, weapon class, guild card and quest start time are tested in mhp3rd_lobby_tests; implementation mappings keep the gate."
+  },
+  "profiles/mhp3rd/host/save_data/savedata_store.hpp": {
+    "sha256": "640663064a02165efbb23ecd191b14f8a978bfb4f4ffcdac0cae6a48dd719610",
+    "reason": "Reviewed plaintext dump declaration only; no executable body is exempted. The dump path and bytes are exercised by mhp3rd_savedata_tests; implementation mappings keep the normal diff gate."
   }
 }
