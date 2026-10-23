@@ -2159,6 +2159,57 @@ void test_monsters(psprecomp::Runtime &runtime) {
     tables::reset_for_tests();
 }
 
+// A kind with behaviour made from a base that hides no materials: which of its
+// monsters thought alone is forgotten when the quest ends, as for any base.
+void test_monster_quest_end(psprecomp::Runtime &runtime) {
+    namespace monsters = mhp3rd::mods::monsters;
+    namespace native = mhp3rd::mods::native;
+    namespace tables = mhp3rd::mods::tables;
+    tables::reset_for_tests();
+    monsters::reset_for_tests();
+    mhp3rd::mods::added::reset_for_tests();
+    constexpr std::uint32_t kSlot = 0x0A05E600u;
+    place_overlay(runtime, kSlot, "lobby_task.ovl", 0x00200000u);
+    native::overlay_loaded(runtime, kSlot);
+    for (const char *name : {"monster.models", "monster.models.second", "monster.models.third", "monster.kinds",
+             "monster.files", "monster.constructors", "monster.sizes", "monster.carves"})
+        tables::write_traced_code_for_tests(runtime, name);
+    const std::vector<std::uint8_t> pack = pack_of({{'S'}, small_pmo(2u), {'T'}});
+    monsters::read_packs_with_for_tests([&pack](mhp3rd::mods::FileId) { return std::optional(pack); });
+    ymod_mod *mod = native::add_mod("test.quest_end", "Quest End", ".");
+    const auto *service = static_cast<const ymod_monsters *>(native::host()->service(mod, YMOD_MONSTERS, 1u));
+    const std::optional<std::uint8_t> kind =
+        monsters::add(runtime, {"lone_rathian", "rathian", pack, {'G'}, {'M'}, "test", mod}, nullptr);
+    const ymod_monster_fn alone = [](ymod_cpu *, std::uint32_t, void *) -> int { return YMOD_RETURN; };
+    check(kind && service->behave(mod, *kind, YMOD_MONSTER_THINK, alone, nullptr) == 0,
+        "monsters: a kind made from a base without traced behaviour takes a part");
+    constexpr std::uint32_t kMonster = 0x08B60000u, kTable = 0x08B61000u, kAct = 0x08B62000u;
+    for (std::uint32_t slot = 0; slot < 96u; ++slot) runtime.memory().store32(kTable + slot * 4u, kAct);
+    store(runtime, kAct, {0x24020005u, 0x03E00008u, 0u}); // v0 = 5
+    runtime.memory().store32(kMonster, kTable);
+    runtime.memory().store8(kMonster + 0x62u, *kind);
+    store(runtime, 0x0A090AE0u, {0x3C020000u | (kMonster >> 16u), 0x34420000u | (kMonster & 0xFFFFu), 0x03E00008u, 0u});
+    place_overlay(runtime, kSlot, "game_task.ovl", 0x00200000u);
+    runtime.memory().store32(0x08AB3640u, 0x09000000u); // the character, on quest 501
+    runtime.memory().store16(0x09000000u + 0x60472u, 501u);
+    native::overlay_loaded(runtime, kSlot);
+    (void)call(runtime, 0x0A090AE0u, 0u);
+    const std::uint32_t own = runtime.memory().load32(kMonster);
+    (void)call(runtime, runtime.memory().load32(own + 32u * 4u), kMonster);
+    runtime.cpu().gpr[2] = 0u;
+    const std::uint32_t act = runtime.memory().load32(own + 33u * 4u);
+    const std::uint32_t during = call(runtime, act, kMonster);
+    runtime.memory().store16(0x09000000u + 0x60472u, 1u); // back in the village
+    place_overlay(runtime, kSlot, "lobby_task.ovl", 0x00200000u);
+    native::overlay_loaded(runtime, kSlot);
+    check(during == 0u && call(runtime, act, kMonster) == 5u,
+        "monsters: once the quest ends, the base's Act runs again for a monster that thought alone in it");
+    monsters::read_packs_with_for_tests({});
+    monsters::reset_for_tests();
+    mhp3rd::mods::added::reset_for_tests();
+    tables::reset_for_tests();
+}
+
 int main() {
     psprecomp::Runtime runtime(64u * 1024u * 1024u);
     mhp3rd::kernel().install(runtime, 0u, 0x08900000u);
@@ -2234,6 +2285,7 @@ int main() {
     test_quests(runtime);
     test_tables(runtime);
     test_monsters(runtime);
+    test_monster_quest_end(runtime);
     test_equipment(runtime);
     test_maps(runtime);
 

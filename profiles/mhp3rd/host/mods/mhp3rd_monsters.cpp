@@ -304,6 +304,7 @@ struct State {
     Runtime *runtime{};
     ymod_mod *host{};
     bool draw_hooked{};
+    bool watching_quest_end{};
     std::vector<Shown> shown;
     std::map<std::uint32_t, bool> thought_alone; // by monster: its last Think was the mod's alone
 };
@@ -752,6 +753,16 @@ void quest_ended(int, std::uint32_t, void *) {
     state().thought_alone.clear();
 }
 
+// Once something is kept for a quest's monsters or models: forgotten when the
+// quest ends.
+void watch_quest_end() {
+    State &s = state();
+    if (s.watching_quest_end || s.host == nullptr) return;
+    const auto *events = static_cast<const ymod_events *>(native::host()->service(s.host, YMOD_EVENTS, 1u));
+    s.watching_quest_end =
+        events != nullptr && events->subscribe(s.host, YMOD_EVENT_QUEST_ENDED, &quest_ended, nullptr) == 0;
+}
+
 const Behaviour *behaviour_of(std::uint8_t base) {
     for (const Behaviour &b : kBehaviours)
         if (b.kind == base) return &b;
@@ -938,9 +949,7 @@ std::optional<std::uint8_t> add(Runtime &runtime, const Spec &spec, std::string 
             else
                 s.draw_hooked = h->instruction(s.host, "game_task", kCompileCall, &compile_called, nullptr) != 0u &&
                     h->instruction(s.host, nullptr, kMaterialAlpha, &alpha_read, nullptr) != 0u;
-            const auto *events = static_cast<const ymod_events *>(native::host()->service(s.host, YMOD_EVENTS, 1u));
-            if (s.draw_hooked && events != nullptr)
-                events->subscribe(s.host, YMOD_EVENT_QUEST_ENDED, &quest_ended, nullptr);
+            if (s.draw_hooked) watch_quest_end();
         }
     }
     std::cout << "[mods] " << (spec.mod.empty() ? std::string("a mod") : spec.mod) << " adds monster " << spec.id
@@ -971,6 +980,8 @@ bool behave(
             h->function(s.host, "game_task", kMakeMonster, YMOD_HOOK_AFTER, &monster_made, nullptr) != 0u;
         if (!s.made_hooked) return fail("the monster maker cannot be hooked");
     }
+    // Which monsters thought alone, kept by monster, goes with the quest.
+    watch_quest_end();
     return true;
 }
 
@@ -1280,9 +1291,12 @@ void reset_for_tests() {
     State &s = state();
     s.kinds.clear();
     s.shown.clear();
+    // Its hooks and events go with it.
+    native::withdraw(s.host);
     s.host = nullptr;
     s.runtime = nullptr;
     s.draw_hooked = false;
+    s.watching_quest_end = false;
     s.made_hooked = false;
     s.in_part = false;
     s.queued.clear();
