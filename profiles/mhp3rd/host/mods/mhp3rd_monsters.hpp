@@ -97,6 +97,16 @@ struct HitSphere {
 [[nodiscard]] bool attack_shape(const void *owner, std::uint8_t kind, std::uint32_t shape,
     std::span<const HitSphere> spheres, std::string *why = nullptr);
 
+// Gives a kind a mod added an attack row of its own: row `row` of its attack
+// table becomes a copy of the base's row `like` (its strength and kind of
+// hit) that hits with shape `shape`, the base's or one the mod gives with
+// attack_shape. Rows and shapes past the base's own may be given, up to
+// kMostAttackRows and 32. Applies to its monsters while it has a part of
+// behaviour. False when the kind is not the mod's or a number is out of range.
+inline constexpr std::uint32_t kMostAttackRows = 64u;
+[[nodiscard]] bool attack_row(const void *owner, std::uint8_t kind, std::uint32_t row, std::uint32_t like,
+    std::uint32_t shape, std::string *why = nullptr);
+
 // A capsule (or a sphere) of a monster's body, where hunters' hits land: from
 // `from` in joint `joint`'s frame to `to` in joint `joint_to`'s, `radius`
 // round; a sphere at `from` when joint_to is negative. `part` is the body part

@@ -474,6 +474,14 @@ typedef struct ymod_monsters {
      * hits land. Call at start; it takes effect in monsters with a part of
      * behaviour. 0, or -1 (the reason is in the log). */
     int (*body_shapes)(ymod_mod *mod, int32_t kind, const ymod_body_capsule *capsules, int32_t count);
+    /* Gives a kind this mod added an attack row of its own: row `row` (1 to
+     * 63) of its attack table becomes a copy of the base kind's row `like`
+     * (what it does: its strength, its kind of hit) that hits with shape
+     * `shape` (0 to 31), the base's or one given with attack_shape. Rows and
+     * shapes past the base's own may be given, so an attack can have a shape
+     * no other uses. Call at start; it takes effect in monsters with a part
+     * of behaviour. 0, or -1 (the reason is in the log). */
+    int (*attack_row)(ymod_mod *mod, int32_t kind, int32_t row, int32_t like, int32_t shape);
 } ymod_monsters;
 
 /* --------------------------------------------------------------------------

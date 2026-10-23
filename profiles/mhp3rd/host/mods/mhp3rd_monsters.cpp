@@ -197,8 +197,11 @@ constexpr std::uint32_t kKindData = 0xD50u; // cached by 0x0A09B644
 constexpr std::uint32_t kKindDataSize = 0xA8u;
 constexpr std::uint32_t kAttackTables = 0xA4u; // in the kind's data
 constexpr std::uint32_t kAttackTablesSize = 0x70u;
-constexpr std::uint32_t kShapeList = 0x5Cu;    // in the attack tables: a pointer per shape
-constexpr std::uint32_t kShapes = 32u;         // shape pointers copied
+constexpr std::uint32_t kShapeList = 0x5Cu; // in the attack tables: a pointer per shape
+constexpr std::uint32_t kShapes = 32u;      // shape pointers copied
+constexpr std::uint32_t kRowList = 0x60u;   // in the attack tables: the rows
+constexpr std::uint32_t kRowSize = 28u;
+constexpr std::uint32_t kRowShape = 0x11u;     // the shape a row hits with (u8)
 constexpr std::uint32_t kSphereSize = 40u;     // joint (u16), kind (0: sphere), 0, radius, x, y, z, 0...
 constexpr std::uint32_t kLastSphere = 0xFFFFu; // the joint that ends a shape
 // The body capsules, where hunters' hits land: the kind's data points at the
@@ -246,8 +249,9 @@ struct Added {
     std::array<std::uint8_t, 2> check_kind{};               // user data for the kind check hooks: {kind, base}
     std::map<std::uint32_t, std::vector<HitSphere>> shapes; // by the base's shape number
     std::vector<BodyCapsule> body;                          // its own body capsules, or none for the base's
-    std::map<std::uint32_t, std::uint32_t> kind_data;       // the base's kind data -> the kind's copy
-    std::vector<bool> effects;                              // which effect numbers its pack has
+    std::map<std::uint32_t, std::pair<std::uint32_t, std::uint32_t>> rows; // its own rows: row -> {like, shape}
+    std::map<std::uint32_t, std::uint32_t> kind_data;                      // the base's kind data -> the kind's copy
+    std::vector<bool> effects;                                             // which effect numbers its pack has
 };
 
 struct Shown {
@@ -403,11 +407,11 @@ void run_chain(psprecomp::AllegrexContext &ctx, const std::shared_ptr<Chain> &ch
 
 // A part's stub, in the kind's own vtable: `j` to the base's function. The
 // mod's function runs first through a hook on the stub, then what it queued.
-// A monster of a kind with attack shapes or body capsules of its own: the
-// kind's data it keeps becomes a copy of the base's with the mod's in it.
+// A monster of a kind with attack shapes, rows or body capsules of its own:
+// the kind's data it keeps becomes a copy of the base's with the mod's in it.
 void give_kind_data(Added &added, std::uint32_t monster) {
     State &s = state();
-    if ((added.shapes.empty() && added.body.empty()) || s.runtime == nullptr ||
+    if ((added.shapes.empty() && added.body.empty() && added.rows.empty()) || s.runtime == nullptr ||
         !s.runtime->memory().contains(monster + kKindData, 4u))
         return;
     auto &memory = s.runtime->memory();
@@ -424,7 +428,10 @@ void give_kind_data(Added &added, std::uint32_t monster) {
         if (!memory.contains(tables, kAttackTablesSize)) return;
         const std::uint32_t list = memory.load32(tables + kShapeList);
         if (!memory.contains(list, kShapes * 4u)) return;
-        std::uint32_t size = kKindDataSize + kAttackTablesSize + kShapes * 4u;
+        const std::uint32_t rows = memory.load32(tables + kRowList);
+        const std::uint32_t rows_size = added.rows.empty() ? 0u : kMostAttackRows * kRowSize;
+        if (rows_size != 0u && !memory.contains(rows, rows_size)) return;
+        std::uint32_t size = kKindDataSize + kAttackTablesSize + kShapes * 4u + rows_size;
         for (const auto &[shape, spheres] : added.shapes)
             size += static_cast<std::uint32_t>(spheres.size() + 1u) * kSphereSize;
         if (!added.body.empty()) size += static_cast<std::uint32_t>(added.body.size() + 1u) * kCapsuleSize;
@@ -445,6 +452,17 @@ void give_kind_data(Added &added, std::uint32_t monster) {
         memory.store32(copy + kAttackTables, tables_copy);
         memory.store32(tables_copy + kShapeList, list_copy);
         std::uint32_t at = list_copy + kShapes * 4u;
+        if (rows_size != 0u) {
+            // The base's rows (and what follows them, past its own), then the
+            // mod's: a base row with the mod's shape.
+            copy_words(at, rows, rows_size);
+            for (const auto &[row, own] : added.rows) {
+                copy_words(at + row * kRowSize, rows + own.first * kRowSize, kRowSize);
+                memory.store8(at + row * kRowSize + kRowShape, static_cast<std::uint8_t>(own.second));
+            }
+            memory.store32(tables_copy + kRowList, at);
+            at += rows_size;
+        }
         const auto put = [&memory, &at](std::uint32_t joint, float radius, float x, float y, float z) {
             for (std::uint32_t word = 0; word < kSphereSize; word += 4u) memory.store32(at + word, 0u);
             memory.store32(at, joint);
@@ -797,6 +815,23 @@ bool attack_shape(
             return fail("a sphere needs a joint, a radius above 0 and a centre");
     added->shapes[shape].assign(spheres.begin(), spheres.end());
     added->kind_data.clear(); // made again with the new shapes
+    return true;
+}
+
+bool attack_row(const void *owner, std::uint8_t number, std::uint32_t row, std::uint32_t like, std::uint32_t shape,
+    std::string *why) {
+    const auto fail = [why](std::string reason) {
+        if (why != nullptr) *why = std::move(reason);
+        return false;
+    };
+    Added *added = nullptr;
+    for (Added &k : state().kinds)
+        if (k.kind == number) added = &k;
+    if (added == nullptr || added->owner != owner) return fail("the kind was not added by this mod");
+    if (row == 0u || row >= kMostAttackRows || like >= kMostAttackRows) return fail("no such attack row");
+    if (shape >= kShapes) return fail("no such attack shape");
+    added->rows[row] = {like, shape};
+    added->kind_data.clear(); // made again with the new row
     return true;
 }
 

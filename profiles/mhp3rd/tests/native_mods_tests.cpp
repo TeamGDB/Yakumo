@@ -1555,6 +1555,31 @@ void test_monsters(psprecomp::Runtime &runtime) {
             runtime.memory().load32(runtime.memory().load32(shapes_of(runtime, bodied) + 8u)) == 51u,
         "monsters: its copy of the kind's data lists the mod's capsules (a sphere where joint_to is -1), ended, with "
         "its attack shapes kept");
+    // Attack rows: a row of the kind's own, a base row with another shape.
+    constexpr std::uint32_t kRows = 0x08B51280u;
+    runtime.memory().store32(kRows + 7u * 28u, 0x00500002u);
+    runtime.memory().store8(kRows + 7u * 28u + 0x11u, 3u);
+    check(service != nullptr && service->attack_row(mod, 58, 30, 7, 20) == -1 &&
+            service->attack_row(mod, 78, 0, 7, 20) == -1 && service->attack_row(mod, 78, 64, 7, 20) == -1 &&
+            service->attack_row(mod, 78, 30, 64, 20) == -1 && service->attack_row(mod, 78, 30, -1, 20) == -1 &&
+            logged("monster 78 is not given attack row 30: no such attack row") &&
+            service->attack_row(mod, 78, 30, 7, 32) == -1 && service->attack_row(mod, 78, 30, 7, -1) == -1 &&
+            logged("monster 78 is not given attack row 30: no such attack shape"),
+        "monsters: attack rows only for the mod's kind, rows 1 to 63 like a row up to 63, shapes up to 31");
+    runtime.memory().store32(kMonster + 0xD50u, kKindData);
+    check(service != nullptr && service->attack_row(mod, 78, 30, 7, 20) == 0,
+        "monsters: a kind the mod added takes an attack row of its own");
+    (void)call(runtime, attacking_stub, kMonster);
+    const std::uint32_t rowed = runtime.memory().load32(kMonster + 0xD50u);
+    const std::uint32_t own_rows = runtime.memory().load32(runtime.memory().load32(rowed + 0xA4u) + 0x60u);
+    check(rowed != kKindData && own_rows != kRows && runtime.memory().load32(own_rows + 30u * 28u) == 0x00500002u &&
+            runtime.memory().load8(own_rows + 30u * 28u + 0x11u) == 20u &&
+            runtime.memory().load32(own_rows + 7u * 28u) == 0x00500002u &&
+            runtime.memory().load8(own_rows + 7u * 28u + 0x11u) == 3u &&
+            runtime.memory().load8(kRows + 30u * 28u + 0x11u) != 20u &&
+            runtime.memory().load16(runtime.memory().load32(rowed + 0x1Cu)) == 51u,
+        "monsters: its copy of the kind's data has the base's rows and the mod's row, a copy of the base row with "
+        "its shape, with its capsules kept");
     runtime.memory().store32(0x0A09E884u, 0u);
     const ymod_monster_fn changed = [](ymod_cpu *, std::uint32_t monster, void *user) -> int {
         const auto *a = static_cast<Acting *>(user);

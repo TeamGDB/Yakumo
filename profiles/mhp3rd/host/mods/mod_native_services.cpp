@@ -408,6 +408,20 @@ int monsters_body_shapes(ymod_mod *mod, int32_t kind, const ymod_body_capsule *c
     return -1;
 }
 
+int monsters_attack_row(ymod_mod *mod, int32_t kind, int32_t row, int32_t like, int32_t shape) {
+    if (mod == nullptr || mod->failed) return -1;
+    std::string why = "no such kind";
+    if (kind >= 0 && kind <= 0xFF && row >= 0 && like >= 0 && shape >= 0 &&
+        monsters::attack_row(mod, static_cast<std::uint8_t>(kind), static_cast<std::uint32_t>(row),
+            static_cast<std::uint32_t>(like), static_cast<std::uint32_t>(shape), &why))
+        return 0;
+    if (kind >= 0 && kind <= 0xFF && (row < 0 || like < 0)) why = "no such attack row";
+    if (kind >= 0 && kind <= 0xFF && row >= 0 && like >= 0 && shape < 0) why = "no such attack shape";
+    report(
+        mod, "monster " + std::to_string(kind) + " is not given attack row " + std::to_string(row) + ": " + why, true);
+    return -1;
+}
+
 int monsters_attack_shape(ymod_mod *mod, int32_t kind, int32_t shape, const ymod_hit_sphere *spheres, int32_t count) {
     if (mod == nullptr || mod->failed) return -1;
     std::vector<monsters::HitSphere> list;
@@ -624,7 +638,7 @@ const ymod_monsters kMonsters{1u, sizeof(ymod_monsters), &monsters_add, &monster
     &monsters_behave, &monsters_play_motion, &monsters_motion_finished, &monsters_motion_frame, &monsters_at_frame,
     &monsters_position, &monsters_facing, &monsters_set_facing, &monsters_target, &monsters_aim,
     &monsters_turn_to_target, &monsters_move, &monsters_attack, &monsters_end_attack, &monsters_attack_shape,
-    &monsters_effect, &monsters_health, &monsters_body_shapes};
+    &monsters_effect, &monsters_health, &monsters_body_shapes, &monsters_attack_row};
 
 const ymod_memory kMemory{
     1u, sizeof(ymod_memory), &memory_read, &memory_write, &memory_allocate, &memory_release, &memory_code_changed};
