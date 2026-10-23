@@ -1683,6 +1683,12 @@ void test_monsters(psprecomp::Runtime &runtime) {
             thought.calls == calls_now + 1 && call(runtime, stub, kMonster) == 7u,
         "monsters: a monster made with the base's vtable of another slot gets a copy of that one, leading to its "
         "functions");
+    // Data after the class's 70 slots changing is not other code.
+    runtime.memory().store32(kBaseTable + 80u * 4u, 0x12345678u);
+    runtime.memory().store32(kMonster, kBaseTable);
+    (void)call(runtime, 0x0A090AE0u, 0u);
+    check(runtime.memory().load32(kMonster) == own, "monsters: words past the class's slots changing keep the copy");
+    runtime.memory().store32(kBaseTable + 80u * 4u, 0x08B43000u + 80u);
     // Other code in the first slot since: the copy is made again from it.
     runtime.memory().store32(kBaseTable + 40u * 4u, 0x08B4A000u);
     runtime.memory().store32(kMonster, kBaseTable);

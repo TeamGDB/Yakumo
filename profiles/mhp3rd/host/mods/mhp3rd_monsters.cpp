@@ -166,6 +166,10 @@ constexpr std::size_t kThink = 0u, kAct = 1u, kEffects = 2u;
 constexpr std::uint32_t kMakeMonster = 0x0A090AE0u;
 // Slots copied into a kind's own vtable: more than the 70 a monster's class has.
 constexpr std::uint32_t kVtableSlots = 96u;
+// The slots a monster's class has (docs/MONSTERS.md, "A monster's behaviour"):
+// what tells whether a copy still matches its base. The words after them are
+// other data, which may change.
+constexpr std::uint32_t kClassSlots = 70u;
 
 struct Added;
 struct Callback {
@@ -656,10 +660,11 @@ int act_follows_think(ymod_cpu *cpu, void *) {
     return found != state().thought_alone.end() && found->second ? YMOD_RETURN : YMOD_ORIGINAL;
 }
 
-// Whether `own` is still a copy of the vtable at `base`: every slot the same,
-// and each stub made leading to the base's function for its part.
+// Whether `own` is still a copy of the vtable at `base`: every slot of the
+// class the same, and each stub made leading to the base's function for its
+// part.
 bool still_copy(const psprecomp::GuestMemory &memory, const Added::Vtable &own, std::uint32_t base) {
-    for (std::uint32_t slot = 0; slot < kVtableSlots; ++slot) {
+    for (std::uint32_t slot = 0; slot < kClassSlots; ++slot) {
         const std::uint32_t word = memory.load32(base + slot * 4u);
         const auto part = std::find(kPartSlots.begin(), kPartSlots.end(), slot);
         const Callback *stub =
