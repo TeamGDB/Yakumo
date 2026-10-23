@@ -152,7 +152,8 @@ struct Resolution {
     // Code written at start, by Mod::priority (0 first), then lowest rank
     // first: where two write the same bytes, the last wins.
     std::vector<Source> code;
-    // Native libraries, loaded in this order: by priority, then rank.
+    // Native libraries, loaded in this order: by priority, then rank, each
+    // after those of the mods it depends on.
     std::vector<Source> native;
     // Scripts, started after the native libraries, in the same order.
     std::vector<Source> scripts;

@@ -327,6 +327,22 @@ Resolution ModLibrary::resolve() const {
     for (const auto &[priority, mod] : coders) {
         for (const std::filesystem::path &file : mod->code) result.code.push_back({mod->id, file, {}});
         if (!mod->memory.empty()) result.code.push_back({mod->id, {}, mod->memory});
+    }
+    // Native libraries and scripts start in the same order, except that a mod
+    // starts after the mods it depends on, whose services it may import.
+    std::vector<const Mod *> waiting;
+    for (const auto &[priority, mod] : coders)
+        if (!mod->native.empty() || !mod->script.empty()) waiting.push_back(mod);
+    const auto starts = [&waiting](const std::string &id) {
+        return std::any_of(waiting.begin(), waiting.end(), [&id](const Mod *m) { return m->id == id; });
+    };
+    while (!waiting.empty()) {
+        // The first whose dependencies have started; with a cycle, the first.
+        auto next = std::find_if(waiting.begin(), waiting.end(),
+            [&starts](const Mod *mod) { return std::none_of(mod->depends.begin(), mod->depends.end(), starts); });
+        if (next == waiting.end()) next = waiting.begin();
+        const Mod *mod = *next;
+        waiting.erase(next);
         if (!mod->native.empty()) result.native.push_back({mod->id, mod->native, {}});
         if (!mod->script.empty()) result.scripts.push_back({mod->id, mod->script, {}});
     }

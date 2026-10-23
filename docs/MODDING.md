@@ -77,8 +77,8 @@ Put the folder in the mods folder (or point `MHP3RD_MODS_DIR` at a folder of you
 | `ModVersion` | Your mod's own version, shown on its page |
 | `Format` | The version of this format the mod is written for. Default `1`. A Yakumo that reads an older format refuses the mod and says so |
 | `Version` | The game release: `HD` or `BOTH`, or leave it out. Any other value (`NOHD`) refuses the mod. Yakumo runs only the HD release |
-| `Depends` | Folder names of mods turned on with this one, separated by `;` |
-| `Priority` | 0 to 5, default 3: the order in which mods' code and memory are written, and native libraries and scripts start, 0 first. Where two mods write the same bytes, the one written last wins |
+| `Depends` | Folder names of mods turned on with this one, separated by `;`. Their native libraries and scripts start before this mod's, so it can import the services they publish |
+| `Priority` | 0 to 5, default 3: the order in which mods' code and memory are written, and native libraries and scripts start (after the mods they depend on), 0 first. Where two mods write the same bytes, the one written last wins |
 
 ### [Files]: replacing files
 

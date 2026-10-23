@@ -35,10 +35,12 @@ All offsets are from the payload's start, all values little-endian.
 | --- | --- |
 | `+0x00` | Offset of the quest record (0x94 on the disc's quests) |
 | `+0x04` | `v005` |
-| `+0x08` | Offset of the reward tables |
-| `+0x1C` | Offset of the small monsters' spawn groups |
+| `+0x08` | Offset of the supply box's groups |
+| `+0x1C` | Offset of the reward groups |
 | `+0x20` | Offset of the large monsters' group |
-| `+0x24`..`+0x2C` | Offsets of further tables, not traced |
+| `+0x24`..`+0x2C` | Offsets of the small monsters' area index, further spawn records and a table not traced |
+
+[Quests a mod describes](#quests-a-mod-describes) gives each of these in full, as the builder writes them and as they were checked in game.
 
 The **quest record** is the same record the counter's lists hold (entries 4059 to 4066, one per star level): the fee at `+4`, the reward at `+8`, the time limit in frames (30 a second) at `+0x10`, the id (u16) at `+0x1C`, the stars at `+0x1E`, the map at `+0x20`, the objective's monster kind and count (u16 each) at `+0x2C`, up to five main monsters (u16) at `+0x3C`, and from `+0x48` the name, objective, failure conditions, description, main monster lines and client, each ended by a zero byte, in English and then in Japanese.
 

@@ -319,6 +319,23 @@ void test_library(const fs::path &root) {
             !with_code.same_start(started),
         "library: a native library, a script or code differ in what only the start takes; a file does not");
 
+    // Scripts (and native libraries) start after the mods they depend on,
+    // which may publish services they import; otherwise by priority.
+    const fs::path ordered = root / "ordered";
+    write(ordered / "user" / "mod.ini",
+        "[MOD INFO]\nType=Yakumo\nPriority=0\nDepends=\"provider\"\n[Script]\nFile=main.luau\n");
+    write(ordered / "provider" / "mod.ini", "[MOD INFO]\nType=Yakumo\nPriority=5\n[Script]\nFile=main.luau\n");
+    write(ordered / "lone" / "mod.ini", "[MOD INFO]\nType=Yakumo\nPriority=3\n[Script]\nFile=main.luau\n");
+    for (const char *name : {"user", "provider", "lone"}) write(ordered / name / "main.luau", std::string("--\n"));
+    ModLibrary starting(format);
+    starting.scan(ordered);
+    starting.set_enabled("user", true);
+    starting.set_enabled("lone", true);
+    std::vector<std::string> order;
+    for (const Resolution::Source &script : starting.resolve().scripts) order.push_back(script.mod);
+    check(order == std::vector<std::string>{"lone", "provider", "user"},
+        "library: a script starts after the mod it depends on, the others by priority");
+
     // The session applies at once when the game can take it.
     bool accept = true;
     int activations = 0;
