@@ -124,7 +124,7 @@
     "reason": "Script mod host declarations. mod_script*.cpp is covered by mhp3rd_script_mods_tests through the real Luau engine."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.h": {
-    "sha256": "bb61c949f5b6b6fd16a3e11982ef553170cdffd0975948f0ecbeab2f285583af",
+    "sha256": "8988da92f4feec1448d7ee1c13795ce080478035d981d26fe82336cf4e32b932",
     "reason": "The C ABI of native mods: types, constants, function-pointer tables and the interface-version macro, no host code. The host implementation in mod_native*.cpp is covered by mhp3rd_native_mods_tests, which also loads a test mod declaring a newer interface."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.hpp": {
@@ -188,8 +188,8 @@
     "reason": "Declarations only. quest_builder.cpp is covered by mhp3rd_quest_file_tests (the record, texts, monsters, tables and refusals) and mhp3rd_native_mods_tests (quests built through the quests service)."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_equipment.hpp": {
-    "sha256": "7c06791481ca92ed89ae8bb2bfcd1a4229c00a12d52f75e9512f5b95b70724e9",
-    "reason": "Declarations only. mhp3rd_equipment.cpp is covered by mhp3rd_native_mods_tests (adding a weapon on stand-ins for the tables, model-to-file code and text block; refusals; giving one in the village)."
+    "sha256": "db5d4bf3479c90470a4af01cc190ba5ea6baf1eb62448ca2d20ed08d6bee2553",
+    "reason": "Declarations only. mhp3rd_equipment.cpp is covered by mhp3rd_native_mods_tests (adding a weapon and armor on stand-ins for the tables, model-to-file code and text block; refusals; giving one in the village)."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_texts.hpp": {
     "sha256": "b01bbd08352a3153836e540c74de80ddd3ab2d02ad2325ee17d3bbe7932410ce",

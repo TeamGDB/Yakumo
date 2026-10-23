@@ -841,6 +841,96 @@ void test_equipment(psprecomp::Runtime &runtime) {
             service->add_weapon(mod, &no_model) == -1 && service->add_weapon(mod, &old) == -1 &&
             service->add_weapon(mod, nullptr) == -1,
         "equipment: a taken id, an unknown class, a base past the class's, a missing model and short structs are refused");
+
+    // Armor: a row of the part's table, its male and female models through
+    // the armor model-to-file code, its name and description, one in the box.
+    tables::write_traced_code_for_tests(runtime, "armor.head");
+    constexpr std::uint32_t kHeads = 0x08987EE4u;
+    for (std::uint32_t i = 0; i < 256u * 40u; i += 4u) memory.store32(kHeads + i, 0u);
+    memory.store16(kHeads + 3u * 40u, 0x22u);
+    memory.store16(kHeads + 3u * 40u + 2u, 0x23u);
+    memory.store8(kHeads + 3u * 40u + 4u, 0x1Fu);
+    memory.store32(kHeads + 3u * 40u + 8u, 500u);
+    memory.store32(kHeads + 3u * 40u + 0x14u, 0x00120010u);
+    memory.store16(kHeads + 3u * 40u + 0x1Au, 3u);
+    make_table(kBlock + 0x4000u, 256u, "Helm ");
+    make_table(kBlock + 0x7000u, 147u, "Worn ");
+    memory.store32(kBlock + 29u * 4u, 0x4000u);
+    memory.store32(kBlock + 30u * 4u, 0x7000u);
+    // The armor model-to-file code: the model (a1) in v0 and the base (a2) in
+    // v1 at the hooked instruction, then their sum.
+    store(runtime, 0x088A5958u,
+        {0x27BDFFF0u, 0xAFBF0008u, 0x00A01021u, 0x00C01821u, 0x8FBF0008u, 0u, 0x27BD0010u, 0x00431021u, 0x3042FFFFu,
+            0x03E00008u, 0u});
+    std::ofstream(folder / "helm_m.pmo", std::ios::binary) << "HELM-M";
+    std::ofstream(folder / "helm_f.pmo", std::ios::binary) << "HELM-F";
+    ymod_armor helm{sizeof(ymod_armor), "black_helm", "head", 3, "helm_m.pmo", "helm_f.pmo", "Black Helm",
+        "A helm a mod added.", 2000u, 1};
+    ymod_armor plain = helm;
+    plain.id = "plain_helm";
+    plain.model_female = nullptr;
+    plain.give = 0;
+    plain.price = 0;
+    check(service != nullptr && service->add_armor(mod, &helm) == 256 && service->add_armor(mod, &plain) == 257,
+        "equipment: armor pieces are added as the part's next ids");
+    const std::optional<tables::Placement> heads = tables::placement("armor.head");
+    const std::uint32_t helm_row = heads ? heads->address + 256u * 40u : 0u;
+    const std::uint32_t plain_row = heads ? heads->address + 257u * 40u : 0u;
+    check(heads && heads->address != kHeads && heads->rows >= 258u && memory.load16(helm_row) == 1000u &&
+            memory.load16(helm_row + 2u) == 1001u && memory.load8(helm_row + 4u) == 0x1Fu &&
+            memory.load32(helm_row + 8u) == 2000u && memory.load32(helm_row + 0x14u) == 0x00120010u &&
+            memory.load16(plain_row) == 1002u && memory.load16(plain_row + 2u) == 1002u &&
+            memory.load32(plain_row + 8u) == 500u,
+        "equipment: an armor record is the base's, with its own models (one number for both when only a male "
+        "model is given) and price");
+    const auto armor_file = [&runtime](std::uint32_t model, std::uint32_t base, std::uint32_t sex, std::uint32_t kind) {
+        runtime.cpu().gpr[5] = model;
+        runtime.cpu().gpr[6] = base;
+        runtime.cpu().gpr[16] = 0x089E892Cu + 2u * (sex * 7u + kind);
+        return call(runtime, 0x088A5958u, 0u);
+    };
+    const std::uint32_t male_file = armor_file(1000u, 0x500u, 0u, 4u);
+    const std::uint32_t female_file = armor_file(1001u, 0x279u, 1u, 4u);
+    check(mhp3rd::mods::added::serves(male_file) && mhp3rd::mods::added::serves(female_file) &&
+            male_file != female_file && armor_file(1002u, 0x279u, 1u, 4u) == armor_file(1002u, 0x500u, 0u, 4u) &&
+            armor_file(0x22u, 0x500u, 0u, 4u) == 0x522u && armor_file(1000u, 0x300u, 0u, 0u) == 0x6E8u &&
+            armor_file(1000u, 0x500u, 2u, 4u) == 0x8E8u,
+        "equipment: an armor model gives its own file for each sex; the game's models, the same number for another "
+        "part and places past the table of bases as before");
+    equipment::frame(runtime);
+    check(mhp3rd::game::text_entry(ram, kBlock, 29, 256u) == "Black Helm" &&
+            mhp3rd::game::text_entry(ram, kBlock, 30, 147u) == "A helm a mod added." &&
+            memory.load16(helm_row + 0x1Au) == 147u,
+        "equipment: an armor piece's name is at its id and its description's index in its record");
+    equipment::frame(runtime);
+    bool helm_given = false;
+    for (std::uint32_t slot = 0; slot < 8u; ++slot) {
+        const std::uint32_t at = mhp3rd::game::kEquipmentBox + slot * 12u;
+        helm_given |= memory.load8(at + 1u) == 4u && memory.load16(at + 2u) == 256u;
+    }
+    check(helm_given, "equipment: the armor asked for is put in the box as a head piece");
+    ymod_armor no_part = helm;
+    no_part.id = "no_part";
+    no_part.part = "tail";
+    ymod_armor past = helm;
+    past.id = "past";
+    past.based_on = 300;
+    ymod_armor no_helm_model = helm;
+    no_helm_model.id = "no_helm_model";
+    no_helm_model.model_male = "missing.pmo";
+    ymod_armor no_female = helm;
+    no_female.id = "no_female";
+    no_female.model_female = "missing.pmo";
+    ymod_armor short_armor{sizeof(std::uint32_t)};
+    check(service != nullptr && service->add_armor(mod, &helm) == -1 &&
+            logged("armor black_helm is not added: the id \"black_helm\" is taken or empty") &&
+            service->add_armor(mod, &no_part) == -1 &&
+            logged("armor no_part is not added: \"tail\" is not an armor part") &&
+            service->add_armor(mod, &past) == -1 && service->add_armor(mod, &no_helm_model) == -1 &&
+            service->add_armor(mod, &no_female) == -1 && service->add_armor(mod, &short_armor) == -1 &&
+            service->add_armor(mod, nullptr) == -1 && equipment::armor_parts().size() == 5u,
+        "equipment: a taken id, an unknown part, a base past the part's, missing models and short structs are "
+        "refused");
     std::error_code ec;
     std::filesystem::remove_all(folder, ec);
     equipment::reset_for_tests();

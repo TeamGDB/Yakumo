@@ -48,6 +48,37 @@ constexpr std::array<WeaponClass, 12> kWeaponClasses{{kClasses[0].weapon, kClass
     kClasses[3].weapon, kClasses[4].weapon, kClasses[5].weapon, kClasses[6].weapon, kClasses[7].weapon,
     kClasses[8].weapon, kClasses[9].weapon, kClasses[10].weapon, kClasses[11].weapon}};
 
+struct Part {
+    ArmorPart armor;
+    std::string_view table;
+    std::uint32_t names{}, descriptions{};
+};
+constexpr std::array<Part, 5> kParts{{
+    {{"head", 4u}, "armor.head", 29u, 30u},
+    {{"chest", 0u}, "armor.chest", 31u, 32u},
+    {{"arms", 1u}, "armor.arms", 33u, 34u},
+    {{"waist", 2u}, "armor.waist", 35u, 36u},
+    {{"legs", 3u}, "armor.legs", 37u, 38u},
+}};
+constexpr std::array<ArmorPart, 5> kArmorParts{
+    {kParts[0].armor, kParts[1].armor, kParts[2].armor, kParts[3].armor, kParts[4].armor}};
+
+// Fields of an armor record (docs/EQUIPMENT_MODS.md).
+constexpr std::uint32_t kMaleModelField = 0x00u;
+constexpr std::uint32_t kFemaleModelField = 0x02u;
+constexpr std::uint32_t kArmorPriceField = 0x08u;
+constexpr std::uint32_t kArmorDescriptionField = 0x1Au;
+// Where the game has an armor's model in v0 and its file base in v1, with s0
+// still at the base's place in the table of bases (u16 [sex][part], seven
+// parts per sex, at 0x089E892C), before it restores s0 and adds the two
+// (0x088A5974, addu v0, v0, v1).
+constexpr std::uint32_t kArmorFile = 0x088A5968u; // lw ra, 8(sp)
+constexpr std::uint32_t kArmorFileWord = 0x8FBF0008u;
+constexpr std::uint32_t kArmorAdd = 0x088A5974u;
+constexpr std::uint32_t kArmorAddWord = 0x00431021u;
+constexpr std::uint32_t kFileBases = 0x089E892Cu;
+constexpr std::uint32_t kBasesPerSex = 7u;
+
 // Fields of a weapon record (docs/EQUIPMENT_MODS.md).
 constexpr std::uint32_t kModelField = 0x00u;
 constexpr std::uint32_t kPriceField = 0x04u;
@@ -69,11 +100,31 @@ struct Weapon {
     std::uint16_t model{};
     FileId file{};
     bool give{};
+};
+
+struct Armor {
+    std::string id;
+    const Part *part{};
+    std::uint16_t number{};
+    std::array<std::uint16_t, 2> models{}; // male, female
+    std::array<FileId, 2> files{};
+};
+
+// A piece to put in the equipment box once the village loads.
+struct Gift {
+    std::string id;
+    std::uint8_t kind{};
+    std::uint16_t number{};
     bool given{};
 };
 
 struct State {
     std::vector<Weapon> weapons;
+    std::vector<Armor> armors;
+    std::vector<Gift> gifts;
+    std::map<std::uint32_t, std::uint16_t> armor_added; // rows each part got, by kind
+    std::uint16_t next_armor_model{kFirstArmorModel};
+    bool armor_hooked{};
     std::map<std::uint32_t, std::uint16_t> added;  // rows each class got, by kind
     std::map<std::uint32_t, std::uint16_t> models; // models each class got, by kind
     ymod_mod *host{};
@@ -102,6 +153,35 @@ int unclamp(ymod_cpu *cpu, void *) {
 int give_file(ymod_cpu *cpu, void *) {
     if (const Weapon *w = mod_model(cpu->gpr[16], cpu->gpr[5] & 0xFFFFu)) cpu->gpr[4] = w->file; // a0
     return YMOD_CONTINUE;
+}
+
+// An armor model of a mod's: its file, whatever the base for the part and sex.
+int give_armor_file(ymod_cpu *cpu, void *) {
+    const std::uint32_t at = cpu->gpr[16]; // s0
+    if (at < kFileBases || (at - kFileBases) % 2u != 0u) return YMOD_CONTINUE;
+    const std::uint32_t index = (at - kFileBases) / 2u, sex = index / kBasesPerSex, kind = index % kBasesPerSex;
+    if (sex > 1u) return YMOD_CONTINUE;
+    const auto model = static_cast<std::uint16_t>(cpu->gpr[2]); // v0
+    for (const Armor &a : state().armors)
+        if (a.part->armor.kind == kind && a.models[sex] == model) {
+            cpu->gpr[3] = a.files[sex] - model; // v1: the sum is the mod's file
+            break;
+        }
+    return YMOD_CONTINUE;
+}
+
+bool hook_armor(Runtime &runtime) {
+    State &s = state();
+    if (s.armor_hooked) return true;
+    s.runtime = &runtime;
+    if (runtime.memory().load32(kArmorFile) != kArmorFileWord || runtime.memory().load32(kArmorAdd) != kArmorAddWord)
+        return false;
+    native::attach(runtime);
+    if (s.host == nullptr) s.host = native::add_mod("yakumo.equipment", "Equipment from mods", "");
+    const auto *hooks = static_cast<const ymod_hooks *>(native::host()->service(s.host, YMOD_HOOKS, 1u));
+    s.armor_hooked =
+        hooks != nullptr && hooks->instruction(s.host, nullptr, kArmorFile, &give_armor_file, nullptr) != 0u;
+    return s.armor_hooked;
 }
 
 void each_frame(int, std::uint32_t, void *) {
@@ -134,6 +214,74 @@ const Class *class_of(std::string_view id) {
 
 std::span<const WeaponClass> weapon_classes() {
     return kWeaponClasses;
+}
+
+std::span<const ArmorPart> armor_parts() {
+    return kArmorParts;
+}
+
+std::optional<std::uint16_t> add_armor(Runtime &runtime, const ArmorSpec &spec, std::string *why) {
+    State &s = state();
+    const auto fail = [why](std::string reason) -> std::optional<std::uint16_t> {
+        if (why != nullptr) *why = std::move(reason);
+        return std::nullopt;
+    };
+    const auto found =
+        std::find_if(kParts.begin(), kParts.end(), [&](const Part &p) { return p.armor.id == spec.part; });
+    if (found == kParts.end()) return fail("\"" + spec.part + "\" is not an armor part");
+    const Part *part = &*found;
+    if (spec.id.empty() ||
+        std::any_of(s.armors.begin(), s.armors.end(), [&](const Armor &a) { return a.id == spec.id; }))
+        return fail("the id \"" + spec.id + "\" is taken or empty");
+    if (spec.model_male.empty()) return fail("it has no model");
+    const tables::Table *table = tables::find(part->table);
+    if (table == nullptr) return fail("the part's table is not known");
+    if (spec.based_on == 0u || spec.based_on >= table->rows)
+        return fail("the base " + std::to_string(spec.based_on) + " is not one of the part's pieces");
+    if (!hook_armor(runtime)) return fail("the game's armor model-to-file code is not as traced");
+    if (!hook(runtime)) return fail("the game's model-to-file code is not as traced");
+
+    const auto number = static_cast<std::uint16_t>(table->rows + s.armor_added[part->armor.kind]);
+    std::string reason;
+    const std::optional<std::uint32_t> at = tables::extend(runtime, part->table, number + 1u, &reason);
+    if (!at) return fail("the part's table cannot grow: " + reason);
+    const FileId male = added::free_id();
+    if (male == 0u || !added::add(runtime, male, spec.model_male)) return fail("its model cannot be served");
+    FileId female = male;
+    if (!spec.model_female.empty()) {
+        female = added::free_id();
+        if (female == 0u || !added::add(runtime, female, spec.model_female)) return fail("its model cannot be served");
+    }
+    ++s.armor_added[part->armor.kind];
+
+    // The record: the base's, with its own models, price and description.
+    auto &memory = runtime.memory();
+    const std::uint32_t base = *at + spec.based_on * table->row;
+    const std::uint32_t row = *at + number * table->row;
+    for (std::uint32_t i = 0; i < table->row; i += 4u) memory.store32(row + i, memory.load32(base + i));
+    const std::uint16_t male_model = s.next_armor_model++;
+    const std::uint16_t female_model = female == male ? male_model : s.next_armor_model++;
+    memory.store16(row + kMaleModelField, male_model);
+    memory.store16(row + kFemaleModelField, female_model);
+    if (spec.price != 0u) memory.store32(row + kArmorPriceField, spec.price);
+    s.armors.push_back({spec.id, part, number, {male_model, female_model}, {male, female}});
+    if (spec.give) s.gifts.push_back({spec.id, part->armor.kind, number});
+
+    const std::string label = spec.mod + "'s " + spec.id;
+    texts::add(part->names, spec.name, [label, number](std::uint32_t index) {
+        if (index != number)
+            std::cerr << "[mods] " << label << ": its name is at " << index << ", not at its id " << number << "\n";
+    });
+    const std::string_view table_name = part->table;
+    texts::add(part->descriptions, spec.description, [table_name, number, &runtime](std::uint32_t index) {
+        const tables::Table *t = tables::find(table_name);
+        const std::optional<tables::Placement> now = tables::placement(table_name);
+        if (t != nullptr && now && number < now->rows)
+            runtime.memory().store16(
+                now->address + number * t->row + kArmorDescriptionField, static_cast<std::uint16_t>(index));
+    });
+    std::cout << "[mods] " << spec.mod << " adds " << part->armor.id << " " << number << " (" << spec.name << ")\n";
+    return number;
 }
 
 std::optional<std::uint16_t> add_weapon(Runtime &runtime, const WeaponSpec &spec, std::string *why) {
@@ -175,6 +323,7 @@ std::optional<std::uint16_t> add_weapon(Runtime &runtime, const WeaponSpec &spec
     memory.store16(row + kModelField, model);
     if (spec.price != 0u) memory.store32(row + kPriceField, spec.price);
     s.weapons.push_back({spec.id, cls, number, model, file, spec.give});
+    if (spec.give) s.gifts.push_back({spec.id, cls->weapon.kind, number});
 
     const std::string label = spec.mod + "'s " + spec.id;
     texts::add(cls->names, spec.name, [label, number](std::uint32_t index) {
@@ -196,14 +345,14 @@ std::optional<std::uint16_t> add_weapon(Runtime &runtime, const WeaponSpec &spec
 void frame(Runtime &runtime) {
     State &s = state();
     texts::frame(runtime);
-    if (std::none_of(s.weapons.begin(), s.weapons.end(), [](const Weapon &w) { return w.give && !w.given; })) return;
+    if (std::none_of(s.gifts.begin(), s.gifts.end(), [](const Gift &g) { return !g.given; })) return;
     // In the village (lobby_task loaded) with a character: the box is the save's.
     const std::optional<LoadedOverlay> overlay = overlay_at(runtime.memory(), 0x0A05E600u);
     game::GuestRam ram(runtime.memory());
     if (!overlay || !iequals(overlay->name, "lobby_task") || !game::character_loaded(ram)) return;
     auto &memory = runtime.memory();
-    for (Weapon &w : s.weapons) {
-        if (!w.give || w.given) continue;
+    for (Gift &w : s.gifts) {
+        if (w.given) continue;
         std::optional<std::uint32_t> empty;
         bool owned = false;
         for (std::uint32_t slot = 0; slot < game::kEquipmentBoxSlots && !owned; ++slot) {
@@ -212,12 +361,12 @@ void frame(Runtime &runtime) {
                 if (!empty) empty = at;
                 continue;
             }
-            owned = memory.load8(at + 1u) == w.cls->weapon.kind && memory.load16(at + 2u) == w.number;
+            owned = memory.load8(at + 1u) == w.kind && memory.load16(at + 2u) == w.number;
         }
         if (!owned && empty) {
             for (std::uint32_t i = 0; i < game::kEquipmentRecord; i += 4u) memory.store32(*empty + i, 0u);
             memory.store8(*empty, 1u);
-            memory.store8(*empty + 1u, w.cls->weapon.kind);
+            memory.store8(*empty + 1u, w.kind);
             memory.store16(*empty + 2u, w.number);
             std::cout << "[mods] " << w.id << " is put in the equipment box, slot "
                       << (*empty - game::kEquipmentBox) / game::kEquipmentRecord << "\n";

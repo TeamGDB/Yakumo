@@ -554,7 +554,8 @@ typedef struct ymod_quest {
  * "yakumo.equipment" 1: weapons mods add. A weapon starts from one of the
  * game's of its class (its attack, element, sharpness, slots, rarity and
  * upgrades) and has its own model, name, description and price
- * (docs/EQUIPMENT_MODS.md). Call add_weapon() from yakumo_mod_main.
+ * (docs/EQUIPMENT_MODS.md), and armor the same way. Call add_weapon() and
+ * add_armor() from yakumo_mod_main.
  */
 #define YMOD_EQUIPMENT "yakumo.equipment"
 typedef struct ymod_weapon {
@@ -570,11 +571,28 @@ typedef struct ymod_weapon {
     uint32_t price;          /* 0: the base's */
     int32_t give;            /* 1: put one in the equipment box when the village loads, if there is none */
 } ymod_weapon;
+/* An armor piece starts from one of the game's of its part (its defence,
+ * resistances, skills, slots and who may wear it) and has its own models (a
+ * male and a female one), name, description and price. */
+typedef struct ymod_armor {
+    uint32_t size;            /* set to sizeof(ymod_armor) before passing one */
+    const char *id;           /* the mod's name for it */
+    const char *part;         /* "head", "chest", "arms", "waist" or "legs" */
+    int32_t based_on;         /* the game's piece of that part it starts from, by its id there (from 1) */
+    const char *model_male;   /* a path in the mod's folder: its model file for a male hunter */
+    const char *model_female; /* and for a female one; NULL: the male's */
+    const char *name;         /* NUL-terminated UTF-8 */
+    const char *description;  /* "\n" for a new line */
+    uint32_t price;           /* 0: the base's */
+    int32_t give;             /* 1: put one in the equipment box when the village loads, if there is none */
+} ymod_armor;
 typedef struct ymod_equipment {
     uint32_t version;
     uint32_t size;
     /* Adds a weapon: its id in its class, or -1 (the reason is in the log). */
     int32_t (*add_weapon)(ymod_mod *mod, const ymod_weapon *weapon);
+    /* Adds an armor piece: its id in its part, or -1 (the reason is in the log). */
+    int32_t (*add_armor)(ymod_mod *mod, const ymod_armor *armor);
 } ymod_equipment;
 
 /* --------------------------------------------------------------------------

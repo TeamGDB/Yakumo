@@ -54,10 +54,42 @@ struct WeaponSpec {
 [[nodiscard]] std::optional<std::uint16_t> add_weapon(
     psprecomp::Runtime &runtime, const WeaponSpec &spec, std::string *why = nullptr);
 
-// Gives the weapons asked for once the village has loaded; between frames.
+// The armor parts, as mods name them ("head", "chest", "arms", "waist",
+// "legs"), with the game's equipment kind.
+struct ArmorPart {
+    std::string_view id;
+    std::uint8_t kind{};
+};
+[[nodiscard]] std::span<const ArmorPart> armor_parts();
+
+struct ArmorSpec {
+    std::string id;                         // the mod's name for it
+    std::string part;                       // "head", "chest", "arms", "waist" or "legs"
+    std::uint16_t based_on{};               // the game's piece of that part whose record it copies
+    std::vector<std::uint8_t> model_male;   // its model file for a male hunter
+    std::vector<std::uint8_t> model_female; // and a female one; empty: the male's
+    std::string name, description;
+    std::uint32_t price{}; // 0: the base's
+    bool give{};           // put one in the equipment box when the village loads
+    std::string mod;       // who adds it, for the log
+};
+
+// Adds an armor piece and returns its id in its part, or nothing (with the
+// reason in `why`) when the part or base is unknown, the id taken, the model
+// empty, the part's table cannot grow or the game's code is not as traced.
+// Its record is the base's (defence, resistances, skills, slots, who may
+// wear it) with its own models, price and description; its models get
+// numbers from kFirstArmorModel, past the game's, and the files are served
+// through an instruction hook where the game turns an armor model into its
+// file (0x088A5968).
+inline constexpr std::uint16_t kFirstArmorModel = 1000u;
+[[nodiscard]] std::optional<std::uint16_t> add_armor(
+    psprecomp::Runtime &runtime, const ArmorSpec &spec, std::string *why = nullptr);
+
+// Gives the weapons and armor asked for once the village has loaded; between frames.
 void frame(psprecomp::Runtime &runtime);
 
-// Forgets the weapons, so tests can add again.
+// Forgets the weapons and armor, so tests can add again.
 void reset_for_tests();
 
 } // namespace mhp3rd::mods::equipment

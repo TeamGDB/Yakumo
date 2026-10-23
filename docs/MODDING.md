@@ -422,7 +422,22 @@ blade.give = 1;                    // one in the equipment box when the village 
 const int32_t id = mod.equipment()->add_weapon(mod.handle(), &blade); // its id in its class, or -1
 ```
 
-Add it at start. Its stats are the base's for now; armor is to come.
+Armor is added the same way, a piece of one of the five parts:
+
+```cpp
+ymod_armor helm{sizeof(ymod_armor)};
+helm.id = "black_helm";
+helm.part = "head";                // "head", "chest", "arms", "waist" or "legs"
+helm.based_on = 1;                 // the game's head piece it starts from: defence, resistances, skills, slots
+helm.model_male = "model/helm_m.pmo";   // the part's model file for a male hunter
+helm.model_female = "model/helm_f.pmo"; // and a female one (NULL: the male's)
+helm.name = "Black Helm";
+helm.description = "A black dragon's skull.";
+helm.give = 1;
+const int32_t id = mod.equipment()->add_armor(mod.handle(), &helm); // its id in its part, or -1
+```
+
+Add them at start. Their stats are the base's for now.
 
 ## Maps
 

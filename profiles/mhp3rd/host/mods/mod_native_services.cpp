@@ -654,6 +654,32 @@ int32_t equipment_add_weapon(ymod_mod *mod, const ymod_weapon *weapon) {
     return id ? int32_t{*id} : refuse(why);
 }
 
+int32_t equipment_add_armor(ymod_mod *mod, const ymod_armor *armor) {
+    Runtime *runtime = state().runtime;
+    if (runtime == nullptr || mod == nullptr || mod->failed || armor == nullptr ||
+        armor->size < offsetof(ymod_armor, give) + sizeof(armor->give))
+        return -1;
+    const auto text = [](const char *s) { return std::string(s != nullptr ? s : ""); };
+    const auto refuse = [mod, armor, &text](const std::string &why) {
+        report(mod, "armor " + text(armor->id) + " is not added: " + why, true);
+        return -1;
+    };
+    if (armor->based_on <= 0 || armor->based_on > 0xFFFF) return refuse("its base is not an armor piece's id");
+    const std::optional<std::vector<std::uint8_t>> male = mod_bytes(mod, armor->model_male, "model", "armor");
+    if (!male) return -1;
+    std::vector<std::uint8_t> female;
+    if (armor->model_female != nullptr) {
+        const std::optional<std::vector<std::uint8_t>> bytes = mod_bytes(mod, armor->model_female, "model", "armor");
+        if (!bytes) return -1;
+        female = *bytes;
+    }
+    equipment::ArmorSpec spec{text(armor->id), text(armor->part), static_cast<std::uint16_t>(armor->based_on), *male,
+        female, text(armor->name), text(armor->description), armor->price, armor->give != 0, mod->name};
+    std::string why;
+    const std::optional<std::uint16_t> id = equipment::add_armor(*runtime, spec, &why);
+    return id ? int32_t{*id} : refuse(why);
+}
+
 const char *monsters_id_of(int32_t kind) {
     if (kind < 0 || kind > 0xFF) return nullptr;
     const std::string_view id = monsters::id_of(static_cast<std::uint8_t>(kind));
@@ -666,7 +692,7 @@ const ymod_tables kTables{1u, sizeof(ymod_tables), &tables_find, &tables_get, &t
 
 const ymod_quests kQuests{1u, sizeof(ymod_quests), &quests_add};
 
-const ymod_equipment kEquipment{1u, sizeof(ymod_equipment), &equipment_add_weapon};
+const ymod_equipment kEquipment{1u, sizeof(ymod_equipment), &equipment_add_weapon, &equipment_add_armor};
 
 const ymod_maps kMaps{1u, sizeof(ymod_maps), &maps_add_area};
 

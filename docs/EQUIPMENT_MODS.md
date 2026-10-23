@@ -161,6 +161,19 @@ What Yakumo does, and how it was found:
 
 Checked in game (macOS): a test mod's great sword got id 92, its name and description showed in the developer tools' `table 5` and `table 6`, and one was put in the equipment box. Not checked yet: equipping it at the box and seeing its model on the hunter. A save that holds a mod's weapon needs the mod to load it: without the mod its id is past the table.
 
+## Armor mods add
+
+A native mod adds an armor piece with `yakumo.equipment`'s `add_armor` ([MODDING.md](MODDING.md#weapons)): its part, the game's piece of that part it starts from, a model file for a male and one for a female hunter, its name, description and price. Its record is the base's (defence, resistances, skills, slots, who may wear it); traced fields are the two model numbers (`+0`, `+2`), who may wear it (`+4`), the price (`+8`, u32) and the description's index (`+0x1A`).
+
+| Step | How |
+| --- | --- |
+| The part's record table a row longer | The five tables are read through twenty `lui`/`addiu` pairs each, all in the executable (none in any overlay, none with a field offset in the low half), with no bound: they are game tables (`armor.head` and the rest), with as many rows as the part's name table has names: 256 heads, 233 chests, 213 arms, 214 waists, 220 legs |
+| Its models | The hunter's file function (`0x088A58DC`) gets the model from `0x08869778` (by the hunter record's id), lets `0x088A51E4` turn model 0 of chest, arms or legs into the inner wear, and adds the base for its sex and part: no bound on the model. A mod's piece gets model numbers from 1000, one for each sex; an instruction hook at `0x088A5968`, where v0 is the model, v1 the base and s0 still points at the base in the table of bases, makes the sum the mod's file, served as a file added from memory. An armor file is the game's own format for that part (a PMO on the hunter's skeleton) |
+| Its name and description | The part's name and description tables (29 to 38, names then descriptions, head, chest, arms, waist, legs), as for weapons |
+| One in the box | As for weapons, with the part's kind |
+
+The look comes from the hunter record (`LAYERED_ARMOR.md`), the stats from the character's worn pieces; the game copies one to the other when it loads the character or the equipment changes at the box. Checked in game (macOS) with a test mod's head piece (the stats of head 1, the models of the Silver Sol helm read from the disc): it got id 256, `armor.head` moved with 257 rows, one was put in the equipment box, and with its id written in both records the quest's hunter loaded the mod's file for its head and drew it. Not checked: wearing it through the box's menu, a model of a mod's own, the male model, and the second file function for another kind of hunter object (`0x088F46D8`), which a mod's model does not reach.
+
 ## Not verified
 
 - Weapon mods: the formula was checked against the files the game read, and
