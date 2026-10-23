@@ -1745,14 +1745,19 @@ void test_monsters(psprecomp::Runtime &runtime) {
     struct Acting {
         const ymod_monsters *service{};
         int answer{YMOD_CONTINUE};
+        const ymod_calls *calls{};
     } acting{service};
     check(service != nullptr && service->play_motion(kMonster, 3, 4) == -1,
         "monsters: a motion is played only from a part of behaviour");
-    const ymod_monster_fn act = [](ymod_cpu *, std::uint32_t monster, void *user) -> int {
+    const ymod_monster_fn act = [](ymod_cpu *cpu, std::uint32_t monster, void *user) -> int {
         auto *a = static_cast<Acting *>(user);
         if (a->service->play_motion(monster, 0x10012, 4) != -1 || a->service->play_motion(monster, 12, -1) != -1)
             return YMOD_RETURN;
         (void)a->service->play_motion(monster, 12, 4);
+        if (a->calls != nullptr) {
+            const std::uint32_t arguments[4]{};
+            (void)a->calls->call(cpu, 0x08B48000u, arguments, nullptr, nullptr);
+        }
         return a->answer;
     };
     ymod_monster second = spec;
@@ -1774,6 +1779,19 @@ void test_monsters(psprecomp::Runtime &runtime) {
     check(call(runtime, acting_stub, kMonster) != 7u && runtime.memory().load32(kPlayed) == 12u &&
             runtime.cpu().pc == kSentinel,
         "monsters: and without the base's when the part is done");
+    // A part that calls guest code itself and asks for a motion too: the call
+    // runs and returns to the game, the motion is left out, and its mod's page
+    // says why.
+    store(runtime, 0x08B48000u, {0x2402002Au, 0x03E00008u, 0u}); // v0 = 42
+    acting.calls = static_cast<const ymod_calls *>(mhp3rd::mods::native::host()->service(mod, YMOD_CALLS, 1u));
+    runtime.memory().store32(kPlayed, 0u);
+    check(acting.calls != nullptr && call(runtime, acting_stub, kMonster) == 42u &&
+            runtime.memory().load32(kPlayed) == 0u && runtime.cpu().pc == kSentinel &&
+            reported("Monster test",
+                "monster acting_fatalis: a part of its behaviour called guest code and queued "
+                "motions or attacks in the same call; those are left out"),
+        "monsters: a part that calls guest code itself has what it queued left out, and is told");
+    acting.calls = nullptr;
 
     // Whether the motion is over, as the game works it out from the model.
     constexpr std::uint32_t kGetter = 0x08B45000u, kTable2 = 0x08B46000u, kActor = 0x08B47000u;
@@ -2344,6 +2362,18 @@ void test_monster_quest_end(psprecomp::Runtime &runtime) {
     native::overlay_loaded(runtime, kSlot);
     check(during == 0u && call(runtime, act, kMonster) == 5u,
         "monsters: once the quest ends, the base's Act runs again for a monster that thought alone in it");
+    // On the next quest one thinks alone again, and a monster made where it
+    // was runs the base's Act.
+    runtime.memory().store16(0x09000000u + 0x60472u, 501u);
+    place_overlay(runtime, kSlot, "game_task.ovl", 0x00200000u);
+    native::overlay_loaded(runtime, kSlot);
+    (void)call(runtime, runtime.memory().load32(own + 32u * 4u), kMonster);
+    runtime.cpu().gpr[2] = 0u;
+    const std::uint32_t alone_again = call(runtime, act, kMonster);
+    runtime.memory().store32(kMonster, kTable);
+    (void)call(runtime, 0x0A090AE0u, 0u);
+    check(alone_again == 0u && runtime.memory().load32(kMonster) == own && call(runtime, act, kMonster) == 5u,
+        "monsters: a monster made where one that thought alone was runs the base's Act");
     // A monster whose vtable is not in memory keeps it, and the mod is told.
     place_overlay(runtime, kSlot, "game_task.ovl", 0x00200000u);
     native::overlay_loaded(runtime, kSlot);

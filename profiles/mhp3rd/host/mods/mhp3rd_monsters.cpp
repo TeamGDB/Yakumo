@@ -26,6 +26,7 @@
 #include <iostream>
 #include <map>
 #include <numbers>
+#include <set>
 
 namespace mhp3rd::mods::monsters {
 namespace {
@@ -637,10 +638,23 @@ int part_called(ymod_cpu *cpu, void *user) {
     give_kind_data(*callback->kind, cpu->gpr[4]);
     s.queued.clear();
     s.in_part = true;
+    auto &ctx = *reinterpret_cast<psprecomp::AllegrexContext *>(cpu);
+    const std::uint32_t at = ctx.pc;
     const int result = callback->fn(cpu, cpu->gpr[4], callback->user);
     s.in_part = false;
     const bool base = result != YMOD_RETURN;
     if (callback->part == kThink) s.thought_alone[cpu->gpr[4]] = !base;
+    // The function called guest code itself (calls.call), which runs now: the
+    // guest cannot run what it queued as well.
+    if (ctx.pc != at) {
+        static std::set<const Callback *> told;
+        if (!s.queued.empty() && told.insert(callback).second)
+            problem(callback->kind->owner, callback->kind->id,
+                "a part of its behaviour called guest code and queued motions or attacks in the same call; those are "
+                "left out");
+        s.queued.clear();
+        return YMOD_CONTINUE;
+    }
     if (callback->part == kThink && !base) queue_footsteps(*callback->kind, cpu->gpr[4]);
     if (s.queued.empty()) return base ? YMOD_ORIGINAL : YMOD_RETURN;
     auto chain = std::make_shared<Chain>();
@@ -744,6 +758,8 @@ int monster_made(ymod_cpu *cpu, void *) {
     const std::uint32_t monster = cpu->gpr[2];
     if (runtime == nullptr || monster < 0x08800000u || !runtime->memory().contains(monster, 0x64u))
         return YMOD_CONTINUE;
+    // A monster made where another was keeps nothing of it.
+    s.thought_alone.erase(monster);
     auto &memory = runtime->memory();
     const std::uint8_t number = memory.load8(monster + 0x62u);
     for (Added &added : s.kinds) {
