@@ -157,7 +157,7 @@ std::int64_t settings_get(ymod_mod *mod, const char *key) {
     const auto declared = mod->fallbacks.find(key);
     const std::int64_t fallback = declared != mod->fallbacks.end() ? declared->second : 0;
     ModSession *session = mods::session();
-    return session != nullptr ? session->library().setting(mod->id, key, fallback) : fallback;
+    return session != nullptr ? session->library().declared_value(mod->id, key, fallback) : fallback;
 }
 
 int services_publish(ymod_mod *mod, const char *name, std::uint32_t version, const void *table) {

@@ -289,6 +289,19 @@ void test_library(const fs::path &root) {
         "library: saved choices come back");
     again.set_master(false);
     check(again.resolve().empty(), "library: the master switch turns every mod off");
+
+    // A setting saved out of its range (by hand, or by an older version of
+    // the mod) reads clamped both when declared and afterwards.
+    again.set_setting("b", "speed", 50);
+    again.set_setting("b", "mode", -3);
+    const std::int64_t declared_speed =
+        again.declare_setting("b", {"speed", "Speed", ModSetting::Kind::Number, 1, 10, 5, {}});
+    const std::int64_t declared_mode =
+        again.declare_setting("b", {"mode", "Mode", ModSetting::Kind::Choice, 0, 0, 1, {"Off", "Low", "High"}});
+    check(declared_speed == 10 && again.declared_value("b", "speed") == 10 && declared_mode == 0 &&
+            again.declared_value("b", "mode") == 0 && again.setting("b", "speed") == 50,
+        "library: a setting reads clamped to its range when declared and when read later");
+    check(again.declared_value("b", "undeclared", 7) == 7, "library: a key never declared reads its fallback");
     (void)top;
 
     // The session applies at once when the game can take it.

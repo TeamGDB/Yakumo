@@ -193,6 +193,21 @@ bool valid_setting_key(std::string_view key) noexcept {
     });
 }
 
+namespace {
+
+// A setting's value within its range: 0 or 1 for a switch, a choice's index,
+// a number between its minimum and maximum.
+std::int64_t clamped(const ModSetting &setting, std::int64_t value) {
+    const std::int64_t maximum = setting.kind == ModSetting::Kind::Choice
+        ? static_cast<std::int64_t>(setting.choices.empty() ? 0u : setting.choices.size() - 1u)
+        : setting.kind == ModSetting::Kind::Switch ? 1
+                                                   : setting.maximum;
+    const std::int64_t minimum = setting.kind == ModSetting::Kind::Number ? setting.minimum : 0;
+    return std::clamp(value, minimum, std::max(minimum, maximum));
+}
+
+} // namespace
+
 std::int64_t ModLibrary::declare_setting(const std::string &id, const ModSetting &setting) {
     if (!valid_setting_key(setting.key)) return setting.fallback;
     std::vector<ModSetting> &declared = declared_[id];
@@ -202,13 +217,13 @@ std::int64_t ModLibrary::declare_setting(const std::string &id, const ModSetting
         *same = setting;
     else
         declared.push_back(setting);
-    const std::int64_t value = this->setting(id, setting.key, setting.fallback);
-    const std::int64_t maximum = setting.kind == ModSetting::Kind::Choice
-        ? static_cast<std::int64_t>(setting.choices.empty() ? 0u : setting.choices.size() - 1u)
-        : setting.kind == ModSetting::Kind::Switch ? 1
-                                                   : setting.maximum;
-    const std::int64_t minimum = setting.kind == ModSetting::Kind::Number ? setting.minimum : 0;
-    return std::clamp(value, minimum, std::max(minimum, maximum));
+    return clamped(setting, this->setting(id, setting.key, setting.fallback));
+}
+
+std::int64_t ModLibrary::declared_value(const std::string &id, const std::string &key, std::int64_t fallback) const {
+    for (const ModSetting &declared : settings_of(id))
+        if (declared.key == key) return clamped(declared, this->setting(id, key, declared.fallback));
+    return this->setting(id, key, fallback);
 }
 
 const std::vector<ModSetting> &ModLibrary::settings_of(const std::string &id) const {

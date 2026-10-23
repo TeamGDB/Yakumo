@@ -196,7 +196,13 @@ public:
     // valid_setting_key() is not declared: its fallback comes back.
     std::int64_t declare_setting(const std::string &id, const ModSetting &setting);
     [[nodiscard]] const std::vector<ModSetting> &settings_of(const std::string &id) const;
+    // The value saved, or the fallback; as the player or the choices file
+    // left it, not clamped.
     [[nodiscard]] std::int64_t setting(const std::string &id, const std::string &key, std::int64_t fallback = 0) const;
+    // A setting's value now as the mod sees it: clamped to its range, as
+    // declare_setting() gave it; for a key the mod did not declare, setting().
+    [[nodiscard]] std::int64_t declared_value(
+        const std::string &id, const std::string &key, std::int64_t fallback = 0) const;
     void set_setting(const std::string &id, const std::string &key, std::int64_t value);
 
     // A change a running mod makes from code (a native mod replacing a file
