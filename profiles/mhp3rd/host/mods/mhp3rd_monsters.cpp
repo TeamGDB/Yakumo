@@ -212,7 +212,7 @@ constexpr std::uint32_t kLastSphere = 0xFFFFu; // the joint that ends a shape
 // 0xFFFF in every u16 and the zone.
 constexpr std::array<std::uint32_t, 2> kBodyLists{0x1Cu, 0x20u};
 // game_sub's player of a monster's motion events (0x0A01476C): seven tables
-// (three of sounds by ground, footsteps, sounds whatever the ground, a row per
+// (three of effects by ground, footsteps, effects whatever the ground, a row per
 // motion, a u16 per motion slot naming its row), the monster, and flags on the
 // stack. A row (16 bytes): u16 starts in the five event tables, then a u8
 // count for each from byte 10. A footstep (12 bytes): u32 motion slot, f32
@@ -573,7 +573,7 @@ bool footstep_tables(Added &added) {
 }
 
 // After a Think its mod did alone: the footsteps of the motion playing, as
-// the base's sounds-and-effects part (which does not run then) plays its own.
+// the base's effects part (which does not run then) plays its own.
 void queue_footsteps(Added &added, std::uint32_t monster) {
     State &s = state();
     if (added.footsteps.empty() || s.runtime == nullptr) return;

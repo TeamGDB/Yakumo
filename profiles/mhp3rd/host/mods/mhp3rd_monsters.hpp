@@ -128,12 +128,11 @@ struct BodyCapsule {
     const void *owner, std::uint8_t kind, std::span<const BodyCapsule> capsules, std::string *why = nullptr);
 
 // A footstep: in motion `motion`, at its frame `frame`, joint `joint` comes
-// down, raising the dust and making the sound of a step of size `size` (the
-// game's kinds of step for large monsters, 0 to 9; the Tigrex's use 0, 1, 2,
-// 4 and 5) on
-// whatever ground the monster stands on. The game keeps them in tables by
-// motion slot that a monster's sounds-and-effects part plays
-// (docs/MONSTERS.md, "A monster's footsteps").
+// down, raising the dust of a step of size `size` (the game's kinds of step
+// for large monsters, 0 to 9; the Tigrex's use 0, 1, 2, 4 and 5) on whatever
+// ground the monster stands on. The game keeps them in tables by motion slot
+// that a monster's effects part plays (docs/MONSTERS.md, "A monster's
+// footsteps").
 struct Footstep {
     std::uint16_t motion{};
     float frame{};
