@@ -224,8 +224,7 @@ std::uint32_t do_load(psprecomp::GuestMemory &memory, std::uint32_t params, cons
     }
     const auto &data = loaded.contents.data;
     if (const char *dump = std::getenv("MHP3RD_SAVE_DUMP"); dump != nullptr && *dump != '\0') {
-        std::filesystem::path folder(dump);
-        if (folder == "1") folder = "logs";
+        const std::filesystem::path folder = "logs/save";
         std::string error;
         if (savedata::write_plain_dump(folder, files.file_name, data, error)) {
             std::cerr << "[savedata] wrote plaintext save to " << path_to_utf8(folder / (files.file_name + ".plain"))

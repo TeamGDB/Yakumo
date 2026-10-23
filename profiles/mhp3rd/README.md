@@ -1165,7 +1165,7 @@ The renderer then leaves out the HUD packets' draws, and nothing else: their oth
 | `MHP3RD_LOBBY` | off | `1` turns the lobby report on (menu: Lobby) |
 | `MHP3RD_LOBBY_SERVER` | none | Lobby dashboard report address, `host` or `host:port` (menu: Lobby Server) |
 | `MHP3RD_LOBBY_TOKEN` | none | Shared secret the dashboard requires, when it has one (menu: Lobby Token) |
-| `MHP3RD_LOBBY_DUMP` | none | A folder for up to three diagnostic dumps of the hall's live memory, ten seconds apart; `1` uses `logs/` |
+| `MHP3RD_LOBBY_DUMP` | off | `1` writes up to three diagnostic dumps of the hall's live memory, ten seconds apart, under `logs/lobby-dump-*` |
 | `MHP3RD_LOBBY_DUMP_TEXT` | `Zinogre` | Text the diagnostic dump searches for beside the hunter name (a quest or monster name) |
 | `MHP3RD_LOBBY_DUMP_FULL` | off | `1` also writes the whole 64 MiB guest RAM on the second and third hall dump |
 | `MHP3RD_LOBBY_DUMP_ANY` | off | `1` also dumps outside a hall, e.g. on the hall-creation screen |
@@ -1265,8 +1265,8 @@ With the setting off nothing is hooked into the display lists, no input is read 
 | `MHP3RD_TRACE_LAYERED_ARMOR=1` | Each armor part [layered armor](#layered-armor) draws differently (`[layered] Chest: model 22 instead of the worn piece's`), and each time a changed look makes the hunter load its models again |
 | `MHP3RD_LAYERED_PREVIEW_FIX=0` | Disable the Smithy preview appearance consistency guard for diagnosis; normal play should leave it enabled |
 | `MHP3RD_TRACE_SAVEDATA=1` | Log every field of each save-data request and each status poll |
-| `MHP3RD_ADHOC_TRACE_PAYLOAD` | A file to append the first 2 KiB of every ad hoc payload the game sends or receives, as hex and ASCII, for tracing the hall and quest packets |
-| `MHP3RD_SAVE_DUMP` | A folder for the decrypted save (`MHP3RD.BIN.plain`) on each load, for tracing; personal data, so keep it local |
+| `MHP3RD_ADHOC_TRACE_PAYLOAD` | `1` appends the first 2 KiB of every ad hoc payload the game sends or receives, as hex and ASCII, to `logs/adhoc_payload.log`, for tracing the hall and quest packets |
+| `MHP3RD_SAVE_DUMP` | `1` writes the decrypted save (`MHP3RD.BIN.plain`) to `logs/save/` on each load, for tracing; personal data, so keep it local |
 | `MHP3RD_TRACE_SYNC=1` | Trace semaphores, event flags and mutexes; `MHP3RD_TRACE_SYNC_LIMIT` caps the lines (default 4000) |
 | `MHP3RD_STARVATION_INTERVAL` | Dispatches between virtual-clock advances in code that never calls an import |
 | `MHP3RD_TRACE_GE=1` | Log the first draws of the run with their state |

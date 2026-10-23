@@ -319,10 +319,13 @@ void set_env(const char *name, const char *value) {
 
 void test_diagnostic_dump() {
     const std::filesystem::path root = std::filesystem::temp_directory_path() / "yakumo-lobby-diag-test";
+    const std::filesystem::path previous = std::filesystem::current_path();
     std::error_code error;
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root, error);
-    set_env("MHP3RD_LOBBY_DUMP", root.string().c_str());
+    std::filesystem::current_path(root, error);
+    check(!error, "the diagnostic test can enter its temporary folder");
+    set_env("MHP3RD_LOBBY_DUMP", "1");
     set_env("MHP3RD_LOBBY_DUMP_TEXT", "Zinogre");
 
     game::BufferRam ram(kBase, kSize);
@@ -335,7 +338,7 @@ void test_diagnostic_dump() {
     lobby::read_hunter(ram, snapshot);
 
     std::filesystem::path dump;
-    for (const auto &entry : std::filesystem::directory_iterator(root)) {
+    for (const auto &entry : std::filesystem::directory_iterator(root / "logs")) {
         if (entry.is_directory()) {
             dump = entry.path();
             break;
@@ -355,6 +358,7 @@ void test_diagnostic_dump() {
 
     set_env("MHP3RD_LOBBY_DUMP", "");
     set_env("MHP3RD_LOBBY_DUMP_TEXT", "");
+    std::filesystem::current_path(previous, error);
     std::filesystem::remove_all(root, error);
 }
 

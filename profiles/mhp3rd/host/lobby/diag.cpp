@@ -303,8 +303,9 @@ void maybe_dump(const game::Ram &ram, const Snapshot &snapshot) {
     last_dump = now;
     ++dumps;
 
-    std::filesystem::path directory(setting);
-    if (directory == "1") directory = "logs";
+    // The dump path is fixed under the working directory: the variable is a
+    // local diagnostic switch, not a path supplied by the game or the network.
+    std::filesystem::path directory = "logs";
     directory /= "lobby-dump-" + std::to_string(static_cast<long long>(std::time(nullptr)));
     std::error_code error;
     std::filesystem::create_directories(directory, error);

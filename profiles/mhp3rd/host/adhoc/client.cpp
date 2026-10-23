@@ -32,10 +32,14 @@ using Clock = std::chrono::steady_clock;
 using std::chrono::milliseconds;
 
 void trace_payload(const char *direction, int handle, const void *data, std::size_t size) {
-    static const char *path = std::getenv("MHP3RD_ADHOC_TRACE_PAYLOAD");
-    if (path == nullptr || *path == '\0' || size == 0u) return;
+    static const bool enabled = std::getenv("MHP3RD_ADHOC_TRACE_PAYLOAD") != nullptr;
+    if (!enabled || size == 0u) return;
     static std::mutex mutex;
-    static std::ofstream out(path, std::ios::binary | std::ios::app);
+    static std::ofstream out = [] {
+        std::error_code error;
+        std::filesystem::create_directories("logs", error);
+        return std::ofstream("logs/adhoc_payload.log", std::ios::binary | std::ios::app);
+    }();
     std::lock_guard lock(mutex);
     if (!out) return;
     const auto *bytes = static_cast<const std::uint8_t *>(data);
