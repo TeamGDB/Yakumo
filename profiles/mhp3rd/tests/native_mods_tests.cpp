@@ -463,6 +463,69 @@ void test_host_returns(psprecomp::Runtime &runtime) {
         "native: a hook that cannot be installed leaves the host feature in place");
 }
 
+// Hooks on one address in two overlays that load there: each applies while
+// its overlay is loaded.
+int g_lobby_seen;
+int g_task_seen;
+void test_shared_overlay_address(psprecomp::Runtime &runtime) {
+    namespace native = mhp3rd::mods::native;
+    constexpr std::uint32_t kSlot = 0x0A05E600u;
+    constexpr std::uint32_t kFunction = kSlot + 0x200u;
+    constexpr std::uint32_t kStep = kSlot + 0x300u;
+    ymod_mod *mod = native::add_mod("shared_overlay", "Shared Overlay", ".");
+    const auto *hooks = static_cast<const ymod_hooks *>(native::host()->service(mod, YMOD_HOOKS, 1u));
+    const auto load = [&runtime](const char *name) {
+        place_overlay(runtime, kSlot, name, 0x1000u);
+        store(runtime, kFunction, {0x00801021u, 0x03E00008u, 0u});          // addu v0, a0, zero; jr ra
+        store(runtime, kStep, {0x24090007u, 0x25290001u, 0x03E00008u, 0u}); // t1 = 7; t1 += 1; jr ra
+        native::overlay_loaded(runtime, kSlot);
+    };
+    load("lobby_task.ovl");
+    g_lobby_seen = 0;
+    g_task_seen = 0;
+    const ymod_hook lobby = hooks->function(
+        mod, "lobby_task", kFunction, YMOD_HOOK_BEFORE,
+        [](ymod_cpu *, void *) -> int {
+            ++g_lobby_seen;
+            return YMOD_CONTINUE;
+        },
+        nullptr);
+    const ymod_hook task = hooks->function(
+        mod, "game_task", kFunction, YMOD_HOOK_BEFORE,
+        [](ymod_cpu *, void *) -> int {
+            ++g_task_seen;
+            return YMOD_CONTINUE;
+        },
+        nullptr);
+    const ymod_hook lobby_step = hooks->instruction(
+        mod, "lobby_task", kStep + 4u,
+        [](ymod_cpu *, void *) -> int {
+            g_lobby_seen += 10;
+            return YMOD_CONTINUE;
+        },
+        nullptr);
+    const ymod_hook task_step = hooks->instruction(
+        mod, "game_task", kStep + 4u,
+        [](ymod_cpu *, void *) -> int {
+            g_task_seen += 10;
+            return YMOD_CONTINUE;
+        },
+        nullptr);
+    (void)call(runtime, kFunction, 1u);
+    (void)call(runtime, kStep, 0u);
+    check(g_lobby_seen == 11 && g_task_seen == 0 && runtime.cpu().gpr[9] == 8u,
+        "native: with lobby_task loaded, its hooks at a shared address run and game_task's do not");
+    load("game_task.ovl");
+    (void)call(runtime, kFunction, 1u);
+    (void)call(runtime, kStep, 0u);
+    check(g_lobby_seen == 11 && g_task_seen == 11 && runtime.cpu().gpr[9] == 8u,
+        "native: once game_task loads there, its hooks run instead");
+    load("lobby_task.ovl");
+    (void)call(runtime, kFunction, 1u);
+    check(g_lobby_seen == 12 && g_task_seen == 11, "native: and lobby_task's again when it comes back");
+    for (const ymod_hook hook : {lobby, task, lobby_step, task_step}) hooks->remove(mod, hook);
+}
+
 // Quests mods add: encrypted with the keys in memory, served as files, and
 // the game's id-to-file code given the file for a mod's quest id.
 void test_quests(psprecomp::Runtime &runtime) {
@@ -1999,6 +2062,7 @@ int main() {
     test_symbols(runtime);
     test_hook_changes(runtime);
     test_host_returns(runtime);
+    test_shared_overlay_address(runtime);
     test_quests(runtime);
     test_tables(runtime);
     test_monsters(runtime);

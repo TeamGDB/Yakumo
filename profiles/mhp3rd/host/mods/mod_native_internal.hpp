@@ -56,11 +56,13 @@ struct Hook {
     int kind{};
     ymod_hook_fn callback{};
     void *user{};
+    std::string overlay; // empty: the executable; otherwise it applies while that overlay is loaded
 };
 
-// A guest address with function hooks: the hooks take over its entry.
+// A guest address with function hooks: the hooks take over its entry. Hooks
+// for different overlays that load at the same address (game_task and
+// lobby_task) share it: those of the overlay loaded now apply.
 struct Site {
-    std::string overlay; // empty: the executable
     std::vector<Hook> hooks;
     psprecomp::JitFunction original{};
     // A host feature that replaces the game's function there (layered armor,
@@ -68,13 +70,14 @@ struct Site {
     // its address back when the last hook goes.
     Runtime::RecompiledFunction host{};
     std::string host_name;
+    std::string loaded; // the overlay it is installed for; empty: the executable
     bool installed{};
     bool refused{}; // the code there is not the known function; said once
 };
 
 struct InstructionSite {
-    std::string overlay;
-    std::vector<Hook> hooks;
+    std::vector<Hook> hooks; // as a Site's, by overlay
+    std::string loaded;      // the overlay it is installed for; empty: the executable
     bool installed{};
 };
 

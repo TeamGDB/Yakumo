@@ -18,19 +18,52 @@
 namespace mhp3rd::mods::native {
 namespace {
 
-const std::vector<Hook> *hooks_at(std::uint32_t address) {
-    State &s = state();
-    const auto found = s.sites.find(address);
-    return found != s.sites.end() ? &found->second.hooks : nullptr;
+// The overlay loaded over `address` now, by name, for hooks that name one:
+// empty when none of `hooks` names an overlay or none is loaded there.
+std::string overlay_for(const psprecomp::GuestMemory &memory, const std::vector<Hook> &hooks, std::uint32_t address) {
+    if (std::none_of(hooks.begin(), hooks.end(), [](const Hook &hook) { return !hook.overlay.empty(); })) return {};
+    const std::optional<LoadedOverlay> loaded = overlay_at(memory, address);
+    return loaded ? loaded->name : std::string();
 }
 
-// Callbacks may add and remove hooks, so they run from a copy of the list.
-void run_after(std::uint32_t address, AllegrexContext &ctx) {
-    if (const std::vector<Hook> *hooks = hooks_at(address)) {
-        const std::vector<Hook> calling = *hooks;
-        for (const Hook &hook : calling)
-            if (hook.kind == YMOD_HOOK_AFTER) (void)hook.callback(as_cpu(ctx), hook.user);
+// A hook for the executable always applies; one for an overlay while that
+// overlay is the one loaded over its address.
+bool applies(const Hook &hook, const std::string &loaded) {
+    return hook.overlay.empty() || (!loaded.empty() && iequals(hook.overlay, loaded));
+}
+
+// The hooks at an address that apply now, in order. Callbacks may add and
+// remove hooks, so they run from this copy of the list.
+std::vector<Hook> applying(
+    const psprecomp::GuestMemory &memory, const std::vector<Hook> &hooks, std::uint32_t address) {
+    const std::string loaded = overlay_for(memory, hooks, address);
+    std::vector<Hook> out;
+    for (const Hook &hook : hooks)
+        if (applies(hook, loaded)) out.push_back(hook);
+    return out;
+}
+
+// What the hooks at an address are installed for now: the overlay loaded
+// there when a hook names it, "" when only hooks for the executable apply,
+// nothing when none does.
+std::optional<std::string> installed_for(
+    const psprecomp::GuestMemory &memory, const std::vector<Hook> &hooks, std::uint32_t address) {
+    const std::string loaded = overlay_for(memory, hooks, address);
+    std::optional<std::string> result;
+    for (const Hook &hook : hooks) {
+        if (!applies(hook, loaded)) continue;
+        if (!hook.overlay.empty()) return loaded;
+        result = std::string();
     }
+    return result;
+}
+
+void run_after(std::uint32_t address, AllegrexContext &ctx) {
+    State &s = state();
+    const auto found = s.sites.find(address);
+    if (found == s.sites.end() || s.runtime == nullptr) return;
+    for (const Hook &hook : applying(s.runtime->memory(), found->second.hooks, address))
+        if (hook.kind == YMOD_HOOK_AFTER) (void)hook.callback(as_cpu(ctx), hook.user);
 }
 
 // Host features registered over the game's functions (their names start with
@@ -80,7 +113,7 @@ void hook_entry(Runtime &runtime, AllegrexContext &ctx) {
     }
     const psprecomp::JitFunction original = site.original;
     const Runtime::RecompiledFunction host = site.host;
-    const std::vector<Hook> calling = site.hooks;
+    const std::vector<Hook> calling = applying(runtime.memory(), site.hooks, address);
     bool run_original = true;
     bool after = false;
     for (const Hook &hook : calling) {
@@ -115,12 +148,6 @@ void hook_entry(Runtime &runtime, AllegrexContext &ctx) {
         original(runtime, ctx);
 }
 
-bool overlay_present(const std::string &overlay, std::uint32_t address) {
-    if (overlay.empty()) return true;
-    const std::optional<LoadedOverlay> loaded = overlay_at(state().runtime->memory(), address);
-    return loaded && iequals(loaded->name, overlay);
-}
-
 // Takes the hooks off their address. What was there before them takes it
 // back: the host feature they wrapped, or nothing, and the game's own code is
 // compiled again from memory.
@@ -134,15 +161,17 @@ void uninstall(std::uint32_t address, Site &site) {
     site.installed = false;
 }
 
-bool install_site(std::uint32_t address, Site &site) {
+// Installs the hooks at an address for `overlay`, the one loaded there now
+// (or "" for the executable).
+bool install_site(std::uint32_t address, Site &site, const std::string &overlay) {
     State &s = state();
     Runtime &runtime = *s.runtime;
-    if (!site.overlay.empty()) {
+    if (!overlay.empty()) {
         const std::optional<LoadedOverlay> loaded = overlay_at(runtime.memory(), address);
-        if (!loaded || !iequals(loaded->name, site.overlay)) return false;
+        if (!loaded || !iequals(loaded->name, overlay)) return false;
         (void)install_overlay_at(runtime, loaded->base);
     }
-    if (!symbols::matches(address, site.overlay, runtime.memory())) {
+    if (!symbols::matches(address, overlay, runtime.memory())) {
         if (!site.refused)
             report(nullptr,
                 "a hook at " + psprecomp::hex32(address) +
@@ -159,6 +188,7 @@ bool install_site(std::uint32_t address, Site &site) {
     // instructions are compiled afterwards, for the hook to run.
     runtime.register_function(address, &hook_entry, "mod_hook");
     site.installed = true;
+    site.loaded = overlay;
     site.original = psprecomp::jit_compile_detached(runtime, address);
     if (site.original == nullptr) uninstall(address, site);
     return site.installed;
@@ -171,17 +201,11 @@ ymod_hook add_hook(ymod_mod *mod, const char *overlay, std::uint32_t address, in
         return 0u;
     if (!instruction && kind != YMOD_HOOK_BEFORE && kind != YMOD_HOOK_AFTER && kind != YMOD_HOOK_REPLACE) return 0u;
     const ymod_hook id = s.next_hook++;
-    const Hook hook{id, mod, kind, callback, user};
-    const std::string overlay_name = overlay != nullptr ? overlay : "";
-    if (instruction) {
-        InstructionSite &site = s.instructions[address];
-        site.overlay = overlay_name;
-        site.hooks.push_back(hook);
-    } else {
-        Site &site = s.sites[address];
-        site.overlay = overlay_name;
-        site.hooks.push_back(hook);
-    }
+    const Hook hook{id, mod, kind, callback, user, overlay != nullptr ? overlay : ""};
+    if (instruction)
+        s.instructions[address].hooks.push_back(hook);
+    else
+        s.sites[address].hooks.push_back(hook);
     s.hook_sites[id] = {address, instruction};
     reconcile();
     return id;
@@ -230,12 +254,12 @@ void hook_return(Runtime &runtime, AllegrexContext &ctx) {
     run_after(back.address, ctx);
 }
 
-void instruction_dispatch(Runtime &, AllegrexContext &ctx, std::uint32_t address) {
+void instruction_dispatch(Runtime &runtime, AllegrexContext &ctx, std::uint32_t address) {
     State &s = state();
     const auto found = s.instructions.find(address);
     if (found == s.instructions.end()) return;
-    const std::vector<Hook> calling = found->second.hooks;
-    for (const Hook &hook : calling) (void)hook.callback(as_cpu(ctx), hook.user);
+    for (const Hook &hook : applying(runtime.memory(), found->second.hooks, address))
+        (void)hook.callback(as_cpu(ctx), hook.user);
 }
 
 // Overlay hooks follow their overlay: in place while it is loaded. And a host
@@ -247,25 +271,32 @@ void reconcile() {
     Runtime &runtime = *s.runtime;
     for (auto &[address, site] : s.sites) {
         if (site.hooks.empty()) continue;
-        const bool present = overlay_present(site.overlay, address);
-        if (present && (!site.installed || !runtime.has_function(address))) {
+        const std::optional<std::string> overlay = installed_for(runtime.memory(), site.hooks, address);
+        // Installed for another overlay than the one loaded now: taken off first.
+        if (overlay && site.installed && site.loaded != *overlay) uninstall(address, site);
+        if (overlay && (!site.installed || !runtime.has_function(address))) {
             site.installed = false;
-            (void)install_site(address, site);
-        } else if (!present && site.installed) {
+            (void)install_site(address, site, *overlay);
+        } else if (!overlay && site.installed) {
             uninstall(address, site);
         }
     }
     for (auto &[address, site] : s.instructions) {
-        const bool present = !site.hooks.empty() && overlay_present(site.overlay, address);
-        if (present && !site.installed) {
+        const std::optional<std::string> overlay = installed_for(runtime.memory(), site.hooks, address);
+        if (overlay && site.installed && site.loaded != *overlay) {
+            psprecomp::jit_unhook_instruction(runtime, address);
+            site.installed = false;
+        }
+        if (overlay && !site.installed) {
             // The overlay's recompiled code goes in first, or installing it
             // later would cover the unit the hook takes out of it.
-            if (!site.overlay.empty())
+            if (!overlay->empty())
                 if (const std::optional<LoadedOverlay> loaded = overlay_at(runtime.memory(), address))
                     (void)install_overlay_at(runtime, loaded->base);
             psprecomp::jit_hook_instruction(runtime, address);
             site.installed = true;
-        } else if (!present && site.installed) {
+            site.loaded = *overlay;
+        } else if (!overlay && site.installed) {
             psprecomp::jit_unhook_instruction(runtime, address);
             site.installed = false;
         }
