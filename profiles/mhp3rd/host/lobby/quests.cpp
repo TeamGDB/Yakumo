@@ -141,6 +141,13 @@ std::vector<std::uint16_t> posted_quest_ids(const game::Ram &ram) {
     return ids;
 }
 
+std::uint16_t active_quest_id(const game::Ram &ram) {
+    const std::uint32_t at = kActiveQuestRecord + kActiveQuestIdOffset;
+    if (!ram.contains(at, 2u)) return 0u;
+    const std::uint16_t id = ram.load16(at);
+    return id >= 10101u && id <= 10899u ? id : 0u;
+}
+
 std::uint16_t latest_quest_id(const game::Ram &ram) {
     if (!ram.contains(kQuestBoardBase, kQuestBoardBytes)) return 0u;
     std::vector<std::uint16_t> ids;

@@ -81,6 +81,12 @@ struct PostedQuest {
 // in the same window; the last new id is the one on screen.
 [[nodiscard]] std::uint16_t latest_quest_id(const game::Ram &ram);
 
+// The quest record the hall's board currently shows. The game keeps the
+// selected quest's info at 0x0A2E9600; the id is at +0x24.
+inline constexpr std::uint32_t kActiveQuestRecord = 0x0A2E9600u;
+inline constexpr std::uint32_t kActiveQuestIdOffset = 0x24u;
+[[nodiscard]] std::uint16_t active_quest_id(const game::Ram &ram);
+
 // The quests posted on the hall board, at most four, in the board's order.
 // The ids are the game's; the details come from the DATA.BIN quest lists.
 [[nodiscard]] std::vector<PostedQuest> posted_quests(const game::Ram &ram);

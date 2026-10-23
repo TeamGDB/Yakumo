@@ -226,6 +226,14 @@ void write_ascii(game::Ram &ram, std::uint32_t at, const char *text) {
         ram.store8(at + static_cast<std::uint32_t>(i), static_cast<std::uint8_t>(text[i]));
 }
 
+void test_active_quest_id() {
+    game::BufferRam record(lobby::kActiveQuestRecord, 0x100u);
+    record.store16(lobby::kActiveQuestRecord + lobby::kActiveQuestIdOffset, 10509u);
+    check(lobby::active_quest_id(record) == 10509u, "the board's selected quest id is read");
+    check(lobby::active_quest_id(game::BufferRam(lobby::kActiveQuestRecord, 0x100u)) == 0u,
+        "no selected record reads no active quest");
+}
+
 void test_latest_quest_id() {
     game::BufferRam board(lobby::kQuestBoardBase, lobby::kQuestBoardBytes);
     board.store16(lobby::kQuestBoardBase + 0x00u, 10101u);
@@ -326,6 +334,7 @@ int main() {
     test_hunter_rank_and_guild_card();
     test_posted_quest_ids();
     test_latest_quest_id();
+    test_active_quest_id();
     test_guild_stats();
     test_diagnostic_dump();
     if (failures == 0) std::cout << "lobby tests passed\n";

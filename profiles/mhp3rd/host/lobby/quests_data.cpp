@@ -120,7 +120,7 @@ const QuestInfo *find_quest(std::uint16_t id) {
 
 std::vector<PostedQuest> posted_quests(const game::Ram &ram) {
     std::vector<PostedQuest> result;
-    const std::uint16_t id = latest_quest_id(ram);
+    const std::uint16_t id = active_quest_id(ram);
     if (id == 0u) return result;
     PostedQuest quest;
     quest.slot = 1u;
