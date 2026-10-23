@@ -1172,7 +1172,11 @@ std::optional<bool> at_frame(Runtime &runtime, std::uint32_t monster, float fram
         return false;
     const float now = real(runtime, model + 4u), next = now + real(runtime, model + 12u);
     const float last = real(runtime, model + 20u), loop_start = real(runtime, model + 16u);
-    if (last < next && (memory.load16(model + 80u) & 1u) != 0u) // wrapping round to the loop's start
+    // Wrapping round to the loop's start, the game's check (0x0887A30C)
+    // passes the loop's start itself and any frame after now, also past the
+    // last; not those between the loop's start and where the step ends.
+    // Behaviours time their actions by it, so it is kept as it is.
+    if (last < next && (memory.load16(model + 80u) & 1u) != 0u)
         return (frame <= loop_start && loop_start <= frame) || now < frame;
     return now < frame && frame <= std::min(next, last);
 }
