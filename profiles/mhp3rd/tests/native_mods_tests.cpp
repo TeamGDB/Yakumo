@@ -436,17 +436,54 @@ void test_hook_changes(psprecomp::Runtime &runtime) {
     (void)events->subscribe(failing, YMOD_EVENT_FRAME, [](int, std::uint32_t, void *) { ++g_added_seen; }, nullptr);
     (void)services->publish(failing, "test.failing", 1u, &kTable);
     (void)ui->panel(failing, "Failing Panel", [](const ymod_widgets *, void *) {}, nullptr);
+    (void)ui->overlay(failing, "Failing Overlay", [](const ymod_widgets *, void *) {}, nullptr);
+    const auto overlays_titled = [](const std::string &title) {
+        std::size_t count = 0u;
+        for (const native::Panel &panel : native::panels({}, true)) count += panel.title == title ? 1u : 0u;
+        return count;
+    };
+    check(native::panels("failing", false).size() == 1u && overlays_titled("Failing Overlay") == 1u,
+        "native: a mod's panel is on its page and its overlay over the game");
     const std::size_t before_withdraw = native::running();
     native::withdraw(failing);
     native::frame(runtime);
     (void)call(runtime, 0x08A00300u, 4u);
     check(g_added_seen == 0 && services->import(g_self, "test.failing", 1u) == nullptr &&
-            native::panels("Failing", false).empty() && native::running() == before_withdraw - 1u,
-        "native: a withdrawn mod's hooks, events, services and panels are gone");
+            native::panels("failing", false).empty() && overlays_titled("Failing Overlay") == 0u &&
+            native::running() == before_withdraw - 1u,
+        "native: a withdrawn mod's hooks, events, services, panels and overlays are gone");
     check(g_hooks->function(failing, nullptr, 0x08A00300u, YMOD_HOOK_BEFORE, &count_added, nullptr) == 0u &&
             events->subscribe(
                 failing, YMOD_EVENT_FRAME, [](int, std::uint32_t, void *) {}, nullptr) != 0,
         "native: a withdrawn mod cannot register again");
+
+    // A mod stopped by a callback before its own runs in the same call or
+    // event is not called: the lists run from copies.
+    static ymod_mod *s_quitter = nullptr;
+    s_quitter = native::add_mod("quitter", "Quitter", ".");
+    ymod_mod *stopper = native::add_mod("stopper", "Stopper", ".");
+    const auto *stopper_events = static_cast<const ymod_events *>(native::host()->service(stopper, YMOD_EVENTS, 1u));
+    g_added_seen = 0;
+    const auto stop_quitter = [](int, std::uint32_t, void *) { native::withdraw(s_quitter); };
+    (void)stopper_events->subscribe(stopper, YMOD_EVENT_FILE_LOADED, stop_quitter, nullptr);
+    (void)stopper_events->subscribe(
+        s_quitter, YMOD_EVENT_FILE_LOADED, [](int, std::uint32_t, void *) { ++g_added_seen; }, nullptr);
+    native::file_loaded(0x123u);
+    check(g_added_seen == 0, "native: an event is not delivered to a mod stopped earlier in the same event");
+    s_quitter = native::add_mod("quitter_hooks", "Quitter Hooks", ".");
+    const ymod_hook stop_hook = g_hooks->function(
+        stopper, nullptr, 0x08A00300u, YMOD_HOOK_BEFORE,
+        [](ymod_cpu *, void *) -> int {
+            native::withdraw(s_quitter);
+            return YMOD_CONTINUE;
+        },
+        nullptr);
+    (void)g_hooks->function(s_quitter, nullptr, 0x08A00300u, YMOD_HOOK_BEFORE, &count_added, nullptr);
+    (void)g_hooks->function(s_quitter, nullptr, 0x08A00300u, YMOD_HOOK_REPLACE, &count_added, nullptr);
+    (void)call(runtime, 0x08A00300u, 4u);
+    check(g_added_seen == 0 && runtime.cpu().gpr[2] == 5u && runtime.cpu().pc == kSentinel,
+        "native: nor a hook of one stopped by an earlier hook at the same call");
+    g_hooks->remove(stopper, stop_hook);
 
     // A mod that logs every frame does not grow the log without end.
     for (int line = 0; line < 1500; ++line) native::host()->log(g_self, YMOD_LOG_INFO, "chatter");
@@ -1938,6 +1975,26 @@ void test_monsters(psprecomp::Runtime &runtime) {
     runtime.memory().store16(kSets + 0x9Cu, 0u);
     (void)call(runtime, burning_stub, kMonster);
     check(burning.started == -1, "monsters: no effect while the kind's model set is not loaded");
+
+    // A mod that fails, or is withdrawn, is not called through its kinds
+    // again: their monsters do the base's part.
+    ymod_mod *quitter = mhp3rd::mods::native::add_mod("test.quitter", "Quitter", folder.string());
+    ymod_monster sixth = spec;
+    sixth.id = "quitting_fatalis";
+    Seen quit_seen;
+    const int32_t quitting_kind = service != nullptr ? service->add(quitter, &sixth) : -1;
+    check(quitting_kind == 81 && service->behave(quitter, quitting_kind, YMOD_MONSTER_THINK, think, &quit_seen) == 0,
+        "monsters: a sixth kind, of another mod, takes a part");
+    runtime.memory().store32(kMonster, kBaseTable);
+    runtime.memory().store8(kMonster + 0x62u, 81u);
+    (void)call(runtime, 0x0A090AE0u, 0u);
+    const std::uint32_t quitting_stub = runtime.memory().load32(runtime.memory().load32(kMonster) + 32u * 4u);
+    (void)call(runtime, quitting_stub, kMonster);
+    const int calls_before = quit_seen.calls;
+    mhp3rd::mods::native::withdraw(quitter);
+    check(calls_before == 1 && call(runtime, quitting_stub, kMonster) == 7u && quit_seen.calls == 1 &&
+            runtime.cpu().pc == kSentinel,
+        "monsters: a withdrawn mod's part is not called; the base's runs");
 
     // A quest to hunt the kind, described through the quests service.
     const auto *quest_service =

@@ -245,6 +245,10 @@ void withdraw(ymod_mod *mod) {
     std::erase_if(s.services, [mod](const auto &entry) { return entry.second.owner == mod; });
 }
 
+bool runs(const ymod_mod *mod) {
+    return mod == nullptr || !mod->failed;
+}
+
 std::size_t running() {
     // Yakumo's own users of the API ("yakumo." ids, such as quests) are not mods.
     const std::vector<std::unique_ptr<ymod_mod>> &mods = state().mods;

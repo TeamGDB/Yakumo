@@ -33,13 +33,15 @@ bool applies(const Hook &hook, const std::string &loaded) {
 }
 
 // The hooks at an address that apply now, in order. Callbacks may add and
-// remove hooks, so they run from this copy of the list.
+// remove hooks, so they run from this copy of the list; one whose mod has
+// stopped meanwhile (a script that failed in an earlier callback) is skipped
+// where it is called.
 std::vector<Hook> applying(
     const psprecomp::GuestMemory &memory, const std::vector<Hook> &hooks, std::uint32_t address) {
     const std::string loaded = overlay_for(memory, hooks, address);
     std::vector<Hook> out;
     for (const Hook &hook : hooks)
-        if (applies(hook, loaded)) out.push_back(hook);
+        if (applies(hook, loaded) && runs(hook.mod)) out.push_back(hook);
     return out;
 }
 
@@ -63,7 +65,7 @@ void run_after(std::uint32_t address, AllegrexContext &ctx) {
     const auto found = s.sites.find(address);
     if (found == s.sites.end() || s.runtime == nullptr) return;
     for (const Hook &hook : applying(s.runtime->memory(), found->second.hooks, address))
-        if (hook.kind == YMOD_HOOK_AFTER) (void)hook.callback(as_cpu(ctx), hook.user);
+        if (hook.kind == YMOD_HOOK_AFTER && runs(hook.mod)) (void)hook.callback(as_cpu(ctx), hook.user);
 }
 
 // Host features registered over the game's functions (their names start with
@@ -117,15 +119,17 @@ void hook_entry(Runtime &runtime, AllegrexContext &ctx) {
     bool run_original = true;
     bool after = false;
     for (const Hook &hook : calling) {
-        if (hook.kind == YMOD_HOOK_BEFORE) (void)hook.callback(as_cpu(ctx), hook.user);
+        if (hook.kind == YMOD_HOOK_BEFORE && runs(hook.mod)) (void)hook.callback(as_cpu(ctx), hook.user);
         if (hook.kind == YMOD_HOOK_AFTER) after = true;
     }
     for (const Hook &hook : calling) {
-        if (hook.kind != YMOD_HOOK_REPLACE) continue;
+        if (hook.kind != YMOD_HOOK_REPLACE || !runs(hook.mod)) continue;
         s.call_pending = false;
         const bool replacing = std::exchange(s.replacing, true);
+        ymod_mod *const calling_mod = std::exchange(s.calling, hook.mod);
         const int result = hook.callback(as_cpu(ctx), hook.user);
         s.replacing = replacing;
+        s.calling = calling_mod;
         // The callback called guest code: it runs now and returns to the caller.
         if (s.call_pending) return;
         if (result == YMOD_RETURN) run_original = false;
@@ -254,8 +258,10 @@ int calls_call(
     const std::array<std::uint32_t, 4> args{arguments != nullptr ? arguments[0] : 0u,
         arguments != nullptr ? arguments[1] : 0u, arguments != nullptr ? arguments[2] : 0u,
         arguments != nullptr ? arguments[3] : 0u};
-    kernel().call_guest(ctx, address, args, [done, user](AllegrexContext &back, std::uint32_t result) {
-        if (done != nullptr) done(as_cpu(back), result, user);
+    // The call returns after the callback: its mod may have stopped by then.
+    ymod_mod *const mod = state().calling;
+    kernel().call_guest(ctx, address, args, [done, user, mod](AllegrexContext &back, std::uint32_t result) {
+        if (done != nullptr && runs(mod)) done(as_cpu(back), result, user);
     });
     state().call_pending = true;
     return 0;
@@ -283,7 +289,7 @@ void instruction_dispatch(Runtime &runtime, AllegrexContext &ctx, std::uint32_t 
     const auto found = s.instructions.find(address);
     if (found == s.instructions.end()) return;
     for (const Hook &hook : applying(runtime.memory(), found->second.hooks, address))
-        (void)hook.callback(as_cpu(ctx), hook.user);
+        if (runs(hook.mod)) (void)hook.callback(as_cpu(ctx), hook.user);
 }
 
 // Overlay hooks follow their overlay: in place while it is loaded. And a host

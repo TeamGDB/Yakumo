@@ -591,14 +591,20 @@ void queue_footsteps(Added &added, std::uint32_t monster) {
 int part_called(ymod_cpu *cpu, void *user) {
     State &s = state();
     const auto *callback = static_cast<const Callback *>(user);
-    if (callback->kind != nullptr) give_kind_data(*callback->kind, cpu->gpr[4]);
+    // A mod that failed or was withdrawn is not called again: its kind's
+    // monsters do the base's part.
+    if (callback->kind == nullptr || !native::runs(static_cast<const ymod_mod *>(callback->kind->owner))) {
+        if (callback->part == kThink) s.thought_alone[cpu->gpr[4]] = false;
+        return YMOD_ORIGINAL;
+    }
+    give_kind_data(*callback->kind, cpu->gpr[4]);
     s.queued.clear();
     s.in_part = true;
     const int result = callback->fn(cpu, cpu->gpr[4], callback->user);
     s.in_part = false;
     const bool base = result != YMOD_RETURN;
     if (callback->part == kThink) s.thought_alone[cpu->gpr[4]] = !base;
-    if (callback->part == kThink && !base && callback->kind != nullptr) queue_footsteps(*callback->kind, cpu->gpr[4]);
+    if (callback->part == kThink && !base) queue_footsteps(*callback->kind, cpu->gpr[4]);
     if (s.queued.empty()) return base ? YMOD_ORIGINAL : YMOD_RETURN;
     auto chain = std::make_shared<Chain>();
     chain->actions = std::move(s.queued);

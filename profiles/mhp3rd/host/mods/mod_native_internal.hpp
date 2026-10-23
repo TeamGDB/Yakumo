@@ -123,7 +123,8 @@ struct State {
     p3rd::GameWatch game; // overlays leaving, quests beginning and ending
     bool started{};
     bool call_pending{};
-    bool replacing{}; // inside a REPLACE callback: the only place guest calls work
+    bool replacing{};    // inside a REPLACE callback: the only place guest calls work
+    ymod_mod *calling{}; // the mod whose REPLACE callback runs
 };
 
 State &state();

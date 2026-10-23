@@ -708,10 +708,11 @@ const ymod_memory kMemory{
 const ymod_events kEvents{1u, sizeof(ymod_events), &events_subscribe, &events_unsubscribe};
 
 void fire(int event, std::uint32_t value) {
-    // A callback may subscribe more: iterate over a copy.
+    // A callback may subscribe more, or stop a mod: iterate over a copy, and
+    // skip a mod that stopped in an earlier callback.
     const std::vector<Subscriber> subscribers = state().subscribers;
     for (const Subscriber &s : subscribers)
-        if (s.event == event) s.callback(event, value, s.user);
+        if (s.event == event && runs(s.mod)) s.callback(event, value, s.user);
 }
 
 const ymod_files kFiles{1u, sizeof(ymod_files), &files_replace, &files_read_original};

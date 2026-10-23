@@ -75,7 +75,12 @@ typedef struct ymod_host {
 } ymod_host;
 
 /* Exported by every native mod. Returns 0 when the mod is ready, anything
- * else to refuse to run (it is then shown as failed and not called again). */
+ * else to refuse to run: it is then shown as failed and nothing of it is
+ * called again. Its hooks, events, panels, overlays and published services
+ * go; what it added to the game before (kinds, quests, weapons, armor,
+ * areas, table rows, replaced files, memory it allocated) stays for the
+ * session, as the game's tables cannot shrink, and its kinds' monsters
+ * behave as their base's. */
 typedef int (*ymod_main_fn)(const ymod_host *host, ymod_mod *mod);
 #define YAKUMO_MOD_MAIN_NAME "yakumo_mod_main"
 

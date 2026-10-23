@@ -63,6 +63,11 @@ void withdraw(struct ::ymod_mod *mod);
 
 // How many native mods run now.
 [[nodiscard]] std::size_t running();
+// Whether a mod is still called: not once it refused to start, failed or was
+// withdrawn. What it added to the game stays (docs/MODDING.md, "Native
+// mods"), but nothing of its code runs again. Null, for Yakumo's own users
+// of the API, always runs.
+[[nodiscard]] bool runs(const struct ::ymod_mod *mod);
 
 // Forgets everything, so tests can start again. Libraries stay loaded.
 void reset_for_tests();
