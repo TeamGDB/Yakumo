@@ -174,6 +174,13 @@ A native mod adds an armor piece with `yakumo.equipment`'s `add_armor` ([MODDING
 
 The look comes from the hunter record (`LAYERED_ARMOR.md`), the stats from the character's worn pieces; the game copies one to the other when it loads the character or the equipment changes at the box. Checked in game (macOS) with a test mod's head piece (the stats of head 1, the models of the Silver Sol helm read from the disc): it got id 256, `armor.head` moved with 257 rows, one was put in the equipment box, and with its id written in both records the quest's hunter loaded the mod's file for its head and drew it. Not checked: wearing it through the box's menu, a model of a mod's own, the male model, and the second file function for another kind of hunter object (`0x088F46D8`), which a mod's model does not reach.
 
+An armor file the game takes, as its own pieces are made and as the Fatalis mod's set from Freedom Unite showed when each piece was worn in the arena's camp (macOS, 2026-10-23):
+
+- **Its skeleton holds the part's bones, named, in the hunter's order:** a chest the whole hunter (21 bones, NULL, COG, BD-00, BD-01, AL-00 to AL-03, AR-00 to AR-03, NK-00, HD-00, WST-00, LL-00 to LL-02, LR-00 to LR-02); arms BD-01, AL-00 to AL-03, AR-00 to AR-03; a waist BD-00, WST-00, LL-00, LL-01, LR-00, LR-01; legs WST-00, LL-00 to LL-02, LR-00 to LR-02; a head BD-01, NK-00, HD-00. Legs holding the whole hunter stopped the game; a chest holding 10 of the 21 bones drew stretched up to the sky, and drew right with the others added.
+- **Each bone at the hunter's offset from its parent:** arms with another rest pose stopped the whole scene drawing.
+- **A vertex group keeps to one side:** groups holding both arms' bones stopped the game.
+- **Small groups:** the game's arms use at most 2 bones a group (its chests up to 4); arms in groups of 3 stopped the scene drawing, in groups of 2 they drew.
+
 ## Not verified
 
 - Weapon mods: the formula was checked against the files the game read, and
