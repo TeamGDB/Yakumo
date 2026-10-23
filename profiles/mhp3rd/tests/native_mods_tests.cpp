@@ -1454,6 +1454,14 @@ void test_monsters(psprecomp::Runtime &runtime) {
     runtime.cpu().gpr[3] = 59u;
     check(seen == 58u && call(runtime, 0x0A1BB304u, 0u) == 59u,
         "monsters: the base's kind check sees the base for the new kind only");
+    // A Tigrex as a quest's second monster: its AI, em058m1, in the second
+    // slot, with the same check at the same offset.
+    place_overlay(runtime, 0x0A1EFE80u, "em058m1.ovl", 0x00030000u);
+    store(runtime, 0x0A1F0184u, {0x00601021u, 0x03E00008u, 0u}); // addu v0, v1, zero; jr ra
+    mhp3rd::mods::native::overlay_loaded(runtime, 0x0A1EFE80u);
+    runtime.cpu().gpr[3] = 75u;
+    check(
+        call(runtime, 0x0A1F0184u, 0u) == 58u, "monsters: and so does the base's AI loaded in the second monster slot");
 
     // The Tigrex's behaviour hides materials: the new kind's model keeps them.
     store(runtime, 0x0A08FE8Cu, {0u, 0x03E00008u, 0u});
@@ -1594,6 +1602,32 @@ void test_monsters(psprecomp::Runtime &runtime) {
     runtime.memory().store32(kMonster, kBaseTable);
     check(call(runtime, 0x0A090AE0u, 0u) == kMonster && runtime.memory().load32(kMonster) == own,
         "monsters: every monster of the kind shares the kind's vtable");
+    // The base's AI in another monster slot: its own vtable, with its own
+    // functions there. A monster made with it gets a copy of that one.
+    constexpr std::uint32_t kSecondTable = 0x08B48000u, kSecondThink = 0x08B49000u;
+    for (std::uint32_t slot = 0; slot < 96u; ++slot)
+        runtime.memory().store32(kSecondTable + slot * 4u, runtime.memory().load32(kBaseTable + slot * 4u));
+    runtime.memory().store32(kSecondTable + 32u * 4u, kSecondThink);
+    store(runtime, kSecondThink, {0x24020008u, 0x03E00008u, 0u}); // v0 = 8
+    runtime.memory().store32(kMonster, kSecondTable);
+    (void)call(runtime, 0x0A090AE0u, 0u);
+    const std::uint32_t second_own = runtime.memory().load32(kMonster);
+    const std::uint32_t second_stub = runtime.memory().load32(second_own + 32u * 4u);
+    thought.answer = YMOD_CONTINUE;
+    const int calls_now = thought.calls;
+    check(second_own != own && second_own != kSecondTable && call(runtime, second_stub, kMonster) == 8u &&
+            thought.calls == calls_now + 1 && call(runtime, stub, kMonster) == 7u,
+        "monsters: a monster made with the base's vtable of another slot gets a copy of that one, leading to its "
+        "functions");
+    // Other code in the first slot since: the copy is made again from it.
+    runtime.memory().store32(kBaseTable + 40u * 4u, 0x08B4A000u);
+    runtime.memory().store32(kMonster, kBaseTable);
+    (void)call(runtime, 0x0A090AE0u, 0u);
+    const std::uint32_t remade = runtime.memory().load32(kMonster);
+    check(remade != own && remade != second_own && runtime.memory().load32(remade + 40u * 4u) == 0x08B4A000u &&
+            call(runtime, runtime.memory().load32(remade + 32u * 4u), kMonster) == 7u,
+        "monsters: a copy whose base vtable has changed since is made again");
+    runtime.memory().store32(kBaseTable + 40u * 4u, 0x08B43000u + 40u);
     runtime.memory().store8(kMonster + 0x62u, 58u);
     runtime.memory().store32(kMonster, kBaseTable);
     check(call(runtime, 0x0A090AE0u, 0u) == kMonster && runtime.memory().load32(kMonster) == kBaseTable,
@@ -2113,7 +2147,10 @@ void test_monsters(psprecomp::Runtime &runtime) {
     const int32_t unhooked_kind = service != nullptr ? service->add(mod, &unhooked) : -1;
     psprecomp::set_jit_enabled(true);
     check(unhooked_kind > 0 &&
-            reported("Monster test", "monster unhooked_fatalis: the base's kind check at 0x0A1BB304 cannot be hooked"),
+            reported("Monster test",
+                "monster unhooked_fatalis: the base's kind check at 0x0A1BB304 (em058m0) cannot be hooked") &&
+            reported("Monster test",
+                "monster unhooked_fatalis: the base's kind check at 0x0A1F0184 (em058m1) cannot be hooked"),
         "monsters: a kind's problems are on its mod's page");
     std::error_code ec;
     std::filesystem::remove_all(folder, ec);

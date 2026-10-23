@@ -7,6 +7,7 @@
 #include "mods/mod_native.hpp"
 
 #include "game/pack_file.hpp"
+#include "mhp3rd_profile.hpp"
 #include "overlays.hpp"
 
 #include "kernel/kernel.hpp"
@@ -109,19 +110,29 @@ constexpr GameKind kGameKinds[] = {
 constexpr std::uint8_t kGameKindCount = 75u;
 
 // What a base's behaviour does that a kind made from it needs handled. Traced
-// for the Tigrex's em058m0, which serves kinds 23 and 58 (docs/MONSTERS.md,
-// "AI overlays that know their kinds" and "Drawing").
+// for the Tigrex's AI, which serves kinds 23 and 58 (docs/MONSTERS.md, "AI
+// overlays that know their kinds" and "Drawing"). An AI comes linked once for
+// each monster slot it can load in: em058m0 in the first, em058m1 in the
+// second (a Tigrex that is a quest's second large monster), the same code
+// 0x34E80 further on. Its kind checks lie at the same offsets from each
+// overlay's load address.
 struct Behaviour {
     std::uint8_t kind{};
-    std::string_view overlay;
-    std::array<std::uint32_t, 4> kind_checks{}; // compare the kind (in v1) with 58
+    std::string_view ai;                        // its overlays' names before the slot: em058 for em058m0
+    std::uint32_t slots{};                      // the monster slots it has an overlay for: m0 to m<slots - 1>
+    std::array<std::uint32_t, 4> kind_checks{}; // from the overlay's load address: compare the kind (in v1) with 58
     std::uint32_t meshes{};                     // meshes it writes to by number
     bool hides_materials{};
 };
 constexpr Behaviour kBehaviours[] = {
-    {58u, "em058m0", {0x0A1BB304u, 0x0A1C0318u, 0x0A1C0500u, 0x0A1C2848u}, 16u, true},
-    {23u, "em058m0", {0x0A1BB304u, 0x0A1C0318u, 0x0A1C0500u, 0x0A1C2848u}, 16u, true},
+    {58u, "em058", 2u, {0x304u, 0x5318u, 0x5500u, 0x7848u}, 16u, true},
+    {23u, "em058", 2u, {0x304u, 0x5318u, 0x5500u, 0x7848u}, 16u, true},
 };
+// The monster slots AI overlays load in (em*m0 to em*m3), among the overlay
+// slots.
+constexpr std::size_t kFirstMonsterSlot = 3u;
+constexpr std::uint32_t kMonsterSlots = 4u;
+static_assert(kOverlaySlots[kFirstMonsterSlot] == 0x0A1BB000u && kOverlaySlots[kFirstMonsterSlot + 1u] == 0x0A1EFE80u);
 
 // Tables by kind in game_task, whose base row an added kind takes.
 constexpr std::string_view kKindTables[] = {
@@ -160,7 +171,7 @@ struct Added;
 struct Callback {
     PartFn fn{};
     void *user{};
-    std::uint32_t base{}; // the base's function for the part, once the kind's vtable is made
+    std::uint32_t base{}; // in a vtable's stub: the base's function for the part
     std::size_t part{};
     Added *kind{};
 };
@@ -253,8 +264,16 @@ struct Chain {
 struct Added {
     std::string id;
     const void *owner{};
-    std::array<Callback, kPartSlots.size()> parts{};
-    std::uint32_t vtable{}; // its own copy of the base's, once one of its monsters is made
+    std::array<Callback, kPartSlots.size()> parts{}; // as behave() gave them
+    // Its own copies of the base's vtable, made as its monsters are, by the
+    // base vtable's address: the base's AI has a vtable in each monster slot
+    // it loads in, with the functions of that slot's overlay.
+    struct Vtable {
+        std::uint32_t copy{};
+        std::array<Callback, kPartSlots.size()> stubs{}; // the hooks' user data; base set for each stub made
+        std::vector<ymod_hook> hooks;
+    };
+    std::map<std::uint32_t, Vtable> vtables;
     std::uint8_t kind{};
     std::uint8_t base{};
     const Behaviour *behaviour{};
@@ -631,8 +650,82 @@ int act_follows_think(ymod_cpu *cpu, void *) {
     return found != state().thought_alone.end() && found->second ? YMOD_RETURN : YMOD_ORIGINAL;
 }
 
+// Whether `own` is still a copy of the vtable at `base`: every slot the same,
+// and each stub made leading to the base's function for its part.
+bool still_copy(const psprecomp::GuestMemory &memory, const Added::Vtable &own, std::uint32_t base) {
+    for (std::uint32_t slot = 0; slot < kVtableSlots; ++slot) {
+        const std::uint32_t word = memory.load32(base + slot * 4u);
+        const auto part = std::find(kPartSlots.begin(), kPartSlots.end(), slot);
+        const Callback *stub =
+            part != kPartSlots.end() ? &own.stubs[static_cast<std::size_t>(part - kPartSlots.begin())] : nullptr;
+        if (stub != nullptr && stub->base != 0u ? stub->base != word : memory.load32(own.copy + slot * 4u) != word)
+            return false;
+    }
+    return true;
+}
+
+// The kind's copy of the base vtable at `base`, made the first time one of its
+// monsters is made with it, and made again when other code has come to the
+// base's slot since. Each part the mod gives gets a stub in the copy, a `j`
+// to the base's function, hooked to run the mod's first.
+const Added::Vtable *vtable_for(Added &added, std::uint32_t base) {
+    State &s = state();
+    auto &memory = s.runtime->memory();
+    // A monster made from one of the kind's own copies keeps it.
+    for (const auto &[from, own] : added.vtables)
+        if (own.copy == base) return &own;
+    if (!memory.contains(base, kVtableSlots * 4u)) {
+        problem(added.owner, added.id,
+            "its behaviour cannot be given to its monsters: the base's vtable at " + psprecomp::hex32(base) +
+                " is not in memory");
+        return nullptr;
+    }
+    const ymod_hooks *h = hooks();
+    if (const auto found = added.vtables.find(base); found != added.vtables.end()) {
+        if (still_copy(memory, found->second, base)) return &found->second;
+        // Other code in the base's slot: its stubs' hooks go. The copy's memory
+        // stays, for a monster that may still point at it.
+        for (const ymod_hook hook : found->second.hooks)
+            if (h != nullptr) h->remove(s.host, hook);
+        added.vtables.erase(found);
+    }
+    const auto *memory_service = static_cast<const ymod_memory *>(native::host()->service(s.host, YMOD_MEMORY, 1u));
+    const std::uint32_t size = kVtableSlots * 4u + 8u * kPartSlots.size();
+    const std::uint32_t copy = memory_service != nullptr ? memory_service->allocate(s.host, size, 16u) : 0u;
+    if (copy == 0u) {
+        problem(added.owner, added.id, "its behaviour cannot be given to its monsters: no guest memory for its vtable");
+        return nullptr;
+    }
+    for (std::uint32_t slot = 0; slot < kVtableSlots; ++slot)
+        memory.store32(copy + slot * 4u, memory.load32(base + slot * 4u));
+    Added::Vtable &own = added.vtables[base];
+    own.copy = copy;
+    for (std::size_t part = 0; part < kPartSlots.size(); ++part) {
+        const bool follows =
+            (part == kAct || part == kEffects) && added.parts[part].fn == nullptr && added.parts[kThink].fn != nullptr;
+        if (added.parts[part].fn == nullptr && !follows) continue;
+        const std::uint32_t stub = copy + kVtableSlots * 4u + 8u * static_cast<std::uint32_t>(part);
+        const std::uint32_t base_function = memory.load32(base + kPartSlots[part] * 4u);
+        memory.store32(stub, 0x08000000u | ((base_function >> 2u) & 0x03FFFFFFu)); // j base_function
+        memory.store32(stub + 4u, 0u);
+        memory.store32(copy + kPartSlots[part] * 4u, stub);
+        own.stubs[part] = added.parts[part];
+        own.stubs[part].part = part;
+        own.stubs[part].kind = &added;
+        own.stubs[part].base = base_function;
+        const ymod_hook hook = h != nullptr ? h->function(s.host, nullptr, stub, YMOD_HOOK_REPLACE,
+                                                  follows ? &act_follows_think : &part_called, &own.stubs[part])
+                                            : 0u;
+        if (hook == 0u)
+            problem(added.owner, added.id, "a part of its behaviour cannot be hooked");
+        else
+            own.hooks.push_back(hook);
+    }
+    return &own;
+}
+
 // A monster just made: one of a kind with parts of its own gets the kind's
-// vtable (made from the base's the first time).
+// copy of the vtable it was made with.
 int monster_made(ymod_cpu *cpu, void *) {
     State &s = state();
     Runtime *runtime = s.runtime;
@@ -645,37 +738,7 @@ int monster_made(ymod_cpu *cpu, void *) {
         if (added.kind != number) continue;
         if (std::none_of(added.parts.begin(), added.parts.end(), [](const Callback &c) { return c.fn != nullptr; }))
             return YMOD_CONTINUE;
-        const std::uint32_t base_vtable = memory.load32(monster);
-        if (added.vtable == 0u) {
-            const auto *memory_service =
-                static_cast<const ymod_memory *>(native::host()->service(s.host, YMOD_MEMORY, 1u));
-            const std::uint32_t size = kVtableSlots * 4u + 8u * kPartSlots.size();
-            const std::uint32_t copy = memory_service != nullptr ? memory_service->allocate(s.host, size, 16u) : 0u;
-            if (copy == 0u || !memory.contains(base_vtable, kVtableSlots * 4u)) {
-                problem(added.owner, added.id, "its behaviour cannot be given to its monsters");
-                return YMOD_CONTINUE;
-            }
-            for (std::uint32_t slot = 0; slot < kVtableSlots; ++slot)
-                memory.store32(copy + slot * 4u, memory.load32(base_vtable + slot * 4u));
-            const ymod_hooks *h = hooks();
-            for (std::size_t part = 0; part < kPartSlots.size(); ++part) {
-                const bool follows = (part == kAct || part == kEffects) && added.parts[part].fn == nullptr &&
-                    added.parts[kThink].fn != nullptr;
-                if (added.parts[part].fn == nullptr && !follows) continue;
-                const std::uint32_t stub = copy + kVtableSlots * 4u + 8u * static_cast<std::uint32_t>(part);
-                const std::uint32_t base_function = memory.load32(base_vtable + kPartSlots[part] * 4u);
-                memory.store32(stub, 0x08000000u | ((base_function >> 2u) & 0x03FFFFFFu)); // j base_function
-                memory.store32(stub + 4u, 0u);
-                memory.store32(copy + kPartSlots[part] * 4u, stub);
-                added.parts[part].base = base_function;
-                if (h == nullptr ||
-                    h->function(s.host, nullptr, stub, YMOD_HOOK_REPLACE, follows ? &act_follows_think : &part_called,
-                        &added.parts[part]) == 0u)
-                    problem(added.owner, added.id, "a part of its behaviour cannot be hooked");
-            }
-            added.vtable = copy;
-        }
-        memory.store32(monster, added.vtable);
+        if (const Added::Vtable *own = vtable_for(added, memory.load32(monster))) memory.store32(monster, own->copy);
         return YMOD_CONTINUE;
     }
     return YMOD_CONTINUE;
@@ -837,7 +900,13 @@ std::optional<std::uint8_t> add(Runtime &runtime, const Spec &spec, std::string 
     else
         problem(spec.owner, spec.id, "its footsteps' dust keeps no size (" + reason + ")");
 
-    Added added{spec.id, spec.owner, {}, 0u, kind_number, *base, behaviour, {}, {kind_number, *base}};
+    Added added;
+    added.id = spec.id;
+    added.owner = spec.owner;
+    added.kind = kind_number;
+    added.base = *base;
+    added.behaviour = behaviour;
+    added.check_kind = {kind_number, *base};
     added.effects = effects_of(pack);
     const std::array<std::vector<std::uint8_t>, 3> files{std::move(pack), spec.geometry, spec.motions};
     for (std::size_t i = 0; i < 3u; ++i) {
@@ -852,10 +921,17 @@ std::optional<std::uint8_t> add(Runtime &runtime, const Spec &spec, std::string 
     if (behaviour != nullptr) {
         native::attach(runtime);
         const ymod_hooks *h = hooks();
-        const std::string overlay(behaviour->overlay);
-        for (const std::uint32_t at : behaviour->kind_checks)
-            if (h == nullptr || h->instruction(s.host, overlay.c_str(), at, &check_kind, kept.check_kind.data()) == 0u)
-                problem(spec.owner, spec.id, "the base's kind check at " + psprecomp::hex32(at) + " cannot be hooked");
+        // In each slot the base's AI can load in, at its overlay there.
+        for (std::uint32_t slot = 0; slot < behaviour->slots && slot < kMonsterSlots; ++slot) {
+            const std::string overlay = std::string(behaviour->ai) + "m" + std::to_string(slot);
+            for (const std::uint32_t offset : behaviour->kind_checks) {
+                const std::uint32_t at = kOverlaySlots[kFirstMonsterSlot + slot] + offset;
+                if (h == nullptr ||
+                    h->instruction(s.host, overlay.c_str(), at, &check_kind, kept.check_kind.data()) == 0u)
+                    problem(spec.owner, spec.id,
+                        "the base's kind check at " + psprecomp::hex32(at) + " (" + overlay + ") cannot be hooked");
+            }
+        }
         if (behaviour->hides_materials && !s.draw_hooked && h != nullptr) {
             if (runtime.memory().load32(kMaterialAlpha) != kMaterialAlphaWord)
                 problem(spec.owner, spec.id, "the model draw is not as traced; the base's hidden parts stay hidden");
@@ -885,7 +961,7 @@ bool behave(
     for (Added &k : s.kinds)
         if (k.kind == number) added = &k;
     if (added == nullptr || added->owner != owner) return fail("the kind was not added by this mod");
-    if (added->vtable != 0u) return fail("its monsters have been made already; give behaviour at start");
+    if (!added->vtables.empty()) return fail("its monsters have been made already; give behaviour at start");
     added->parts[static_cast<std::size_t>(part)] = {fn, user, 0u, static_cast<std::size_t>(part), added};
     s.runtime = &runtime;
     if (!s.made_hooked) {
