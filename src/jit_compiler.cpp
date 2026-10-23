@@ -788,7 +788,15 @@ private:
         UniCompiler &uc = *uc_;
         switch (d.kind) {
         case OpcodeKind::Nop:
+            return;
         case OpcodeKind::Cache:
+            // An instruction cache line invalidated: the shared definition
+            // drops compiled code whose bytes changed there, and this code,
+            // which may be among it, leaves to run what follows as it is now.
+            // In a delay slot it leaves with its branch.
+            if (!semantics::invalidates_instructions(d)) return;
+            emit_shared(d, pc, out);
+            if (!in_slot_) exit_to(pc + 4u);
             return;
         case OpcodeKind::Addiu: {
             Gp v = read(d.rs);
@@ -1047,7 +1055,9 @@ private:
     // A delay slot, with its instruction hook if it has one.
     void emit_slot(const Node &node, std::uint32_t pc, Compiled &out) {
         if (hooked_.contains(pc + 4u)) emit_hook(pc + 4u);
+        in_slot_ = true;
         emit_simple(node.slot, pc + 4u, out);
+        in_slot_ = false;
     }
 
     // A jump or branch with its delay slot. Operands are read before the slot
@@ -1185,6 +1195,7 @@ private:
     std::uint32_t written_{}; // ... that the function may change
     std::size_t shared_{};
     std::uint32_t pc_{}; // the instruction being emitted, for the memory helpers' messages
+    bool in_slot_{};     // emitting a delay slot
     Errors errors_;
     // The emitter of compile(), kept here so the helpers can reach it.
     struct Emitter {

@@ -6,6 +6,7 @@
 
 #include "psprecomp/allegrex_context.hpp"
 #include "psprecomp/guest_memory.hpp"
+#include "psprecomp/jit.hpp"
 #include "psprecomp/runtime.hpp"
 
 #include <bit>
@@ -219,8 +220,14 @@ bool execute_simple(Runtime &rt, AllegrexContext &ctx, const DecodedInstruction 
     switch (d.kind) {
     case OpcodeKind::Nop:
         break;
-    // PSP CACHE is a hint against a cache the host mapping does not have.
+    // PSP CACHE is a hint against a cache the host mapping does not have,
+    // except where it invalidates an instruction cache line: code compiled
+    // from that line's old bytes goes, as after the kernel's icache calls.
     case OpcodeKind::Cache:
+        if (invalidates_instructions(d)) {
+            const std::uint32_t line = (rs + imm) & ~(kIcacheLine - 1u);
+            jit_memory_changed(rt, line, line + kIcacheLine);
+        }
         break;
     case OpcodeKind::Sync:
         memory.memory_barrier();

@@ -400,6 +400,43 @@ void preemption(Generator &g) {
             std::to_string(compiled_boundaries) + " scheduler boundaries) and computes what it did");
 }
 
+// Guest code that rewrites a function and invalidates its instruction cache
+// line (cache 0x08): the next call runs the new instruction, compiled or
+// interpreted alike.
+void self_modifying(Generator &g) {
+    std::vector<std::uint32_t> code = {
+        0x3C0808A0u, // lui t0, 0x08A0
+        0x35080100u, // ori t0, t0, 0x0100: the callee
+        0x3C092402u, // lui t1, 0x2402
+        0x35290063u, // ori t1, t1, 0x0063: addiu v0, zero, 0x63
+        0x0E280040u, // jal 0x08A00100: v0 = 5
+        0u,          // nop
+        0x0040A021u, // addu s4, v0, zero
+        0xAD090000u, // sw t1, 0(t0)
+        0xBD080000u, // cache 0x08, 0(t0)
+        0x0E280040u, // jal 0x08A00100: now v0 = 0x63
+        0u,          // nop
+    };
+    code.resize(0x100u / 4u, 0u);
+    // The program's own end is appended after the callee by start(): jump
+    // over the callee to it.
+    code[11] = 0x0A280047u; // j 0x08A0011C
+    code[12] = 0u;
+    code.push_back(0x24020005u); // 0x08A00100: addiu v0, zero, 5
+    code.push_back(0x03E00008u); // jr ra
+    code.push_back(0u);
+    code.push_back(0u);
+    code.push_back(0u);
+    code.push_back(0u);
+    code.push_back(0u); // 0x08A00118
+    const Setup setup = g.start(code);
+    compare(setup, "self-modifying code after an icache line invalidate");
+    const Outcome out = run(setup, true);
+    check(out.stopped_normally && out.ctx.gpr[20] == 5u && out.ctx.gpr[2] == 0x63u,
+        "self-modifying code: the compiled callee is dropped by cache 0x08 and the new instruction runs (v0 " +
+            psprecomp::hex32(out.ctx.gpr[2]) + ")");
+}
+
 // A loop around a call, as games write them: the function the JIT compiles
 // for the call's return address starts with the loop's backward branch.
 void loop_with_call(Generator &g) {
@@ -727,6 +764,7 @@ int main(int argc, char **argv) {
     branches(g);
     loop(g);
     preemption(g);
+    self_modifying(g);
     loop_with_call(g);
     calls(g);
     invalidation(g);

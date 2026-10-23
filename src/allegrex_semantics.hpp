@@ -22,6 +22,17 @@ namespace psprecomp::semantics {
 // slot runs.
 [[nodiscard]] bool evaluate_branch(const AllegrexContext &ctx, const DecodedInstruction &d) noexcept;
 
+// A CACHE that invalidates the instruction cache line at its address (its
+// operation, in rt, 8: the Allegrex's Hit Invalidate of the instruction
+// cache), whose lines are 64 bytes: code compiled from that line's bytes must
+// go if they changed. The other operations act on caches the host does not
+// have.
+inline constexpr std::uint32_t kIcacheHitInvalidate = 8u;
+inline constexpr std::uint32_t kIcacheLine = 64u;
+[[nodiscard]] constexpr bool invalidates_instructions(const DecodedInstruction &d) noexcept {
+    return d.kind == OpcodeKind::Cache && d.rt == kIcacheHitInvalidate;
+}
+
 // Executes one instruction that does not transfer control. Returns false when
 // the runtime stopped or an unsupported-instruction hook asked for a retry;
 // ctx.pc is then the instruction's address and the caller returns to the
