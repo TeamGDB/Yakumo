@@ -420,25 +420,17 @@ struct TestServer {
             return;
         }
         port = bound.port();
-        net::set_nonblocking(listener);
         thread = std::thread([this] {
-            while (!stop.load()) {
-                net::PollEntry poll{};
-                poll.fd = listener;
-                poll.events = POLLIN;
-                if (net::poll_sockets(&poll, 1u, 100) <= 0) continue;
-                const net::Socket peer = ::accept(listener, nullptr, nullptr);
-                if (peer == net::kNoSocket) continue;
-                char buffer[4096];
-                for (;;) {
-                    const int count = ::recv(peer, buffer, static_cast<int>(sizeof(buffer)), 0);
-                    if (count <= 0) break;
-                    std::lock_guard lock(mutex);
-                    received.append(buffer, static_cast<std::size_t>(count));
-                }
-                net::close_socket(peer);
-                break;
+            const net::Socket peer = ::accept(listener, nullptr, nullptr);
+            if (peer == net::kNoSocket) return;
+            char buffer[4096];
+            for (;;) {
+                const int count = ::recv(peer, buffer, static_cast<int>(sizeof(buffer)), 0);
+                if (count <= 0) break;
+                std::lock_guard lock(mutex);
+                received.append(buffer, static_cast<std::size_t>(count));
             }
+            net::close_socket(peer);
         });
     }
 
@@ -464,6 +456,11 @@ void test_reporter_network() {
     lobby::test::configure(true, "127.0.0.1:" + std::to_string(server.port), "");
     lobby::test::queue({lobby::report_line(sample(), 1000), lobby::leave_line("02:00:00:00:00:01", "", 1001)});
     const bool sent = wait_until([&] { return lobby::status().reports_sent >= 2u; });
+    if (!sent) {
+        const lobby::Status current = lobby::status();
+        std::cerr << "reporter: enabled=" << current.enabled << " connected=" << current.connected
+                  << " sent=" << current.reports_sent << " error=" << current.last_error << '\n';
+    }
     check(sent, "the reporter sends queued lines");
     const bool received = wait_until([&] {
         const std::string text = server.text();
