@@ -59,6 +59,14 @@ bool logged(const std::string &text) {
     return false;
 }
 
+// A line that starts with `start`, as a problem: for messages that end with
+// what the platform says.
+bool logged_starting(const std::string &start) {
+    for (const auto &report : mhp3rd::mods::native::reports())
+        if (report.line.starts_with(start) && report.line.size() > start.size() && report.problem) return true;
+    return false;
+}
+
 // On the page of the mod named `mod`, as a problem.
 bool reported(const std::string &mod, const std::string &text) {
     for (const auto &report : mhp3rd::mods::native::reports())
@@ -2347,8 +2355,7 @@ int main() {
         {{"bad", "/nonexistent/library.so", {}}, {"test", built(MHP3RD_NATIVE_TEST_MOD), {}},
             {"template", built(MHP3RD_TEMPLATE_TEST_MOD), {}}, {"future", built(MHP3RD_FUTURE_TEST_MOD), {}}});
     symbols::reset_for_tests();
-    check(logged("cannot load library.so: ") || mhp3rd::mods::native::reports().front().problem,
-        "native: a library that cannot be loaded is reported");
+    check(logged_starting("cannot load library.so: "), "native: a library that cannot be loaded is reported, and why");
     check(logged("started"), "native: the test mod starts");
     check(logged("needs a newer Yakumo (mod interface 2, this Yakumo has 1)"),
         "native: a mod made for a newer interface is refused before it runs");
