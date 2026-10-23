@@ -127,6 +127,28 @@ struct BodyCapsule {
 [[nodiscard]] bool body_shapes(
     const void *owner, std::uint8_t kind, std::span<const BodyCapsule> capsules, std::string *why = nullptr);
 
+// A footstep: in motion `motion`, at its frame `frame`, joint `joint` comes
+// down, raising the dust and making the sound of a step of size `size` (the
+// game's kinds of step for large monsters, 0 to 9; the Tigrex's use 0, 1, 2,
+// 4 and 5) on
+// whatever ground the monster stands on. The game keeps them in tables by
+// motion slot that a monster's sounds-and-effects part plays
+// (docs/MONSTERS.md, "A monster's footsteps").
+struct Footstep {
+    std::uint16_t motion{};
+    float frame{};
+    std::uint16_t joint{};
+    std::uint16_t size{};
+};
+inline constexpr std::size_t kMostFootsteps = 256u;
+inline constexpr std::uint16_t kFootstepSizes = 10u;
+// Gives a kind a mod added its own footsteps: after each frame its mod's
+// THINK did alone, the game plays those of the motion playing. False when the
+// kind is not the mod's, there are none or more than kMostFootsteps, or one
+// is not usable (a motion past 999, a size past 9).
+[[nodiscard]] bool footsteps(
+    const void *owner, std::uint8_t kind, std::span<const Footstep> steps, std::string *why = nullptr);
+
 // During a part of behaviour (inside its fn): queues the game's motion setter
 // for `monster`, carried out once fn returns. False outside a part.
 [[nodiscard]] bool play_motion(std::uint32_t monster, std::uint16_t motion, std::uint32_t blend);

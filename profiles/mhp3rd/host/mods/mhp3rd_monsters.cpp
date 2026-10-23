@@ -126,6 +126,8 @@ constexpr Behaviour kBehaviours[] = {
 // Tables by kind in game_task, whose base row an added kind takes.
 constexpr std::string_view kKindTables[] = {
     "monster.kinds", "monster.files", "monster.constructors", "monster.sizes", "monster.carves"};
+// A float per kind in the executable, the size of its footsteps' dust.
+constexpr std::string_view kStepScales = "monster.step_scales";
 // Tables by model set (from 1) in the executable: its three files.
 constexpr std::string_view kModelTables[] = {"monster.models", "monster.models.second", "monster.models.third"};
 
@@ -209,6 +211,17 @@ constexpr std::uint32_t kLastSphere = 0xFFFFu; // the joint that ends a shape
 // capsule), part u16, zone u32, 0, radius, from x/y/z, to x/y/z), ended by
 // 0xFFFF in every u16 and the zone.
 constexpr std::array<std::uint32_t, 2> kBodyLists{0x1Cu, 0x20u};
+// game_sub's player of a monster's motion events (0x0A01476C): seven tables
+// (three of sounds by ground, footsteps, sounds whatever the ground, a row per
+// motion, a u16 per motion slot naming its row), the monster, and flags on the
+// stack. A row (16 bytes): u16 starts in the five event tables, then a u8
+// count for each from byte 10. A footstep (12 bytes): u32 motion slot, f32
+// frame, u16 joint, u16 size.
+constexpr std::uint32_t kMotionEvents = 0x0A01476Cu;
+constexpr std::array<std::uint32_t, 2> kMotionEventsWords{0x27BDFFD0u, 0x93A30030u};
+constexpr std::uint32_t kEventSlots = 1000u; // the player reads the index for slots below this
+constexpr std::uint32_t kEventRow = 16u;
+constexpr std::uint32_t kFootstepSize = 12u;
 constexpr std::uint32_t kCapsuleSize = 44u;
 // The monster's body (docs/MONSTERS.md, "A monster's body").
 constexpr std::uint32_t kPosition = 0x80u; // x, y, z as floats
@@ -250,8 +263,12 @@ struct Added {
     std::map<std::uint32_t, std::vector<HitSphere>> shapes; // by the base's shape number
     std::vector<BodyCapsule> body;                          // its own body capsules, or none for the base's
     std::map<std::uint32_t, std::pair<std::uint32_t, std::uint32_t>> rows; // its own rows: row -> {like, shape}
-    std::map<std::uint32_t, std::uint32_t> kind_data;                      // the base's kind data -> the kind's copy
-    std::vector<bool> effects;                                             // which effect numbers its pack has
+    std::vector<Footstep> footsteps;                                       // by motion, in order
+    struct Events {
+        std::uint32_t index{}, rows{}, steps{}, none{}; // in guest memory, once made
+    } events;
+    std::map<std::uint32_t, std::uint32_t> kind_data; // the base's kind data -> the kind's copy
+    std::vector<bool> effects;                        // which effect numbers its pack has
 };
 
 struct Shown {
@@ -506,6 +523,71 @@ void give_kind_data(Added &added, std::uint32_t monster) {
     if (copy != 0u) memory.store32(monster + kKindData, copy);
 }
 
+// The tables of a kind's footsteps in guest memory, made the first time: the
+// index (a u16 per motion slot, 0xFFFF for none), a row per motion with
+// footsteps, and the footsteps; the other event tables are empty.
+bool footstep_tables(Added &added) {
+    State &s = state();
+    if (added.events.index != 0u || added.footsteps.empty()) return added.events.index != 0u;
+    std::vector<std::uint16_t> motions;
+    for (const Footstep &f : added.footsteps)
+        if (motions.empty() || motions.back() != f.motion) motions.push_back(f.motion);
+    const std::uint32_t index_size = kEventSlots * 2u;
+    const auto rows_size = static_cast<std::uint32_t>(motions.size()) * kEventRow;
+    const auto steps_size = static_cast<std::uint32_t>(added.footsteps.size()) * kFootstepSize;
+    const auto *memory_service = static_cast<const ymod_memory *>(native::host()->service(s.host, YMOD_MEMORY, 1u));
+    const std::uint32_t at = memory_service != nullptr
+        ? memory_service->allocate(s.host, index_size + rows_size + steps_size + kEventRow, 16u)
+        : 0u;
+    if (at == 0u) {
+        std::cerr << "[mods] " << added.id << ": its footsteps cannot be given\n";
+        added.footsteps.clear();
+        return false;
+    }
+    auto &memory = s.runtime->memory();
+    const std::uint32_t rows = at + index_size, steps = rows + rows_size;
+    for (std::uint32_t slot = 0; slot < kEventSlots; ++slot) memory.store16(at + 2u * slot, 0xFFFFu);
+    std::uint32_t first = 0;
+    for (std::size_t r = 0; r < motions.size(); ++r) {
+        std::uint32_t count = 0;
+        while (first + count < added.footsteps.size() && added.footsteps[first + count].motion == motions[r]) ++count;
+        const std::uint32_t row = rows + static_cast<std::uint32_t>(r) * kEventRow;
+        for (std::uint32_t word = 0; word < kEventRow; word += 4u) memory.store32(row + word, 0u);
+        memory.store16(row + 6u, static_cast<std::uint16_t>(first));
+        memory.store8(row + 13u, static_cast<std::uint8_t>(count));
+        memory.store16(at + 2u * motions[r], static_cast<std::uint16_t>(r));
+        first += count;
+    }
+    for (std::size_t i = 0; i < added.footsteps.size(); ++i) {
+        const Footstep &f = added.footsteps[i];
+        const std::uint32_t e = steps + static_cast<std::uint32_t>(i) * kFootstepSize;
+        memory.store32(e, f.motion);
+        memory.store32(e + 4u, std::bit_cast<std::uint32_t>(f.frame));
+        memory.store16(e + 8u, f.joint);
+        memory.store16(e + 10u, f.size);
+    }
+    // An empty table for the four kinds of event a kind does not give.
+    for (std::uint32_t word = 0; word < kEventRow; word += 4u) memory.store32(steps + steps_size + word, 0u);
+    added.events = {at, rows, steps, steps + steps_size};
+    return true;
+}
+
+// After a Think its mod did alone: the footsteps of the motion playing, as
+// the base's sounds-and-effects part (which does not run then) plays its own.
+void queue_footsteps(Added &added, std::uint32_t monster) {
+    State &s = state();
+    if (added.footsteps.empty() || s.runtime == nullptr) return;
+    auto &memory = s.runtime->memory();
+    for (std::size_t i = 0; i < kMotionEventsWords.size(); ++i)
+        if (memory.load32(kMotionEvents + 4u * static_cast<std::uint32_t>(i)) != kMotionEventsWords[i]) return;
+    if (!footstep_tables(added)) return;
+    const Added::Events &e = added.events;
+    Action action{kMotionEvents, {e.none, e.none, e.none, e.steps}};
+    action.more = {e.none, e.rows, e.index, monster};
+    action.frame = {0u}; // the flags: footsteps and sounds both
+    s.queued.push_back(std::move(action));
+}
+
 int part_called(ymod_cpu *cpu, void *user) {
     State &s = state();
     const auto *callback = static_cast<const Callback *>(user);
@@ -516,6 +598,7 @@ int part_called(ymod_cpu *cpu, void *user) {
     s.in_part = false;
     const bool base = result != YMOD_RETURN;
     if (callback->part == kThink) s.thought_alone[cpu->gpr[4]] = !base;
+    if (callback->part == kThink && !base && callback->kind != nullptr) queue_footsteps(*callback->kind, cpu->gpr[4]);
     if (s.queued.empty()) return base ? YMOD_ORIGINAL : YMOD_RETURN;
     auto chain = std::make_shared<Chain>();
     chain->actions = std::move(s.queued);
@@ -734,6 +817,12 @@ std::optional<std::uint8_t> add(Runtime &runtime, const Spec &spec, std::string 
         if (!at) return fail("table " + std::string(kModelTables[i]) + " cannot grow: " + reason);
         model_rows[i] = *at + (kind_number - 1u) * 2u;
     }
+    // The size of its footsteps' dust: the base's. Not fatal: past the
+    // table's rows a footstep's dust takes the next table's words.
+    if (std::string reason; const auto steps = tables::extend(runtime, kStepScales, kind_number + 1u, &reason))
+        runtime.memory().store32(*steps + 4u * kind_number, runtime.memory().load32(*steps + 4u * *base));
+    else
+        std::cerr << "[mods] " << spec.id << ": its footsteps' dust keeps no size (" << reason << ")\n";
 
     Added added{spec.id, spec.owner, {}, 0u, kind_number, *base, behaviour, {}, {kind_number, *base}};
     added.effects = effects_of(pack);
@@ -832,6 +921,27 @@ bool attack_row(const void *owner, std::uint8_t number, std::uint32_t row, std::
     if (shape >= kShapes) return fail("no such attack shape");
     added->rows[row] = {like, shape};
     added->kind_data.clear(); // made again with the new row
+    return true;
+}
+
+bool footsteps(const void *owner, std::uint8_t number, std::span<const Footstep> steps, std::string *why) {
+    const auto fail = [why](std::string reason) {
+        if (why != nullptr) *why = std::move(reason);
+        return false;
+    };
+    Added *added = nullptr;
+    for (Added &k : state().kinds)
+        if (k.kind == number) added = &k;
+    if (added == nullptr || added->owner != owner) return fail("the kind was not added by this mod");
+    if (steps.empty() || steps.size() > kMostFootsteps) return fail("it has none or more than 256");
+    for (const Footstep &f : steps)
+        if (f.motion >= kEventSlots || f.size >= kFootstepSizes || f.joint > 0xFFu || !std::isfinite(f.frame) ||
+            f.frame < 0.0f)
+            return fail("a footstep needs a motion below 1000, a frame, a joint and a size from 0 to 9");
+    added->footsteps.assign(steps.begin(), steps.end());
+    std::stable_sort(added->footsteps.begin(), added->footsteps.end(),
+        [](const Footstep &a, const Footstep &b) { return a.motion < b.motion; });
+    added->events = {}; // made again with these
     return true;
 }
 

@@ -399,6 +399,16 @@ typedef struct ymod_body_capsule {
     float radius;
     ymod_vec3 from, to;
 } ymod_body_capsule;
+/* A footstep (docs/MONSTERS.md, "A monster's footsteps"): in motion `motion`
+ * at its frame `frame`, joint `joint` comes down, raising dust and making the
+ * sound of a step of size `size` (the game's kinds of step, 0 to 9) on the
+ * ground the monster stands on. */
+typedef struct ymod_footstep {
+    int32_t motion;
+    float frame;
+    int32_t joint;
+    int32_t size;
+} ymod_footstep;
 typedef struct ymod_monsters {
     uint32_t version;
     uint32_t size;
@@ -483,6 +493,11 @@ typedef struct ymod_monsters {
      * no other uses. Call at start; it takes effect in monsters with a part
      * of behaviour. 0, or -1 (the reason is in the log). */
     int (*attack_row)(ymod_mod *mod, int32_t kind, int32_t row, int32_t like, int32_t shape);
+    /* Gives a kind this mod added its footsteps (1 to 256): after each frame
+     * its THINK did alone (YMOD_RETURN), the game plays those of the motion
+     * playing, as a monster's own sounds-and-effects part plays the base's.
+     * Call at start. 0, or -1 (the reason is in the log). */
+    int (*footsteps)(ymod_mod *mod, int32_t kind, const ymod_footstep *steps, int32_t count);
 } ymod_monsters;
 
 /* --------------------------------------------------------------------------

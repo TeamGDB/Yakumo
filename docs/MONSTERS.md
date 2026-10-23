@@ -184,6 +184,18 @@ An effect starts with game_sub's `0x0A00D7D8`: start(bank, effect, monster, join
 
 `game_task`'s maker (`0x0A090AE0`, make(manager, kind)) returns a new monster, with its kind at `+0x62` and its vtable at `+0`. The monsters service gives a kind a mod added a vtable of its own: a copy of the base's whose slot for each part the mod gives runs the mod's function first and then, unless it says it has done the part, the base's.
 
+### A monster's footsteps
+
+A monster's sounds-and-effects part (vtable slot 36; the Tigrex's is `0x0A1C2810`) calls game_sub's `0x0A01476C` with seven tables of the kind's, the monster, and flags on the stack. By the monster's motion slot (`+0x18E`), the last table (a u16 per slot) names a row of the sixth (16 bytes: u16 starts into the five event tables, then a u8 count for each from byte 10), and the player passes each event of the motion playing to its handler, which acts when the motion passes the event's frame:
+
+| Table | Event | What it does |
+| --- | --- | --- |
+| 1 to 3 | 60 bytes: u32 motion slot, f32 frame, u16 bank, u16 sound or effect, u16 joint, ... | One of the three by the ground under the monster (`+0x130`): its sound, or an effect when byte `+0x12` is not 0 (`0x0A01425C`) |
+| 4 | 12 bytes: u32 motion slot, f32 frame, u16 joint, u16 size of step (0 to 9) | A footstep (`0x0A0144FC`): the dust and splash the ground and size call for, two effects from a table of 3 grounds by size (`0x08A21B68` for large monsters), at the joint, as large as the kind's float in `0x08A21A40` |
+| 5 | 60 bytes, as 1 to 3 | Played whatever the ground |
+
+The Tigrex's (dumped from memory on a quest): footsteps in 4, the steps' sounds by ground in 1 to 3; its roar is not in them. `yakumo.monsters`'s `footsteps` builds a kind's index, rows and table 4 (the others empty) and, after each frame its mod's THINK did alone, queues the player with them. With Fatalis's footsteps (from Freedom Unite's em02, where it strikes the ground), its feet raised dust at the frames given: probes on the effect starter (`0x0A00E39C`) saw effects 95, 104 and 107 (steps of size 2, 4 and 5) at its feet's joints. The size table has a float for each of kinds 0 to 73, and the game's own reader in game_sub has no bound, so it is the game table `monster.step_scales`: a kind added takes its base's. The steps' sounds (tables 1 to 3, from the monster's sound bank) are not given yet.
+
 ## Not traced yet
 
 Other code compares a kind with 75 and leaves a larger one out: a byte per kind at `0x08971650` (read at `0x0882A6F4` and `0x0882A898`), a jump table at `0x08968E40` (`0x08813A94`), a jump on a byte at `+397` of an object (`0x0A1112A4`), a flag per kind kept inside a larger structure (`0x0A0B6B0C`), and the checks at `0x0894D3C8`, `0x0894D4B8`. What each one is for, and so what a new kind lacks without it, is not known yet. Neither are:

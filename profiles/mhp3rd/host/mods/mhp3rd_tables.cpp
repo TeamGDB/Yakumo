@@ -39,6 +39,10 @@ struct Definition {
     std::uint32_t most_rows; // what the index the game uses can reach
     std::vector<Reference> references;
     std::vector<Count> counts;
+    // The overlay whose code holds the references in overlay memory, when it
+    // is not the one the table is in (a table in the executable read by an
+    // overlay): they are there, and checked, only while it is loaded.
+    std::string code{};
 };
 
 // Traced on NPJB-40001 (docs/MONSTERS.md).
@@ -78,6 +82,11 @@ const std::vector<Definition> &definitions() {
         // of its object.
         {{"monster.sizes", "game_task", 0x0A19F2D8u, 4u, 75u}, 256u,
             {{0x0A08C8B4u, 0x3C030A1Au, 0x0A08C8BCu, 0x2463F2D8u}}, {{0x0A08C8A8u, 0x2CA2004Bu}}},
+        // A float per kind: the size of the dust a large monster's footsteps
+        // raise, read with no bound by game_sub's footstep player (0x0A0144FC),
+        // only there. A kind past its rows reads the next table's words.
+        {{"monster.step_scales", "", 0x08A21A40u, 4u, 74u}, 256u,
+            {{0x0A014710u, 0x3C0208A2u, 0x0A014714u, 0x24421A40u}}, {}, "game_sub"},
         // Four more files of each kind (u16, 0xFFFF for none), loaded with its
         // model set on a quest. Read by the executable and the quest overlay.
         {{"monster.files", "game_task", 0x0A1834F0u, 8u, 75u}, 256u,
@@ -208,7 +217,10 @@ bool loaded(psprecomp::Runtime &runtime, const Definition &d) {
 // Code in an overlay is only there, and only checked, while it is loaded;
 // the executable's is always there.
 bool present(psprecomp::Runtime &runtime, const Definition &d, std::uint32_t address) {
-    return address < 0x0A000000u || loaded(runtime, d);
+    if (address < 0x0A000000u) return true;
+    if (d.code.empty()) return loaded(runtime, d);
+    const std::optional<LoadedOverlay> overlay = overlay_at(runtime.memory(), address);
+    return overlay && iequals(overlay->name, d.code);
 }
 
 // What a reference holds: the game's words, the ones for the copy, or
@@ -256,6 +268,10 @@ void rewrite(psprecomp::Runtime &runtime, std::uint32_t address, std::uint32_t w
 void repoint(psprecomp::Runtime &runtime, const Definition &d, const Moved &m, std::uint32_t previous = 0u) {
     if (!d.table.overlay.empty() && loaded(runtime, d)) {
         if (const std::optional<LoadedOverlay> overlay = overlay_at(runtime.memory(), d.table.address))
+            (void)install_overlay_at(runtime, overlay->base);
+    }
+    if (!d.code.empty() && !d.references.empty() && present(runtime, d, d.references.front().hi)) {
+        if (const std::optional<LoadedOverlay> overlay = overlay_at(runtime.memory(), d.references.front().hi))
             (void)install_overlay_at(runtime, overlay->base);
     }
     const std::string who = "table " + d.table.name;
@@ -347,7 +363,8 @@ std::optional<std::uint32_t> extend(
 void overlay_loaded(psprecomp::Runtime &runtime) {
     for (auto &[name, m] : moved()) {
         const Definition *d = definition(name);
-        if (d == nullptr || d->table.overlay.empty() || m.address == 0u || !loaded(runtime, *d)) continue;
+        if (d == nullptr || (d->table.overlay.empty() && d->code.empty()) || m.address == 0u || !loaded(runtime, *d))
+            continue;
         if (!as_traced(runtime, *d, m)) {
             refuse(*d, m, "the overlay's code that reads it is not as traced");
             continue;

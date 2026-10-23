@@ -408,6 +408,26 @@ int monsters_body_shapes(ymod_mod *mod, int32_t kind, const ymod_body_capsule *c
     return -1;
 }
 
+int monsters_footsteps(ymod_mod *mod, int32_t kind, const ymod_footstep *steps, int32_t count) {
+    if (mod == nullptr || mod->failed) return -1;
+    std::vector<monsters::Footstep> list;
+    bool usable = true;
+    if (steps != nullptr && count > 0 && count <= static_cast<int32_t>(monsters::kMostFootsteps))
+        for (int32_t i = 0; i < count; ++i) {
+            const ymod_footstep &f = steps[i];
+            usable &= f.motion >= 0 && f.motion <= 0xFFFF && f.joint >= 0 && f.joint <= 0xFFFF && f.size >= 0 &&
+                f.size <= 0xFFFF;
+            list.push_back({static_cast<std::uint16_t>(f.motion), f.frame, static_cast<std::uint16_t>(f.joint),
+                static_cast<std::uint16_t>(f.size)});
+        }
+    std::string why = "no such kind";
+    if (!usable) why = "a footstep needs a motion below 1000, a frame, a joint and a size from 0 to 9";
+    if (usable && kind >= 0 && kind <= 0xFF && monsters::footsteps(mod, static_cast<std::uint8_t>(kind), list, &why))
+        return 0;
+    report(mod, "monster " + std::to_string(kind) + " is not given footsteps: " + why, true);
+    return -1;
+}
+
 int monsters_attack_row(ymod_mod *mod, int32_t kind, int32_t row, int32_t like, int32_t shape) {
     if (mod == nullptr || mod->failed) return -1;
     std::string why = "no such kind";
@@ -654,7 +674,7 @@ const ymod_monsters kMonsters{1u, sizeof(ymod_monsters), &monsters_add, &monster
     &monsters_behave, &monsters_play_motion, &monsters_motion_finished, &monsters_motion_frame, &monsters_at_frame,
     &monsters_position, &monsters_facing, &monsters_set_facing, &monsters_target, &monsters_aim,
     &monsters_turn_to_target, &monsters_move, &monsters_attack, &monsters_end_attack, &monsters_attack_shape,
-    &monsters_effect, &monsters_health, &monsters_body_shapes, &monsters_attack_row};
+    &monsters_effect, &monsters_health, &monsters_body_shapes, &monsters_attack_row, &monsters_footsteps};
 
 const ymod_memory kMemory{
     1u, sizeof(ymod_memory), &memory_read, &memory_write, &memory_allocate, &memory_release, &memory_code_changed};

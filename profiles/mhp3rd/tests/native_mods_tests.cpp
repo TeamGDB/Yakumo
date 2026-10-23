@@ -1115,6 +1115,7 @@ void test_monsters(psprecomp::Runtime &runtime) {
         return base;
     });
     runtime.memory().store32(0x0889EEC4u, 0x91030003u); // the draw's alpha read, as traced
+    runtime.memory().store32(0x08A21A40u + 58u * 4u, std::bit_cast<std::uint32_t>(1.5f)); // the Tigrex's step dust
     mhp3rd::mods::native::attach(runtime);
     const std::optional<std::uint8_t> fatalis =
         monsters::add(runtime, {"fatalis", "tigrex", mine, {'G', 'E'}, {'M', 'O'}, "test"}, &why);
@@ -1133,6 +1134,29 @@ void test_monsters(psprecomp::Runtime &runtime) {
     check(!monsters::add(runtime, {"fatalis", "tigrex", mine, {1u}, {1u}, "test"}, &why) &&
             why.find("taken") != std::string::npos,
         "monsters: an id already added is refused");
+    // Its footsteps' dust: the step scale table (in the executable) a row
+    // longer, the base's size in its row; game_sub, which reads it, is pointed
+    // at the copy only while it is the overlay loaded there.
+    const std::optional<tables::Placement> scales = tables::placement("monster.step_scales");
+    check(scales && scales->rows == 76u && scales->address != 0x08A21A40u &&
+            runtime.memory().load32(scales->address + 75u * 4u) == std::bit_cast<std::uint32_t>(1.5f) &&
+            runtime.memory().load32(scales->address + 58u * 4u) == std::bit_cast<std::uint32_t>(1.5f),
+        "monsters: the step scale table grows, and the new kind takes the base's size");
+    constexpr std::uint32_t kSubSlot = 0x0A001780u;
+    place_overlay(runtime, kSubSlot, "other_sub.ovl", 0x00020000u);
+    tables::write_traced_code_for_tests(runtime, "monster.step_scales");
+    tables::overlay_loaded(runtime);
+    check(runtime.memory().load32(0x0A014710u) == 0x3C0208A2u && runtime.memory().load32(0x0A014714u) == 0x24421A40u,
+        "tables: an executable table's reader in an overlay is left alone while another overlay is there");
+    place_overlay(runtime, kSubSlot, "game_sub.ovl", 0x00020000u);
+    tables::write_traced_code_for_tests(runtime, "monster.step_scales");
+    tables::overlay_loaded(runtime);
+    const std::uint32_t scale_hi = runtime.memory().load32(0x0A014710u),
+                        scale_lo = runtime.memory().load32(0x0A014714u);
+    check(scales && (scale_hi & 0xFFFFu) == ((scales->address + 0x8000u) >> 16u) &&
+            (scale_lo & 0xFFFFu) == (scales->address & 0xFFFFu) && (scale_hi >> 16u) == 0x3C02u &&
+            (scale_lo >> 16u) == 0x2442u,
+        "tables: and pointed at the copy once game_sub is loaded there");
     monsters::read_packs_with_for_tests(
         [](mhp3rd::mods::FileId) { return std::optional<std::vector<std::uint8_t>>{}; });
     check(!monsters::add(runtime, {"kirin", "tigrex", mine, {1u}, {1u}, "test"}, &why) &&
@@ -1580,6 +1604,46 @@ void test_monsters(psprecomp::Runtime &runtime) {
             runtime.memory().load16(runtime.memory().load32(rowed + 0x1Cu)) == 51u,
         "monsters: its copy of the kind's data has the base's rows and the mod's row, a copy of the base row with "
         "its shape, with its capsules kept");
+    // Footsteps: after a Think done alone, the game's motion event player gets
+    // the kind's tables. A stand-in records its tables, the monster and the
+    // flags on the stack.
+    store(runtime, 0x0A01476Cu,
+        {0x27BDFFD0u, 0x93A30030u, 0x3C180000u | (kAttacked >> 16u), 0xAF070000u | ((kAttacked & 0xFFFFu) + 0x20u),
+            0xAF090000u | ((kAttacked & 0xFFFFu) + 0x24u), 0xAF0A0000u | ((kAttacked & 0xFFFFu) + 0x28u),
+            0xAF0B0000u | ((kAttacked & 0xFFFFu) + 0x2Cu), 0xAF030000u | ((kAttacked & 0xFFFFu) + 0x30u), 0x03E00008u,
+            0x27BD0030u});
+    const ymod_footstep steps[] = {{7, 30.0f, 25, 4}, {2, 46.0f, 10, 1}, {7, 60.0f, 30, 4}};
+    const ymod_footstep huge[] = {{7, 30.0f, 25, 10}};
+    const ymod_footstep late[] = {{1000, 30.0f, 25, 1}};
+    check(service != nullptr && service->footsteps(mod, 58, steps, 3) == -1 &&
+            service->footsteps(mod, 78, steps, 0) == -1 && service->footsteps(mod, 78, nullptr, 3) == -1 &&
+            service->footsteps(mod, 78, huge, 1) == -1 && service->footsteps(mod, 78, late, 1) == -1 &&
+            logged("monster 78 is not given footsteps: a footstep needs a motion below 1000, a frame, a joint and a "
+                   "size from 0 to 9"),
+        "monsters: footsteps only for the mod's kind, 1 to 256 of them, each usable");
+    runtime.memory().store32(kAttacked + 0x2Cu, 0u);
+    check(service != nullptr && service->footsteps(mod, 78, steps, 3) == 0,
+        "monsters: a kind the mod added takes footsteps of its own");
+    (void)call(runtime, attacking_stub, kMonster);
+    const std::uint32_t step_list = runtime.memory().load32(kAttacked + 0x20u);
+    const std::uint32_t step_rows = runtime.memory().load32(kAttacked + 0x24u);
+    const std::uint32_t step_index = runtime.memory().load32(kAttacked + 0x28u);
+    check(runtime.memory().load32(kAttacked + 0x2Cu) == kMonster && runtime.memory().load32(kAttacked + 0x30u) == 0u &&
+            runtime.memory().load16(step_index + 2u * 2u) == 0u &&
+            runtime.memory().load16(step_index + 2u * 7u) == 1u &&
+            runtime.memory().load16(step_index + 2u * 3u) == 0xFFFFu && runtime.memory().load16(step_rows + 6u) == 0u &&
+            runtime.memory().load8(step_rows + 13u) == 1u && runtime.memory().load16(step_rows + 16u + 6u) == 1u &&
+            runtime.memory().load8(step_rows + 16u + 13u) == 2u && runtime.memory().load32(step_list) == 2u &&
+            real(step_list + 4u) == 46.0f && runtime.memory().load16(step_list + 8u) == 10u &&
+            runtime.memory().load16(step_list + 10u) == 1u && runtime.memory().load32(step_list + 12u) == 7u &&
+            real(step_list + 28u) == 60.0f && runtime.memory().load16(step_list + 32u) == 30u,
+        "monsters: after its Think, the motion event player gets the kind's footsteps by motion: the index, a row "
+        "per motion (where its steps start, how many), each step's motion, frame, joint and size");
+    runtime.memory().store32(0x0A01476Cu, 0u);
+    runtime.memory().store32(kAttacked + 0x2Cu, 0u);
+    (void)call(runtime, attacking_stub, kMonster);
+    check(runtime.memory().load32(kAttacked + 0x2Cu) == 0u,
+        "monsters: and nothing is called where the game's player is not");
     runtime.memory().store32(0x0A09E884u, 0u);
     const ymod_monster_fn changed = [](ymod_cpu *, std::uint32_t monster, void *user) -> int {
         const auto *a = static_cast<Acting *>(user);
