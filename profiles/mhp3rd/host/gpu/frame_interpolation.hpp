@@ -81,8 +81,9 @@ struct Matching {
     std::uint32_t matched{};
     // How the camera moved between the frames, as the motion of eye space:
     // for scenery that stands still, newer eye transform = camera * older.
-    // Taken from the matched draw whose turn is the median of a sample, so
-    // characters moving on their own do not count. The angle is its turn;
+    // Taken from the matched draw whose motion the most of a sample agrees
+    // with, each draw counted by its vertices, so characters moving on their
+    // own do not count, even where the scenery is a few large draws. The angle is its turn;
     // the distance is how far the eye itself moved, not how far distant
     // scenery swings when the camera turns.
     bool camera_found{};

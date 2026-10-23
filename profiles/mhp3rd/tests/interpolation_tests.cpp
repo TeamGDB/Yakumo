@@ -270,6 +270,32 @@ void matching() {
     const Matching &moved = fresh_matcher.match(scene(100u), scene(100u, 0.0f, 300.0f), thresholds);
     check(moved.cut != nullptr && std::strcmp(moved.cut, "camera moved") == 0, "a 300 unit jump is a cut");
 
+    // An area a mod adds can be a few large draws among many more of the
+    // characters'. Counted by their vertices, the still scenery gives the
+    // camera, and the characters, all running 250 units in one frame, do not.
+    const auto large_scene = [](std::uint32_t large, float camera_degrees, float runners_x,
+                                 std::uint32_t count = 20000u) {
+        // One running draw first and 600 in all: the stride of 2 passes the first large draw.
+        std::vector<DrawSummary> frame{draw(999u, runners_x, camera_degrees)};
+        for (std::uint32_t i = 0; i < large; ++i) {
+            frame.push_back(draw(200u + i, static_cast<float>(i) * 300.0f, camera_degrees));
+            frame.back().count = count;
+        }
+        for (std::uint32_t i = 0; i < 599u; ++i)
+            frame.push_back(draw(i, runners_x + static_cast<float>(i % 10u), camera_degrees));
+        mark_eligible(frame, kShown);
+        return frame;
+    };
+    Matcher area_matcher;
+    const Matching &area = area_matcher.match(large_scene(20u, 0.0f, 0.0f), large_scene(20u, 2.0f, 250.0f), thresholds);
+    check(area.cut == nullptr && near(area.camera_angle_degrees, 2.0f, 0.01f) && area.rejected == 600u,
+        "a few large still draws give the camera's motion, not many small running ones");
+    Matcher single_matcher;
+    const Matching &single =
+        single_matcher.match(large_scene(1u, 0.0f, 0.0f, 60000u), large_scene(1u, 0.0f, 250.0f, 60000u), thresholds);
+    check(single.cut == nullptr && near(single.camera_distance, 0.0f, 0.01f),
+        "one large draw is tried even when the stride passes it");
+
     std::vector<DrawSummary> other = scene(100u);
     for (std::size_t i = 0; i < 60u; ++i) other[i].vertex_address += 0x00100000u;
     const Matching &replaced = matcher.match(scene(100u), other, thresholds);

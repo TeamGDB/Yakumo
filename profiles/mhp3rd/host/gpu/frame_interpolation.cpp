@@ -146,19 +146,33 @@ const Matching &Matcher::match(
     // How the camera moved: this game keeps the view matrix almost fixed and
     // puts the camera's rotation into every world matrix, so the camera shows
     // in how each matched draw moved in eye space (view times world). Most of
-    // a scene stands still, so the median over the matched draws is the
-    // camera's turn and move, and characters moving on their own do not
-    // count. A sample of up to 256 pairs spread over the frame is enough.
+    // a scene stands still, and everything standing still moved alike, so the
+    // camera's motion is the one that the most of the scene agrees with:
+    // each sampled draw's motion is tried on the others, and characters
+    // moving on their own do not count. A sample of up to 256 pairs spread
+    // over the frame is enough. Each draw counts by its vertices: the game's
+    // areas are thousands of small draws, but an area a mod adds can be a few
+    // dozen large ones, fewer than the hunter's and the monster's draws, and
+    // counted alike the characters would be taken for the camera. Draws of at
+    // least kLargeDraw vertices are always sampled, so that a few large ones
+    // are not missed between the strides.
     struct Sample {
         float turn;
+        float weight;
         Matrix motion;
+        std::array<float, 3> from, to; // eye-space positions in each frame
     };
+    constexpr std::uint32_t kLargeDraw = 1024u;
+    constexpr std::size_t kMostCandidates = 64u;
+    constexpr float kAgreement = 16.0f; // world units: the same motion, up to rounding
     std::vector<Sample> samples;
     const std::size_t stride = std::max<std::size_t>(1u, out.matched / 256u);
     std::size_t seen = 0u;
     for (std::size_t i = 0; i < older.size(); ++i) {
         const std::int32_t partner = out.newer_of[i];
-        if (partner < 0 || seen++ % stride != 0u) continue;
+        if (partner < 0) continue;
+        const bool on_stride = seen++ % stride == 0u;
+        if (!on_stride && older[i].count < kLargeDraw) continue;
         const DrawSummary &from = older[i];
         const DrawSummary &to = newer[static_cast<std::size_t>(partner)];
         Matrix before_inverse{};
@@ -166,15 +180,42 @@ const Matching &Matcher::match(
         const Matrix motion = multiply(multiply(to.view, to.world), before_inverse);
         Matrix identity{};
         identity[0] = identity[5] = identity[10] = identity[15] = 1.0f;
-        samples.push_back({rotation_angle_degrees(identity, motion), motion});
+        // A draw on the stride stands for the ones skipped after it.
+        const float weight = static_cast<float>(std::max(from.count, 1u)) *
+            static_cast<float>(on_stride && from.count < kLargeDraw ? stride : 1u);
+        samples.push_back({rotation_angle_degrees(identity, motion), weight, motion,
+            from.prepared ? from.eye_translation : eye_translation_of(from),
+            to.prepared ? to.eye_translation : eye_translation_of(to)});
     }
     if (!samples.empty()) {
-        const auto middle = samples.begin() + static_cast<std::ptrdiff_t>(samples.size() / 2u);
-        std::nth_element(
-            samples.begin(), middle, samples.end(), [](const Sample &a, const Sample &b) { return a.turn < b.turn; });
+        // Tried in order of their turn, so that among motions as well agreed
+        // with the smallest turn is taken; every large draw is tried.
+        std::sort(samples.begin(), samples.end(), [](const Sample &a, const Sample &b) { return a.turn < b.turn; });
+        const std::size_t step = std::max<std::size_t>(1u, samples.size() / kMostCandidates);
+        const Sample *best = nullptr;
+        float best_agreed = -1.0f;
+        for (std::size_t c = 0; c < samples.size(); ++c) {
+            if (c % step != 0u && samples[c].weight < static_cast<float>(kLargeDraw)) continue;
+            const Matrix &m = samples[c].motion;
+            float agreed = 0.0f;
+            for (const Sample &other : samples) {
+                float distance = 0.0f;
+                for (std::size_t row = 0; row < 3u; ++row) {
+                    const float d = other.to[row] -
+                        (m[row] * other.from[0] + m[4u + row] * other.from[1] + m[8u + row] * other.from[2] +
+                            m[12u + row]);
+                    distance += d * d;
+                }
+                if (distance <= kAgreement * kAgreement) agreed += other.weight;
+            }
+            if (agreed > best_agreed) {
+                best_agreed = agreed;
+                best = &samples[c];
+            }
+        }
         out.camera_found = true;
-        out.camera_angle_degrees = middle->turn;
-        out.camera = middle->motion;
+        out.camera_angle_degrees = best->turn;
+        out.camera = best->motion;
         out.camera_distance = std::sqrt(
             out.camera[12] * out.camera[12] + out.camera[13] * out.camera[13] + out.camera[14] * out.camera[14]);
     }
