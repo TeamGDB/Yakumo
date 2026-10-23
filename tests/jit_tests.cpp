@@ -400,6 +400,28 @@ void preemption(Generator &g) {
             std::to_string(compiled_boundaries) + " scheduler boundaries) and computes what it did");
 }
 
+// Leading zeros and ones of 0 and all ones are 32, compiled as interpreted.
+// (x86 without LZCNT counts with BSR, which finds no bit in 0: the JIT
+// selects 32 for it.)
+void leading_bits(Generator &g) {
+    const std::vector<std::uint32_t> code = {
+        0x00001016u, // clz v0, zero
+        0x2408FFFFu, // addiu t0, zero, -1
+        0x01001817u, // clo v1, t0
+        0x00004821u, // addu t1, zero, zero
+        0x01202016u, // clz a0, t1
+        0x240A0001u, // addiu t2, zero, 1
+        0x01402816u, // clz a1, t2
+        0x01003017u, // clo a2, t0
+    };
+    const Setup setup = g.start(code);
+    compare(setup, "leading zeros and ones");
+    const Outcome out = run(setup, true);
+    check(out.stopped_normally && out.ctx.gpr[2] == 32u && out.ctx.gpr[3] == 32u && out.ctx.gpr[4] == 32u &&
+            out.ctx.gpr[5] == 31u && out.ctx.gpr[6] == 32u,
+        "clz and clo: 32 for 0 and for all ones, 31 for 1");
+}
+
 // Guest code that rewrites a function and invalidates its instruction cache
 // line (cache 0x08): the next call runs the new instruction, compiled or
 // interpreted alike.
@@ -765,6 +787,7 @@ int main(int argc, char **argv) {
     loop(g);
     preemption(g);
     self_modifying(g);
+    leading_bits(g);
     loop_with_call(g);
     calls(g);
     invalidation(g);

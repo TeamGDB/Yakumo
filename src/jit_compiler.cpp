@@ -931,8 +931,14 @@ private:
         case OpcodeKind::Clo: {
             Gp v = read(d.rs);
             if (d.kind == OpcodeKind::Clo) uc.not_(v.r32(), v.r32());
-            uc.clz(v.r32(), v.r32());
-            write(d.rd, v);
+            // On x86 without LZCNT the count is BSR's, which leaves 0 with no
+            // bit to find; the Allegrex counts 32 there, as AArch64 does.
+            Gp count = value();
+            Gp all = value();
+            uc.clz(count.r32(), v.r32());
+            uc.mov(all.r32(), Imm(32));
+            uc.cmov(count.r32(), all.r32(), ujit::cmp_eq(v.r32(), Imm(0)));
+            write(d.rd, count);
             return;
         }
         case OpcodeKind::Ext: {
