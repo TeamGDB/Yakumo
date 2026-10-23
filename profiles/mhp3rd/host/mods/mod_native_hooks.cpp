@@ -35,8 +35,12 @@ void run_after(std::uint32_t address, AllegrexContext &ctx) {
 
 // Host features registered over the game's functions (their names start with
 // "mhp3rd_"), hooked or not: a hook installed later wraps the feature.
-std::unordered_map<std::uint32_t, Runtime::RecompiledFunction> &host_functions() {
-    static std::unordered_map<std::uint32_t, Runtime::RecompiledFunction> functions;
+struct HostFunction {
+    Runtime::RecompiledFunction function{};
+    std::string name;
+};
+std::unordered_map<std::uint32_t, HostFunction> &host_functions() {
+    static std::unordered_map<std::uint32_t, HostFunction> functions;
     return functions;
 }
 
@@ -45,7 +49,7 @@ std::unordered_map<std::uint32_t, Runtime::RecompiledFunction> &host_functions()
 void observe(Runtime &, std::uint32_t address, Runtime::RecompiledFunction function, const std::string &name) {
     if (name == "mod_hook") return;
     if (name.starts_with("mhp3rd_"))
-        host_functions()[address] = function;
+        host_functions()[address] = {function, name};
     else if (!host_functions().empty())
         host_functions().erase(address);
     State &s = state();
@@ -117,6 +121,19 @@ bool overlay_present(const std::string &overlay, std::uint32_t address) {
     return loaded && iequals(loaded->name, overlay);
 }
 
+// Takes the hooks off their address. What was there before them takes it
+// back: the host feature they wrapped, or nothing, and the game's own code is
+// compiled again from memory.
+void uninstall(std::uint32_t address, Site &site) {
+    Runtime &runtime = *state().runtime;
+    if (site.installed) {
+        runtime.unregister_functions(address, address + 1u);
+        psprecomp::jit_invalidate(runtime, address, address + 8u);
+        if (site.host != nullptr) runtime.register_function(address, site.host, site.host_name);
+    }
+    site.installed = false;
+}
+
 bool install_site(std::uint32_t address, Site &site) {
     State &s = state();
     Runtime &runtime = *s.runtime;
@@ -136,13 +153,14 @@ bool install_site(std::uint32_t address, Site &site) {
     }
     site.refused = false;
     const auto host = host_functions().find(address);
-    site.host = host != host_functions().end() ? host->second : nullptr;
+    site.host = host != host_functions().end() ? host->second.function : nullptr;
+    site.host_name = host != host_functions().end() ? host->second.name : std::string();
     // Registering drops compiled code there; the game's own first
     // instructions are compiled afterwards, for the hook to run.
     runtime.register_function(address, &hook_entry, "mod_hook");
+    site.installed = true;
     site.original = psprecomp::jit_compile_detached(runtime, address);
-    site.installed = site.original != nullptr;
-    if (!site.installed) runtime.unregister_functions(address, address + 1u);
+    if (site.original == nullptr) uninstall(address, site);
     return site.installed;
 }
 
@@ -234,8 +252,7 @@ void reconcile() {
             site.installed = false;
             (void)install_site(address, site);
         } else if (!present && site.installed) {
-            if (runtime.has_function(address)) runtime.unregister_functions(address, address + 1u);
-            site.installed = false;
+            uninstall(address, site);
         }
     }
     for (auto &[address, site] : s.instructions) {
@@ -269,12 +286,8 @@ void hooks_remove(ymod_mod *, ymod_hook hook) {
     } else {
         Site &site = s.sites[address];
         drop(site.hooks);
-        // The last hook gone: the game's own code again.
-        if (site.hooks.empty() && site.installed) {
-            s.runtime->unregister_functions(address, address + 1u);
-            psprecomp::jit_invalidate(*s.runtime, address, address + 8u);
-            site.installed = false;
-        }
+        // The last hook gone: the game's own code again, or the host feature.
+        if (site.hooks.empty()) uninstall(address, site);
     }
     reconcile();
 }

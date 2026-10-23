@@ -438,6 +438,31 @@ void test_hook_changes(psprecomp::Runtime &runtime) {
         "native: the log keeps its latest lines and every problem");
 }
 
+// A host feature under a hook takes its address back when the last hook goes,
+// and when a hook over it cannot be installed.
+void test_host_returns(psprecomp::Runtime &runtime) {
+    namespace native = mhp3rd::mods::native;
+    ymod_mod *mod = native::add_mod("host_returns", "Host Returns", ".");
+    const auto *hooks = static_cast<const ymod_hooks *>(native::host()->service(mod, YMOD_HOOKS, 1u));
+    store(runtime, 0x08A00500u, {0x00801021u, 0x03E00008u, 0u}); // addu v0, a0, zero; jr ra
+    runtime.register_function(0x08A00500u, &host_feature, "mhp3rd_test_returns");
+    g_added_seen = 0;
+    const ymod_hook hook = hooks->function(mod, nullptr, 0x08A00500u, YMOD_HOOK_BEFORE, &count_added, nullptr);
+    check(call(runtime, 0x08A00500u, 3u) == 6u && g_added_seen == 1, "native: a hook wraps a host feature");
+    hooks->remove(mod, hook);
+    native::frame(runtime);
+    check(call(runtime, 0x08A00500u, 3u) == 6u && g_added_seen == 1 && runtime.cpu().pc == kSentinel,
+        "native: the host feature takes its address back when the last hook goes");
+
+    // j, with a j in its delay slot: the game's code there cannot be compiled.
+    store(runtime, 0x08A00600u, {0x08280184u, 0x08280188u, 0u});
+    runtime.register_function(0x08A00600u, &host_feature, "mhp3rd_test_uncompilable");
+    (void)hooks->function(mod, nullptr, 0x08A00600u, YMOD_HOOK_BEFORE, &count_added, nullptr);
+    native::frame(runtime);
+    check(call(runtime, 0x08A00600u, 4u) == 8u && g_added_seen == 1 && runtime.cpu().pc == kSentinel,
+        "native: a hook that cannot be installed leaves the host feature in place");
+}
+
 // Quests mods add: encrypted with the keys in memory, served as files, and
 // the game's id-to-file code given the file for a mod's quest id.
 void test_quests(psprecomp::Runtime &runtime) {
@@ -1973,6 +1998,7 @@ int main() {
     test_ui();
     test_symbols(runtime);
     test_hook_changes(runtime);
+    test_host_returns(runtime);
     test_quests(runtime);
     test_tables(runtime);
     test_monsters(runtime);

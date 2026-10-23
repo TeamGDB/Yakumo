@@ -64,8 +64,10 @@ struct Site {
     std::vector<Hook> hooks;
     psprecomp::JitFunction original{};
     // A host feature that replaces the game's function there (layered armor,
-    // the camera): the hooks wrap it instead of the game's code.
+    // the camera): the hooks wrap it instead of the game's code, and it takes
+    // its address back when the last hook goes.
     Runtime::RecompiledFunction host{};
+    std::string host_name;
     bool installed{};
     bool refused{}; // the code there is not the known function; said once
 };
