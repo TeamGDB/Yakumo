@@ -508,7 +508,8 @@ typedef struct ymod_monsters {
      * no other uses. Call at start; it takes effect in monsters with a part
      * of behaviour. 0, or -1 (the reason is in the log). */
     int (*attack_row)(ymod_mod *mod, int32_t kind, int32_t row, int32_t like, int32_t shape);
-    /* Gives a kind this mod added its footsteps (1 to 256): after each frame
+    /* Gives a kind this mod added its footsteps (1 to 256, at most 255 in one
+     * motion): after each frame
      * its THINK did alone (YMOD_RETURN), the game plays those of the motion
      * playing, as a monster's own effects part plays the base's.
      * Call at start. 0, or -1 (the reason is in the log). */

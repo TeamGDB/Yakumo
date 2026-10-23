@@ -140,11 +140,13 @@ struct Footstep {
     std::uint16_t size{};
 };
 inline constexpr std::size_t kMostFootsteps = 256u;
+inline constexpr std::size_t kMostFootstepsInMotion = 255u; // a motion's row counts them in a byte
 inline constexpr std::uint16_t kFootstepSizes = 10u;
 // Gives a kind a mod added its own footsteps: after each frame its mod's
 // THINK did alone, the game plays those of the motion playing. False when the
-// kind is not the mod's, there are none or more than kMostFootsteps, or one
-// is not usable (a motion past 999, a size past 9).
+// kind is not the mod's, there are none or more than kMostFootsteps, more
+// than kMostFootstepsInMotion in one motion, or one is not usable (a motion
+// past 999, a size past 9).
 [[nodiscard]] bool footsteps(
     const void *owner, std::uint8_t kind, std::span<const Footstep> steps, std::string *why = nullptr);
 

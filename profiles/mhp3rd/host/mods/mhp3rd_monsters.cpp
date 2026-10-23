@@ -1048,9 +1048,18 @@ bool footsteps(const void *owner, std::uint8_t number, std::span<const Footstep>
         if (f.motion >= kEventSlots || f.size >= kFootstepSizes || f.joint > 0xFFu || !std::isfinite(f.frame) ||
             f.frame < 0.0f)
             return fail("a footstep needs a motion below 1000, a frame, a joint and a size from 0 to 9");
-    added->footsteps.assign(steps.begin(), steps.end());
-    std::stable_sort(added->footsteps.begin(), added->footsteps.end(),
-        [](const Footstep &a, const Footstep &b) { return a.motion < b.motion; });
+    std::vector<Footstep> sorted(steps.begin(), steps.end());
+    std::stable_sort(
+        sorted.begin(), sorted.end(), [](const Footstep &a, const Footstep &b) { return a.motion < b.motion; });
+    // A motion's row counts its footsteps in a byte.
+    for (std::size_t first = 0; first < sorted.size();) {
+        std::size_t last = first;
+        while (last < sorted.size() && sorted[last].motion == sorted[first].motion) ++last;
+        if (last - first > kMostFootstepsInMotion)
+            return fail("motion " + std::to_string(sorted[first].motion) + " has more than 255 footsteps");
+        first = last;
+    }
+    added->footsteps = std::move(sorted);
     added->events = {}; // made again with these
     return true;
 }

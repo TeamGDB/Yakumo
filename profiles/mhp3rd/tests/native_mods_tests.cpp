@@ -1924,6 +1924,13 @@ void test_monsters(psprecomp::Runtime &runtime) {
             logged("monster 78 is not given footsteps: a footstep needs a motion below 1000, a frame, a joint and a "
                    "size from 0 to 9"),
         "monsters: footsteps only for the mod's kind, 1 to 256 of them, each usable");
+    // A motion's row counts its footsteps in a byte: 255 at most in one.
+    std::vector<ymod_footstep> crowded(256u, ymod_footstep{3, 10.0f, 25, 1});
+    const bool full_refused = service != nullptr && service->footsteps(mod, 78, crowded.data(), 256) == -1 &&
+        logged("monster 78 is not given footsteps: motion 3 has more than 255 footsteps");
+    crowded.back().motion = 4;
+    check(full_refused && service != nullptr && service->footsteps(mod, 78, crowded.data(), 256) == 0,
+        "monsters: 256 footsteps in one motion are refused, 255 in one and one in another taken");
     runtime.memory().store32(kAttacked + 0x2Cu, 0u);
     check(service != nullptr && service->footsteps(mod, 78, steps, 3) == 0,
         "monsters: a kind the mod added takes footsteps of its own");
