@@ -549,6 +549,18 @@ const std::vector<Field> &fields() {
                 std::uint32_t value = s.adhoc_host_port;
                 if (parse_uint(t, 1024u, 65534u, value)) s.adhoc_host_port = value;
             }},
+        {"network.relay_port", "MHP3RD_ADHOC_RELAY_PORT",
+            [](Settings &s, const std::string &t) {
+                std::uint32_t value = s.adhoc_relay_port;
+                const bool ok = parse_uint(t, 0u, 65535u, value);
+                if (ok) s.adhoc_relay_port = static_cast<std::uint16_t>(value);
+                return ok;
+            },
+            [](const Settings &s) { return std::to_string(s.adhoc_relay_port); },
+            [](Settings &s, const char *t) {
+                std::uint32_t value = s.adhoc_relay_port;
+                if (parse_uint(t, 0u, 65535u, value)) s.adhoc_relay_port = static_cast<std::uint16_t>(value);
+            }},
         {"look.layered_armor", "MHP3RD_LAYERED_ARMOR",
             [](Settings &s, const std::string &t) { return parse_bool(t, s.layered_armor); },
             [](const Settings &s) { return std::string(s.layered_armor ? "1" : "0"); },

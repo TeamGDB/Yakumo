@@ -408,7 +408,9 @@ struct Client::Impl {
     bool relay_connected{};
     bool relay_fallback{};
     void relay_failed() {
-        if (relay_connected || relay_fallback || !server || server->port() == kAdhocctlPort) return;
+        if (identity.relay_port != 0u || relay_connected || relay_fallback || !server ||
+            server->port() == kAdhocctlPort)
+            return;
         // A one-port gateway (the Railway server) classifies the relay on the
         // same public port. Direct servers keep the historical next port, so
         // try that first and fall back only when it never opened.
@@ -1126,7 +1128,7 @@ struct Client::Impl {
                 split_server(to_resolve, host, port);
                 {
                     std::lock_guard lock(mutex);
-                    relay_port = relay_port_for(port);
+                    relay_port = identity.relay_port != 0u ? identity.relay_port : relay_port_for(port);
                     relay_connected = false;
                     relay_fallback = false;
                 }
@@ -1293,7 +1295,8 @@ void Client::start(const Identity &identity) {
     std::lock_guard lock(impl_->mutex);
     Impl &s = *impl_;
     const bool same = s.active && s.identity.server == identity.server && s.identity.mac == identity.mac &&
-        s.identity.nickname == identity.nickname && s.identity.product == identity.product;
+        s.identity.nickname == identity.nickname && s.identity.product == identity.product &&
+        s.identity.relay_port == identity.relay_port;
     if (same) return;
     s.stop_ctl = true;
     s.logged_in = false;

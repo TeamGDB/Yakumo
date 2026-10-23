@@ -1158,6 +1158,7 @@ The renderer then leaves out the HUD packets' draws, and nothing else: their oth
 | --- | --- | --- |
 | `MHP3RD_ADHOC` | off | `1` turns ad hoc play on (menu: Ad Hoc Play) |
 | `MHP3RD_ADHOC_SERVER` | none | PSP ad hoc server, `host` or `host:port` (menu: Server) |
+| `MHP3RD_ADHOC_RELAY_PORT` | none | Relay port when the server uses one shared port for matchmaking and relay, such as the Railway gateway; empty uses the next port (settings key `network.relay_port`) |
 | `MHP3RD_ADHOC_NICKNAME` | the hunter name | Name other players see (menu: Nickname) |
 | `MHP3RD_ADHOC_MAC` | made up once | The address other players know you by, `xx:xx:xx:xx:xx:xx` |
 | `MHP3RD_ADHOC_OVERLAY` | off | `1` shows the network overlay from the start |
