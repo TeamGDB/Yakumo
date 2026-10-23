@@ -52,9 +52,11 @@ struct PostedQuest {
     std::uint8_t slot{}; // 1 to 4, the board's order
     std::uint16_t id{};  // the quest id in DATA.BIN's lists
     std::uint8_t stars{};
+    std::uint8_t min_hr{}; // lowest hunter rank the star level admits
     std::uint32_t fee{};
     std::uint32_t reward{};
     std::uint32_t time_limit{}; // frames at 30 a second
+    std::string zone;           // the map and time of day
     std::string name;
     std::string objective;
     std::string monsters;
@@ -66,11 +68,11 @@ struct PostedQuest {
     std::string started_at; // quest start time, ISO 8601, when the board reports it
 
     [[nodiscard]] bool operator==(const PostedQuest &other) const {
-        return slot == other.slot && id == other.id && stars == other.stars && fee == other.fee &&
-            reward == other.reward && time_limit == other.time_limit && name == other.name &&
-            objective == other.objective && monsters == other.monsters && client == other.client &&
-            poster == other.poster && accepted == other.accepted && password == other.password && note == other.note &&
-            started_at == other.started_at;
+        return slot == other.slot && id == other.id && stars == other.stars && min_hr == other.min_hr &&
+            fee == other.fee && reward == other.reward && time_limit == other.time_limit && zone == other.zone &&
+            name == other.name && objective == other.objective && monsters == other.monsters &&
+            client == other.client && poster == other.poster && accepted == other.accepted &&
+            password == other.password && note == other.note && started_at == other.started_at;
     }
 };
 

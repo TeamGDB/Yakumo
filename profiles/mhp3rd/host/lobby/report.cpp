@@ -107,8 +107,11 @@ std::string report_line(const Snapshot &snapshot, std::int64_t unix_seconds) {
             const PostedQuest &quest = snapshot.quests[i];
             if (i > 0u) out.push_back(',');
             out += "{\"slot\":" + std::to_string(quest.slot) + ",\"id\":" + std::to_string(quest.id) +
-                ",\"stars\":" + std::to_string(quest.stars) + ",\"fee\":" + std::to_string(quest.fee) +
-                ",\"reward\":" + std::to_string(quest.reward) + ",\"time_limit\":" + std::to_string(quest.time_limit);
+                ",\"stars\":" + std::to_string(quest.stars) +
+                ",\"min_hr\":" + std::to_string(static_cast<unsigned>(quest.min_hr)) +
+                ",\"fee\":" + std::to_string(quest.fee) + ",\"reward\":" + std::to_string(quest.reward) +
+                ",\"time_limit\":" + std::to_string(quest.time_limit);
+            append_string_field(out, "zone", quest.zone);
             append_string_field(out, "name", quest.name);
             append_string_field(out, "objective", quest.objective);
             append_string_field(out, "monsters", quest.monsters);

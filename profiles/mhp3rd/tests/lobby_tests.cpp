@@ -65,8 +65,8 @@ lobby::Snapshot sample() {
     snapshot.token = "secret";
     snapshot.equipment = {{"head", 12u, "Hunter Helm"}};
     snapshot.weapon = lobby::Weapon{5u, 3u, "Iron Sword", "Great Sword"};
-    snapshot.quests = {{1u, 10522u, 5u, 800u, 9600u, 36000u, "The Festival of Fear", "Repel the Jhen Mohran",
-        "Jhen Mohran", "Guildmaster"}};
+    snapshot.quests = {{1u, 10522u, 5u, 3u, 800u, 9600u, 36000u, "Great Desert", "The Festival of Fear",
+        "Repel the Jhen Mohran", "Jhen Mohran", "Guildmaster"}};
     snapshot.stats.quests = {{"Village", 12u}, {"Low Rank", 34u}};
     snapshot.stats.fs_level = 23u;
     snapshot.stats.play_seconds = 3661u;
@@ -92,9 +92,9 @@ void test_report_line() {
     check(has(line, "\"weapon\":{\"kind\":5,\"id\":3,\"name\":\"Iron Sword\",\"type\":\"Great Sword\"}"),
         "the report carries the weapon and its class");
     check(has(line,
-              "\"quests\":[{\"slot\":1,\"id\":10522,\"stars\":5,\"fee\":800,\"reward\":9600,\"time_limit\":36000,"
-              "\"name\":\"The Festival of Fear\",\"objective\":\"Repel the Jhen Mohran\",\"monsters\":\"Jhen Mohran\","
-              "\"client\":\"Guildmaster\"}]"),
+              "\"quests\":[{\"slot\":1,\"id\":10522,\"stars\":5,\"min_hr\":3,\"fee\":800,\"reward\":9600,"
+              "\"time_limit\":36000,\"zone\":\"Great Desert\",\"name\":\"The Festival of Fear\","
+              "\"objective\":\"Repel the Jhen Mohran\",\"monsters\":\"Jhen Mohran\",\"client\":\"Guildmaster\"}]"),
         "the report carries the posted quests");
     check(has(line,
               "\"stats\":{\"quests\":[{\"label\":\"Village\",\"count\":12},{\"label\":\"Low Rank\",\"count\":34}],"
@@ -241,6 +241,7 @@ void test_quest_file_objective_across_padding() {
     file[8u + 0x1Cu] = 0x0Du;
     file[8u + 0x1Du] = 0x29u; // quest 10509
     file[8u + 0x1Eu] = 5u;
+    file[8u + 0x20u] = 0x0Eu; // Deserted Island at night
     for (const char *text : {"Warrior's Hunt", "Hunt the Zinogre", "Reward Zero\nTime Over",
              "The thunder wyvern waits on the island.", "Ludroth\nJaggia", "Guild Manager"}) {
         for (const char *c = text; *c != '\0'; ++c) file.push_back(static_cast<std::uint8_t>(*c));
@@ -251,6 +252,8 @@ void test_quest_file_objective_across_padding() {
     const std::vector<lobby::QuestFileEntry> quests = lobby::parse_quest_file(file);
     check(quests.size() == 1u, "a quest list record is parsed");
     check(quests.size() == 1u && quests[0].id == 10509u && quests[0].stars == 5u, "the record's id and stars are read");
+    check(quests.size() == 1u && quests[0].min_hr == 3u, "the star level gives the minimum hunter rank");
+    check(quests.size() == 1u && quests[0].zone == "Deserted Island (Night)", "the map byte gives the quest zone");
     check(quests.size() == 1u && quests[0].name == "Warrior's Hunt", "the title is read from before the padded gap");
     check(quests.size() == 1u && quests[0].objective == "Hunt the Zinogre",
         "the objective is read past the padding between fields");

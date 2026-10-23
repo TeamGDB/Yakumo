@@ -71,9 +71,11 @@ std::vector<PostedQuest> posted_quests(const game::Ram &ram) {
     quest.id = id;
     if (const QuestFileEntry *info = find_quest(quest.id)) {
         quest.stars = info->stars;
+        quest.min_hr = info->min_hr;
         quest.fee = info->fee;
         quest.reward = info->reward;
         quest.time_limit = info->time_limit;
+        quest.zone = info->zone;
         quest.name = info->name;
         quest.objective = info->objective;
         quest.monsters = info->monsters;

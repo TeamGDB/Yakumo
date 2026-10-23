@@ -17,9 +17,11 @@ namespace mhp3rd::lobby {
 struct QuestFileEntry {
     std::uint16_t id{};
     std::uint8_t stars{};
+    std::uint8_t min_hr{}; // lowest hunter rank the star level admits
     std::uint32_t fee{};
     std::uint32_t reward{};
     std::uint32_t time_limit{};
+    std::string zone; // the quest's map and time of day
     std::string name;
     std::string objective;
     std::string monsters;
