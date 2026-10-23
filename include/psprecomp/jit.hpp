@@ -32,7 +32,9 @@ class Runtime;
 void set_jit_enabled(bool enabled) noexcept;
 
 // Compiles the guest code at `pc` and registers it there. False when the JIT
-// is off or the code cannot be compiled (the caller then interprets it).
+// is off or the code cannot be compiled (the caller then interprets it); code
+// that could not be compiled is not tried again until the memory around it
+// changes (jit_invalidate(), jit_memory_changed()).
 bool jit_compile(Runtime &runtime, std::uint32_t pc);
 
 // Drops compiled code that read guest memory in [start, end): something

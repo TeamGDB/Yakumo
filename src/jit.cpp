@@ -36,6 +36,9 @@ struct State {
     std::map<std::uint32_t, Compiled> functions; // by entry
     std::vector<Compiled> detached;              // compiled for hooks, registered nowhere
     std::set<std::uint32_t> hooked;              // addresses with an instruction hook
+    // Entries whose code could not be compiled: not tried again on every
+    // dispatch, only once the memory around them changed (drop() forgets them).
+    std::set<std::uint32_t> failed;
     // Code dropped while the runtime runs is never freed before it ends:
     // a guest thread may be running it, waiting inside it, or about to
     // return into it, and a hook may still hold it.
@@ -68,11 +71,13 @@ bool jit_compile(Runtime &runtime, std::uint32_t pc) {
     if (!jit_enabled() || (pc & 3u) != 0u) return false;
     State &state = state_of(runtime);
     if (state.functions.contains(pc)) return false; // compiled and still missed: let the caller handle it
+    if (state.failed.contains(pc)) return false;
     Compiled compiled;
     compiled.entry = pc;
     const jit::Compilation compilation = jit::compile(runtime, state.jit, pc, state.hooked, compiled);
     if (compilation.code == nullptr) {
         ++g_stats.failed;
+        state.failed.insert(pc);
         if (!compilation.error.empty())
             std::cerr << "[jit] could not compile the code at " << hex32(pc) << ": " << compilation.error << "\n";
         return false;
@@ -118,6 +123,8 @@ void drop(Runtime &runtime, std::uint32_t start, std::uint32_t end, bool only_ch
     constexpr std::uint32_t kReach = kWindow + 8u;
     const std::uint32_t from = start > kReach ? start - kReach : 0u;
     const std::uint32_t to = end < 0xFFFFFFFFu - kReach ? end + kReach : 0xFFFFFFFFu;
+    // An entry that could not be compiled may compile from the new bytes.
+    state.failed.erase(state.failed.lower_bound(from), state.failed.lower_bound(to));
     for (auto it = state.functions.lower_bound(from); it != state.functions.end() && it->first < to;) {
         Compiled &compiled = it->second;
         if (!overlaps(compiled, start, end) || (only_changed && !source_changed(runtime, compiled))) {

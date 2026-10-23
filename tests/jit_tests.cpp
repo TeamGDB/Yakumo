@@ -400,6 +400,33 @@ void preemption(Generator &g) {
             std::to_string(compiled_boundaries) + " scheduler boundaries) and computes what it did");
 }
 
+// Code that cannot be compiled (a jump in its first jump's delay slot) is
+// not compiled again at every dispatch, only once its memory changed.
+void failed_compiles() {
+    psprecomp::set_jit_enabled(true);
+    Runtime &runtime = engine(true);
+    constexpr std::uint32_t kAt = kCode + 0x2000u;
+    psprecomp::jit_invalidate(runtime, kAt, kAt + 16u);
+    runtime.memory().store32(kAt, 0x08280900u);      // j somewhere
+    runtime.memory().store32(kAt + 4u, 0x08280900u); // j, in its delay slot
+    std::ostringstream quiet;
+    std::streambuf *previous = std::cerr.rdbuf(quiet.rdbuf());
+    const std::uint64_t before = psprecomp::jit_stats().failed;
+    const bool first = psprecomp::jit_compile(runtime, kAt);
+    const bool second = psprecomp::jit_compile(runtime, kAt);
+    const std::uint64_t tried = psprecomp::jit_stats().failed - before;
+    runtime.memory().store32(kAt, 0x03E00008u); // jr ra
+    runtime.memory().store32(kAt + 4u, 0u);
+    psprecomp::jit_memory_changed(runtime, kAt, kAt + 8u);
+    const bool after_change = psprecomp::jit_compile(runtime, kAt);
+    std::cerr.rdbuf(previous);
+    check(!first && !second && tried == 1u && after_change,
+        "jit: code that cannot be compiled is tried once, and again once its memory changed (" + std::to_string(tried) +
+            " tries)");
+    psprecomp::jit_invalidate(runtime, kAt, kAt + 16u);
+    runtime.unregister_functions(kAt, kAt + 4u);
+}
+
 // Leading zeros and ones of 0 and all ones are 32, compiled as interpreted.
 // (x86 without LZCNT counts with BSR, which finds no bit in 0: the JIT
 // selects 32 for it.)
@@ -788,6 +815,7 @@ int main(int argc, char **argv) {
     preemption(g);
     self_modifying(g);
     leading_bits(g);
+    failed_compiles();
     loop_with_call(g);
     calls(g);
     invalidation(g);
