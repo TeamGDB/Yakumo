@@ -265,6 +265,12 @@ void write_summary(const std::filesystem::path &path, const game::Ram &ram, cons
     out << "  name: \"" << utf16_text(ram, 0x09FA8DBAu, 12u) << "\" title: \""
         << utf16_text(ram, 0x09FA8DBAu + 0x54u, 13u) << "\" comment: \"" << utf16_text(ram, 0x09FA8DBAu + 0x6Eu, 24u)
         << "\"\n";
+    GuildStats card;
+    guild_stats(ram, card);
+    out << "  play: " << card.play_seconds << "s fs: " << card.fs_level << " awards: " << card.awards << "\n";
+    for (const StatCount &quest : card.quests) out << "  quests " << quest.label << ": " << quest.count << "\n";
+    for (const StatCount &weapon : card.weapons) out << "  weapon " << weapon.label << ": " << weapon.count << "\n";
+    for (const std::string &recent : card.recent_quests) out << "  recent: " << recent << "\n";
     out << "\nsearch: " << found_names << " name hit(s), " << found_texts << " \"" << needle << "\" hit(s)\n";
     out << "files: character.bin, hunter_records.bin, save_copy.bin, questboard_9f.bin, questboard_a2.bin, "
            "name_hits.txt, text_hits.txt\n";
