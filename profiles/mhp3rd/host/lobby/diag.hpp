@@ -10,7 +10,8 @@
 // dumps are written per hall, ten seconds apart, so the board can be captured
 // after a quest is posted. MHP3RD_LOBBY_DUMP_TEXT adds a text to search for
 // (default "Zinogre"); MHP3RD_LOBBY_DUMP_FULL also writes the whole 64 MiB of
-// guest RAM on the second and third dump.
+// guest RAM on the second and third dump. MHP3RD_LOBBY_DUMP_ANY also dumps
+// outside a hall, which captures the hall-creation screen.
 
 #include "lobby/report.hpp"
 

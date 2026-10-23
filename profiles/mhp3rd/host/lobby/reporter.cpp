@@ -4,6 +4,7 @@
 #include "adhoc/protocol.hpp"
 #include "adhoc/sockets.hpp"
 #include "game/guest_ram.hpp"
+#include "lobby/diag.hpp"
 #include "lobby/report.hpp"
 #include "lobby/snapshot.hpp"
 #include "psprecomp/runtime.hpp"
@@ -205,10 +206,11 @@ void Reporter::frame(psprecomp::Runtime &runtime) {
     snapshot.server = diagnostics.server;
     snapshot.token = token;
     if (diagnostics.group) snapshot.hall = *diagnostics.group;
-    if (!snapshot.hall.empty()) {
-        game::GuestRam ram(runtime.memory());
+    game::GuestRam ram(runtime.memory());
+    if (!snapshot.hall.empty())
         read_hunter(ram, snapshot);
-    }
+    else if (std::getenv("MHP3RD_LOBBY_DUMP_ANY") != nullptr)
+        maybe_dump(ram, snapshot);
 
     const std::vector<std::string> lines = planner_.update(snapshot, unix_seconds());
     if (lines.empty()) return;

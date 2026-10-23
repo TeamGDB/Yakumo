@@ -282,16 +282,18 @@ void write_summary(const std::filesystem::path &path, const game::Ram &ram, cons
 
 void maybe_dump(const game::Ram &ram, const Snapshot &snapshot) {
     const char *setting = std::getenv("MHP3RD_LOBBY_DUMP");
-    if (setting == nullptr || *setting == '\0' || snapshot.hall.empty()) return;
-    // The first dump is taken as the hall opens, before a quest is posted; the
+    const bool any_state = std::getenv("MHP3RD_LOBBY_DUMP_ANY") != nullptr;
+    if (setting == nullptr || *setting == '\0' || (snapshot.hall.empty() && !any_state)) return;
+    // The first dump is taken as the state opens, before a quest is posted; the
     // next two, ten seconds apart, capture the board after it is posted.
     constexpr int kMaxDumps = 3;
     constexpr auto kDumpInterval = std::chrono::seconds(10);
+    const std::string key = snapshot.hall.empty() ? "outside" : snapshot.hall;
     static std::string last_hall;
     static std::chrono::steady_clock::time_point last_dump{};
     static int dumps{};
-    if (last_hall != snapshot.hall) {
-        last_hall = snapshot.hall;
+    if (last_hall != key) {
+        last_hall = key;
         dumps = 0;
         last_dump = {};
     }
