@@ -140,7 +140,7 @@ yakumo.log("setting now", yakumo.setting("on"), yakumo.setting("mode"), yakumo.s
 yakumo.log("bad key", yakumo.setting_switch("x\n[mod other]\nenabled", "Bad", true), yakumo.setting("x\n[mod other]\nenabled"))
 yakumo.hook(0x08A00000, "before", function(cpu) cpu.a0 = cpu.a0 + 1 end)
 local gone = yakumo.hook(0x08A00100, "before", function() yakumo.log("removed hook ran") end)
-yakumo.unhook(gone)
+yakumo.log("unhook", yakumo.unhook(gone), yakumo.unhook(gone), yakumo.unhook(999999))
 local once
 once = yakumo.hook(0x08A00000, "before", function() yakumo.log("one-shot ran"); yakumo.unhook(once) end)
 yakumo.hook(0x08A00000, "after", function(cpu) yakumo.log("after v0=" .. cpu.v0) end)
@@ -194,6 +194,21 @@ end))
 yakumo.on("frame", function() if kept_ui then yakumo.log("widgets outside a draw refused", pcall(kept_ui.text, "x") == false); kept_ui = nil end end)
 )");
     const fs::path loop = write_script(folder, "loop.luau", "yakumo.on('frame', function() while true do end end)");
+    // A native mod's hook, which a script cannot remove.
+    mhp3rd::mods::native::attach(runtime);
+    ymod_mod *native_mod = mhp3rd::mods::native::add_mod("native_owner", "Native Owner", folder.string());
+    const auto *hooks =
+        static_cast<const ymod_hooks *>(mhp3rd::mods::native::host()->service(native_mod, YMOD_HOOKS, 1u));
+    static int s_native_calls = 0;
+    const ymod_hook owned = hooks->function(
+        native_mod, nullptr, 0x08A00200u, YMOD_HOOK_BEFORE,
+        [](ymod_cpu *, void *) {
+            ++s_native_calls;
+            return static_cast<int>(YMOD_CONTINUE);
+        },
+        nullptr);
+    const fs::path intruder = write_script(
+        folder, "intruder.luau", "yakumo.log('unhook of another mod', yakumo.unhook(" + std::to_string(owned) + "))");
     const fs::path broken = write_script(folder, "broken.luau", "this is not luau");
     // The SDK's example, at the game's armor model lookup: model 42 for any part.
     store(runtime, 0x08869778u, {0x2402002Au, 0x03E00008u, 0u}); // addiu v0, zero, 42; jr ra
@@ -215,7 +230,7 @@ yakumo.on("frame", function() if kept_ui then yakumo.log("widgets outside a draw
 
     mhp3rd::mods::scripts::start(runtime,
         {{"script", main, {}}, {"loop", loop, {}}, {"broken", broken, {}}, {"gone", folder / "x.luau", {}},
-            {"example", example, {}}});
+            {"example", example, {}}, {"intruder", intruder, {}}});
     check(logged("script started"), "scripts: a script starts");
     check(logged("memory true true"), "scripts: memory reads and writes, checked");
     check(logged("ranges true true true"), "scripts: out-of-range values and NaN addresses are errors; -1 is all ones");
@@ -236,6 +251,10 @@ yakumo.on("frame", function() if kept_ui then yakumo.log("widgets outside a draw
         "scripts: a removed hook runs no more, also one that removes itself while it runs");
     (void)call(runtime, 0x08A00200u, 0u);
     check(logged("instruction t1=7"), "scripts: an instruction hook");
+    check(logged("unhook true false false") && logged("unhook of another mod false") &&
+            logged("hook " + std::to_string(owned) + " is not removed: another mod added it") && s_native_calls == 1,
+        "scripts: unhook is true for the script's hook, false for one removed already, a number no hook has, or "
+        "another mod's hook, which stays");
     std::this_thread::sleep_for(std::chrono::milliseconds(6)); // the last callback's time runs out
     check(mhp3rd::mods::scripts::out_of_time(-1) && !mhp3rd::mods::scripts::out_of_time(0) &&
             !mhp3rd::mods::scripts::out_of_time(2),
@@ -292,7 +311,7 @@ yakumo.on("frame", function() if kept_ui then yakumo.log("widgets outside a draw
     check(logged("started, frames so far 0"), "scripts: the start event before the first frame's");
     check(logged("took too long"), "scripts: a script that loops forever is stopped");
     check(logged("stale cpu refused true"), "scripts: the CPU cannot be used after its callback");
-    check(mhp3rd::mods::scripts::running() == 2u, "scripts: only the working scripts keep running");
+    check(mhp3rd::mods::scripts::running() == 3u, "scripts: only the working scripts keep running");
 
     // A script at its memory limit when its hook is called: the proxy for the
     // CPU cannot be made, and the script stops with an error of its own
@@ -313,7 +332,7 @@ yakumo.log("hungry hooked")
     }
     mhp3rd::mods::scripts::limit_memory_for_tests(0u);
     check(logged("hungry hooked") && !threw && result == 3u && logged("not enough memory") &&
-            mhp3rd::mods::scripts::running() == 2u,
+            mhp3rd::mods::scripts::running() == 3u,
         "scripts: a script out of memory when its hook is called stops with an error, and the game goes on");
 
     mhp3rd::mods::scripts::reset_for_tests();

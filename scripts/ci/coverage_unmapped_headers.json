@@ -124,7 +124,7 @@
     "reason": "Script mod host declarations. mod_script*.cpp is covered by mhp3rd_script_mods_tests through the real Luau engine."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.h": {
-    "sha256": "e29ff8bd3f5e385a2a414124cb06c6c2dd52c7ebd926b66d20d2ce3803c904c2",
+    "sha256": "3440b23fe001cd09d3685844bb03c8967ba6a8b015d1a337a80448b11c122883",
     "reason": "The C ABI of native mods: types, constants, function-pointer tables, the interface-version macro and YMOD_SIZE_OF, which gives sizes and strides their C++ defaults; no host code. The host implementation in mod_native*.cpp is covered by mhp3rd_native_mods_tests, which also loads a test mod declaring a newer interface and checks the C++ defaults and arrays read by their strides."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.hpp": {
@@ -144,7 +144,7 @@
     "reason": "Declarations of the drawing of mods' panels and overlays. mod_panels.cpp is covered by mhp3rd_renderer_ui_tests through the real interface."
   },
   "profiles/mhp3rd/host/mods/mod_native_internal.hpp": {
-    "sha256": "267fed172e2067545245cb31c2085734d5d3f093c5dd37e01da9134858f2dfb6",
+    "sha256": "ed14bad5644f244a6ee317954bf6b7db5ec802346e7ec8a7c4082c0277f2f7c5",
     "reason": "The native mod host's internal state: aggregates, one inline cast and declarations shared by mod_native.cpp, mod_native_hooks.cpp and mod_native_services.cpp, which mhp3rd_native_mods_tests covers through real shared libraries."
   },
   "profiles/mhp3rd/host/mods/mod_script_internal.hpp": {

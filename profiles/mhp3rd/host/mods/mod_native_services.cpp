@@ -338,9 +338,19 @@ int ui_overlay(ymod_mod *mod, const char *title, ymod_draw_fn draw, void *user) 
     return add_drawing(mod, title, draw, user, true);
 }
 
-void ui_remove(ymod_mod *mod, ymod_draw_fn draw, void *user) {
-    std::erase_if(state().drawings,
-        [&](const Drawing &drawing) { return drawing.mod == mod && drawing.draw == draw && drawing.user == user; });
+int ui_remove(ymod_mod *mod, ymod_draw_fn draw, void *user) {
+    std::vector<Drawing> &drawings = state().drawings;
+    const auto drawn_by = [draw, user](const Drawing &drawing) { return drawing.draw == draw && drawing.user == user; };
+    if (std::erase_if(drawings, [&](const Drawing &drawing) { return drawing.mod == mod && drawn_by(drawing); }) > 0u)
+        return 0;
+    // Only the mod that added a panel or an overlay takes it off.
+    const bool others = std::any_of(drawings.begin(), drawings.end(), drawn_by);
+    report(mod,
+        std::string("no panel or overlay is removed: ") +
+            (others ? "another mod added those drawn by that function with that user"
+                    : "none is drawn by that function with that user"),
+        true);
+    return -1;
 }
 
 // Fills in as much of `out` as the mod's struct holds, by its size.

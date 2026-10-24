@@ -242,7 +242,7 @@ void withdraw(ymod_mod *mod) {
         for (const Hook &hook : list)
             if (hook.id == id && hook.mod == mod) hooks.push_back(id);
     }
-    for (const ymod_hook hook : hooks) hooks_remove(mod, hook);
+    for (const ymod_hook hook : hooks) (void)hooks_remove(mod, hook);
     std::erase_if(s.subscribers, [mod](const Subscriber &subscriber) { return subscriber.mod == mod; });
     std::erase_if(s.drawings, [mod](const Drawing &drawing) { return drawing.mod == mod; });
     std::erase_if(s.services, [mod](const auto &entry) { return entry.second.owner == mod; });

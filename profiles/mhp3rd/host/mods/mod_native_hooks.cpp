@@ -231,7 +231,7 @@ ymod_hook add_hook(ymod_mod *mod, const char *overlay, std::uint32_t address, in
                     "the hook at " + psprecomp::hex32(address) +
                         " is refused: the game's code there cannot be compiled to run under it",
                     true);
-            hooks_remove(mod, id);
+            (void)hooks_remove(mod, id);
             return 0u;
         }
     }
@@ -333,18 +333,20 @@ void reconcile() {
     }
 }
 
-void hooks_remove(ymod_mod *mod, ymod_hook hook) {
+int hooks_remove(ymod_mod *mod, ymod_hook hook) {
     State &s = state();
     const auto found = s.hook_sites.find(hook);
-    if (found == s.hook_sites.end()) return;
+    const auto refuse = [mod, hook](const char *why) {
+        report(mod, "hook " + std::to_string(hook) + " is not removed: " + why, true);
+        return -1;
+    };
+    if (found == s.hook_sites.end())
+        return refuse("no hook has that number: it was never added, or was removed already");
     const auto [address, instruction] = found->second;
     std::vector<Hook> &hooks = instruction ? s.instructions[address].hooks : s.sites[address].hooks;
     const auto owned = std::find_if(hooks.begin(), hooks.end(), [hook](const Hook &h) { return h.id == hook; });
     // Only the mod that added a hook takes it off.
-    if (owned == hooks.end() || owned->mod != mod) {
-        report(mod, "hook " + std::to_string(hook) + " is not removed: another mod added it", true);
-        return;
-    }
+    if (owned == hooks.end() || owned->mod != mod) return refuse("another mod added it");
     hooks.erase(owned);
     s.hook_sites.erase(found);
     if (!instruction) {
@@ -353,6 +355,7 @@ void hooks_remove(ymod_mod *mod, ymod_hook hook) {
         if (site.hooks.empty()) uninstall(address, site);
     }
     reconcile();
+    return 0;
 }
 
 const ymod_hooks kHooks{1u, sizeof(ymod_hooks), &hooks_function, &hooks_instruction, &hooks_remove};

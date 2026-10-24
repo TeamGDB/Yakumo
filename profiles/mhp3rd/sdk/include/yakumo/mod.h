@@ -181,8 +181,10 @@ typedef struct ymod_hooks {
     /* 0 also when the JIT is off (PSPRECOMP_NO_JIT=1): the interpreter does
      * not run instruction hooks. */
     ymod_hook (*instruction)(ymod_mod *mod, const char *overlay, uint32_t address, ymod_hook_fn callback, void *user);
-    /* Removes a hook this mod added; another mod's stays. */
-    void (*remove)(ymod_mod *mod, ymod_hook hook);
+    /* Removes a hook this mod added: 0, or -1 with the reason in the log for
+     * a hook it does not have (a number no hook has, one removed already, or
+     * another mod's hook, which stays). */
+    int (*remove)(ymod_mod *mod, ymod_hook hook);
 } ymod_hooks;
 
 /* --------------------------------------------------------------------------
@@ -348,8 +350,10 @@ typedef struct ymod_ui {
     /* Return 0 on success. */
     int (*panel)(ymod_mod *mod, const char *title, ymod_draw_fn draw, void *user);
     int (*overlay)(ymod_mod *mod, const char *title, ymod_draw_fn draw, void *user);
-    /* Removes the panels and overlays drawn by `draw` with `user`. */
-    void (*remove)(ymod_mod *mod, ymod_draw_fn draw, void *user);
+    /* Removes this mod's panels and overlays drawn by `draw` with `user`: 0,
+     * or -1 with the reason in the log when it has none (another mod's
+     * stay). */
+    int (*remove)(ymod_mod *mod, ymod_draw_fn draw, void *user);
 } ymod_ui;
 
 /* --------------------------------------------------------------------------

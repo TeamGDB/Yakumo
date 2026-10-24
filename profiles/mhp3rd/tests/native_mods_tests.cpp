@@ -540,6 +540,30 @@ void test_hook_changes(psprecomp::Runtime &runtime) {
         "native: nor a hook of one stopped by an earlier hook at the same call");
     g_hooks->remove(stopper, stop_hook);
 
+    // Panels and overlays come off by the mod that added them: 0, or -1 with
+    // the reason when it has none drawn so.
+    ymod_mod *drawer = native::add_mod("ui_owner", "UI Owner", ".");
+    ymod_mod *bystander = native::add_mod("ui_other", "UI Other", ".");
+    const auto *drawing = static_cast<const ymod_ui *>(native::host()->service(drawer, YMOD_UI, 1u));
+    static int s_user = 0;
+    const ymod_draw_fn draw = [](const ymod_widgets *, void *) {};
+    const ymod_draw_fn never_drawn = [](const ymod_widgets *ui, void *) { ui->separator(); };
+    (void)drawing->panel(drawer, "Owned Panel", draw, &s_user);
+    (void)drawing->overlay(drawer, "Owned Overlay", draw, &s_user);
+    const int by_bystander = drawing->remove(bystander, draw, &s_user);
+    const bool kept_both = native::panels("ui_owner", false).size() == 1u && overlays_titled("Owned Overlay") == 1u;
+    check(by_bystander == -1 && kept_both &&
+            reported("UI Other",
+                "no panel or overlay is removed: another mod added those drawn by that function with that user"),
+        "ui: a mod cannot remove another mod's panels and overlays: -1, and the reason on its page");
+    check(drawing->remove(drawer, draw, &s_user) == 0 && native::panels("ui_owner", false).empty() &&
+            overlays_titled("Owned Overlay") == 0u,
+        "ui: its own mod removes its panel and overlay drawn by that function with that user: 0");
+    const std::string none_drawn = "no panel or overlay is removed: none is drawn by that function with that user";
+    check(drawing->remove(drawer, draw, &s_user) == -1 && drawing->remove(drawer, never_drawn, nullptr) == -1 &&
+            reported("UI Owner", none_drawn),
+        "ui: removing what was removed already, or never drawn, is -1, with the reason");
+
     // A mod that logs every frame does not grow the log without end.
     for (int line = 0; line < 1500; ++line) native::host()->log(g_self, YMOD_LOG_INFO, "chatter");
     check(native::reports().size() <= 1000u && logged("needs a newer Yakumo (mod interface 2, this Yakumo has 1)"),
@@ -580,15 +604,21 @@ void test_host_returns(psprecomp::Runtime &runtime) {
     // Only the mod that added a hook removes it.
     ymod_mod *other = native::add_mod("other_remover", "Other Remover", ".");
     const ymod_hook kept = hooks->function(mod, nullptr, 0x08A00500u, YMOD_HOOK_BEFORE, &count_added, nullptr);
-    hooks->remove(other, kept);
+    const int by_other = hooks->remove(other, kept);
     native::frame(runtime);
     (void)call(runtime, 0x08A00500u, 3u);
-    check(g_added_seen == 2 && logged("hook " + std::to_string(kept) + " is not removed: another mod added it"),
-        "native: a mod cannot remove another mod's hook");
-    hooks->remove(mod, kept);
+    check(by_other == -1 && g_added_seen == 2 &&
+            reported("Other Remover", "hook " + std::to_string(kept) + " is not removed: another mod added it"),
+        "native: a mod cannot remove another mod's hook: -1, and the reason on its page");
+    const int by_owner = hooks->remove(mod, kept);
     native::frame(runtime);
     (void)call(runtime, 0x08A00500u, 3u);
-    check(g_added_seen == 2, "native: its own mod removes it");
+    check(by_owner == 0 && g_added_seen == 2, "native: its own mod removes it: 0");
+    const std::string unknown = "is not removed: no hook has that number: it was never added, or was removed already";
+    check(hooks->remove(mod, kept) == -1 && reported("Host Returns", "hook " + std::to_string(kept) + " " + unknown) &&
+            hooks->remove(mod, 0u) == -1 && reported("Host Returns", "hook 0 " + unknown) &&
+            hooks->remove(mod, 0xFFFFFFF0u) == -1 && reported("Host Returns", "hook 4294967280 " + unknown),
+        "native: removing a hook removed already, hook 0 or a number no hook has is -1, with the reason");
 
     // With the JIT off, nothing would call an instruction hook.
     psprecomp::set_jit_enabled(false);

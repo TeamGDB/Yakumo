@@ -134,7 +134,7 @@ void report(ymod_mod *mod, const std::string &line, bool problem);
 // AFTER hooks return through; instruction hooks from compiled code; the
 // hooks and calls services.
 void reconcile();
-void hooks_remove(ymod_mod *mod, ymod_hook hook);
+int hooks_remove(ymod_mod *mod, ymod_hook hook);
 void hook_return(Runtime &runtime, AllegrexContext &ctx);
 void instruction_dispatch(Runtime &runtime, AllegrexContext &ctx, std::uint32_t address);
 extern const ymod_hooks kHooks;

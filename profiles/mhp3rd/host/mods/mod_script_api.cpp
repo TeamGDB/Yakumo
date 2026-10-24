@@ -176,15 +176,19 @@ int api_hook_instruction(lua_State *state) {
     return 1;
 }
 
+// True when the hook was the script's and is gone; false, with the reason in
+// the log, for a number that is not one of its hooks.
 int api_unhook(lua_State *state) {
     Script &script = self(state);
     const auto id = static_cast<ymod_hook>(luaL_checkinteger(state, 1));
-    script.hooks->remove(script.mod, id);
-    if (const auto found = script.hooked.find(id); found != script.hooked.end()) {
+    const bool removed = script.hooks->remove(script.mod, id) == 0;
+    // A hook that stays keeps its callback.
+    if (const auto found = script.hooked.find(id); removed && found != script.hooked.end()) {
         release(found->second);
         script.hooked.erase(found);
     }
-    return 0;
+    lua_pushboolean(state, removed);
+    return 1;
 }
 
 // The host refuses a key that could break the choices file; so does the
