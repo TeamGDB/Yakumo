@@ -85,16 +85,16 @@ class CppcheckDriverTests(unittest.TestCase):
 
     def test_reviewed_exception_is_bound_to_exact_source_context(self):
         production = Path(cppcheck.ROOT) / 'profiles/mhp3rd/host/kernel/kernel.cpp'
-        reviewed = production.read_text().splitlines()[818:837]
+        reviewed = production.read_text().splitlines()[824:843]
         local = self.root / 'profiles/mhp3rd/host/kernel/kernel.cpp'
         local.parent.mkdir(parents=True)
-        local.write_text('\n'.join([''] * 818 + reviewed) + '\n')
+        local.write_text('\n'.join([''] * 824 + reviewed) + '\n')
         diagnostic = self.diagnostic(path='profiles/mhp3rd/host/kernel/kernel.cpp',
-                                     identifier='invalidContainer', line='832')
+                                     identifier='invalidContainer', line='838')
         self.assertFalse(self.analyze(diagnostic))
         summary = json.loads((self.build / 'cppcheck-results/summary.json').read_text())
         self.assertEqual(len(summary['reviewed_exceptions']), 1)
-        local.write_text('\n'.join([''] * 818 + ['Changed context'] + reviewed[1:]) + '\n')
+        local.write_text('\n'.join([''] * 824 + ['Changed context'] + reviewed[1:]) + '\n')
         self.assertTrue(self.analyze(diagnostic))
 
     def test_failed_invocation_or_malformed_report_cannot_pass(self):
