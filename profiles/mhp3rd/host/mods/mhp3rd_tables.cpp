@@ -34,6 +34,14 @@ struct Count {
     std::uint32_t word;
 };
 
+// A word of data that holds an address in the table, as a list of tables
+// the game picks from holds it: the game's word, the table's start or a
+// place in it.
+struct Pointer {
+    std::uint32_t address;
+    std::uint32_t word;
+};
+
 struct Definition {
     Table table;
     std::uint32_t most_rows; // what the index the game uses can reach
@@ -43,6 +51,7 @@ struct Definition {
     // is not the one the table is in (a table in the executable read by an
     // overlay): they are there, and checked, only while it is loaded.
     std::string code{};
+    std::vector<Pointer> pointers{};
 };
 
 // Traced on NPJB-40001 (docs/MONSTERS.md).
@@ -112,9 +121,15 @@ const std::vector<Definition> &definitions() {
             {}},
         // Each armor part's records, by armor id (40 bytes): the male and the
         // female model numbers at +0 and +2, who may wear it at +4, its price
-        // at +8 and its description's index at +0x1A. Read through twenty
-        // pairs each in the executable, none in an overlay, with no bound;
-        // the part's name table has as many entries.
+        // at +8, its decoration slots at +0x12 and its description's index at
+        // +0x1A. Read through twenty pairs each in the executable, none in an
+        // overlay, with no bound; the part's name table has as many entries.
+        // Also through the list of the five parts' tables at 0x089832D8
+        // (chest, arms, waist, legs, head, by an equipment record's part),
+        // which nine functions read, among them the count of a piece's slots
+        // that the equipment screens fill a list of three with (0x0885EED8):
+        // a piece past the game's read there gave a count past three, and the
+        // screen ran over its stack.
         {{"armor.head", "", 0x08987EE4u, 40u, 256u}, 0x400u,
             {{0x0885CC00u, 0x3C020898u, 0x0885CC08u, 0x24427EE4u}, {0x0885D198u, 0x3C030898u, 0x0885D19Cu, 0x24637EE4u},
                 {0x0885D464u, 0x3C020898u, 0x0885D46Cu, 0x24427EE4u},
@@ -135,7 +150,7 @@ const std::vector<Definition> &definitions() {
                 {0x08869BC0u, 0x3C030898u, 0x08869BC4u, 0x24637EE4u},
                 {0x08869D84u, 0x3C030898u, 0x08869D88u, 0x24637EE4u},
                 {0x08869EA4u, 0x3C030898u, 0x08869EA8u, 0x24637EE4u}},
-            {}},
+            {}, {}, {{0x089832E8u, 0x08987EE4u}}},
         {{"armor.chest", "", 0x08985A7Cu, 40u, 233u}, 0x400u,
             {{0x0885CB60u, 0x3C020898u, 0x0885CB68u, 0x24425A7Cu}, {0x0885D0F8u, 0x3C030898u, 0x0885D0FCu, 0x24635A7Cu},
                 {0x0885D3D4u, 0x3C020898u, 0x0885D3DCu, 0x24425A7Cu},
@@ -156,7 +171,7 @@ const std::vector<Definition> &definitions() {
                 {0x08869BECu, 0x3C030898u, 0x08869BF0u, 0x24635A7Cu},
                 {0x08869D2Cu, 0x3C030898u, 0x08869D30u, 0x24635A7Cu},
                 {0x08869ED0u, 0x3C030898u, 0x08869ED4u, 0x24635A7Cu}},
-            {}},
+            {}, {}, {{0x089832D8u, 0x08985A7Cu}}},
         {{"armor.arms", "", 0x08983934u, 40u, 213u}, 0x400u,
             {{0x0885CB88u, 0x3C020898u, 0x0885CB90u, 0x24423934u}, {0x0885D120u, 0x3C030898u, 0x0885D124u, 0x24633934u},
                 {0x0885D3F8u, 0x3C020898u, 0x0885D400u, 0x24423934u},
@@ -177,7 +192,7 @@ const std::vector<Definition> &definitions() {
                 {0x08869B3Cu, 0x3C030898u, 0x08869B40u, 0x24633934u},
                 {0x08869DF4u, 0x3C030898u, 0x08869DF8u, 0x24633934u},
                 {0x08869E20u, 0x3C030898u, 0x08869E24u, 0x24633934u}},
-            {}},
+            {}, {}, {{0x089832DCu, 0x08983934u}}},
         {{"armor.waist", "", 0x0898A6E4u, 40u, 214u}, 0x400u,
             {{0x0885CBB0u, 0x3C020899u, 0x0885CBB8u, 0x2442A6E4u}, {0x0885D148u, 0x3C030899u, 0x0885D14Cu, 0x2463A6E4u},
                 {0x0885D41Cu, 0x3C020899u, 0x0885D424u, 0x2442A6E4u},
@@ -198,7 +213,7 @@ const std::vector<Definition> &definitions() {
                 {0x08869B68u, 0x3C030899u, 0x08869B6Cu, 0x2463A6E4u},
                 {0x08869CF4u, 0x3C030899u, 0x08869CF8u, 0x2463A6E4u},
                 {0x08869E4Cu, 0x3C030899u, 0x08869E50u, 0x2463A6E4u}},
-            {}},
+            {}, {}, {{0x089832E0u, 0x0898A6E4u}}},
         {{"armor.legs", "", 0x0898C854u, 40u, 220u}, 0x400u,
             {{0x0885CBD8u, 0x3C020899u, 0x0885CBE0u, 0x2442C854u}, {0x0885D170u, 0x3C030899u, 0x0885D174u, 0x2463C854u},
                 {0x0885D440u, 0x3C020899u, 0x0885D448u, 0x2442C854u},
@@ -219,7 +234,7 @@ const std::vector<Definition> &definitions() {
                 {0x08869B94u, 0x3C030899u, 0x08869B98u, 0x2463C854u},
                 {0x08869DBCu, 0x3C030899u, 0x08869DC0u, 0x2463C854u},
                 {0x08869E78u, 0x3C030899u, 0x08869E7Cu, 0x2463C854u}},
-            {}},
+            {}, {}, {{0x089832E4u, 0x0898C854u}}},
         // Each weapon class's records, by weapon id (28 bytes, 80 for the
         // bowguns and bows): its model number at +0, its rarity at +2, its
         // price at +4 and its description's index at +0x18. Read only through
@@ -361,12 +376,23 @@ Code count_state(psprecomp::Runtime &runtime, const Count &c, std::uint32_t rows
     return Code::Other;
 }
 
+Code pointer_state(psprecomp::Runtime &runtime, const Definition &d, const Pointer &p, std::uint32_t copy) {
+    auto &memory = runtime.memory();
+    if (!memory.contains(p.address, 4u)) return Code::Other;
+    const std::uint32_t w = memory.load32(p.address);
+    if (w == p.word) return Code::Game;
+    if (copy != 0u && w == copy + (p.word - d.table.address)) return Code::Ours;
+    return Code::Other;
+}
+
 // Whether every reference present holds the game's words or `m`'s.
 bool as_traced(psprecomp::Runtime &runtime, const Definition &d, const Moved &m) {
     for (const Reference &r : d.references)
         if (present(runtime, d, r.hi) && reference_state(runtime, r, m.address) == Code::Other) return false;
     for (const Count &c : d.counts)
         if (present(runtime, d, c.address) && count_state(runtime, c, m.rows) == Code::Other) return false;
+    for (const Pointer &p : d.pointers)
+        if (present(runtime, d, p.address) && pointer_state(runtime, d, p, m.address) == Code::Other) return false;
     return true;
 }
 
@@ -400,6 +426,12 @@ void repoint(psprecomp::Runtime &runtime, const Definition &d, const Moved &m, s
     for (const Count &c : d.counts) {
         if (!present(runtime, d, c.address) || count_state(runtime, c, m.rows) == Code::Ours) continue;
         rewrite(runtime, c.address, with_immediate(c.word, m.rows), who);
+    }
+    // Data, not code: nothing compiled to retire.
+    for (const Pointer &p : d.pointers) {
+        if (!present(runtime, d, p.address) || pointer_state(runtime, d, p, m.address) == Code::Ours) continue;
+        if (pointer_state(runtime, d, p, previous) == Code::Other) continue;
+        runtime.memory().store32(p.address, m.address + (p.word - d.table.address));
     }
 }
 
@@ -512,6 +544,7 @@ void write_traced_code_for_tests(psprecomp::Runtime &runtime, std::string_view n
         runtime.memory().store32(r.lo, r.lo_word);
     }
     for (const Count &c : d->counts) runtime.memory().store32(c.address, c.word);
+    for (const Pointer &p : d->pointers) runtime.memory().store32(p.address, p.word);
 }
 
 void reset_for_tests() {

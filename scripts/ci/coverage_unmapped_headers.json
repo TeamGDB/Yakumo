@@ -172,8 +172,8 @@
     "reason": "Declarations and the Quest aggregate. mhp3rd_quests.cpp is covered by mhp3rd_native_mods_tests (keys and stand-in code in memory, a refused executable, the hook giving a mod's quest its file)."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_tables.hpp": {
-    "sha256": "8951e561938788d2acc58919906c3e4c1d3163a3a68681c5a59ce3cd32f20d45",
-    "reason": "Declarations and the Table and Placement aggregates. mhp3rd_tables.cpp is covered by mhp3rd_native_mods_tests (stand-in code that reads a table in the executable and one in a code overlay, refused and moved tables, the yakumo.tables service) and mhp3rd_script_mods_tests. can_extend(), which checks a table can grow and changes nothing, is covered there too (unknown tables, too many rows, code not as traced)."
+    "sha256": "7798e8ae95e4a12505ae548fa59302f25309002495dd514adb36f7b7b405c4f3",
+    "reason": "Declarations and the Table and Placement aggregates. mhp3rd_tables.cpp is covered by mhp3rd_native_mods_tests (stand-in code that reads a table in the executable and one in a code overlay, refused and moved tables, the words of data that hold a table's address, the yakumo.tables service) and mhp3rd_script_mods_tests. can_extend(), which checks a table can grow and changes nothing, is covered there too (unknown tables, too many rows, code not as traced)."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_mod_format.hpp": {
     "sha256": "4699cb04841f539b503163e52d64ff8083b1cd72b0ba6f6ca0d07ec4a471a465",

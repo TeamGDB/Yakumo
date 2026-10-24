@@ -833,6 +833,22 @@ void test_tables(psprecomp::Runtime &runtime) {
     check(!tables::extend(runtime, "monster.models", 100u, &why) && why.find("not as traced") != std::string::npos,
         "tables: not moved again over another mod's change to its code");
 
+    // A word of data that holds a table's address: the list of the armor
+    // parts' tables, which the count of a piece's slots reads. Left at the
+    // game's table, a piece past the game's read a count past the three the
+    // equipment screens have room for.
+    constexpr std::uint32_t kWaists = 0x089832E0u;
+    tables::write_traced_code_for_tests(runtime, "armor.waist");
+    const std::optional<std::uint32_t> waists = tables::extend(runtime, "armor.waist", 215u);
+    check(waists && *waists != 0x0898A6E4u && runtime.memory().load32(kWaists) == *waists,
+        "tables: a word of data that holds the table's address follows it");
+    const std::optional<std::uint32_t> more_waists = tables::extend(runtime, "armor.waist", 230u);
+    check(more_waists && more_waists != waists && runtime.memory().load32(kWaists) == *more_waists,
+        "tables: and each move after");
+    runtime.memory().store32(kWaists, 0x08900000u);
+    check(!tables::extend(runtime, "armor.waist", 240u, &why) && why.find("not as traced") != std::string::npos,
+        "tables: not moved again over another mod's change to a word that holds its address");
+
     // The kinds, in the quest overlay: extended before the overlay loads.
     constexpr std::uint32_t kSlot = 0x0A05E600u;
     place_overlay(runtime, kSlot, "lobby_task.ovl", 0x00200000u);
