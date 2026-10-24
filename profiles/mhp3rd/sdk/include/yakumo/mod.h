@@ -40,6 +40,34 @@ extern "C" {
 #define YAKUMO_MOD_EXPORT __attribute__((visibility("default")))
 #endif
 
+/* --------------------------------------------------------------------------
+ * Sizes and strides: how the structs a mod passes grow without breaking it.
+ *
+ * A struct passed on its own (ymod_monster, ymod_quest, ymod_symbol...) starts
+ * with `size`, its sizeof. A struct passed in an array (ymod_hit_sphere,
+ * ymod_quest_monster, ymod_area_exit...) has no size of its own: the array is
+ * a pointer, a count and a stride, the bytes from one element to the next
+ * (the element's sizeof), given in a field of the struct that holds the
+ * pointer or as the argument after the count. Fields are only ever added at
+ * the end of a struct. The host reads what both its own header and the mod's
+ * cover: a field the mod's header lacks takes its default (0 unless the field
+ * says otherwise), and fields the host does not know are ignored. An array
+ * whose stride is below its element in the first SDK (interface 1) is
+ * refused, with the reason in the log, as is a struct too short for what the
+ * call needs; nothing past count times stride is read. ymod_vec3 and
+ * ymod_quest_texts lie inside other structs and never grow.
+ *
+ * A C mod sets every `size` and stride it passes to the sizeof of its struct;
+ * one left at 0 is refused. In C++ (14 or later) they start as this header's
+ * sizes (YMOD_SIZE_OF), and yakumo/mod.hpp passes the strides of arrays given
+ * as arguments, so a C++ mod sets none of them.
+ */
+#ifdef __cplusplus
+#define YMOD_SIZE_OF(type) = sizeof(type)
+#else
+#define YMOD_SIZE_OF(type)
+#endif
+
 /* The interface version this header describes. Services carry versions of
  * their own. A mod states the version it was built for with
  * YAKUMO_MOD_API_VERSION(), once, in one source file; a host refuses a mod
@@ -249,11 +277,11 @@ typedef struct ymod_services {
  */
 #define YMOD_SYMBOLS "yakumo.symbols"
 enum ymod_symbol_kind { YMOD_SYMBOL_FUNCTION = 0, YMOD_SYMBOL_DATA = 1 };
-/* Set `size` to sizeof(ymod_symbol) before passing one: the host fills in
- * only the fields that fit, so a later host with more fields never writes
- * past an older mod's struct. */
+/* Set `size` to sizeof(ymod_symbol) before passing one (C++ does): the host
+ * fills in only the fields that fit, so a later host with more fields never
+ * writes past an older mod's struct. */
 typedef struct ymod_symbol {
-    uint32_t size;
+    uint32_t size YMOD_SIZE_OF(ymod_symbol);
     const char *name;
     const char *overlay; /* NULL: the executable; otherwise the code overlay ("game_task") */
     const char *about;   /* what it is, in a line */
@@ -334,7 +362,7 @@ typedef struct ymod_ui {
  */
 #define YMOD_TABLES "yakumo.tables"
 typedef struct ymod_table {
-    uint32_t size; /* set to sizeof(ymod_table) before passing one */
+    uint32_t size YMOD_SIZE_OF(ymod_table);
     const char *name;
     const char *overlay; /* NULL: the executable; otherwise the code overlay it lies in */
     uint32_t address;    /* where it is now */
@@ -365,7 +393,7 @@ typedef struct ymod_tables {
  */
 #define YMOD_MONSTERS "yakumo.monsters"
 typedef struct ymod_monster {
-    uint32_t size;         /* set to sizeof(ymod_monster) before passing one */
+    uint32_t size YMOD_SIZE_OF(ymod_monster);
     const char *id;        /* the mod's name for the kind: lower case, "fatalis" */
     const char *based_on;  /* a kind of the game by id: "tigrex" */
     const char *model;     /* paths in the mod's folder: the model pack (skeleton, model, textures), */
@@ -399,7 +427,8 @@ typedef struct ymod_vec3 {
     float x, y, z;
 } ymod_vec3;
 /* A sphere an attack hits with, on one of the kind's joints (numbered as in
- * its skeleton): its radius and centre from the joint, in the joint's frame. */
+ * its skeleton): its radius and centre from the joint, in the joint's frame.
+ * Passed in arrays, with a stride (Sizes and strides, at the top). */
 typedef struct ymod_hit_sphere {
     int32_t joint;
     float radius;
@@ -412,7 +441,7 @@ typedef int (*ymod_monster_fn)(ymod_cpu *cpu, uint32_t monster, void *user);
  * "A monster's body capsules"): from `from` in joint `joint`'s frame to `to`
  * in joint `joint_to`'s, `radius` round, or a sphere at `from` when joint_to
  * is -1. `part` is the body part and `zone` the hit zone word, as the base
- * kind's own capsules give them. */
+ * kind's own capsules give them. Passed in arrays, with a stride. */
 typedef struct ymod_body_capsule {
     int32_t joint, joint_to;
     int32_t part;
@@ -423,7 +452,7 @@ typedef struct ymod_body_capsule {
 /* A footstep (docs/MONSTERS.md, "A monster's footsteps"): in motion `motion`
  * at its frame `frame`, joint `joint` comes down, raising the dust of a step
  * of size `size` (the game's kinds of step, 0 to 9) on the ground the monster
- * stands on. */
+ * stands on. Passed in arrays, with a stride. */
 typedef struct ymod_footstep {
     int32_t motion;
     float frame;
@@ -490,10 +519,12 @@ typedef struct ymod_monsters {
     /* Gives a kind this mod added its own spheres (1 to 16) for one of the
      * base kind's attack shapes, by number: what the base's attack rows that
      * name the shape hit with, on the kind's own joints instead of the
-     * base's (docs/MONSTERS.md, "A monster's attacks"). Call at start; it
-     * takes effect in monsters with a part of behaviour. 0, or -1 (the
-     * reason is in the log). */
-    int (*attack_shape)(ymod_mod *mod, int32_t kind, int32_t shape, const ymod_hit_sphere *spheres, int32_t count);
+     * base's (docs/MONSTERS.md, "A monster's attacks"). `stride` is
+     * sizeof(ymod_hit_sphere): yakumo::Mod::attack_shape passes it. Call at
+     * start; it takes effect in monsters with a part of behaviour. 0, or -1
+     * (the reason is in the log). */
+    int (*attack_shape)(ymod_mod *mod, int32_t kind, int32_t shape, const ymod_hit_sphere *spheres, int32_t count,
+        uint32_t stride);
     /* Starts one of the kind's effects (in its model pack, docs/MONSTERS.md),
      * by number, on one of its joints, `offset` from it (NULL: on the joint)
      * and at `scale` (1: as made); queued as play_motion is. 0, or -1 outside
@@ -505,9 +536,12 @@ typedef struct ymod_monsters {
     int (*health)(uint32_t monster, int32_t *now, int32_t *most);
     /* Gives a kind this mod added its own body capsules (1 to 64), in place
      * of the base kind's, which are on the base's joints: where hunters'
-     * hits land. Call at start; it takes effect in monsters with a part of
-     * behaviour. 0, or -1 (the reason is in the log). */
-    int (*body_shapes)(ymod_mod *mod, int32_t kind, const ymod_body_capsule *capsules, int32_t count);
+     * hits land. `stride` is sizeof(ymod_body_capsule), as
+     * yakumo::Mod::body_shapes passes it. Call at start; it takes effect in
+     * monsters with a part of behaviour. 0, or -1 (the reason is in the
+     * log). */
+    int (*body_shapes)(
+        ymod_mod *mod, int32_t kind, const ymod_body_capsule *capsules, int32_t count, uint32_t stride);
     /* Gives a kind this mod added an attack row of its own: row `row` (1 to
      * 63) of its attack table becomes a copy of the base kind's row `like`
      * (what it does: its strength, its kind of hit) that hits with shape
@@ -519,9 +553,10 @@ typedef struct ymod_monsters {
     /* Gives a kind this mod added its footsteps (1 to 256, at most 255 in one
      * motion): after each frame
      * its THINK did alone (YMOD_RETURN), the game plays those of the motion
-     * playing, as a monster's own effects part plays the base's.
+     * playing, as a monster's own effects part plays the base's. `stride`
+     * is sizeof(ymod_footstep), as yakumo::Mod::footsteps passes it.
      * Call at start. 0, or -1 (the reason is in the log). */
-    int (*footsteps)(ymod_mod *mod, int32_t kind, const ymod_footstep *steps, int32_t count);
+    int (*footsteps)(ymod_mod *mod, int32_t kind, const ymod_footstep *steps, int32_t count, uint32_t stride);
 } ymod_monsters;
 
 /* --------------------------------------------------------------------------
@@ -532,6 +567,8 @@ typedef struct ymod_monsters {
  * texts. Call add() from yakumo_mod_main, after adding the monsters it names.
  */
 #define YMOD_QUESTS "yakumo.quests"
+/* The quest's large monsters, rewards and supplies are arrays, each with its
+ * stride in ymod_quest (Sizes and strides, at the top). */
 typedef struct ymod_quest_monster {
     const char *monster; /* a kind by id, the game's or a mod's: "fatalis" */
     int32_t area;        /* the area of the quest's map it starts in, by the game's number; 0 in a quest that
@@ -541,6 +578,8 @@ typedef struct ymod_quest_monster {
     int32_t attack;      /* the game's attack level (0x13: a low rank hunt; 0x30 hits three times as hard) */
     int32_t size;        /* percent of the kind's size; 0: 100 */
 } ymod_quest_monster;
+/* Inside ymod_quest, so it never grows: more texts would be fields at the end
+ * of ymod_quest. */
 typedef struct ymod_quest_texts {
     /* Shown in every language for now; NUL-terminated UTF-8, "\n" for a new line. */
     const char *name, *objective, *failure, *description, *monsters, *client;
@@ -557,7 +596,7 @@ typedef struct ymod_quest_supply {
     uint32_t count;   /* how many, 1 to 99 */
 } ymod_quest_supply;
 typedef struct ymod_quest {
-    uint32_t size; /* set to sizeof(ymod_quest) before passing one */
+    uint32_t size YMOD_SIZE_OF(ymod_quest);
     uint32_t id;   /* 62000 to 65535 */
     int32_t map;   /* the game's map number: 8 is the arena; not read when `area` names an added area */
     int32_t stars;
@@ -579,6 +618,11 @@ typedef struct ymod_quest {
                                  besides `area`: up to 13, all on one map, each in place of another of its areas
                                  (a camp and a fighting area, say); `map` is then theirs */
     uint32_t area_count;
+    /* The strides of `monsters`, `rewards` and `supplies`: sizeof(ymod_quest_monster), sizeof(ymod_quest_reward)
+       and sizeof(ymod_quest_supply). A C mod sets them; in C++ they start so. */
+    uint32_t monster_stride YMOD_SIZE_OF(ymod_quest_monster);
+    uint32_t reward_stride YMOD_SIZE_OF(ymod_quest_reward);
+    uint32_t supply_stride YMOD_SIZE_OF(ymod_quest_supply);
 } ymod_quest;
 /* --------------------------------------------------------------------------
  * "yakumo.equipment" 1: weapons mods add. A weapon starts from one of the
@@ -589,7 +633,7 @@ typedef struct ymod_quest {
  */
 #define YMOD_EQUIPMENT "yakumo.equipment"
 typedef struct ymod_weapon {
-    uint32_t size;           /* set to sizeof(ymod_weapon) before passing one */
+    uint32_t size YMOD_SIZE_OF(ymod_weapon);
     const char *id;          /* the mod's name for it */
     const char *kind;        /* its class: "great_sword", "sword_and_shield", "hammer", "lance", "heavy_bowgun",
                                 "light_bowgun", "long_sword", "switch_axe", "gunlance", "bow", "dual_blades",
@@ -605,7 +649,7 @@ typedef struct ymod_weapon {
  * resistances, skills, slots and who may wear it) and has its own models (a
  * male and a female one), name, description and price. */
 typedef struct ymod_armor {
-    uint32_t size;            /* set to sizeof(ymod_armor) before passing one */
+    uint32_t size YMOD_SIZE_OF(ymod_armor);
     const char *id;           /* the mod's name for it */
     const char *part;         /* "head", "chest", "arms", "waist" or "legs" */
     int32_t based_on;         /* the game's piece of that part it starts from, by its id there (from 1) */
@@ -641,7 +685,8 @@ typedef struct ymod_equipment {
  * their sizes above 0; a facing is a turn in 65536ths (0 faces +z, 16384 +x,
  * 32768 -z). A quest whose areas, or the areas their exits lead to and their
  * arrivals come from, are not all among the map's own areas is played in the
- * game's areas.
+ * game's areas. Exits, arrivals, spots and a spot's items are arrays, each
+ * with its stride in the struct holding it (Sizes and strides, at the top).
  */
 #define YMOD_MAPS "yakumo.maps"
 /* A way out: walking into its upright cylinder takes the hunter to area `to`
@@ -701,9 +746,11 @@ typedef struct ymod_area_spot {
     uint32_t item_count;
     uint32_t uses;
     uint32_t extra_uses;
+    /* The stride of `items`: sizeof(ymod_area_item). A C mod sets it; in C++ it starts so. */
+    uint32_t item_stride YMOD_SIZE_OF(ymod_area_item);
 } ymod_area_spot;
 typedef struct ymod_area {
-    uint32_t size;          /* set to sizeof(ymod_area) before passing one */
+    uint32_t size YMOD_SIZE_OF(ymod_area);
     const char *id;         /* the mod's name for it */
     int32_t map, area;      /* the game's area it takes the place of (an area 0 to 12): map 8's area 1 is the
                                arena's */
@@ -714,8 +761,7 @@ typedef struct ymod_area {
     const char *walls;      /* and its walls', ceilings' and steep slopes': what runs into them */
     /* Its points (up to 16 of each; an array is NULL only with a count of 0). With none of them (all NULL),
        the game's area's stay: its start, ways in and out, camp and gathering, in the game's places. With any,
-       the area has these and none of the game's. Each array is read with the element size this header
-       declares (its structs carry no size of their own). */
+       the area has these and none of the game's. */
     const ymod_area_exit *exits;
     uint32_t exit_count;
     const ymod_area_arrival *arrivals;
@@ -725,6 +771,11 @@ typedef struct ymod_area {
     const ymod_area_arrival *cart; /* NULL, or the camp's cart, on area 0 only (the game keeps one for the map, the
                                       camp's, so a quest has at most one): a hunter who fainted is brought back
                                       there and set down along its facing (`from` and `door` are not read) */
+    /* The strides of `exits`, `arrivals` (and `cart`, an arrival) and `spots`: sizeof(ymod_area_exit),
+       sizeof(ymod_area_arrival) and sizeof(ymod_area_spot). A C mod sets them; in C++ they start so. */
+    uint32_t exit_stride YMOD_SIZE_OF(ymod_area_exit);
+    uint32_t arrival_stride YMOD_SIZE_OF(ymod_area_arrival);
+    uint32_t spot_stride YMOD_SIZE_OF(ymod_area_spot);
 } ymod_area;
 typedef struct ymod_maps {
     uint32_t version;

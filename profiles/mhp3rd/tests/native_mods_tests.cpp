@@ -13,7 +13,7 @@
 #include "mods/mhp3rd_symbols.hpp"
 #include "mods/mhp3rd_tables.hpp"
 
-#include "yakumo/mod.h"
+#include "yakumo/mod.hpp"
 
 #include "game/game_data.hpp"
 #include "game/guest_ram.hpp"
@@ -339,6 +339,31 @@ void test_ui() {
     overlays[0].draw(&kWidgets, overlays[0].user);
     check(g_checkbox_calls == 1 && logged("panel switch=1"), "ui: a panel's switch changes the mod's value");
     check(g_shapes == 1 && logged("overlay drawn"), "ui: an overlay draws its shapes");
+}
+
+// In C++ a struct's size and its arrays' strides start as this header's, so
+// a C++ mod fills in none of them; a C mod sets them (yakumo/mod.h).
+void test_sizes() {
+    const ymod_quest quest{};
+    const ymod_area area{};
+    const ymod_area_spot spot{};
+    const ymod_symbol symbol{};
+    const ymod_table table{};
+    const ymod_monster monster{};
+    const ymod_weapon weapon{};
+    const ymod_armor armor{};
+    check(quest.size == sizeof(ymod_quest) && quest.monster_stride == sizeof(ymod_quest_monster) &&
+            quest.reward_stride == sizeof(ymod_quest_reward) && quest.supply_stride == sizeof(ymod_quest_supply) &&
+            area.size == sizeof(ymod_area) && area.exit_stride == sizeof(ymod_area_exit) &&
+            area.arrival_stride == sizeof(ymod_area_arrival) && area.spot_stride == sizeof(ymod_area_spot) &&
+            spot.item_stride == sizeof(ymod_area_item) && symbol.size == sizeof(ymod_symbol) &&
+            table.size == sizeof(ymod_table) && monster.size == sizeof(ymod_monster) &&
+            weapon.size == sizeof(ymod_weapon) && armor.size == sizeof(ymod_armor),
+        "sdk: in C++ every size and stride starts as this header's");
+    // A positional initializer written before the strides keeps its meaning.
+    const ymod_area_spot pile{YMOD_SPOT_GATHERING, {1.0f, 2.0f, 3.0f}, 150.0f, 200.0f, 0, nullptr, 0u, 10u, 2u};
+    check(pile.uses == 10u && pile.extra_uses == 2u && pile.item_stride == sizeof(ymod_area_item),
+        "sdk: the strides come after the fields a positional initializer names");
 }
 
 } // namespace
@@ -1346,9 +1371,8 @@ void test_maps(psprecomp::Runtime &runtime) {
     in_castle.area = "castle";
     in_castle.monsters = pair;
     in_castle.monster_count = 2u;
-    std::optional<std::vector<std::uint8_t>> built;
-    if (quests != nullptr && quests->add(mod, &in_castle) == 62605) {
-        const mhp3rd::mods::FileId file = *mhp3rd::mods::p3rd::quest_file(62605u);
+    const auto built_quest = [&](std::uint32_t id) -> std::optional<std::vector<std::uint8_t>> {
+        const mhp3rd::mods::FileId file = *mhp3rd::mods::p3rd::quest_file(id);
         runtime.cpu().gpr[5] = file;
         const std::uint32_t size = call(runtime, 0x08864E8Cu, 0x08B3F040u);
         runtime.cpu().gpr[5] = file;
@@ -1357,8 +1381,11 @@ void test_maps(psprecomp::Runtime &runtime) {
         std::vector<std::uint8_t> encrypted(size);
         memory.copy_out(0x08C00000u, encrypted);
         game::GuestRam keys_ram(memory);
-        if (const auto keys = game::read_quest_keys(keys_ram)) built = game::decrypt_quest(encrypted, *keys);
-    }
+        if (const auto keys = game::read_quest_keys(keys_ram)) return game::decrypt_quest(encrypted, *keys);
+        return std::nullopt;
+    };
+    std::optional<std::vector<std::uint8_t>> built;
+    if (quests != nullptr && quests->add(mod, &in_castle) == 62605) built = built_quest(62605u);
     const auto u32_at = [&built](std::size_t at) { return word_at(*built, at); };
     const auto area_of = [&](std::size_t monster) {
         const std::uint32_t spawns = u32_at(u32_at(0x20u) + 12u);
@@ -1368,6 +1395,30 @@ void test_maps(psprecomp::Runtime &runtime) {
     const std::optional<game::QuestRecord> record = built ? game::read_quest_record(*built) : std::nullopt;
     check(built && record && record->map == 8u && area_of(0) == 1u && area_of(1) == 3u,
         "maps: a quest in an added area is on its map, its monsters of area 0 in the added area");
+    // Its monsters from a mod built with wider ones, as a later SDK's: read by
+    // their stride, the extra bytes ignored. A stride of 0, as a C mod that
+    // forgot it gives, is refused with the reason.
+    struct WideMonster {
+        ymod_quest_monster monster;
+        const char *later;
+        std::int32_t more;
+    };
+    const WideMonster wide_pair[] = {{pair[0], "not a monster", -1}, {pair[1], "not a monster", -1}};
+    ymod_quest wide = in_castle;
+    wide.id = 62606u;
+    wide.monsters = &wide_pair[0].monster;
+    wide.monster_stride = sizeof(WideMonster);
+    built = quests != nullptr && quests->add(mod, &wide) == 62606 ? built_quest(62606u) : std::nullopt;
+    check(built && area_of(0) == 1u && area_of(1) == 3u,
+        "maps: a quest's monsters wider than this header's are read by their stride, their extra bytes ignored");
+    ymod_quest unstrided = in_castle;
+    unstrided.id = 62607u;
+    unstrided.monster_stride = 0u;
+    check(quests != nullptr && quests->add(mod, &unstrided) == -1 &&
+            logged("quest 62607 is not added: monster_stride is 0, less than the " +
+                std::to_string(offsetof(ymod_quest_monster, size) + sizeof(std::int32_t)) +
+                " bytes of a ymod_quest_monster: set it to sizeof(ymod_quest_monster)"),
+        "maps: a quest whose monsters' stride is 0 is refused, with the reason");
 
     std::error_code ec;
     std::filesystem::remove_all(folder, ec);
@@ -1579,6 +1630,38 @@ void test_map_points(psprecomp::Runtime &runtime) {
         "points: too many, an exit to no area or its own or with a door past 255, an arrival's facing, area or door "
         "out of range, a thing that is not the camp's, a cart's facing out of range or a cart off the camp, a place "
         "that is not a finite number and a size not above 0 (infinite, not a number) are refused");
+    // Strides below the first SDK's elements, or so wide the array passes 4 GiB.
+    const auto stride_line = [](const char *field, std::size_t stride, std::size_t first, const char *type) {
+        return std::string(field) + " is " + std::to_string(stride) + ", less than the " + std::to_string(first) +
+            " bytes of a " + type + ": set it to sizeof(" + type + ")";
+    };
+    constexpr std::size_t kExitEnd = offsetof(ymod_area_exit, door) + sizeof(std::int32_t);
+    constexpr std::size_t kArrivalEnd = offsetof(ymod_area_arrival, door) + sizeof(std::int32_t);
+    constexpr std::size_t kSpotEnd = offsetof(ymod_area_spot, item_stride) + sizeof(std::uint32_t);
+    ymod_area short_exits = camp;
+    short_exits.exit_stride = static_cast<std::uint32_t>(kExitEnd - 4u);
+    ymod_area unstrided_arrivals = camp;
+    unstrided_arrivals.arrival_stride = 0u;
+    ymod_area cart_alone = camp;
+    cart_alone.arrivals = nullptr;
+    cart_alone.arrival_count = 0u;
+    cart_alone.arrival_stride = 0u;
+    ymod_area short_spots = camp;
+    short_spots.spot_stride = static_cast<std::uint32_t>(offsetof(ymod_area_spot, item_stride));
+    const ymod_area_exit two_doors[] = {door, door};
+    ymod_area endless = camp;
+    endless.exits = two_doors;
+    endless.exit_count = 2u;
+    endless.exit_stride = 0x80000000u;
+    check(refused(short_exits, "short_exits", stride_line("exit_stride", kExitEnd - 4u, kExitEnd, "ymod_area_exit")) &&
+            refused(unstrided_arrivals, "unstrided_arrivals",
+                stride_line("arrival_stride", 0u, kArrivalEnd, "ymod_area_arrival")) &&
+            refused(cart_alone, "cart_alone", stride_line("arrival_stride", 0u, kArrivalEnd, "ymod_area_arrival")) &&
+            refused(short_spots, "short_spots",
+                stride_line("spot_stride", offsetof(ymod_area_spot, item_stride), kSpotEnd, "ymod_area_spot")) &&
+            refused(endless, "endless", "exit_stride is 2147483648: 2 elements that far apart pass 4 GiB"),
+        "points: an exit, arrival (the cart's too) or spot stride below its first element, 0, or one whose array "
+        "passes 4 GiB is refused with the reason, before anything of the array is read");
     std::string why;
     const Bytes pmo = bytes(std::string_view("pmo\0"
                                              "102\0",
@@ -1649,6 +1732,44 @@ void test_map_points(psprecomp::Runtime &runtime) {
             u16(camp_points, 0xDEu) == 7u && f32(camp_points, 0xE0u) == 6000.0f && u16(camp_points, 0xF8u) == 0x4000u,
         "points: the camp's points table is its exits, arrivals, supply box, bed and cart");
     check(entry(collision, 6) == bytes("FLOOR POINTS"), "points: an area that gives none keeps the game's table");
+    // The same camp from a mod built with wider elements, as a later SDK's
+    // with fields of its own past these: read by its strides, the extra bytes
+    // ignored, it has the same table.
+    struct WideExit {
+        ymod_area_exit exit;
+        std::uint32_t later[3];
+    };
+    struct WideArrival {
+        ymod_area_arrival arrival;
+        std::uint32_t later[5];
+    };
+    struct WideSpot {
+        ymod_area_spot spot;
+        std::uint32_t later[2];
+    };
+    const WideExit wide_door[] = {{door, {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu}}};
+    WideArrival wide_ins[2] = {};
+    WideSpot wide_things[2] = {};
+    for (std::size_t i = 0; i < 2u; ++i) {
+        wide_ins[i] = {ins[i], {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu}};
+        wide_things[i] = {things[i], {0xFFFFFFFFu, 0xFFFFFFFFu}};
+    }
+    const WideArrival wide_cart{cart, {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu}};
+    ymod_area wide = camp;
+    wide.id = "wide_camp";
+    wide.exits = &wide_door[0].exit;
+    wide.exit_stride = sizeof(WideExit);
+    wide.arrivals = &wide_ins[0].arrival;
+    wide.arrival_stride = sizeof(WideArrival);
+    wide.spots = &wide_things[0].spot;
+    wide.spot_stride = sizeof(WideSpot);
+    wide.cart = &wide_cart.arrival;
+    check(service != nullptr && service->add_area(mod, &wide) == 0 && maps::play_quest_in("wide_camp", 62706u) &&
+            maps::play_quest_in("yard", 62706u),
+        "points: an area whose exits, arrivals, spots and cart are wider than this header's is added");
+    memory.store16(0x09000000u + 0x60472u, 62706u);
+    check(entry(served(0x1262u), 5) == camp_points,
+        "points: its wider elements are read by their strides, their extra bytes ignored: the same points table");
     // Past the map's areas, nothing of the quest's is served: its blocks and
     // table would land on other entries (a ground block read as a table).
     memory.store16(0x09000000u + 0x60472u, 62701u);
@@ -1758,19 +1879,22 @@ void test_map_points(psprecomp::Runtime &runtime) {
     std::vector<const char *> fourteen(14u, "camp");
     check(refuse_quest(62717u, fourteen, "it names more than 13 areas"),
         "points: a quest naming more areas than a map has is refused before they are read");
-    // A quest of the struct before `areas` reads none: the same quest with
-    // the full struct (62710) is played in the camp and the yard.
+    // A quest struct that ends before its monsters' stride cannot give them,
+    // and is refused with the reason: the same quest with the full struct
+    // (62710) is played in the camp and the yard.
     ymod_quest older = quest;
     older.size = offsetof(ymod_quest, areas);
     older.id = 62716u;
     older.map = 8;
-    built = quests != nullptr && quests->add(mod, &older) == 62716 ? built_quest(62716u) : std::nullopt;
-    record = built ? game::read_quest_record(*built) : std::nullopt;
-    memory.store16(0x09000000u + 0x60472u, 62716u);
-    const bool older_served = maps::serve(runtime, 0x1262u) != nullptr || maps::serve(runtime, 0x138Au) != nullptr;
+    const bool older_refused = quests != nullptr && quests->add(mod, &older) == -1 &&
+        mhp3rd::mods::quests::find(62716u) == nullptr &&
+        logged("a ymod_quest of " + std::to_string(offsetof(ymod_quest, areas)) +
+            " bytes is refused: this call reads " +
+            std::to_string(offsetof(ymod_quest, monster_stride) + sizeof(std::uint32_t)) +
+            " (set its size to sizeof(ymod_quest))");
     memory.store16(0x09000000u + 0x60472u, 62710u);
-    check(built && record && record->map == 8u && !older_served && maps::serve(runtime, 0x1262u) != nullptr,
-        "points: an older quest struct names no areas, and is played in the game's");
+    check(older_refused && maps::serve(runtime, 0x1262u) != nullptr,
+        "points: a quest struct too short for its monsters' stride is refused, with the reason");
 
     std::error_code ec;
     std::filesystem::remove_all(folder, ec);
@@ -1936,6 +2060,38 @@ void test_map_gathering(psprecomp::Runtime &runtime) {
         "gathering: items counted but not given, more than 16, more than 99 uses, none or past 99 with the extra "
         "ones, an item unnamed or of none, 100 or with no chance, chances not adding up to 100, items on a cannon "
         "or uses on a bed, and a kind not offered (the gong) are refused");
+    // A spot's items by their stride: wider ones, as a later SDK's, read with
+    // their extra bytes ignored; a stride below the first SDK's item refused.
+    struct WideItem {
+        ymod_area_item item;
+        const char *later;
+    };
+    const WideItem wide_bolts[] = {{bolts[0], "not an item"}, {bolts[1], "not an item"}};
+    ymod_area_spot wide_pile = things[3];
+    wide_pile.items = &wide_bolts[0].item;
+    wide_pile.item_stride = sizeof(WideItem);
+    ymod_area wide_yard = one_spot(wide_pile);
+    wide_yard.id = "wide_yard";
+    const std::vector<maps::Gathering> wide_lists = service != nullptr && service->add_area(mod, &wide_yard) == 0
+        ? maps::gathering("wide_yard")
+        : std::vector<maps::Gathering>{};
+    check(wide_lists.size() == 1u && wide_lists[0].items.size() == 2u &&
+            wide_lists[0].items[0].item == "Ballista Ammo" && wide_lists[0].items[0].chance == 70u &&
+            wide_lists[0].items[1].item == "Cannon Ammo" && wide_lists[0].items[1].count == 1u &&
+            wide_lists[0].items[1].chance == 30u,
+        "gathering: a point's items wider than this header's are read by their stride, their extra bytes ignored");
+    constexpr std::size_t kItemEnd = offsetof(ymod_area_item, chance) + sizeof(std::uint32_t);
+    ymod_area_spot narrow_pile = pile_spot;
+    narrow_pile.item_stride = static_cast<std::uint32_t>(offsetof(ymod_area_item, chance));
+    ymod_area_spot unstrided_pile = pile_spot;
+    unstrided_pile.item_stride = 0u;
+    const auto item_stride_line = [&](std::size_t stride) {
+        return "item_stride is " + std::to_string(stride) + ", less than the " + std::to_string(kItemEnd) +
+            " bytes of a ymod_area_item: set it to sizeof(ymod_area_item)";
+    };
+    check(refused(one_spot(narrow_pile), "narrow_pile", item_stride_line(offsetof(ymod_area_item, chance))) &&
+            refused(one_spot(unstrided_pile), "unstrided_pile", item_stride_line(0u)),
+        "gathering: a point whose items' stride is below the first SDK's item, or 0, is refused with the reason");
     ymod_area uncounted_exits = yard;
     uncounted_exits.exit_count = 1u;
     ymod_area uncounted_arrivals = yard;
@@ -2784,13 +2940,15 @@ void test_monsters(psprecomp::Runtime &runtime) {
     const ymod_hit_sphere jaws[] = {{51, 200.0f, 0.0f, 10.0f, 20.0f}, {53, 150.0f, 0.0f, 0.0f, 0.0f}};
     const ymod_hit_sphere broken[] = {{-1, 200.0f, 0.0f, 0.0f, 0.0f}};
     const ymod_hit_sphere flat[] = {{3, 0.0f, 0.0f, 0.0f, 0.0f}};
-    check(service != nullptr && service->attack_shape(mod, 58, 2, jaws, 2) == -1 &&
-            service->attack_shape(mod, 78, 32, jaws, 2) == -1 && service->attack_shape(mod, 78, 2, jaws, 0) == -1 &&
-            service->attack_shape(mod, 78, 2, nullptr, 2) == -1 && service->attack_shape(mod, 78, 2, broken, 1) == -1 &&
-            service->attack_shape(mod, 78, 2, flat, 1) == -1 &&
+    check(service != nullptr && service->attack_shape(mod, 58, 2, jaws, 2, sizeof(ymod_hit_sphere)) == -1 &&
+            service->attack_shape(mod, 78, 32, jaws, 2, sizeof(ymod_hit_sphere)) == -1 &&
+            service->attack_shape(mod, 78, 2, jaws, 0, sizeof(ymod_hit_sphere)) == -1 &&
+            service->attack_shape(mod, 78, 2, nullptr, 2, sizeof(ymod_hit_sphere)) == -1 &&
+            service->attack_shape(mod, 78, 2, broken, 1, sizeof(ymod_hit_sphere)) == -1 &&
+            service->attack_shape(mod, 78, 2, flat, 1, sizeof(ymod_hit_sphere)) == -1 &&
             logged("monster 78 is not given attack shape 2: a sphere needs a joint, a radius above 0 and a centre"),
         "monsters: attack shapes only for the mod's kind, a shape that exists and usable spheres");
-    check(service != nullptr && service->attack_shape(mod, 78, 2, jaws, 2) == 0,
+    check(service != nullptr && service->attack_shape(mod, 78, 2, jaws, 2, sizeof(ymod_hit_sphere)) == 0,
         "monsters: a kind the mod added takes an attack shape of its own");
     const std::uint32_t attacked_v0 = call(runtime, attacking_stub, kMonster);
     check(attacked_v0 != 7u && runtime.memory().load32(kAttacked) == 1u &&
@@ -2820,14 +2978,15 @@ void test_monsters(psprecomp::Runtime &runtime) {
     const ymod_body_capsule body[] = {{51, 55, 0, 0x0u, 110.0f, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 20.0f}},
         {0, -1, 0, 0x120000u, 260.0f, {0.0f, 10.0f, 0.0f}, {0.0f, 0.0f, 0.0f}}};
     const ymod_body_capsule thin[] = {{51, 55, 0, 0u, 0.0f, {}, {}}};
-    check(service != nullptr && service->body_shapes(mod, 58, body, 2) == -1 &&
-            service->body_shapes(mod, 78, body, 0) == -1 && service->body_shapes(mod, 78, nullptr, 2) == -1 &&
-            service->body_shapes(mod, 78, thin, 1) == -1 &&
+    check(service != nullptr && service->body_shapes(mod, 58, body, 2, sizeof(ymod_body_capsule)) == -1 &&
+            service->body_shapes(mod, 78, body, 0, sizeof(ymod_body_capsule)) == -1 &&
+            service->body_shapes(mod, 78, nullptr, 2, sizeof(ymod_body_capsule)) == -1 &&
+            service->body_shapes(mod, 78, thin, 1, sizeof(ymod_body_capsule)) == -1 &&
             logged(
                 "monster 78 is not given body capsules: a capsule needs joints, a part, a radius above 0 and its ends"),
         "monsters: body capsules only for the mod's kind, 1 to 64 of them, each usable");
     runtime.memory().store32(kMonster + 0xD50u, kKindData);
-    check(service != nullptr && service->body_shapes(mod, 78, body, 2) == 0,
+    check(service != nullptr && service->body_shapes(mod, 78, body, 2, sizeof(ymod_body_capsule)) == 0,
         "monsters: a kind the mod added takes body capsules of its own");
     (void)call(runtime, attacking_stub, kMonster);
     const std::uint32_t bodied = runtime.memory().load32(kMonster + 0xD50u);
@@ -2842,6 +3001,33 @@ void test_monsters(psprecomp::Runtime &runtime) {
             runtime.memory().load32(runtime.memory().load32(shapes_of(runtime, bodied) + 8u)) == 51u,
         "monsters: its copy of the kind's data lists the mod's capsules (a sphere where joint_to is -1), ended, with "
         "its attack shapes kept");
+    // The same capsules from a mod built with wider ones, as a later SDK's:
+    // read by the stride given, their extra bytes ignored, they make the same
+    // list. A stride below the first SDK's capsule is refused.
+    struct WideCapsule {
+        ymod_body_capsule capsule;
+        float later[3];
+    };
+    const WideCapsule wide_body[] = {{body[0], {-1.0f, -1.0f, -1.0f}}, {body[1], {-1.0f, -1.0f, -1.0f}}};
+    std::vector<std::uint8_t> listed(100u);
+    runtime.memory().copy_out(capsules, listed);
+    runtime.memory().store32(kMonster + 0xD50u, kKindData);
+    const bool wide_given = service != nullptr &&
+        service->body_shapes(mod, 78, &wide_body[0].capsule, 2, static_cast<std::uint32_t>(sizeof(WideCapsule))) == 0;
+    (void)call(runtime, attacking_stub, kMonster);
+    std::vector<std::uint8_t> wide_listed(100u);
+    runtime.memory().copy_out(runtime.memory().load32(runtime.memory().load32(kMonster + 0xD50u) + 0x1Cu), wide_listed);
+    check(wide_given && wide_listed == listed,
+        "monsters: capsules wider than this header's are read by their stride, their extra bytes ignored");
+    constexpr std::size_t kCapsuleEnd = offsetof(ymod_body_capsule, to) + sizeof(ymod_vec3);
+    check(service != nullptr && service->body_shapes(mod, 78, body, 2, 8u) == -1 &&
+            logged("monster 78 is not given body capsules: the stride is 8, less than the " +
+                std::to_string(kCapsuleEnd) + " bytes of a ymod_body_capsule: set it to sizeof(ymod_body_capsule)") &&
+            service->attack_shape(mod, 78, 2, jaws, 2, 0u) == -1 &&
+            logged("monster 78 is not given attack shape 2: the stride is 0, less than the " +
+                std::to_string(offsetof(ymod_hit_sphere, z) + sizeof(float)) +
+                " bytes of a ymod_hit_sphere: set it to sizeof(ymod_hit_sphere)"),
+        "monsters: capsules or spheres whose stride is below the first SDK's, or 0, are refused with the reason");
     // Attack rows: a row of the kind's own, a base row with another shape.
     constexpr std::uint32_t kRows = 0x08B51280u;
     runtime.memory().store32(kRows + 7u * 28u, 0x00500002u);
@@ -2878,22 +3064,48 @@ void test_monsters(psprecomp::Runtime &runtime) {
     const ymod_footstep steps[] = {{7, 30.0f, 25, 4}, {2, 46.0f, 10, 1}, {7, 60.0f, 30, 4}};
     const ymod_footstep huge[] = {{7, 30.0f, 25, 10}};
     const ymod_footstep late[] = {{1000, 30.0f, 25, 1}};
-    check(service != nullptr && service->footsteps(mod, 58, steps, 3) == -1 &&
-            service->footsteps(mod, 78, steps, 0) == -1 && service->footsteps(mod, 78, nullptr, 3) == -1 &&
-            service->footsteps(mod, 78, huge, 1) == -1 && service->footsteps(mod, 78, late, 1) == -1 &&
+    check(service != nullptr && service->footsteps(mod, 58, steps, 3, sizeof(ymod_footstep)) == -1 &&
+            service->footsteps(mod, 78, steps, 0, sizeof(ymod_footstep)) == -1 &&
+            service->footsteps(mod, 78, nullptr, 3, sizeof(ymod_footstep)) == -1 &&
+            service->footsteps(mod, 78, huge, 1, sizeof(ymod_footstep)) == -1 &&
+            service->footsteps(mod, 78, late, 1, sizeof(ymod_footstep)) == -1 &&
             logged("monster 78 is not given footsteps: a footstep needs a motion below 1000, a frame, a joint and a "
                    "size from 0 to 9"),
         "monsters: footsteps only for the mod's kind, 1 to 256 of them, each usable");
     // A motion's row counts its footsteps in a byte: 255 at most in one.
     std::vector<ymod_footstep> crowded(256u, ymod_footstep{3, 10.0f, 25, 1});
-    const bool full_refused = service != nullptr && service->footsteps(mod, 78, crowded.data(), 256) == -1 &&
+    const bool full_refused = service != nullptr &&
+        service->footsteps(mod, 78, crowded.data(), 256, sizeof(ymod_footstep)) == -1 &&
         logged("monster 78 is not given footsteps: motion 3 has more than 255 footsteps");
     crowded.back().motion = 4;
-    check(full_refused && service != nullptr && service->footsteps(mod, 78, crowded.data(), 256) == 0,
+    check(full_refused && service != nullptr &&
+            service->footsteps(mod, 78, crowded.data(), 256, sizeof(ymod_footstep)) == 0,
         "monsters: 256 footsteps in one motion are refused, 255 in one and one in another taken");
+    check(service != nullptr && service->footsteps(mod, 78, steps, 3, 0x60000000u) == -1 &&
+            logged("monster 78 is not given footsteps: the stride is 1610612736: 3 elements that far apart pass 4 GiB"),
+        "monsters: footsteps so far apart that they pass 4 GiB are refused before any is read");
     runtime.memory().store32(kAttacked + 0x2Cu, 0u);
-    check(service != nullptr && service->footsteps(mod, 78, steps, 3) == 0,
+    check(service != nullptr && service->footsteps(mod, 78, steps, 3, sizeof(ymod_footstep)) == 0,
         "monsters: a kind the mod added takes footsteps of its own");
+    // yakumo/mod.hpp gives the arrays' counts and strides itself, and gives
+    // nothing on a host without the function or for a count past an int32_t.
+    const yakumo::Mod wrapped(mhp3rd::mods::native::host(), mod);
+    check(wrapped.footsteps(78, steps) == 0 && wrapped.body_shapes(78, body) == 0 &&
+            wrapped.attack_shape(78, 2, jaws, std::size(jaws)) == 0,
+        "sdk: yakumo::Mod passes an array's count and stride to the monsters service");
+    static ymod_monsters s_older{};
+    s_older = *service;
+    s_older.size = static_cast<std::uint32_t>(offsetof(ymod_monsters, attack_shape));
+    static const ymod_host s_older_host{YAKUMO_API_VERSION, sizeof(ymod_host),
+        [](ymod_mod *, const char *name, std::uint32_t) -> const void * {
+            return std::string(name) == YMOD_MONSTERS ? &s_older : nullptr;
+        },
+        nullptr, nullptr};
+    const yakumo::Mod on_older(&s_older_host, mod);
+    check(on_older.attack_shape(78, 2, jaws) == -1 && on_older.body_shapes(78, body) == -1 &&
+            on_older.footsteps(78, steps) == -1 && wrapped.footsteps(78, steps, std::size_t{1} << 40u) == -1,
+        "sdk: yakumo::Mod gives nothing on a host whose monsters service lacks the function, or for a count past "
+        "an int32_t");
     (void)call(runtime, attacking_stub, kMonster);
     const std::uint32_t step_list = runtime.memory().load32(kAttacked + 0x20u);
     const std::uint32_t step_rows = runtime.memory().load32(kAttacked + 0x24u);
@@ -3080,6 +3292,60 @@ void test_monsters(psprecomp::Runtime &runtime) {
             quest_service->add(mod, &supplied) == 62018,
         "quests: rewards (in up to three groups) and supplies are checked, then kept for when the game's text is "
         "loaded");
+    // Rewards and supplies by their strides: wider ones, as a later SDK's,
+    // read with their extra bytes ignored (compared once built with the
+    // game's text below); below the first SDK's, refused; and no more rewards
+    // than the game's three groups hold.
+    struct WideReward {
+        ymod_quest_reward reward;
+        std::uint32_t later[4];
+    };
+    struct WideSupply {
+        ymod_quest_supply supply;
+        const char *later;
+    };
+    const ymod_quest_reward halves[] = {{"Wyvern Gem", 1u, 50u, 0u}, {"Wyvern Gem", 2u, 50u, 0u}};
+    const WideReward wide_halves[] = {{halves[0], {9u, 9u, 9u, 9u}}, {halves[1], {9u, 9u, 9u, 9u}}};
+    WideSupply wide_box[5] = {};
+    for (std::size_t i = 0; i < 5u; ++i) wide_box[i] = {box[i], "not an item"};
+    ymod_quest halved = rich;
+    halved.id = 62021u;
+    halved.rewards = halves;
+    halved.reward_count = 2u;
+    ymod_quest wide_halved = halved;
+    wide_halved.id = 62022u;
+    wide_halved.rewards = &wide_halves[0].reward;
+    wide_halved.reward_stride = sizeof(WideReward);
+    ymod_quest wide_supplied = supplied;
+    wide_supplied.id = 62023u;
+    wide_supplied.supplies = &wide_box[0].supply;
+    wide_supplied.supply_stride = sizeof(WideSupply);
+    ymod_quest narrow_rewards = halved;
+    narrow_rewards.id = 62024u;
+    narrow_rewards.reward_stride = static_cast<std::uint32_t>(offsetof(ymod_quest_reward, line));
+    ymod_quest unstrided_supplies = supplied;
+    unstrided_supplies.id = 62025u;
+    unstrided_supplies.supply_stride = 0u;
+    std::vector<ymod_quest_reward> lavish(73u, ymod_quest_reward{"Wyvern Gem", 1u, 1u, 0u});
+    ymod_quest too_many_rewards = rich;
+    too_many_rewards.id = 62026u;
+    too_many_rewards.rewards = lavish.data();
+    too_many_rewards.reward_count = 73u;
+    check(quest_service != nullptr && quest_service->add(mod, &halved) == 62021 &&
+            quest_service->add(mod, &wide_halved) == 62022 && quest_service->add(mod, &wide_supplied) == 62023,
+        "quests: rewards and supplies wider than this header's are taken");
+    check(quest_service != nullptr && quest_service->add(mod, &narrow_rewards) == -1 &&
+            logged("quest 62024 is not added: reward_stride is " + std::to_string(offsetof(ymod_quest_reward, line)) +
+                ", less than the " + std::to_string(offsetof(ymod_quest_reward, line) + sizeof(std::uint32_t)) +
+                " bytes of a ymod_quest_reward: set it to sizeof(ymod_quest_reward)") &&
+            quest_service->add(mod, &unstrided_supplies) == -1 &&
+            logged("quest 62025 is not added: supply_stride is 0, less than the " +
+                std::to_string(offsetof(ymod_quest_supply, count) + sizeof(std::uint32_t)) +
+                " bytes of a ymod_quest_supply: set it to sizeof(ymod_quest_supply)") &&
+            quest_service->add(mod, &too_many_rewards) == -1 &&
+            logged("quest 62026 is not added: it has more than 72 rewards"),
+        "quests: a reward or supply stride below the first SDK's, or 0, and more rewards than the game's groups "
+        "hold are refused, with the reason");
     const mhp3rd::mods::FileId rich_file = *mhp3rd::mods::p3rd::quest_file(62014u);
     const auto served_size = [&runtime](mhp3rd::mods::FileId file) {
         runtime.cpu().gpr[5] = file;
@@ -3107,6 +3373,31 @@ void test_monsters(psprecomp::Runtime &runtime) {
     check(served_size(supplied_file) > first_supplied, "quests: and one with supplies, with them");
     check(served_size(*mhp3rd::mods::p3rd::quest_file(62016u)) == served_size(*mhp3rd::mods::p3rd::quest_file(62010u)),
         "quests: a reward naming no item of the game's leaves the quest as first built");
+    using Payload = std::vector<std::uint8_t>;
+    const auto decrypted = [&](std::uint32_t id) -> std::optional<Payload> {
+        const mhp3rd::mods::FileId file = *mhp3rd::mods::p3rd::quest_file(id);
+        const std::uint32_t size = served_size(file);
+        runtime.cpu().gpr[5] = file;
+        runtime.cpu().gpr[6] = 0x08C00000u;
+        (void)call(runtime, 0x08863CDCu, 0x08B3F040u);
+        Payload encrypted(size);
+        runtime.memory().copy_out(0x08C00000u, encrypted);
+        mhp3rd::game::GuestRam keys_ram(runtime.memory());
+        const auto keys = mhp3rd::game::read_quest_keys(keys_ram);
+        return keys ? mhp3rd::game::decrypt_quest(encrypted, *keys) : std::nullopt;
+    };
+    // Built from the same rewards and supplies, the quests differ only in
+    // their ids.
+    const auto same_but_id = [&](std::uint32_t a, std::uint32_t b) {
+        const std::optional<Payload> one = decrypted(a), other = decrypted(b);
+        if (!one || !other || one->size() != other->size() || one->size() < 0x100u) return false;
+        std::size_t differing = 0u;
+        for (std::size_t i = 0; i < one->size(); ++i) differing += (*one)[i] != (*other)[i] ? 1u : 0u;
+        return differing > 0u && differing <= 2u;
+    };
+    check(served_size(*mhp3rd::mods::p3rd::quest_file(62021u)) > first_size && same_but_id(62021u, 62022u) &&
+            same_but_id(62018u, 62023u),
+        "quests: wider rewards and supplies are read by their strides, their extra bytes ignored: the same quests");
 
     // What goes wrong with a kind is on its mod's page: with the JIT off, the
     // base's kind checks cannot be hooked.
@@ -3505,6 +3796,7 @@ int main() {
     test_added_files(runtime);
     test_events(runtime);
     test_ui();
+    test_sizes();
     test_symbols(runtime);
     test_hook_changes(runtime);
     test_host_returns(runtime);

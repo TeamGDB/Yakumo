@@ -29,6 +29,7 @@
 #include <iterator>
 #include <map>
 #include <set>
+#include <type_traits>
 
 // The services besides hooks: guest memory, events, files, settings,
 // services between mods, the game's symbols and drawing in the interface.
@@ -36,6 +37,65 @@ namespace mhp3rd::mods::native {
 namespace {
 
 namespace fs = std::filesystem;
+
+// The arrays a mod passes (yakumo/mod.h, "Sizes and strides"): each element
+// as the first SDK has it ends at its last field below, and a stride below
+// that is refused. The ends stay where they are when fields are added.
+constexpr std::size_t kFirstHitSphere = offsetof(ymod_hit_sphere, z) + sizeof(float);
+constexpr std::size_t kFirstBodyCapsule = offsetof(ymod_body_capsule, to) + sizeof(ymod_vec3);
+constexpr std::size_t kFirstFootstep = offsetof(ymod_footstep, size) + sizeof(std::int32_t);
+constexpr std::size_t kFirstQuestMonster = offsetof(ymod_quest_monster, size) + sizeof(std::int32_t);
+constexpr std::size_t kFirstQuestReward = offsetof(ymod_quest_reward, line) + sizeof(std::uint32_t);
+constexpr std::size_t kFirstQuestSupply = offsetof(ymod_quest_supply, count) + sizeof(std::uint32_t);
+constexpr std::size_t kFirstAreaExit = offsetof(ymod_area_exit, door) + sizeof(std::int32_t);
+constexpr std::size_t kFirstAreaArrival = offsetof(ymod_area_arrival, door) + sizeof(std::int32_t);
+constexpr std::size_t kFirstAreaSpot = offsetof(ymod_area_spot, item_stride) + sizeof(std::uint32_t);
+constexpr std::size_t kFirstAreaItem = offsetof(ymod_area_item, chance) + sizeof(std::uint32_t);
+
+// The `count` elements of an array a mod passes, `stride` bytes apart, each
+// copied as far as both the mod's element and this header's go: fields past
+// the mod's are 0 (a field added later whose default is not 0 sets it after),
+// and bytes past this header's are not read. Nothing past count times stride
+// is read. An empty list for no array (NULL, or a count of 0); nothing, with
+// the reason in `why`, for a stride below the first SDK's element (`first`)
+// or an array past 4 GiB. `field` and `type` name the stride and the element
+// in the reason.
+template <typename T>
+std::optional<std::vector<T>> elements(const T *items, std::uint32_t count, std::uint32_t stride, std::size_t first,
+    const char *field, const char *type, std::string &why) {
+    static_assert(std::is_trivially_copyable_v<T>);
+    std::vector<T> out;
+    if (items == nullptr || count == 0u) return out;
+    if (stride < first) {
+        why = std::string(field) + " is " + std::to_string(stride) + ", less than the " + std::to_string(first) +
+            " bytes of a " + type + ": set it to sizeof(" + type + ")";
+        return std::nullopt;
+    }
+    if (std::uint64_t{count} * stride > 0xFFFFFFFFu) {
+        why = std::string(field) + " is " + std::to_string(stride) + ": " + std::to_string(count) +
+            " elements that far apart pass 4 GiB";
+        return std::nullopt;
+    }
+    const auto *bytes = reinterpret_cast<const unsigned char *>(items);
+    const std::size_t copied = std::min<std::size_t>(stride, sizeof(T));
+    out.resize(count);
+    for (std::uint32_t i = 0; i < count; ++i) {
+        std::memset(static_cast<void *>(&out[i]), 0, sizeof(T));
+        std::memcpy(static_cast<void *>(&out[i]), bytes + std::size_t{i} * stride, copied);
+    }
+    return out;
+}
+
+// Whether a struct the mod passes is shorter than what the call reads: said
+// on its page, for a struct whose `size` was not set to its sizeof.
+bool too_short(ymod_mod *mod, std::uint32_t size, std::size_t needed, const char *type) {
+    if (size >= needed) return false;
+    report(mod,
+        std::string("a ") + type + " of " + std::to_string(size) + " bytes is refused: this call reads " +
+            std::to_string(needed) + " (set its size to sizeof(" + type + "))",
+        true);
+    return true;
+}
 
 int memory_read(std::uint32_t address, void *out, std::uint32_t length) {
     Runtime *runtime = state().runtime;
@@ -342,7 +402,7 @@ std::optional<std::vector<std::uint8_t>> mod_bytes(
 int32_t monsters_add(ymod_mod *mod, const ymod_monster *monster) {
     Runtime *runtime = state().runtime;
     if (runtime == nullptr || mod == nullptr || mod->failed || monster == nullptr ||
-        monster->size < offsetof(ymod_monster, motions) + sizeof(monster->motions))
+        too_short(mod, monster->size, offsetof(ymod_monster, motions) + sizeof(monster->motions), "ymod_monster"))
         return -1;
     const auto model = mod_bytes(mod, monster->model, "model");
     const auto geometry = mod_bytes(mod, monster->geometry, "geometry");
@@ -444,36 +504,45 @@ int monsters_target(uint32_t monster, ymod_vec3 *out) {
     return put_vec3(runtime != nullptr ? monsters::target(*runtime, monster) : std::nullopt, out);
 }
 
-int monsters_body_shapes(ymod_mod *mod, int32_t kind, const ymod_body_capsule *capsules, int32_t count) {
+// The elements of an array given as an argument, when its count is from 1 to
+// `most`: none otherwise, for the service to refuse as it does no list.
+template <typename T>
+std::optional<std::vector<T>> argument_elements(const T *items, int32_t count, std::uint32_t stride, std::size_t most,
+    std::size_t first, const char *type, std::string &why) {
+    if (count <= 0 || static_cast<std::size_t>(count) > most) return std::vector<T>{};
+    return elements(items, static_cast<std::uint32_t>(count), stride, first, "the stride", type, why);
+}
+
+int monsters_body_shapes(
+    ymod_mod *mod, int32_t kind, const ymod_body_capsule *capsules, int32_t count, std::uint32_t stride) {
     if (mod == nullptr || mod->failed) return -1;
-    std::vector<monsters::BodyCapsule> list;
-    if (capsules != nullptr && count > 0 && count <= 64)
-        for (int32_t i = 0; i < count; ++i) {
-            const ymod_body_capsule &c = capsules[i];
-            list.push_back({c.joint < 0 ? 0x100u : static_cast<std::uint32_t>(c.joint), c.joint_to,
-                c.part < 0 ? 0x100u : static_cast<std::uint32_t>(c.part), c.zone, c.radius,
-                {c.from.x, c.from.y, c.from.z}, {c.to.x, c.to.y, c.to.z}});
-        }
     std::string why = "no such kind";
-    if (kind >= 0 && kind <= 0xFF && monsters::body_shapes(mod, static_cast<std::uint8_t>(kind), list, &why)) return 0;
+    const auto given = argument_elements(capsules, count, stride, 64u, kFirstBodyCapsule, "ymod_body_capsule", why);
+    std::vector<monsters::BodyCapsule> list;
+    for (const ymod_body_capsule &c : given.value_or(std::vector<ymod_body_capsule>{}))
+        list.push_back({c.joint < 0 ? 0x100u : static_cast<std::uint32_t>(c.joint), c.joint_to,
+            c.part < 0 ? 0x100u : static_cast<std::uint32_t>(c.part), c.zone, c.radius, {c.from.x, c.from.y, c.from.z},
+            {c.to.x, c.to.y, c.to.z}});
+    if (given && kind >= 0 && kind <= 0xFF && monsters::body_shapes(mod, static_cast<std::uint8_t>(kind), list, &why))
+        return 0;
     report(mod, "monster " + std::to_string(kind) + " is not given body capsules: " + why, true);
     return -1;
 }
 
-int monsters_footsteps(ymod_mod *mod, int32_t kind, const ymod_footstep *steps, int32_t count) {
+int monsters_footsteps(ymod_mod *mod, int32_t kind, const ymod_footstep *steps, int32_t count, std::uint32_t stride) {
     if (mod == nullptr || mod->failed) return -1;
-    std::vector<monsters::Footstep> list;
-    bool usable = true;
-    if (steps != nullptr && count > 0 && count <= static_cast<int32_t>(monsters::kMostFootsteps))
-        for (int32_t i = 0; i < count; ++i) {
-            const ymod_footstep &f = steps[i];
-            usable &= f.motion >= 0 && f.motion <= 0xFFFF && f.joint >= 0 && f.joint <= 0xFFFF && f.size >= 0 &&
-                f.size <= 0xFFFF;
-            list.push_back({static_cast<std::uint16_t>(f.motion), f.frame, static_cast<std::uint16_t>(f.joint),
-                static_cast<std::uint16_t>(f.size)});
-        }
     std::string why = "no such kind";
-    if (!usable) why = "a footstep needs a motion below 1000, a frame, a joint and a size from 0 to 9";
+    const auto given =
+        argument_elements(steps, count, stride, monsters::kMostFootsteps, kFirstFootstep, "ymod_footstep", why);
+    std::vector<monsters::Footstep> list;
+    bool usable = given.has_value();
+    for (const ymod_footstep &f : given.value_or(std::vector<ymod_footstep>{})) {
+        usable &=
+            f.motion >= 0 && f.motion <= 0xFFFF && f.joint >= 0 && f.joint <= 0xFFFF && f.size >= 0 && f.size <= 0xFFFF;
+        list.push_back({static_cast<std::uint16_t>(f.motion), f.frame, static_cast<std::uint16_t>(f.joint),
+            static_cast<std::uint16_t>(f.size)});
+    }
+    if (given && !usable) why = "a footstep needs a motion below 1000, a frame, a joint and a size from 0 to 9";
     if (usable && kind >= 0 && kind <= 0xFF && monsters::footsteps(mod, static_cast<std::uint8_t>(kind), list, &why))
         return 0;
     report(mod, "monster " + std::to_string(kind) + " is not given footsteps: " + why, true);
@@ -494,15 +563,15 @@ int monsters_attack_row(ymod_mod *mod, int32_t kind, int32_t row, int32_t like, 
     return -1;
 }
 
-int monsters_attack_shape(ymod_mod *mod, int32_t kind, int32_t shape, const ymod_hit_sphere *spheres, int32_t count) {
+int monsters_attack_shape(
+    ymod_mod *mod, int32_t kind, int32_t shape, const ymod_hit_sphere *spheres, int32_t count, std::uint32_t stride) {
     if (mod == nullptr || mod->failed) return -1;
-    std::vector<monsters::HitSphere> list;
-    if (spheres != nullptr && count > 0 && count <= 16)
-        for (int32_t i = 0; i < count; ++i)
-            list.push_back({spheres[i].joint < 0 ? 0x100u : static_cast<std::uint32_t>(spheres[i].joint),
-                spheres[i].radius, spheres[i].x, spheres[i].y, spheres[i].z});
     std::string why = "no such kind";
-    if (kind >= 0 && kind <= 0xFF && shape >= 0 &&
+    const auto given = argument_elements(spheres, count, stride, 16u, kFirstHitSphere, "ymod_hit_sphere", why);
+    std::vector<monsters::HitSphere> list;
+    for (const ymod_hit_sphere &h : given.value_or(std::vector<ymod_hit_sphere>{}))
+        list.push_back({h.joint < 0 ? 0x100u : static_cast<std::uint32_t>(h.joint), h.radius, h.x, h.y, h.z});
+    if (given && kind >= 0 && kind <= 0xFF && shape >= 0 &&
         monsters::attack_shape(mod, static_cast<std::uint8_t>(kind), static_cast<std::uint32_t>(shape), list, &why))
         return 0;
     report(mod, "monster " + std::to_string(kind) + " is not given attack shape " + std::to_string(shape) + ": " + why,
@@ -554,8 +623,9 @@ int monsters_end_attack(uint32_t monster, int32_t slot) {
 
 int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
     Runtime *runtime = state().runtime;
+    // Its monsters' stride is the last field it needs.
     if (runtime == nullptr || mod == nullptr || mod->failed || quest == nullptr ||
-        quest->size < offsetof(ymod_quest, texts) + sizeof(quest->texts))
+        too_short(mod, quest->size, offsetof(ymod_quest, monster_stride) + sizeof(quest->monster_stride), "ymod_quest"))
         return -1;
     const auto text = [](const char *s) { return std::string(s != nullptr ? s : ""); };
     const auto kind_of = [](const char *id) { return id != nullptr ? monsters::kind(id) : std::nullopt; };
@@ -565,9 +635,8 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
     };
     game::QuestSpec spec;
     // Played in areas of the mod's: on their map, whatever `map` says.
-    const bool has_area = quest->size >= offsetof(ymod_quest, area) + sizeof(quest->area) && quest->area != nullptr;
-    const bool has_areas = quest->size >= offsetof(ymod_quest, area_count) + sizeof(quest->area_count) &&
-        quest->areas != nullptr && quest->area_count > 0u;
+    const bool has_area = quest->area != nullptr;
+    const bool has_areas = quest->areas != nullptr && quest->area_count > 0u;
     if (has_areas && quest->area_count > maps::kMostAreas)
         return refuse("it names more than " + std::to_string(maps::kMostAreas) + " areas");
     std::vector<std::string> area_ids;
@@ -599,8 +668,11 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
     if (!target) return refuse("its target \"" + text(quest->target) + "\" is not a monster's id");
     spec.target = *target;
     spec.count = static_cast<std::uint16_t>(std::clamp<std::uint32_t>(quest->count, 1u, 0xFFFFu));
-    for (std::uint32_t i = 0; quest->monsters != nullptr && i < quest->monster_count && i < 6u; ++i) {
-        const ymod_quest_monster &m = quest->monsters[i];
+    std::string why;
+    const auto given_monsters = elements(quest->monsters, std::min(quest->monster_count, 6u), quest->monster_stride,
+        kFirstQuestMonster, "monster_stride", "ymod_quest_monster", why);
+    if (!given_monsters) return refuse(why);
+    for (const ymod_quest_monster &m : *given_monsters) {
         const std::optional<std::uint8_t> kind = kind_of(m.monster);
         if (!kind) return refuse("its monster \"" + text(m.monster) + "\" is not a monster's id");
         if (m.area < 0 || m.area > 0xFF || m.health < 0 || m.health > 0xFF || m.attack < 0 || m.attack > 0xFF ||
@@ -623,10 +695,23 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
     };
     constexpr std::uint32_t kSupply = 0xFFFFFFFFu;
     std::vector<Named> rewards;
-    const bool has_rewards =
-        quest->size >= offsetof(ymod_quest, reward_count) + sizeof(quest->reward_count) && quest->rewards != nullptr;
-    for (std::uint32_t i = 0; has_rewards && i < quest->reward_count; ++i) {
-        const ymod_quest_reward &r = quest->rewards[i];
+    // A struct too short for a stride has no such array.
+    const bool has_rewards = quest->size >= offsetof(ymod_quest, reward_stride) + sizeof(quest->reward_stride);
+    const bool has_supplies = quest->size >= offsetof(ymod_quest, supply_stride) + sizeof(quest->supply_stride);
+    constexpr std::size_t kMostRewards = game::kMostRewardGroups * game::kMostRewardItems;
+    if (has_rewards && quest->rewards != nullptr && quest->reward_count > kMostRewards)
+        return refuse("it has more than " + std::to_string(kMostRewards) + " rewards");
+    if (has_supplies && quest->supplies != nullptr && quest->supply_count > game::kMostSupplies)
+        return refuse("it has more supplies than the box holds");
+    const auto given_rewards = has_rewards ? elements(quest->rewards, quest->reward_count, quest->reward_stride,
+                                                 kFirstQuestReward, "reward_stride", "ymod_quest_reward", why)
+                                           : std::optional(std::vector<ymod_quest_reward>{});
+    if (!given_rewards) return refuse(why);
+    const auto given_supplies = has_supplies ? elements(quest->supplies, quest->supply_count, quest->supply_stride,
+                                                   kFirstQuestSupply, "supply_stride", "ymod_quest_supply", why)
+                                             : std::optional(std::vector<ymod_quest_supply>{});
+    if (!given_supplies) return refuse(why);
+    for (const ymod_quest_reward &r : *given_rewards) {
         if (r.item == nullptr || r.count == 0u || r.count > 99u || r.chance == 0u || r.chance > 100u ||
             r.line >= game::kMostRewardGroups)
             return refuse("a reward's item, count, chance or group is out of range");
@@ -640,12 +725,7 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
     }
     if (std::any_of(totals.begin(), totals.end(), [](unsigned total) { return total != 100u; }))
         return refuse("a reward group's chances do not add up to 100, or a group between has none");
-    const bool has_supplies =
-        quest->size >= offsetof(ymod_quest, supply_count) + sizeof(quest->supply_count) && quest->supplies != nullptr;
-    if (has_supplies && quest->supply_count > game::kMostSupplies)
-        return refuse("it has more supplies than the box holds");
-    for (std::uint32_t i = 0; has_supplies && i < quest->supply_count; ++i) {
-        const ymod_quest_supply &s = quest->supplies[i];
+    for (const ymod_quest_supply &s : *given_supplies) {
         if (s.item == nullptr || s.count == 0u || s.count > 99u)
             return refuse("a supply's item or count is out of range");
         rewards.push_back({s.item, static_cast<std::uint8_t>(s.count), 0u, kSupply});
@@ -664,7 +744,6 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
         for (const maps::Gathering &g : points) spec.gathering[a->area].push_back({{}, g.uses, g.extra_uses});
         gathered[a->area] = std::move(points);
     }
-    std::string why;
     const std::optional<std::vector<std::uint8_t>> payload = game::build_quest(spec, &why);
     if (!payload) return refuse(why);
     if (!mhp3rd::mods::quests::add(*runtime, *payload, mod->name, &why)) return refuse(why);
@@ -723,7 +802,7 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
 int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
     Runtime *runtime = state().runtime;
     if (runtime == nullptr || mod == nullptr || mod->failed || area == nullptr ||
-        area->size < offsetof(ymod_area, walls) + sizeof(area->walls))
+        too_short(mod, area->size, offsetof(ymod_area, walls) + sizeof(area->walls), "ymod_area"))
         return -1;
     const auto text = [](const char *s) { return std::string(s != nullptr ? s : ""); };
     const auto refuse = [mod, area, &text](const std::string &why) {
@@ -740,8 +819,9 @@ int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
     if (!model || !geometry || !textures || !ground || !walls) return -1;
     maps::AreaSpec spec{text(area->id), static_cast<std::uint8_t>(area->map), static_cast<std::uint8_t>(area->area),
         *model, *geometry, *textures, *ground, *walls, mod->name};
-    // Its points, when it gives any (a mod built before them gives none).
-    if (area->size >= offsetof(ymod_area, cart) + sizeof(area->cart) &&
+    // Its points, when it gives any (a mod built before them, whose struct
+    // ends before their strides, gives none).
+    if (area->size >= offsetof(ymod_area, spot_stride) + sizeof(area->spot_stride) &&
         (area->exits != nullptr || area->arrivals != nullptr || area->spots != nullptr || area->cart != nullptr)) {
         const auto facing = [](int32_t f) { return f >= 0 && f <= 0xFFFF; };
         const auto byte = [](int32_t b) { return b >= 0 && b <= 0xFF; };
@@ -753,24 +833,34 @@ int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
             (area->arrivals == nullptr && area->arrival_count > 0u) ||
             (area->spots == nullptr && area->spot_count > 0u))
             return refuse("it counts exits, arrivals or things to use it does not give");
+        std::string why;
+        const auto exits = elements(
+            area->exits, area->exit_count, area->exit_stride, kFirstAreaExit, "exit_stride", "ymod_area_exit", why);
+        const auto arrivals = exits ? elements(area->arrivals, area->arrival_count, area->arrival_stride,
+                                          kFirstAreaArrival, "arrival_stride", "ymod_area_arrival", why)
+                                    : std::nullopt;
+        const auto cart = arrivals ? elements(area->cart, 1u, area->arrival_stride, kFirstAreaArrival, "arrival_stride",
+                                         "ymod_area_arrival", why)
+                                   : std::nullopt;
+        const auto spots = cart ? elements(area->spots, area->spot_count, area->spot_stride, kFirstAreaSpot,
+                                      "spot_stride", "ymod_area_spot", why)
+                                : std::nullopt;
+        if (!spots) return refuse(why);
         maps::Points points;
-        for (std::uint32_t i = 0; area->exits != nullptr && i < area->exit_count; ++i) {
-            const ymod_area_exit &e = area->exits[i];
+        for (const ymod_area_exit &e : *exits) {
             if (!byte(e.to) || e.to == maps::kQuestStart || !byte(e.door))
                 return refuse("an exit's area or door is out of range");
             points.exits.push_back({e.at.x, e.at.y, e.at.z, e.radius, e.height, static_cast<std::uint8_t>(e.to),
                 static_cast<std::uint8_t>(e.door)});
         }
-        for (std::uint32_t i = 0; area->arrivals != nullptr && i < area->arrival_count; ++i) {
-            const ymod_area_arrival &a = area->arrivals[i];
+        for (const ymod_area_arrival &a : *arrivals) {
             const bool start = a.from == YMOD_AREA_QUEST_START;
             if (!facing(a.facing) || (!start && (!byte(a.from) || a.from == maps::kQuestStart)) || !byte(a.door))
                 return refuse("an arrival's facing, area or door is out of range");
             points.arrivals.push_back({a.at.x, a.at.y, a.at.z, static_cast<std::uint16_t>(a.facing),
                 start ? maps::kQuestStart : static_cast<std::uint8_t>(a.from), static_cast<std::uint8_t>(a.door)});
         }
-        for (std::uint32_t i = 0; area->spots != nullptr && i < area->spot_count; ++i) {
-            const ymod_area_spot &t = area->spots[i];
+        for (const ymod_area_spot &t : *spots) {
             const bool known = t.kind == YMOD_SPOT_GATHERING || t.kind == YMOD_SPOT_SUPPLY_BOX ||
                 t.kind == YMOD_SPOT_DELIVERY_BOX || t.kind == YMOD_SPOT_BED || t.kind == YMOD_SPOT_BALLISTA ||
                 t.kind == YMOD_SPOT_CANNON;
@@ -783,9 +873,11 @@ int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
                 t.extra_uses > maps::kMostGatherUses)
                 return refuse("a thing to use gives more than " + std::to_string(maps::kMostGatherItems) +
                     " items or more than " + std::to_string(maps::kMostGatherUses) + " uses");
+            const auto items =
+                elements(t.items, t.item_count, t.item_stride, kFirstAreaItem, "item_stride", "ymod_area_item", why);
+            if (!items) return refuse(why);
             maps::Gathering gathering{{}, static_cast<std::uint8_t>(t.uses), static_cast<std::uint8_t>(t.extra_uses)};
-            for (std::uint32_t k = 0; t.items != nullptr && k < t.item_count; ++k) {
-                const ymod_area_item &item = t.items[k];
+            for (const ymod_area_item &item : *items) {
                 if (item.item == nullptr || item.count == 0u || item.count > 99u || item.chance == 0u ||
                     item.chance > 100u)
                     return refuse("a gathered item's name, count or chance is out of range");
@@ -795,10 +887,10 @@ int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
             points.spots.push_back({static_cast<maps::SpotKind>(t.kind), t.at.x, t.at.y, t.at.z, t.radius, t.height,
                 static_cast<std::uint16_t>(t.facing), std::move(gathering)});
         }
-        if (area->cart != nullptr) {
-            if (!facing(area->cart->facing)) return refuse("its cart's facing is out of range");
-            points.cart = maps::Cart{
-                area->cart->at.x, area->cart->at.y, area->cart->at.z, static_cast<std::uint16_t>(area->cart->facing)};
+        if (!cart->empty()) {
+            const ymod_area_arrival &c = cart->front();
+            if (!facing(c.facing)) return refuse("its cart's facing is out of range");
+            points.cart = maps::Cart{c.at.x, c.at.y, c.at.z, static_cast<std::uint16_t>(c.facing)};
         }
         spec.points = std::move(points);
     }
@@ -809,7 +901,7 @@ int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
 int32_t equipment_add_weapon(ymod_mod *mod, const ymod_weapon *weapon) {
     Runtime *runtime = state().runtime;
     if (runtime == nullptr || mod == nullptr || mod->failed || weapon == nullptr ||
-        weapon->size < offsetof(ymod_weapon, give) + sizeof(weapon->give))
+        too_short(mod, weapon->size, offsetof(ymod_weapon, give) + sizeof(weapon->give), "ymod_weapon"))
         return -1;
     const auto text = [](const char *s) { return std::string(s != nullptr ? s : ""); };
     const auto refuse = [mod, weapon, &text](const std::string &why) {
@@ -829,7 +921,7 @@ int32_t equipment_add_weapon(ymod_mod *mod, const ymod_weapon *weapon) {
 int32_t equipment_add_armor(ymod_mod *mod, const ymod_armor *armor) {
     Runtime *runtime = state().runtime;
     if (runtime == nullptr || mod == nullptr || mod->failed || armor == nullptr ||
-        armor->size < offsetof(ymod_armor, give) + sizeof(armor->give))
+        too_short(mod, armor->size, offsetof(ymod_armor, give) + sizeof(armor->give), "ymod_armor"))
         return -1;
     const auto text = [](const char *s) { return std::string(s != nullptr ? s : ""); };
     const auto refuse = [mod, armor, &text](const std::string &why) {

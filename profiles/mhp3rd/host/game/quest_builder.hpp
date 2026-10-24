@@ -41,6 +41,7 @@ struct QuestRewardItem {
 // (a guild's commendation, say).
 using QuestRewardGroup = std::vector<QuestRewardItem>;
 inline constexpr std::size_t kMostRewardGroups = 3u;
+inline constexpr std::size_t kMostRewardItems = 24u; // in a group: the disc's have up to 12
 // What the supply box holds at the start: `count` of item `item`.
 struct QuestSupply {
     std::uint16_t item{};

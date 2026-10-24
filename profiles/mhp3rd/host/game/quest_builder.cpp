@@ -20,7 +20,6 @@ constexpr std::size_t kMaxMonsters = 5u;
 constexpr std::uint16_t kRewardGroup = 0x8000u;
 constexpr std::uint8_t kRewardRows = 5u;
 constexpr std::uint32_t kRewardDraws = 3u;
-constexpr std::size_t kMostRewardItems = 24u; // the disc's groups have up to 12
 constexpr std::uint32_t kFramesPerMinute = 1800u;
 // The record's quest type (+0): a hunt; its objective count (+0x27) and kind
 // (+0x28, 1: hunt or slay).

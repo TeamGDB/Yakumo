@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -44,7 +45,7 @@ public:
     // A known function or data by name (sdk/symbols.txt), or nothing.
     [[nodiscard]] std::optional<ymod_symbol> symbol(const char *name) const {
         const ymod_symbols *table = symbols();
-        ymod_symbol found{sizeof(ymod_symbol)};
+        ymod_symbol found{};
         if (table == nullptr || table->find(name, &found) == 0u) return std::nullopt;
         return found;
     }
@@ -55,6 +56,37 @@ public:
         const ymod_hooks *table = hooks();
         if (!found || found->kind != YMOD_SYMBOL_FUNCTION || table == nullptr) return 0u;
         return table->function(mod_, found->overlay, found->address, kind, callback, user);
+    }
+
+    // The monsters service's functions that take an array, from a C array or
+    // a pointer and a count: they pass the array's stride (yakumo/mod.h,
+    // "Sizes and strides"). 0, or -1 (the reason is in the log; -1 too when
+    // the host has no such function).
+    int attack_shape(std::int32_t kind, std::int32_t shape, const ymod_hit_sphere *spheres, std::size_t count) const {
+        const ymod_monsters *table = monsters_having(offsetof(ymod_monsters, attack_shape), count);
+        if (table == nullptr) return -1;
+        const auto n = static_cast<std::int32_t>(count);
+        return table->attack_shape(mod_, kind, shape, spheres, n, sizeof(ymod_hit_sphere));
+    }
+    template <std::size_t N>
+    int attack_shape(std::int32_t kind, std::int32_t shape, const ymod_hit_sphere (&spheres)[N]) const {
+        return attack_shape(kind, shape, spheres, N);
+    }
+    int body_shapes(std::int32_t kind, const ymod_body_capsule *capsules, std::size_t count) const {
+        const ymod_monsters *table = monsters_having(offsetof(ymod_monsters, body_shapes), count);
+        if (table == nullptr) return -1;
+        return table->body_shapes(mod_, kind, capsules, static_cast<std::int32_t>(count), sizeof(ymod_body_capsule));
+    }
+    template <std::size_t N> int body_shapes(std::int32_t kind, const ymod_body_capsule (&capsules)[N]) const {
+        return body_shapes(kind, capsules, N);
+    }
+    int footsteps(std::int32_t kind, const ymod_footstep *steps, std::size_t count) const {
+        const ymod_monsters *table = monsters_having(offsetof(ymod_monsters, footsteps), count);
+        if (table == nullptr) return -1;
+        return table->footsteps(mod_, kind, steps, static_cast<std::int32_t>(count), sizeof(ymod_footstep));
+    }
+    template <std::size_t N> int footsteps(std::int32_t kind, const ymod_footstep (&steps)[N]) const {
+        return footsteps(kind, steps, N);
     }
 
     void log(const std::string &message, int level = YMOD_LOG_INFO) const { host_->log(mod_, level, message.c_str()); }
@@ -75,6 +107,16 @@ public:
     }
 
 private:
+    // The monsters service when it has the function at `field` and `count`
+    // fits its argument, or null.
+    [[nodiscard]] const ymod_monsters *monsters_having(std::size_t field, std::size_t count) const {
+        const ymod_monsters *table = monsters();
+        if (table == nullptr || table->size < field + sizeof(void *) ||
+            count > static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max()))
+            return nullptr;
+        return table;
+    }
+
     const ymod_host *host_;
     ymod_mod *mod_;
 };
