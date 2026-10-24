@@ -40,6 +40,7 @@
 #include <iterator>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #define STBI_WRITE_NO_STDIO
@@ -411,6 +412,19 @@ int call_from_before(ymod_cpu *cpu, void *) {
     return YMOD_CONTINUE;
 }
 
+// A hook that removes a later one at its address, for that one's kind.
+ymod_hook g_victim;
+int g_victim_seen;
+int remove_victim(ymod_cpu *, void *) {
+    if (g_victim != 0u) (void)g_hooks->remove(g_self, std::exchange(g_victim, 0u));
+    return YMOD_CONTINUE;
+}
+int victim(ymod_cpu *cpu, void *) {
+    ++g_victim_seen;
+    cpu->gpr[2] = 0x77u;
+    return YMOD_RETURN;
+}
+
 int g_first_call;
 int g_second_call;
 int call_twice(ymod_cpu *cpu, void *) {
@@ -474,6 +488,31 @@ void test_hook_changes(psprecomp::Runtime &runtime) {
     check(g_call_result == -1 && runtime.cpu().gpr[2] == 5u,
         "native: a guest call from a BEFORE hook is refused and the function runs as usual");
     g_hooks->remove(g_self, caller);
+
+    // A hook removed by an earlier one in the same call is not called, of any
+    // kind: its mod may have freed what it points at.
+    store(runtime, 0x08A00900u, {0x00801021u, 0x03E00008u, 0u}); // addu v0, a0, zero; jr ra
+    store(runtime, 0x08A00A00u, {0x24090007u, 0x25290001u, 0x03E00008u, 0u});
+    const auto removed_in_call = [&](int remover_kind, int victim_kind, bool instruction) {
+        const std::uint32_t at = instruction ? 0x08A00A04u : 0x08A00900u;
+        const ymod_hook remover = instruction
+            ? g_hooks->instruction(g_self, nullptr, at, &remove_victim, nullptr)
+            : g_hooks->function(g_self, nullptr, at, remover_kind, &remove_victim, nullptr);
+        g_victim = instruction ? g_hooks->instruction(g_self, nullptr, at, &victim, nullptr)
+                               : g_hooks->function(g_self, nullptr, at, victim_kind, &victim, nullptr);
+        g_victim_seen = 0;
+        const bool hooked = remover != 0u && g_victim != 0u;
+        const std::uint32_t result = call(runtime, instruction ? 0x08A00A00u : 0x08A00900u, 5u);
+        const bool skipped = hooked && g_victim == 0u && g_victim_seen == 0 && runtime.cpu().pc == kSentinel &&
+            (instruction || result == 5u);
+        (void)g_hooks->remove(g_self, remover);
+        return skipped;
+    };
+    check(removed_in_call(YMOD_HOOK_BEFORE, YMOD_HOOK_BEFORE, false) &&
+            removed_in_call(YMOD_HOOK_BEFORE, YMOD_HOOK_REPLACE, false) &&
+            removed_in_call(YMOD_HOOK_AFTER, YMOD_HOOK_AFTER, false) && removed_in_call(0, 0, true),
+        "native: a BEFORE, REPLACE, AFTER or instruction hook removed by an earlier hook in the same call is not "
+        "called again in it");
 
     store(runtime, 0x08A00800u, {0x24020063u, 0x03E00008u, 0u}); // addiu v0, zero, 0x63; jr ra
     const ymod_hook twice = g_hooks->function(g_self, nullptr, 0x08A00300u, YMOD_HOOK_REPLACE, &call_twice, nullptr);

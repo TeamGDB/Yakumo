@@ -199,7 +199,9 @@ typedef struct ymod_hooks {
     ymod_hook (*instruction)(ymod_mod *mod, const char *overlay, uint32_t address, ymod_hook_fn callback, void *user);
     /* Removes a hook this mod added: 0, or -1 with the reason in the log for
      * a hook it does not have (a number no hook has, one removed already, or
-     * another mod's hook, which stays). */
+     * another mod's hook, which stays). From a callback too: a hook removed
+     * is not called again, not even later in the same call, and a hook added
+     * in a callback runs from the next call. */
     int (*remove)(ymod_mod *mod, ymod_hook hook);
 } ymod_hooks;
 

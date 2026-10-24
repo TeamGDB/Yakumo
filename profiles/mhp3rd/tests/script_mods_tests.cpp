@@ -127,6 +127,7 @@ int main() {
     store(runtime, 0x08A00000u, {0x00801021u, 0x03E00008u, 0u});              // addu v0, a0, zero; jr ra
     store(runtime, 0x08A00100u, {0x24020005u, 0x03E00008u, 0u});              // addiu v0, zero, 5; jr ra
     store(runtime, 0x08A00200u, {0x24090007u, 0x25290001u, 0x03E00008u, 0u}); // t1 = 7; t1 += 1; jr ra
+    store(runtime, 0x08A00500u, {0x00801021u, 0x03E00008u, 0u});              // addu v0, a0, zero; jr ra
 
     const fs::path main = write_script(folder, "main.luau", R"(
 local block = yakumo.allocate(64)
@@ -146,6 +147,17 @@ once = yakumo.hook(0x08A00000, "before", function() yakumo.log("one-shot ran"); 
 yakumo.hook(0x08A00000, "after", function(cpu) yakumo.log("after v0=" .. cpu.v0) end)
 yakumo.hook(0x08A00100, "replace", function(cpu) cpu.v0 = 0x99; return true end)
 yakumo.hook_instruction(0x08A00204, function(cpu) yakumo.log("instruction t1=" .. cpu.t1) end)
+-- A hook that removes a later one at its address and adds another: the new
+-- hook takes the removed one's callback slot, yet neither runs in this call.
+local swapped = false
+local doomed
+yakumo.hook(0x08A00500, "before", function()
+    if swapped then return end
+    swapped = true
+    yakumo.unhook(doomed)
+    yakumo.hook(0x08A00500, "before", function() yakumo.log("hook added in a call ran") end)
+end)
+doomed = yakumo.hook(0x08A00500, "before", function() yakumo.log("hook removed in a call ran") end)
 local frames = 0
 yakumo.on("frame", function() frames = frames + 1 end)
 yakumo.on("start", function() yakumo.log("started, frames so far", frames) end)
@@ -251,6 +263,18 @@ yakumo.on("frame", function() if kept_ui then yakumo.log("widgets outside a draw
         "scripts: a removed hook runs no more, also one that removes itself while it runs");
     (void)call(runtime, 0x08A00200u, 0u);
     check(logged("instruction t1=7"), "scripts: an instruction hook");
+    const auto times_logged = [](const std::string &line) {
+        std::size_t times = 0u;
+        for (const auto &report : mhp3rd::mods::native::reports()) times += report.line == line ? 1u : 0u;
+        return times;
+    };
+    (void)call(runtime, 0x08A00500u, 1u);
+    const std::size_t added_first = times_logged("hook added in a call ran");
+    (void)call(runtime, 0x08A00500u, 1u);
+    check(added_first == 0u && times_logged("hook added in a call ran") == 1u &&
+            times_logged("hook removed in a call ran") == 0u,
+        "scripts: a hook removed by an earlier one in the same call does not run, not even as the hook that took "
+        "its callback's slot; that one runs from the next call");
     check(logged("unhook true false false") && logged("unhook of another mod false") &&
             logged("hook " + std::to_string(owned) + " is not removed: another mod added it") && s_native_calls == 1,
         "scripts: unhook is true for the script's hook, false for one removed already, a number no hook has, or "

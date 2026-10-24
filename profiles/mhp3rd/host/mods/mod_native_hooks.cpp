@@ -34,8 +34,8 @@ bool applies(const Hook &hook, const std::string &loaded) {
 
 // The hooks at an address that apply now, in order. Callbacks may add and
 // remove hooks, so they run from this copy of the list; one whose mod has
-// stopped meanwhile (a script that failed in an earlier callback) is skipped
-// where it is called.
+// stopped meanwhile (a script that failed in an earlier callback), or that an
+// earlier callback removed, is skipped where it is called (to_call()).
 std::vector<Hook> applying(
     const psprecomp::GuestMemory &memory, const std::vector<Hook> &hooks, std::uint32_t address) {
     const std::string loaded = overlay_for(memory, hooks, address);
@@ -43,6 +43,15 @@ std::vector<Hook> applying(
     for (const Hook &hook : hooks)
         if (applies(hook, loaded) && runs(hook.mod)) out.push_back(hook);
     return out;
+}
+
+// Whether a hook from such a copy is to be called: its mod runs and it is
+// still in place. One removed by an earlier callback of the same call is not
+// called again: its mod may have freed what `user` points at, and a script
+// may have given its callback's slot to a hook added since. Hook numbers are
+// never reused.
+bool to_call(const Hook &hook) {
+    return runs(hook.mod) && state().hook_sites.contains(hook.id);
 }
 
 // What the hooks at an address are installed for now: the overlay loaded
@@ -65,7 +74,7 @@ void run_after(std::uint32_t address, AllegrexContext &ctx) {
     const auto found = s.sites.find(address);
     if (found == s.sites.end() || s.runtime == nullptr) return;
     for (const Hook &hook : applying(s.runtime->memory(), found->second.hooks, address))
-        if (hook.kind == YMOD_HOOK_AFTER && runs(hook.mod)) (void)hook.callback(as_cpu(ctx), hook.user);
+        if (hook.kind == YMOD_HOOK_AFTER && to_call(hook)) (void)hook.callback(as_cpu(ctx), hook.user);
 }
 
 // Host features registered over the game's functions (their names start with
@@ -119,11 +128,11 @@ void hook_entry(Runtime &runtime, AllegrexContext &ctx) {
     bool run_original = true;
     bool after = false;
     for (const Hook &hook : calling) {
-        if (hook.kind == YMOD_HOOK_BEFORE && runs(hook.mod)) (void)hook.callback(as_cpu(ctx), hook.user);
+        if (hook.kind == YMOD_HOOK_BEFORE && to_call(hook)) (void)hook.callback(as_cpu(ctx), hook.user);
         if (hook.kind == YMOD_HOOK_AFTER) after = true;
     }
     for (const Hook &hook : calling) {
-        if (hook.kind != YMOD_HOOK_REPLACE || !runs(hook.mod)) continue;
+        if (hook.kind != YMOD_HOOK_REPLACE || !to_call(hook)) continue;
         s.call_pending = false;
         const bool replacing = std::exchange(s.replacing, true);
         ymod_mod *const calling_mod = std::exchange(s.calling, hook.mod);
@@ -289,7 +298,7 @@ void instruction_dispatch(Runtime &runtime, AllegrexContext &ctx, std::uint32_t 
     const auto found = s.instructions.find(address);
     if (found == s.instructions.end()) return;
     for (const Hook &hook : applying(runtime.memory(), found->second.hooks, address))
-        if (runs(hook.mod)) (void)hook.callback(as_cpu(ctx), hook.user);
+        if (to_call(hook)) (void)hook.callback(as_cpu(ctx), hook.user);
 }
 
 // Overlay hooks follow their overlay: in place while it is loaded. And a host
