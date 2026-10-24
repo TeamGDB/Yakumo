@@ -534,8 +534,8 @@ typedef struct ymod_monsters {
 #define YMOD_QUESTS "yakumo.quests"
 typedef struct ymod_quest_monster {
     const char *monster; /* a kind by id, the game's or a mod's: "fatalis" */
-    int32_t area;        /* the area of the quest's map it starts in; 0 in a quest played in an added area
-                            (ymod_quest.area): that area's */
+    int32_t area;        /* the area of the quest's map it starts in, by the game's number; 0 in a quest that
+                            names ymod_quest.area: that area's */
     ymod_vec3 at;        /* and where in it */
     int32_t health;      /* the game's health level: higher is more (0x1E: a Tigrex-based kind's 5400) */
     int32_t attack;      /* the game's attack level (0x13: a low rank hunt; 0x30 hits three times as hard) */
@@ -575,6 +575,10 @@ typedef struct ymod_quest {
     uint32_t reward_count;
     const ymod_quest_supply *supplies; /* what the supply box holds at the start (up to 32), named as rewards are */
     uint32_t supply_count;
+    const char *const *areas; /* NULL, or areas of the mod's (yakumo.maps, added first) the quest is played in,
+                                 besides `area`: all on one map, each in place of another of its areas (a camp
+                                 and a fighting area, say); `map` is then theirs */
+    uint32_t area_count;
 } ymod_quest;
 /* --------------------------------------------------------------------------
  * "yakumo.equipment" 1: weapons mods add. A weapon starts from one of the
@@ -624,13 +628,50 @@ typedef struct ymod_equipment {
 /* --------------------------------------------------------------------------
  * "yakumo.maps" 1: areas mods add. An area takes the place of one of the
  * game's (an area of one of its maps) on the mod's quests that name it
- * (ymod_quest.area): its model, GE data, textures and collision (a block for
- * its ground and one for its walls) are served
- * instead of the game's while such a quest is played; the rest of the area
- * (its scene, camera paths, minimap) stays the game's (docs/MAPS.md). Call
+ * (ymod_quest.area, ymod_quest.areas): its model, GE data, textures and
+ * collision (a block for its ground and one for its walls) are served instead
+ * of the game's while such a quest is played, and so are its points when it
+ * gives them: where the hunter comes in, where he leaves for another area and
+ * the camp's supply box, delivery box, bed and cart. The rest of the area (its
+ * scene, camera paths, minimap) stays the game's (docs/MAPS.md). Call
  * add_area() from yakumo_mod_main, before the quests that name it.
+ *
+ * Points are in the area's own units, as its model and collision; a facing is
+ * a turn in 65536ths (0 faces +z, 16384 +x, 32768 -z).
  */
 #define YMOD_MAPS "yakumo.maps"
+/* A way out: walking into its upright cylinder takes the hunter to area `to`
+ * of the same map, where he comes in at the arrival from this area with the
+ * same door. */
+typedef struct ymod_area_exit {
+    ymod_vec3 at;  /* the cylinder's middle */
+    float radius;  /* across the ground */
+    float height;  /* up and down, half of it above at.y and half below */
+    int32_t to;    /* the area it leads to, by the game's number (map 8: 0 the camp, 1 the floor) */
+    int32_t door;  /* 0 to 255: two ways between the same two areas differ by it */
+} ymod_area_exit;
+/* A way in: where the hunter comes into the area and which way he faces. */
+typedef struct ymod_area_arrival {
+    ymod_vec3 at;   /* he is put on the ground under it */
+    int32_t facing; /* 0 to 65535 */
+    int32_t from;   /* the area he comes from, or YMOD_AREA_QUEST_START: where the quest starts (the camp's) */
+    int32_t door;   /* the door of the exit he came through, 0 to 255 */
+} ymod_area_arrival;
+#define YMOD_AREA_QUEST_START (-1)
+/* Something the hunter uses with the action button, where he stands within
+ * its upright cylinder. The game's own camps have a supply box of radius 150
+ * and height 200, a delivery box the same and a bed of radius 130 and height
+ * 300; what is drawn there is the area's model's. */
+#define YMOD_SPOT_SUPPLY_BOX 5
+#define YMOD_SPOT_DELIVERY_BOX 6
+#define YMOD_SPOT_BED 7
+typedef struct ymod_area_spot {
+    int32_t kind;   /* YMOD_SPOT_* */
+    ymod_vec3 at;   /* the cylinder's middle */
+    float radius;   /* across the ground */
+    float height;   /* up and down, half of it above at.y and half below */
+    int32_t facing; /* 0 to 65535: the way the hunter turns to use it (the game's beds have one, its boxes 0) */
+} ymod_area_spot;
 typedef struct ymod_area {
     uint32_t size;          /* set to sizeof(ymod_area) before passing one */
     const char *id;         /* the mod's name for it */
@@ -640,6 +681,16 @@ typedef struct ymod_area {
     const char *textures;   /* its textures (TMH), */
     const char *ground;     /* its ground's collision block ("4.00"): what stands on it, */
     const char *walls;      /* and its walls', ceilings' and steep slopes': what runs into them */
+    /* Its points (up to 16 of each). With none of them (all NULL), the game's area's stay: its start, ways in
+       and out and camp, in the game's places. With any, the area has these and none of the game's. */
+    const ymod_area_exit *exits;
+    uint32_t exit_count;
+    const ymod_area_arrival *arrivals;
+    uint32_t arrival_count;
+    const ymod_area_spot *spots;
+    uint32_t spot_count;
+    const ymod_area_arrival *cart; /* NULL, or a camp's cart: a hunter who fainted is brought back there and set down
+                                      along its facing (`from` and `door` are not read) */
 } ymod_area;
 typedef struct ymod_maps {
     uint32_t version;

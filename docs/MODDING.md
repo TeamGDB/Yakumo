@@ -464,6 +464,26 @@ quest.area = "castle_schrade";             // and the quest is played in it
 
 Add it at start, before the quests that name it. A quest that names an area is on that area's map, so it needs no `map`, and a monster of it whose `area` is 0 starts in the added area; another area number is kept. While such a quest is played, the base area's files are served with the mod's in them; the area's scene, camera paths and minimap stay the game's, and every other quest loads the game's area. The files' formats are in [MAPS.md](MAPS.md); an area from another game is converted into them by a tool of the mod's own.
 
+An area can also say where the hunter comes in, where he leaves for another area and what he uses there, in its own units; without these, the game's area's stay where the game has them:
+
+```cpp
+static const ymod_area_exit exits[] = {          // walking into the cylinder leaves
+    {{5980.0f, -20.0f, 5000.0f}, 300.0f, 500.0f, 1, 0}};   // middle, radius, height, to area 1, door 0
+static const ymod_area_arrival arrivals[] = {    // facing: 65536 to a turn, 0 towards +z
+    {{5800.0f, 0.0f, 6400.0f}, 0x8000, YMOD_AREA_QUEST_START, 0},  // where the quest starts
+    {{5950.0f, 3.0f, 5600.0f}, 0, 1, 0}};        // coming from area 1 through door 0
+static const ymod_area_spot spots[] = {          // the action button, within the cylinder
+    {YMOD_SPOT_SUPPLY_BOX, {6200.0f, 0.0f, 6300.0f}, 180.0f, 200.0f, 0},
+    {YMOD_SPOT_BED, {5480.0f, 0.0f, 6390.0f}, 300.0f, 300.0f, 0xC001}};
+static const ymod_area_arrival cart{{5700.0f, 0.0f, 6800.0f}, 0x4000, 0, 0};
+camp.exits = exits;       camp.exit_count = 1;
+camp.arrivals = arrivals; camp.arrival_count = 2;
+camp.spots = spots;       camp.spot_count = 2;
+camp.cart = &cart;        // a camp's cart
+```
+
+The hunter leaving through an exit comes into its area at the arrival from the area he left with the exit's door; two ways between the same areas differ by their doors. A quest played in several areas of one map names them all, each in place of another of the map's areas, a camp and a fighting area say: `quest.areas` (with `quest.area_count`) besides `quest.area`. Their monsters' areas are the map's numbers (0 the camp), except that a monster of area 0 starts in `quest.area` when the quest names one. If one of the quest's areas does not fit where the game's goes ([MAPS.md](MAPS.md#areas-mods-add)), none of them is served.
+
 ## Panels and overlays
 
 A mod can draw in Yakumo's interface through `yakumo.ui` (native) or `yakumo.panel` and `yakumo.overlay` (scripts):

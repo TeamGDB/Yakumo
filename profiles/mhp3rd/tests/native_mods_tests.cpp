@@ -1369,6 +1369,326 @@ void test_maps(psprecomp::Runtime &runtime) {
     mhp3rd::mods::added::reset_for_tests();
 }
 
+// A quest played in several areas of a mod's, and areas that give their own
+// points (where the hunter comes in and leaves, the camp's things).
+void test_map_points(psprecomp::Runtime &runtime) {
+    namespace maps = mhp3rd::mods::maps;
+    namespace game = mhp3rd::game;
+    using Bytes = std::vector<std::uint8_t>;
+    const auto bytes = [](std::string_view s) { return Bytes(s.begin(), s.end()); };
+    const auto entry = [](const Bytes &pack, std::size_t i) {
+        const auto entries = game::read_pack(pack);
+        return entries && i < entries->size() ? Bytes((*entries)[i].begin(), (*entries)[i].end()) : Bytes{};
+    };
+    const auto f32 = [](const Bytes &b, std::size_t at) {
+        const std::uint32_t bits = word_at(b, at);
+        float value{};
+        std::memcpy(&value, &bits, sizeof(value));
+        return value;
+    };
+    const auto u16 = [](const Bytes &b, std::size_t at) {
+        return static_cast<std::uint16_t>(b[at] | (b[at + 1u] << 8u));
+    };
+
+    // The table: groups by kind, records of 32 bytes from the next 16 bytes.
+    maps::Points points;
+    points.exits = {{100.0f, 5.0f, -200.0f, 300.0f, 500.0f, 1u, 2u}};
+    points.arrivals = {{1.0f, 2.0f, 3.0f, 0x8000u, maps::kQuestStart, 0u}, {4.0f, 5.0f, 6.0f, 0x4000u, 1u, 2u}};
+    points.spots = {{maps::SpotKind::Bed, 7.0f, 8.0f, 9.0f, 130.0f, 300.0f, 0xC001u}};
+    points.cart = maps::Cart{10.0f, 11.0f, 12.0f, 0x7000u};
+    const Bytes table = maps::write_points(points);
+    // Four groups: 4 + 48 bytes, so the records start at 0x40.
+    check(table.size() == 0x40u + 5u * 32u && word_at(table, 0u) == 4u && word_at(table, 4u) == 0u &&
+            word_at(table, 8u) == 1u && word_at(table, 12u) == 0x40u && word_at(table, 16u) == 1u &&
+            word_at(table, 20u) == 2u && word_at(table, 24u) == 0x60u && word_at(table, 28u) == 2u &&
+            word_at(table, 32u) == 1u && word_at(table, 36u) == 0xA0u && word_at(table, 40u) == 4u &&
+            word_at(table, 44u) == 1u && word_at(table, 48u) == 0xC0u,
+        "points: a count, then each group's kind, count and offset, its records after them from 16 bytes on");
+    check(f32(table, 0x40u) == 100.0f && f32(table, 0x44u) == 5.0f && f32(table, 0x48u) == -200.0f &&
+            f32(table, 0x4Cu) == 1.0f && f32(table, 0x50u) == 300.0f && f32(table, 0x54u) == 500.0f &&
+            u16(table, 0x58u) == 0u && u16(table, 0x5Cu) == 2u && table[0x5Eu] == 1u,
+        "points: an exit has its middle, radius, height, door and the area it leads to");
+    check(f32(table, 0x60u) == 1.0f && u16(table, 0x78u) == 0x8000u && table[0x7Eu] == 0xFFu &&
+            f32(table, 0x80u) == 4.0f && f32(table, 0x90u) == 1.0f && u16(table, 0x98u) == 0x4000u &&
+            u16(table, 0x9Au) == 1u && u16(table, 0x9Cu) == 2u && table[0x9Eu] == 1u && table[0x9Fu] == 1u,
+        "points: an arrival has its place, facing, door and the area it comes from (0xFF the quest's start)");
+    check(f32(table, 0xA8u) == 9.0f && f32(table, 0xB0u) == 130.0f && f32(table, 0xB4u) == 300.0f &&
+            u16(table, 0xB8u) == 0xC001u && u16(table, 0xBCu) == 0u && u16(table, 0xBEu) == 7u &&
+            f32(table, 0xC0u) == 10.0f && u16(table, 0xD8u) == 0x7000u && word_at(table, 0xDCu) == 0u,
+        "points: a thing to use has its kind, radius, height and facing; the cart its place and facing");
+    const Bytes empty = maps::write_points({});
+    check(empty.size() == 16u && word_at(empty, 0u) == 0u, "points: with nothing, a table of no groups");
+    maps::Points only_exits;
+    only_exits.exits = {{0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0u, 0u}, {0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0u, 1u}};
+    const Bytes exits_table = maps::write_points(only_exits);
+    check(word_at(exits_table, 0u) == 1u && word_at(exits_table, 12u) == 0x10u && exits_table.size() == 0x50u &&
+            u16(exits_table, 0x10u + 32u + 26u) == 1u && exits_table[0x10u + 32u + 31u] == 1u,
+        "points: one group's records start at 16, each with its index");
+
+    // Areas through the service, with points and without.
+    maps::reset_for_tests();
+    mhp3rd::mods::added::reset_for_tests();
+    loader_stand_ins(runtime);
+    const std::filesystem::path folder = std::filesystem::temp_directory_path() / "yakumo_map_points_test";
+    std::filesystem::create_directories(folder);
+    const auto write = [&folder](const char *name, std::string_view text) {
+        std::ofstream(folder / name, std::ios::binary).write(text.data(), static_cast<std::streamsize>(text.size()));
+    };
+    write("model.pmo",
+        std::string_view("pmo\0"
+                         "102\0CAMP",
+            12));
+    write("floor.pmo",
+        std::string_view("pmo\0"
+                         "102\0YARD",
+            12));
+    write("ge.bin", "CAMP GE");
+    write("floor_ge.bin", "YARD GE");
+    write("tex.tmh", ".TMH camp");
+    write("ground.bin", "4.00 camp ground");
+    write("walls.bin", "4.00 camp walls");
+    ymod_mod *mod = mhp3rd::mods::native::add_mod("test.points", "Points test", folder.string());
+    const auto *service = static_cast<const ymod_maps *>(mhp3rd::mods::native::host()->service(mod, YMOD_MAPS, 1u));
+    const ymod_area_exit door{{5980.0f, -20.0f, 5000.0f}, 300.0f, 500.0f, 1, 0};
+    const ymod_area_arrival ins[] = {
+        {{5950.0f, 0.0f, 6100.0f}, 0x8000, YMOD_AREA_QUEST_START, 0}, {{5950.0f, 3.0f, 5600.0f}, 0, 1, 0}};
+    const ymod_area_spot things[] = {{YMOD_SPOT_SUPPLY_BOX, {6200.0f, 0.0f, 6300.0f}, 150.0f, 200.0f, 0x7000},
+        {YMOD_SPOT_BED, {5480.0f, 0.0f, 6390.0f}, 130.0f, 300.0f, 0xC001}};
+    const ymod_area_arrival cart{{6000.0f, 0.0f, 6800.0f}, 0x4000, 0, 0};
+    ymod_area camp{sizeof(ymod_area), "camp", 8, 0, "model.pmo", "ge.bin", "tex.tmh", "ground.bin", "walls.bin"};
+    camp.exits = &door;
+    camp.exit_count = 1u;
+    camp.arrivals = ins;
+    camp.arrival_count = 2u;
+    camp.spots = things;
+    camp.spot_count = 2u;
+    camp.cart = &cart;
+    // An older mod's struct ends at the walls: no points.
+    ymod_area yard{
+        offsetof(ymod_area, exits), "yard", 8, 1, "floor.pmo", "floor_ge.bin", "tex.tmh", "ground.bin", "walls.bin"};
+    yard.exits = &door; // past its size: not read
+    yard.exit_count = 1u;
+    check(service != nullptr && service->add_area(mod, &camp) == 0 && service->add_area(mod, &yard) == 0 &&
+            maps::find("camp") != nullptr && maps::find("yard") != nullptr,
+        "points: an area with points is added, and one of a mod built before them");
+    const auto refused = [&](ymod_area area, const char *id, const std::string &line) {
+        area.id = id;
+        return service != nullptr && service->add_area(mod, &area) == -1 && maps::find(id) == nullptr &&
+            logged("area " + std::string(id) + " is not added: " + line);
+    };
+    std::vector<ymod_area_exit> many(17u, door);
+    ymod_area too_many = camp;
+    too_many.exits = many.data();
+    too_many.exit_count = 17u;
+    ymod_area_exit bad_exits[] = {door, door, door, door, door};
+    bad_exits[0].to = 255;
+    bad_exits[1].to = -1;
+    bad_exits[2].door = 256;
+    bad_exits[3].radius = 0.0f;
+    bad_exits[4].height = -1.0f;
+    ymod_area_arrival bad_ins[] = {ins[0], ins[0], ins[0], ins[0], ins[0]};
+    bad_ins[0].facing = 0x10000;
+    bad_ins[1].facing = -1;
+    bad_ins[2].from = 255;
+    bad_ins[3].from = -2;
+    bad_ins[4].door = -1;
+    ymod_area_spot bad_things[] = {things[0], things[0], things[0], things[0]};
+    bad_things[0].kind = 8;
+    bad_things[1].radius = 0.0f;
+    bad_things[2].height = -5.0f;
+    bad_things[3].facing = 0x10000;
+    const std::string exit_line = "an exit's area, door or size is out of range";
+    const std::string in_line = "an arrival's facing, area or door is out of range";
+    const std::string thing_line =
+        "a thing to use is not a supply box, delivery box or bed, or its size or facing is out of range";
+    bool all_refused = refused(too_many, "many", "it has more than 16 exits, arrivals or things to use");
+    for (std::size_t i = 0; i < std::size(bad_exits); ++i) {
+        ymod_area a = camp;
+        a.exits = &bad_exits[i];
+        all_refused = refused(a, ("exit" + std::to_string(i)).c_str(), exit_line) && all_refused;
+    }
+    for (std::size_t i = 0; i < std::size(bad_ins); ++i) {
+        ymod_area a = camp;
+        a.arrivals = &bad_ins[i];
+        a.arrival_count = 1u;
+        all_refused = refused(a, ("in" + std::to_string(i)).c_str(), in_line) && all_refused;
+    }
+    for (std::size_t i = 0; i < std::size(bad_things); ++i) {
+        ymod_area a = camp;
+        a.spots = &bad_things[i];
+        a.spot_count = 1u;
+        all_refused = refused(a, ("thing" + std::to_string(i)).c_str(), thing_line) && all_refused;
+    }
+    ymod_area_arrival bad_cart = cart;
+    bad_cart.facing = 70000;
+    ymod_area cart_off = camp;
+    cart_off.cart = &bad_cart;
+    all_refused = refused(cart_off, "cart", "its cart's facing is out of range") && all_refused;
+    check(all_refused,
+        "points: too many, an exit to no area or with a door past 255 or no size, an arrival's facing, area or door "
+        "out of range, a thing that is not the camp's or has no size, and a cart's facing out of range are refused");
+    std::string why;
+    const Bytes pmo = bytes(std::string_view("pmo\0"
+                                             "102\0",
+        8));
+    maps::Points crowded;
+    crowded.spots.resize(17u);
+    check(!maps::add_area(runtime,
+              {"crowded", 8, 0, pmo, bytes("g"), bytes(".TMH"), bytes("4.00"), bytes("4.00"), "Points test", crowded},
+              &why) &&
+            why == "it has more than 16 exits, arrivals or things to use",
+        "points: the service's own limit holds for areas added from inside too");
+
+    // Played together: on map 8, one of a map 9 area or in place of the camp again is refused.
+    check(maps::add_area(runtime, {"elsewhere", 9, 0, pmo, bytes("g"), bytes(".TMH"), bytes("4.00"), bytes("4.00")}) &&
+            maps::add_area(runtime, {"camp2", 8, 0, pmo, bytes("g"), bytes(".TMH"), bytes("4.00"), bytes("4.00")}),
+        "points: two more areas are added");
+    check(maps::play_quest_in("camp", 62700u) && maps::play_quest_in("yard", 62700u) &&
+            maps::play_quest_in("camp", 62700u) && !maps::play_quest_in("elsewhere", 62700u, &why) &&
+            why == "its area elsewhere is on map 9, its area camp on map 8" &&
+            !maps::play_quest_in("camp2", 62700u, &why) &&
+            why == "its areas camp and camp2 both take the place of area 0" &&
+            !maps::play_quest_in("nowhere", 62700u, &why) && why == "there is no area \"nowhere\"",
+        "points: a quest is played in two areas of a map; one on another map, in place of the same area, or not "
+        "added is refused, and naming one again changes nothing");
+
+    // The game's files: the arena's two areas and its collision, with its points tables.
+    const Bytes camp_pack = game::write_pack({bytes("THEIR CAMP"), bytes("CAMP SCENE"), {}, bytes("THEIR CAMP TMH")});
+    const Bytes floor_pack =
+        game::write_pack({bytes("THEIR FLOOR"), bytes("FLOOR SCENE"), {}, bytes("THEIR FLOOR TMH")});
+    const Bytes hits_pack = game::write_pack({bytes("MAP TMH"), bytes("CAMP 1"), bytes("CAMP 2"), bytes("FLOOR 1"),
+        bytes("FLOOR 2"), bytes("CAMP POINTS"), bytes("FLOOR POINTS")});
+    maps::read_files_with_for_tests([&](mhp3rd::mods::FileId file) -> std::optional<Bytes> {
+        if (file == 0x1389u) return camp_pack;
+        if (file == 0x138Au) return Bytes(0x1000u, 0u);
+        if (file == 0x138Bu) return floor_pack;
+        if (file == 0x138Cu) return Bytes(0x1000u, 0u);
+        if (file == 0x1262u) return hits_pack;
+        if (file == 0x1263u) return game::write_pack({bytes("TMH"), bytes("A"), bytes("B")});
+        return std::nullopt;
+    });
+    auto &memory = runtime.memory();
+    place_overlay(runtime, 0x0A001780u, "game_sub.ovl", 0x00050000u);
+    memory.store16(0x0A0457C4u + 16u, 0x1389u);
+    memory.store16(0x0A04579Cu + 16u, 0x138Au);
+    memory.store8(0x0A0457ECu + 8u, 2u); // the arena has two areas
+    memory.store32(0x08AB3640u, 0x09000000u);
+    memory.store16(0x09000000u + 0x60472u, 62700u);
+    const auto served = [&](mhp3rd::mods::FileId file) {
+        const auto b = maps::serve(runtime, file);
+        return b ? *b : Bytes{};
+    };
+    check(served(0x138Au) == bytes("CAMP GE") && served(0x138Cu) == bytes("YARD GE") &&
+            entry(served(0x1389u), 3) == bytes(".TMH camp") && entry(served(0x1389u), 1) == bytes("CAMP SCENE") &&
+            entry(served(0x138Bu), 0) ==
+                bytes(std::string_view("pmo\0"
+                                       "102\0YARD",
+                    12)),
+        "points: each of the quest's areas has its pack and GE data served");
+    const Bytes collision = served(0x1262u);
+    check(entry(collision, 1) == bytes("4.00 camp ground") && entry(collision, 2) == bytes("4.00 camp walls") &&
+            entry(collision, 3) == bytes("4.00 camp ground") && entry(collision, 4) == bytes("4.00 camp walls") &&
+            entry(collision, 0) == bytes("MAP TMH"),
+        "points: the map's collision has every one of the quest's areas' blocks");
+    const Bytes camp_points = entry(collision, 5);
+    check(camp_points.size() == 0x40u + 6u * 32u && word_at(camp_points, 0u) == 4u &&
+            f32(camp_points, 0x40u) == 5980.0f && camp_points[0x5Eu] == 1u && f32(camp_points, 0x60u) == 5950.0f &&
+            camp_points[0x7Eu] == 0xFFu && camp_points[0x9Eu] == 1u && u16(camp_points, 0xBEu) == 5u &&
+            u16(camp_points, 0xDEu) == 7u && f32(camp_points, 0xE0u) == 6000.0f && u16(camp_points, 0xF8u) == 0x4000u,
+        "points: the camp's points table is its exits, arrivals, supply box, bed and cart");
+    check(entry(collision, 6) == bytes("FLOOR POINTS"), "points: an area that gives none keeps the game's table");
+    // Without game_sub's count, or a map with too few areas, the table has no place.
+    memory.store16(0x09000000u + 0x60472u, 62701u);
+    check(maps::play_quest_in("camp", 62701u), "points: another quest in the camp");
+    memory.store8(0x0A0457ECu + 8u, 0u);
+    check(maps::serve(runtime, 0x1262u) == nullptr && served(0x138Au) == bytes("CAMP GE"),
+        "points: the collision is the game's when the map has no table for the area; the area's files are served");
+    memory.store8(0x0A0457ECu + 8u, 9u);
+    check(maps::serve(runtime, 0x1262u) == nullptr, "points: and when the table's entry would be past the pack's last");
+    memory.store8(0x0A0457ECu + 8u, 2u);
+    // All or nothing: one area too large to fit, and none of the quest's is served.
+    check(maps::add_area(
+              runtime, {"huge", 8, 1, pmo, Bytes(0x2000u, 1u), bytes(".TMH"), bytes("4.00"), bytes("4.00"), "P"}) &&
+            maps::play_quest_in("camp2", 62702u) && maps::play_quest_in("huge", 62702u),
+        "points: a quest in a camp and an area too large");
+    memory.store16(0x09000000u + 0x60472u, 62702u);
+    check(maps::serve(runtime, 0x1389u) == nullptr && maps::serve(runtime, 0x138Au) == nullptr &&
+            maps::serve(runtime, 0x1262u) == nullptr,
+        "points: when one of a quest's areas does not fit, none of them is served");
+
+    // Quests that name several areas.
+    const auto *quests = static_cast<const ymod_quests *>(mhp3rd::mods::native::host()->service(mod, YMOD_QUESTS, 1u));
+    const ymod_quest_monster pair[] = {
+        {"tigrex", 0, {0.0f, 0.0f, 0.0f}, 0x1E, 0x13, 100}, {"tigrex", 1, {0.0f, 0.0f, 0.0f}, 0x1E, 0x13, 100}};
+    const char *both[] = {"camp", "yard"};
+    ymod_quest quest{sizeof(ymod_quest), 62710u, 300, 1, 30u, 0u, 0u, "tigrex", 1u, pair, 2u, {}};
+    quest.areas = both;
+    quest.area_count = 2u;
+    const auto built_quest = [&](std::uint32_t id) -> std::optional<Bytes> {
+        const auto file = mhp3rd::mods::p3rd::quest_file(id);
+        if (!file) return std::nullopt;
+        runtime.cpu().gpr[5] = *file;
+        const std::uint32_t size = call(runtime, 0x08864E8Cu, 0x08B3F040u);
+        runtime.cpu().gpr[5] = *file;
+        runtime.cpu().gpr[6] = 0x08C00000u;
+        (void)call(runtime, 0x08863CDCu, 0x08B3F040u);
+        Bytes encrypted(size);
+        memory.copy_out(0x08C00000u, encrypted);
+        game::GuestRam keys_ram(memory);
+        if (const auto keys = game::read_quest_keys(keys_ram)) return game::decrypt_quest(encrypted, *keys);
+        return std::nullopt;
+    };
+    const auto area_of = [](const Bytes &b, std::size_t monster) {
+        const std::uint32_t spawns = word_at(b, word_at(b, 0x20u) + 12u);
+        return static_cast<std::uint32_t>(b[spawns + 0x30u * monster + 6u] | (b[spawns + 0x30u * monster + 7u] << 8u));
+    };
+    std::optional<Bytes> built =
+        quests != nullptr && quests->add(mod, &quest) == 62710 ? built_quest(62710u) : std::nullopt;
+    std::optional<game::QuestRecord> record = built ? game::read_quest_record(*built) : std::nullopt;
+    memory.store16(0x09000000u + 0x60472u, 62710u);
+    check(built && record && record->map == 8u && area_of(*built, 0) == 0u && area_of(*built, 1) == 1u &&
+            served(0x138Au) == bytes("CAMP GE") && served(0x138Cu) == bytes("YARD GE"),
+        "points: a quest in two areas is on their map, its monsters in the areas they name, both areas served");
+    // With `area` too: its monsters of area 0 start in it.
+    const char *camp_only[] = {"camp"};
+    ymod_quest with_area = quest;
+    with_area.id = 62711u;
+    with_area.area = "yard";
+    with_area.areas = camp_only;
+    with_area.area_count = 1u;
+    built = quests != nullptr && quests->add(mod, &with_area) == 62711 ? built_quest(62711u) : std::nullopt;
+    check(built && area_of(*built, 0) == 1u && area_of(*built, 1) == 1u,
+        "points: with `area` and `areas`, a monster of area 0 starts in `area`");
+    const auto refuse_quest = [&](std::uint32_t id, std::vector<const char *> ids, const std::string &line) {
+        ymod_quest q = quest;
+        q.id = id;
+        q.areas = ids.data();
+        q.area_count = static_cast<std::uint32_t>(ids.size());
+        return quests != nullptr && quests->add(mod, &q) == -1 &&
+            logged("quest " + std::to_string(id) + " is not added: " + line);
+    };
+    check(refuse_quest(62712u, {"camp", "nowhere"}, "its area \"nowhere\" has not been added") &&
+            refuse_quest(62713u, {"camp", "elsewhere"}, "its areas camp and elsewhere are on different maps") &&
+            refuse_quest(62714u, {"camp", "camp2"}, "its areas camp and camp2 take the place of the same area") &&
+            refuse_quest(62715u, {"camp", "camp"}, "it names its area \"camp\" twice"),
+        "points: a quest naming an area not added, areas on two maps, two in place of one area or one twice is "
+        "refused");
+    // A quest of the struct before `areas` reads none.
+    ymod_quest older = quest;
+    older.size = offsetof(ymod_quest, areas);
+    older.id = 62716u;
+    older.map = 8;
+    check(quests != nullptr && quests->add(mod, &older) == 62716 && maps::serve(runtime, 0x1262u) != nullptr,
+        "points: an older quest struct names no areas");
+    memory.store16(0x09000000u + 0x60472u, 62716u);
+    check(maps::serve(runtime, 0x1262u) == nullptr, "points: and is played in the game's areas");
+
+    std::error_code ec;
+    std::filesystem::remove_all(folder, ec);
+    maps::reset_for_tests();
+    mhp3rd::mods::added::reset_for_tests();
+}
+
 void test_monsters(psprecomp::Runtime &runtime) {
     namespace monsters = mhp3rd::mods::monsters;
     namespace tables = mhp3rd::mods::tables;
@@ -2690,6 +3010,7 @@ int main() {
     test_monster_quest_end(runtime);
     test_equipment(runtime);
     test_maps(runtime);
+    test_map_points(runtime);
     test_pictures(runtime);
     test_report_log();
 

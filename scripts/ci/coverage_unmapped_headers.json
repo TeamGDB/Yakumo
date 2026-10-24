@@ -124,7 +124,7 @@
     "reason": "Script mod host declarations. mod_script*.cpp is covered by mhp3rd_script_mods_tests through the real Luau engine."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.h": {
-    "sha256": "fc109abb447f2d9925c60fb7224a6bc3bd2e503d6bb4a0e0adfbfc7a05b9406b",
+    "sha256": "045295c5dea421369044c767ace22f08a813c51ed5c13c37788447908effa215",
     "reason": "The C ABI of native mods: types, constants, function-pointer tables and the interface-version macro, no host code. The host implementation in mod_native*.cpp is covered by mhp3rd_native_mods_tests, which also loads a test mod declaring a newer interface."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.hpp": {
@@ -196,8 +196,8 @@
     "reason": "Declarations only. mhp3rd_texts.cpp is covered by mhp3rd_native_mods_tests (names and descriptions placed in a stand-in text block, and again when it reloads)."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_maps.hpp": {
-    "sha256": "a0c801fcb5983a36d359422b87e3247eff222e4e4f7a8800a9a914b8fa93ce59",
-    "reason": "Declarations only. mhp3rd_maps.cpp is covered by mhp3rd_native_mods_tests (adding areas through the maps service and refusals; serving the area pack, GE data and collision pack composed with the mod's while a quest is played in the area, on stand-ins for game_sub's tables and the loader)."
+    "sha256": "7c61de95ba74d0e3849ed77eed9999e216bcfa977c259b9efadd5351e42a0446",
+    "reason": "Declarations only. mhp3rd_maps.cpp is covered by mhp3rd_native_mods_tests (adding areas through the maps service and refusals; serving the area pack, GE data and collision pack composed with the mod's, with the points tables written for areas that give points, while a quest is played in one area or several, on stand-ins for game_sub's tables and the loader)."
   },
   "profiles/mhp3rd/host/game/pack_file.hpp": {
     "sha256": "587a49b9f6462bfd51a0ec2e80b3950cf7219fb094032cd6f54ebf28ede1a70e",

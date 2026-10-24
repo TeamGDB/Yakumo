@@ -564,14 +564,31 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
         return -1;
     };
     game::QuestSpec spec;
-    // Played in an area of the mod's: on that area's map, whatever `map` says.
+    // Played in areas of the mod's: on their map, whatever `map` says.
     const bool has_area = quest->size >= offsetof(ymod_quest, area) + sizeof(quest->area) && quest->area != nullptr;
-    if (quest->id > 0xFFFFu || (!has_area && (quest->map < 0 || quest->map > 0xFF)) || quest->stars < 0)
+    const bool has_areas = quest->size >= offsetof(ymod_quest, area_count) + sizeof(quest->area_count) &&
+        quest->areas != nullptr && quest->area_count > 0u;
+    std::vector<std::string> area_ids;
+    if (has_area) area_ids.push_back(quest->area);
+    for (std::uint32_t i = 0; has_areas && i < quest->area_count; ++i) area_ids.push_back(text(quest->areas[i]));
+    if (quest->id > 0xFFFFu || (area_ids.empty() && (quest->map < 0 || quest->map > 0xFF)) || quest->stars < 0)
         return refuse("a number is out of range");
     spec.id = static_cast<std::uint16_t>(quest->id);
-    const maps::Area *area = has_area ? maps::find(quest->area) : nullptr;
-    if (has_area && area == nullptr) return refuse("its area \"" + text(quest->area) + "\" has not been added");
-    spec.map = area != nullptr ? area->map : static_cast<std::uint8_t>(quest->map);
+    std::vector<const maps::Area *> areas;
+    for (const std::string &id : area_ids) {
+        const maps::Area *a = maps::find(id);
+        if (a == nullptr) return refuse("its area \"" + id + "\" has not been added");
+        for (const maps::Area *other : areas) {
+            if (other == a) return refuse("it names its area \"" + id + "\" twice");
+            if (other->map != a->map) return refuse("its areas " + other->id + " and " + id + " are on different maps");
+            if (other->area == a->area)
+                return refuse("its areas " + other->id + " and " + id + " take the place of the same area");
+        }
+        areas.push_back(a);
+    }
+    // A monster of area 0 starts in `area`, when the quest names one.
+    const maps::Area *area = has_area ? areas.front() : nullptr;
+    spec.map = !areas.empty() ? areas.front()->map : static_cast<std::uint8_t>(quest->map);
     spec.stars = static_cast<std::uint16_t>(quest->stars);
     spec.minutes = quest->minutes;
     spec.fee = quest->fee;
@@ -635,7 +652,7 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
     const std::optional<std::vector<std::uint8_t>> payload = game::build_quest(spec, &why);
     if (!payload) return refuse(why);
     if (!mhp3rd::mods::quests::add(*runtime, *payload, mod->name, &why)) return refuse(why);
-    if (area != nullptr) maps::play_quest_in(area->id, quest->id);
+    for (const maps::Area *a : areas) maps::play_quest_in(a->id, quest->id);
     if (!rewards.empty()) {
         mhp3rd::mods::quests::rebuild_later(
             quest->id, [spec, rewards](Runtime &r, std::string *reason) -> std::optional<std::vector<std::uint8_t>> {
@@ -682,6 +699,47 @@ int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
     if (!model || !geometry || !textures || !ground || !walls) return -1;
     maps::AreaSpec spec{text(area->id), static_cast<std::uint8_t>(area->map), static_cast<std::uint8_t>(area->area),
         *model, *geometry, *textures, *ground, *walls, mod->name};
+    // Its points, when it gives any (a mod built before them gives none).
+    if (area->size >= offsetof(ymod_area, cart) + sizeof(area->cart) &&
+        (area->exits != nullptr || area->arrivals != nullptr || area->spots != nullptr || area->cart != nullptr)) {
+        const auto facing = [](int32_t f) { return f >= 0 && f <= 0xFFFF; };
+        const auto byte = [](int32_t b) { return b >= 0 && b <= 0xFF; };
+        if (area->exit_count > maps::kMostPoints || area->arrival_count > maps::kMostPoints ||
+            area->spot_count > maps::kMostPoints)
+            return refuse(
+                "it has more than " + std::to_string(maps::kMostPoints) + " exits, arrivals or things to use");
+        maps::Points points;
+        for (std::uint32_t i = 0; area->exits != nullptr && i < area->exit_count; ++i) {
+            const ymod_area_exit &e = area->exits[i];
+            if (!byte(e.to) || e.to == maps::kQuestStart || !byte(e.door) || !(e.radius > 0.0f) || !(e.height > 0.0f))
+                return refuse("an exit's area, door or size is out of range");
+            points.exits.push_back({e.at.x, e.at.y, e.at.z, e.radius, e.height, static_cast<std::uint8_t>(e.to),
+                static_cast<std::uint8_t>(e.door)});
+        }
+        for (std::uint32_t i = 0; area->arrivals != nullptr && i < area->arrival_count; ++i) {
+            const ymod_area_arrival &a = area->arrivals[i];
+            const bool start = a.from == YMOD_AREA_QUEST_START;
+            if (!facing(a.facing) || (!start && (!byte(a.from) || a.from == maps::kQuestStart)) || !byte(a.door))
+                return refuse("an arrival's facing, area or door is out of range");
+            points.arrivals.push_back({a.at.x, a.at.y, a.at.z, static_cast<std::uint16_t>(a.facing),
+                start ? maps::kQuestStart : static_cast<std::uint8_t>(a.from), static_cast<std::uint8_t>(a.door)});
+        }
+        for (std::uint32_t i = 0; area->spots != nullptr && i < area->spot_count; ++i) {
+            const ymod_area_spot &t = area->spots[i];
+            if ((t.kind != YMOD_SPOT_SUPPLY_BOX && t.kind != YMOD_SPOT_DELIVERY_BOX && t.kind != YMOD_SPOT_BED) ||
+                !facing(t.facing) || !(t.radius > 0.0f) || !(t.height > 0.0f))
+                return refuse("a thing to use is not a supply box, delivery box or bed, or its size or facing is out "
+                              "of range");
+            points.spots.push_back({static_cast<maps::SpotKind>(t.kind), t.at.x, t.at.y, t.at.z, t.radius, t.height,
+                static_cast<std::uint16_t>(t.facing)});
+        }
+        if (area->cart != nullptr) {
+            if (!facing(area->cart->facing)) return refuse("its cart's facing is out of range");
+            points.cart = maps::Cart{
+                area->cart->at.x, area->cart->at.y, area->cart->at.z, static_cast<std::uint16_t>(area->cart->facing)};
+        }
+        spec.points = std::move(points);
+    }
     std::string why;
     return maps::add_area(*runtime, std::move(spec), &why) ? 0 : refuse(why);
 }
