@@ -2026,6 +2026,161 @@ void test_map_gathering(psprecomp::Runtime &runtime) {
     mhp3rd::mods::added::reset_for_tests();
 }
 
+// The quest's three ballista slots, the areas' conditional words and the
+// areas a map can have.
+void test_map_slots(psprecomp::Runtime &runtime) {
+    namespace maps = mhp3rd::mods::maps;
+    namespace game = mhp3rd::game;
+    using Bytes = std::vector<std::uint8_t>;
+    using Words = std::vector<std::uint16_t>;
+    const auto bytes = [](std::string_view s) { return Bytes(s.begin(), s.end()); };
+    const auto u16 = [](const Bytes &b, std::size_t at) {
+        return static_cast<std::uint16_t>(b[at] | (b[at + 1u] << 8u));
+    };
+    const auto entry = [](const Bytes &pack, std::size_t i) {
+        const auto entries = game::read_pack(pack);
+        return entries && i < entries->size() ? Bytes((*entries)[i].begin(), (*entries)[i].end()) : Bytes{};
+    };
+
+    // game_sub's six conditional rows (0x0A044A58): map 12's area 4 makes
+    // word 2 so, map 3's area 4 word 5; other areas have none.
+    check(maps::point_words(12u, 4u, 3u, 1u) == Words{1, 3, 4} &&
+            maps::point_words(12u, 4u, 3u, 0u) == Words{0, 1, 3} && maps::point_words(19u, 5u, 2u, 3u) == Words{4, 5} &&
+            maps::point_words(3u, 4u, 6u, 0u) == Words{0, 1, 2, 3, 4, 6} &&
+            maps::point_words(8u, 1u, 3u, 0u) == Words{0, 1, 2} && maps::point_words(12u, 4u, 0u, 0u).empty(),
+        "slots: an area's conditional words are passed over, and only that area's");
+    maps::Points points;
+    points.spots = {
+        {maps::SpotKind::Gathering, 0.0f, 0.0f, 0.0f, 100.0f, 100.0f, 0u, {{{"Cannon Ammo", 1u, 100u}}, 1u, 0u}},
+        {maps::SpotKind::Cannon, 0.0f, 0.0f, 0.0f, 100.0f, 100.0f, 0u},
+        {maps::SpotKind::Ballista, 0.0f, 0.0f, 0.0f, 100.0f, 100.0f, 0u},
+        {maps::SpotKind::Gathering, 0.0f, 0.0f, 0.0f, 100.0f, 100.0f, 0u, {{{"Cannon Ammo", 1u, 100u}}, 1u, 0u}},
+        {maps::SpotKind::Cannon, 0.0f, 0.0f, 0.0f, 100.0f, 100.0f, 0u},
+        {maps::SpotKind::Cannon, 0.0f, 0.0f, 0.0f, 100.0f, 100.0f, 0u},
+        {maps::SpotKind::Ballista, 0.0f, 0.0f, 0.0f, 100.0f, 100.0f, 0u}};
+    const auto words_of = [&u16](const Bytes &table) {
+        Words out;
+        for (std::size_t i = 0; i < word_at(table, 8u); ++i) out.push_back(u16(table, 0x10u + 32u * i + 28u));
+        return out;
+    };
+    check(words_of(maps::write_points(points, {12u, 4u, 0u})) == Words{1, 0, 0, 3, 1, 3, 1} &&
+            words_of(maps::write_points(points, {8u, 1u, 1u})) == Words{1, 0, 1, 2, 1, 2, 2},
+        "slots: an area's points are numbered past its conditional words, its ballistas from the quest's next slot");
+
+    maps::reset_for_tests();
+    mhp3rd::mods::added::reset_for_tests();
+    loader_stand_ins(runtime);
+    const std::filesystem::path folder = std::filesystem::temp_directory_path() / "yakumo_map_slots_test";
+    std::filesystem::create_directories(folder);
+    const auto write = [&folder](const char *name, std::string_view text) {
+        std::ofstream(folder / name, std::ios::binary).write(text.data(), static_cast<std::streamsize>(text.size()));
+    };
+    write("model.pmo",
+        std::string_view("pmo\0"
+                         "102\0SLOT",
+            12));
+    write("ge.bin", "GE");
+    write("tex.tmh", ".TMH");
+    write("ground.bin", "4.00 ground");
+    write("walls.bin", "4.00 walls");
+    ymod_mod *mod = mhp3rd::mods::native::add_mod("test.slots", "Slots test", folder.string());
+    const auto *service = static_cast<const ymod_maps *>(mhp3rd::mods::native::host()->service(mod, YMOD_MAPS, 1u));
+    const ymod_area_item balls[] = {{"Cannon Ammo", 1u, 100u}};
+    const ymod_area_spot ballista{YMOD_SPOT_BALLISTA, {0.0f, 0.0f, 0.0f}, 200.0f, 300.0f, 0};
+    const ymod_area_spot pile{YMOD_SPOT_GATHERING, {0.0f, 0.0f, 0.0f}, 150.0f, 200.0f, 0, balls, 1u, 5u, 0u};
+    const ymod_area_arrival in{{0.0f, 0.0f, 0.0f}, 0, YMOD_AREA_QUEST_START, 0};
+    const auto area_with = [&](const char *id, int map, int number, const std::vector<ymod_area_spot> &spots) {
+        ymod_area a{sizeof(ymod_area), id, map, number, "model.pmo", "ge.bin", "tex.tmh", "ground.bin", "walls.bin"};
+        a.arrivals = &in;
+        a.arrival_count = 1u;
+        a.spots = spots.data();
+        a.spot_count = static_cast<std::uint32_t>(spots.size());
+        return service != nullptr ? service->add_area(mod, &a) : -1;
+    };
+    const std::vector<ymod_area_spot> three(3u, ballista), four(4u, ballista), two(2u, ballista);
+    check(area_with("three", 8, 1, three) == 0 && area_with("four", 8, 1, four) == -1 &&
+            logged("area four is not added: it has more ballistas than the game's 3 for a quest (past its area's "
+                   "conditional words)") &&
+            area_with("peak_three", 12, 4, three) == -1 && area_with("peak_two", 12, 4, two) == 0,
+        "slots: an area with more ballistas than the quest's three slots is refused, and with three where its "
+        "conditional word leaves two");
+    check(area_with("thirteen", 8, 13, {}) == -1 &&
+            logged("area thirteen is not added: area 13 is past the 13 a map can "
+                   "have") &&
+            area_with("twelve", 8, 12, {}) == 0,
+        "slots: an area past the 13 a map can have is refused; the 13th is added");
+    const std::vector<ymod_area_spot> piles(2u, pile);
+    const std::vector<maps::Gathering> lists =
+        area_with("peak_piles", 12, 4, piles) == 0 ? maps::gathering("peak_piles") : std::vector<maps::Gathering>{};
+    check(lists.size() == 3u && lists[0].items.size() == 1u && lists[1].items.empty() && lists[1].uses == 0u &&
+            lists[2].items.size() == 1u,
+        "slots: the gathering lists of an area with a conditional word keep an empty one at it");
+
+    // Across a quest's areas: two in the camp and two on the floor need four.
+    const std::vector<ymod_area_spot> camp_two(2u, ballista), floor_one(1u, ballista);
+    check(area_with("camp_two", 8, 0, camp_two) == 0 && area_with("floor_two", 8, 1, two) == 0 &&
+            area_with("floor_one", 8, 1, floor_one) == 0,
+        "slots: areas with two, two and one ballistas are added");
+    check(maps::quest_points_problem({"camp_two", "floor_two"}) &&
+            !maps::quest_points_problem({"camp_two", "floor_one"}) && !maps::quest_points_problem({"three", "nowhere"}),
+        "slots: a quest's ballistas are counted across its areas");
+    const auto *quests = static_cast<const ymod_quests *>(mhp3rd::mods::native::host()->service(mod, YMOD_QUESTS, 1u));
+    const ymod_quest_monster hunted{"tigrex", 1, {0.0f, 0.0f, 0.0f}, 0x1E, 0x13, 100};
+    const char *too_many[] = {"camp_two", "floor_two"};
+    ymod_quest crowded{sizeof(ymod_quest), 62730u, 8, 1, 30u, 0u, 0u, "tigrex", 1u, &hunted, 1u, {}};
+    crowded.areas = too_many;
+    crowded.area_count = 2u;
+    std::string why;
+    check(quests != nullptr && quests->add(mod, &crowded) == -1 &&
+            logged("quest 62730 is not added: its areas have more ballistas than the game's 3 for a quest "
+                   "(numbered across them, past their areas' conditional words)") &&
+            maps::play_quest_in("camp_two", 62731u) && !maps::play_quest_in("floor_two", 62731u, &why) &&
+            why.find("more ballistas") != std::string::npos,
+        "slots: a quest whose areas have four ballistas is refused, and so is playing a quest in them");
+
+    // Served: the camp's two ballistas take slots 0 and 1, the floor's 2.
+    const char *fitting[] = {"camp_two", "floor_one"};
+    ymod_quest fits = crowded;
+    fits.id = 62732u;
+    fits.areas = fitting;
+    maps::read_files_with_for_tests([&](mhp3rd::mods::FileId file) -> std::optional<Bytes> {
+        if (file == 0x1389u || file == 0x138Bu) return game::write_pack({bytes("M"), bytes("S"), {}, bytes("T")});
+        if (file == 0x138Au || file == 0x138Cu) return Bytes(0x1000u, 0u);
+        if (file == 0x1262u)
+            return game::write_pack(
+                {bytes("TMH"), bytes("C1"), bytes("C2"), bytes("F1"), bytes("F2"), bytes("CP"), bytes("FP")});
+        return std::nullopt;
+    });
+    auto &memory = runtime.memory();
+    place_overlay(runtime, 0x0A001780u, "game_sub.ovl", 0x00050000u);
+    memory.store16(0x0A0457C4u + 16u, 0x1389u);
+    memory.store16(0x0A04579Cu + 16u, 0x138Au);
+    memory.store8(0x0A0457ECu + 8u, 2u);
+    memory.store32(0x08AB3640u, 0x09000000u);
+    memory.store16(0x09000000u + 0x60472u, 62732u);
+    const bool fits_added = quests != nullptr && quests->add(mod, &fits) == 62732;
+    const auto served = maps::serve(runtime, 0x1262u);
+    const Bytes camp_table = served ? entry(*served, 5) : Bytes{};
+    const Bytes floor_table = served ? entry(*served, 6) : Bytes{};
+    // Each table's things to use (group 2): their words.
+    const auto spot_words = [&u16](const Bytes &table) {
+        Words out;
+        for (std::size_t g = 0; g < word_at(table, 0u); ++g) {
+            if (word_at(table, 4u + 12u * g) != 2u) continue;
+            for (std::size_t i = 0; i < word_at(table, 8u + 12u * g); ++i)
+                out.push_back(u16(table, word_at(table, 12u + 12u * g) + 32u * i + 28u));
+        }
+        return out;
+    };
+    check(fits_added && served && spot_words(camp_table) == Words{0, 1} && spot_words(floor_table) == Words{2},
+        "slots: a quest's ballistas are numbered across its areas, in the order it names them");
+
+    std::error_code ec;
+    std::filesystem::remove_all(folder, ec);
+    maps::reset_for_tests();
+    mhp3rd::mods::added::reset_for_tests();
+}
+
 void test_monsters(psprecomp::Runtime &runtime) {
     namespace monsters = mhp3rd::mods::monsters;
     namespace tables = mhp3rd::mods::tables;
@@ -3349,6 +3504,7 @@ int main() {
     test_maps(runtime);
     test_map_points(runtime);
     test_map_gathering(runtime);
+    test_map_slots(runtime);
     test_pictures(runtime);
     test_report_log();
 

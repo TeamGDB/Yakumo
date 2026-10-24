@@ -650,6 +650,8 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
             return refuse("a supply's item or count is out of range");
         rewards.push_back({s.item, static_cast<std::uint8_t>(s.count), 0u, kSupply});
     }
+    // Its areas' ballistas, numbered across them, fit the game's slots.
+    if (std::optional<std::string> problem = maps::quest_points_problem(area_ids)) return refuse(*problem);
     // What its areas' gathering points give, by the map's area: named as the
     // rewards are, so the points cannot be used until the quest is built
     // again with the game's text.

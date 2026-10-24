@@ -186,9 +186,38 @@ bool playable(const std::vector<const Added *> &areas, std::uint32_t quest, cons
     return !why;
 }
 
+// How many of an area's spots are of `kind`.
+std::size_t count_spots(const Added &a, SpotKind kind) {
+    if (!a.points) return 0u;
+    return static_cast<std::size_t>(std::count_if(
+        a.points->spots.begin(), a.points->spots.end(), [kind](const Spot &t) { return t.kind == kind; }));
+}
+
+// The word after an area's ballistas, numbered from `first` (the quest's
+// ballistas are numbered across its areas, in the order it names them), or
+// nothing when one of them would be past the game's slots.
+std::optional<std::uint16_t> after_ballistas(const Added &a, std::uint16_t first) {
+    const std::size_t ballistas = count_spots(a, SpotKind::Ballista);
+    if (ballistas == 0u) return first;
+    const std::vector<std::uint16_t> words = point_words(a.area.map, a.area.area, ballistas, first);
+    if (words.size() < ballistas || words.back() >= kBallistaSlots) return std::nullopt;
+    return static_cast<std::uint16_t>(words.back() + 1u);
+}
+
+// Why these areas, played by one quest in this order, cannot be, or nothing.
+std::optional<std::string> points_problem(const std::vector<const Added *> &areas) {
+    std::optional<std::uint16_t> next = 0u;
+    for (const Added *a : areas)
+        if (next) next = after_ballistas(*a, *next);
+    if (!next)
+        return "its areas have more ballistas than the game's " + std::to_string(kBallistaSlots) +
+            " for a quest (numbered across them, past their areas' conditional words)";
+    return std::nullopt;
+}
+
 // The map's collision pack with every one of the quest's areas' blocks, and
 // the points tables of those that give theirs (playable() has checked that
-// the pack has them all).
+// the pack has them all), the quest's ballistas numbered across them.
 std::shared_ptr<const std::vector<std::uint8_t>> compose_collision(
     const std::vector<const Added *> &areas, FileId file, const psprecomp::GuestMemory &memory) {
     const std::optional<std::vector<std::uint8_t>> base = game_file(file);
@@ -197,12 +226,15 @@ std::shared_ptr<const std::vector<std::uint8_t>> compose_collision(
     std::vector<std::vector<std::uint8_t>> tables;
     tables.reserve(areas.size());
     std::vector<std::pair<std::size_t, std::span<const std::uint8_t>>> replacements;
+    std::uint16_t ballista = 0u;
     for (const Added *a : areas) {
         const std::size_t blocks = 1u + 2u * a->area.area;
         replacements.emplace_back(blocks, a->ground);
         replacements.emplace_back(blocks + 1u, a->walls);
         if (!a->points) continue;
-        replacements.emplace_back(1u + 2u * *count + a->area.area, tables.emplace_back(write_points(*a->points)));
+        replacements.emplace_back(1u + 2u * *count + a->area.area,
+            tables.emplace_back(write_points(*a->points, {a->area.map, a->area.area, ballista})));
+        ballista = after_ballistas(*a, ballista).value_or(kBallistaSlots); // play_quest_in() kept them within
     }
     if (auto pack = game::replace_entries(*base, replacements)) return shared(std::move(*pack));
     return nullptr;
@@ -268,6 +300,9 @@ bool add_area(Runtime &runtime, AreaSpec spec, std::string *why) {
     if (!starts_with(spec.textures, ".TMH")) return fail("its textures are not a TMH");
     if (!starts_with(spec.ground, "4.00") || !starts_with(spec.walls, "4.00"))
         return fail("its ground or walls are not a collision block (\"4.00\")");
+    if (spec.area >= kMostAreas)
+        return fail(
+            "area " + std::to_string(spec.area) + " is past the " + std::to_string(kMostAreas) + " a map can have");
     if (spec.points) {
         const Points &p = *spec.points;
         if (p.exits.size() > kMostPoints || p.arrivals.size() > kMostPoints || p.spots.size() > kMostPoints)
@@ -292,6 +327,11 @@ bool add_area(Runtime &runtime, AreaSpec spec, std::string *why) {
         // The game keeps one cart for the map, the camp's (area 0): game_task
         // puts it there in the camp, and every cart on the disc is area 0's.
         if (p.cart && spec.area != 0u) return fail("only a camp (area 0) has a cart");
+        const auto ballistas = static_cast<std::size_t>(
+            std::count_if(p.spots.begin(), p.spots.end(), [](const Spot &t) { return t.kind == SpotKind::Ballista; }));
+        if (ballistas > 0u && point_words(spec.map, spec.area, ballistas, 0u).back() >= kBallistaSlots)
+            return fail("it has more ballistas than the game's " + std::to_string(kBallistaSlots) +
+                " for a quest (past its area's conditional words)");
     }
     if (!s.installed) {
         if (!added::stand_in(runtime, [](Runtime &r, FileId file) { return serve(r, file); }))
@@ -312,14 +352,38 @@ const Area *find(std::string_view id) {
     return nullptr;
 }
 
+std::vector<std::uint16_t> point_words(std::uint8_t map, std::uint8_t area, std::size_t count, std::uint16_t first) {
+    std::vector<std::uint16_t> out;
+    for (std::uint32_t word = first; out.size() < count && word <= 0xFFFFu; ++word) {
+        const bool conditional = std::any_of(std::begin(kConditionalWords), std::end(kConditionalWords),
+            [&](const ConditionalWord &c) { return c.map == map && c.area == area && c.word == word; });
+        if (!conditional) out.push_back(static_cast<std::uint16_t>(word));
+    }
+    return out;
+}
+
 std::vector<Gathering> gathering(std::string_view id) {
     std::vector<Gathering> out;
     for (const Added &a : state().areas) {
         if (a.area.id != id || !a.points) continue;
-        for (const Spot &t : a.points->spots)
-            if (t.kind == SpotKind::Gathering) out.push_back(t.gathering);
+        const std::vector<std::uint16_t> words =
+            point_words(a.area.map, a.area.area, count_spots(a, SpotKind::Gathering), 1u);
+        std::size_t k = 0;
+        for (const Spot &t : a.points->spots) {
+            if (t.kind != SpotKind::Gathering) continue;
+            out.resize(words[k], Gathering{}); // a conditional word passed over keeps an empty list
+            out[words[k++] - 1u] = t.gathering;
+        }
     }
     return out;
+}
+
+std::optional<std::string> quest_points_problem(const std::vector<std::string> &ids) {
+    std::vector<const Added *> areas;
+    for (const std::string &id : ids)
+        for (const Added &a : state().areas)
+            if (a.area.id == id) areas.push_back(&a);
+    return points_problem(areas);
 }
 
 bool play_quest_in(std::string_view id, std::uint32_t quest, std::string *why) {
@@ -342,11 +406,15 @@ bool play_quest_in(std::string_view id, std::uint32_t quest, std::string *why) {
             return fail("its areas " + a.id + " and " + found->area.id + " both take the place of area " +
                 std::to_string(a.area));
     }
+    std::vector<const Added *> areas;
+    for (const std::size_t other : played) areas.push_back(&s.areas[other]);
+    areas.push_back(&*found);
+    if (std::optional<std::string> problem = points_problem(areas)) return fail(std::move(*problem));
     played.push_back(index);
     return true;
 }
 
-std::vector<std::uint8_t> write_points(const Points &points) {
+std::vector<std::uint8_t> write_points(const Points &points, const Numbering &numbering) {
     // Records of 32 bytes: x, y, z, 1; two sizes; the facing, the record's
     // index in its group, a u16 and two bytes, which each kind reads its way.
     struct Record {
@@ -372,16 +440,25 @@ std::vector<std::uint8_t> write_points(const Points &points) {
     }
     if (!points.spots.empty()) {
         // The word: a gathering point's list in the quest, from 1 (game_task
-        // reads entry word - 1, 0x0A175684); a ballista's or a cannon's number
-        // among the area's of its kind, as on the disc's sand ship and Sacred
-        // Peak (map 6, areas 1 and 2; map 13, area 1); 0 for the camp's.
-        std::map<SpotKind, std::uint16_t> numbers;
+        // reads entry word - 1, 0x0A175684); a cannon's number among the
+        // area's, from 0, and a ballista's slot, as on the disc's sand ship
+        // and Sacred Peak (map 6, areas 1 and 2; map 13, area 1); none of them
+        // one of the area's conditional words; 0 for the camp's.
+        std::map<SpotKind, std::vector<std::uint16_t>> words;
+        std::map<SpotKind, std::size_t> used;
+        const auto numbered = [&](SpotKind kind, std::uint16_t first) {
+            std::size_t count = 0;
+            for (const Spot &t : points.spots) count += t.kind == kind;
+            words[kind] = point_words(numbering.map, numbering.area, count, first);
+        };
+        numbered(SpotKind::Gathering, 1u);
+        numbered(SpotKind::Cannon, 0u);
+        numbered(SpotKind::Ballista, numbering.first_ballista);
         std::vector<Record> &out = groups.emplace_back(2u, std::vector<Record>{}).second;
         for (std::size_t i = 0; i < points.spots.size(); ++i) {
             const Spot &t = points.spots[i];
-            std::uint16_t word = 0u;
-            if (t.kind == SpotKind::Gathering) word = ++numbers[t.kind];
-            if (t.kind == SpotKind::Ballista || t.kind == SpotKind::Cannon) word = numbers[t.kind]++;
+            const auto own = words.find(t.kind);
+            const std::uint16_t word = own != words.end() ? own->second[used[t.kind]++] : 0u;
             out.push_back(
                 {t.x, t.y, t.z, t.radius, t.height, t.facing, index(i), word, static_cast<std::uint8_t>(t.kind), 0u});
         }

@@ -673,7 +673,9 @@ typedef struct ymod_area_arrival {
 #define YMOD_SPOT_DELIVERY_BOX 6
 #define YMOD_SPOT_BED 7
 #define YMOD_SPOT_BALLISTA 9    /* the action button fires the ballista ammo the hunter has ("Ballista Ammo",
-                                   in the quest's supplies), aimed the way he faces */
+                                   in the quest's supplies), aimed the way he faces; at most 3 in all of a
+                                   quest's areas (fewer in an area with a conditional point word, MAPS.md),
+                                   as the game keeps 3 for a quest */
 #define YMOD_SPOT_CANNON 10     /* fires the cannonball he carries there ("Cannon Ammo", which a gathering
                                    point gives): from 120 above and 280 ahead of `at` along `facing`, in an
                                    arc that comes down some 5000 away */
@@ -703,7 +705,8 @@ typedef struct ymod_area_spot {
 typedef struct ymod_area {
     uint32_t size;          /* set to sizeof(ymod_area) before passing one */
     const char *id;         /* the mod's name for it */
-    int32_t map, area;      /* the game's area it takes the place of: map 8's area 1 is the arena's */
+    int32_t map, area;      /* the game's area it takes the place of (an area 0 to 12): map 8's area 1 is the
+                               arena's */
     const char *model;      /* paths in the mod's folder: its model (PMO "102", static), */
     const char *geometry;   /* that model's GE data, */
     const char *textures;   /* its textures (TMH), */
@@ -711,9 +714,8 @@ typedef struct ymod_area {
     const char *walls;      /* and its walls', ceilings' and steep slopes': what runs into them */
     /* Its points (up to 16 of each; an array is NULL only with a count of 0). With none of them (all NULL),
        the game's area's stay: its start, ways in and out, camp and gathering, in the game's places. With any,
-       the area has these and none of the game's. The spots are ymod_area_spot as this header declares it: a
-       later header that lengthens ymod_area_spot lengthens ymod_area too, so that `size` tells which a mod
-       was built with. */
+       the area has these and none of the game's. Each array is read with the element size this header
+       declares (its structs carry no size of their own). */
     const ymod_area_exit *exits;
     uint32_t exit_count;
     const ymod_area_arrival *arrivals;

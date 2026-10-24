@@ -122,6 +122,28 @@ inline constexpr std::size_t kMostGatherItems = 16u;
 inline constexpr unsigned kMostGatherUses = 99u;
 // The most areas a map has: the executable's 0x088D0228 reads 13 tables.
 inline constexpr std::size_t kMostAreas = 13u;
+// The ballistas a quest has: the game keeps whether each is manned in three
+// bytes of its state (+8677 of *0x09FBE874; 0x088C0D1C, 0x088C0D40 and
+// 0x088C0D64 index them by the ballista's word, 0x088C0D78 and 0x088C0DA4
+// walk three), quest-wide as on the sand ship, whose two areas' ballistas
+// share words 0 and 1. A word past them lands on the dragonator's and the
+// gong's waits. Cannons have no such slots: their word only names one of an
+// area's to the other hunters (0x0A0C5434 finds it by area and word).
+inline constexpr std::uint16_t kBallistaSlots = 3u;
+// The words with which game_task makes a point of some areas usable only
+// while a flag of the area is set (0x0A1755D4 looks up map, area and word
+// for every point, through 0x088CF1B0, in game_sub's six rows at
+// 0x0A044A58). Yakumo numbers no point of such an area with one.
+struct ConditionalWord {
+    std::uint8_t map{}, area{};
+    std::uint16_t word{};
+};
+inline constexpr ConditionalWord kConditionalWords[] = {
+    {3u, 4u, 5u}, {16u, 4u, 5u}, {12u, 4u, 2u}, {19u, 4u, 2u}, {12u, 5u, 3u}, {19u, 5u, 3u}};
+// `count` words for an area's points of one kind, from `first` up, passing
+// over the area's conditional words.
+[[nodiscard]] std::vector<std::uint16_t> point_words(
+    std::uint8_t map, std::uint8_t area, std::size_t count, std::uint16_t first);
 
 struct AreaSpec {
     std::string id;                     // the mod's name for it
@@ -147,28 +169,45 @@ struct Area {
 // above 0, an exit leads to its own area, an area other than a camp (area 0)
 // has a cart, a gathering point gives no item, more than kMostGatherItems, one
 // unnamed or with a count of 0, chances not adding up to 100 or uses outside
-// 1 to kMostGatherUses, something else gives items, or the loader cannot be
+// 1 to kMostGatherUses, something else gives items, its ballistas need words
+// past kBallistaSlots, the area is past kMostAreas, or the loader cannot be
 // taken over.
 bool add_area(psprecomp::Runtime &runtime, AreaSpec spec, std::string *why = nullptr);
 
 // The area a mod added under `id`, or null.
 [[nodiscard]] const Area *find(std::string_view id);
 
-// What the gathering points of the area `id` give, in the order of their
-// records' words (1 first); empty for an area that gives none or none added.
+// What the gathering points of the area `id` give, by their records' words
+// (word 1 first; a conditional word passed over has an empty list); empty
+// for an area that gives none or none added.
 [[nodiscard]] std::vector<Gathering> gathering(std::string_view id);
+
+// Why the areas `ids`, played by one quest in this order, cannot be: their
+// ballistas, numbered across them, need words past kBallistaSlots; or
+// nothing. Unknown ids are not counted.
+[[nodiscard]] std::optional<std::string> quest_points_problem(const std::vector<std::string> &ids);
 
 // Plays `quest` in the area `id` (its own quest, under a mod's id), besides
 // the areas it is played in already. False, with the reason in `why`, when
 // there is no such area, or it is on another map than the quest's others or
-// takes the place of the same game's area as one of them.
+// takes the place of the same game's area as one of them, or the quest's
+// ballistas would need words past kBallistaSlots.
 bool play_quest_in(std::string_view id, std::uint32_t quest, std::string *why = nullptr);
 
+// How write_points() numbers an area's points: the map and area they are in
+// (whose conditional words are passed over) and the first ballista's word,
+// the quest's ballistas being numbered across its areas.
+struct Numbering {
+    std::uint8_t map{kMaps}, area{0xFFu};
+    std::uint16_t first_ballista{};
+};
+
 // The points table written for `points` (docs/MAPS.md). A record's word
-// (+28) is a gathering point's list, from 1 in the order they are given, and
-// a ballista's or a cannon's number among the area's of its kind, as the
-// disc's sand ship numbers them; 0 for the camp's things.
-[[nodiscard]] std::vector<std::uint8_t> write_points(const Points &points);
+// (+28) is a gathering point's list, from 1 in the order they are given, a
+// cannon's number among the area's, from 0, and a ballista's its slot, from
+// `numbering.first_ballista`, all past the area's conditional words; 0 for
+// the camp's things.
+[[nodiscard]] std::vector<std::uint8_t> write_points(const Points &points, const Numbering &numbering = {});
 
 // What is served for `file` now: bytes standing in for the game's, or null.
 [[nodiscard]] std::shared_ptr<const std::vector<std::uint8_t>> serve(psprecomp::Runtime &runtime, FileId file);
