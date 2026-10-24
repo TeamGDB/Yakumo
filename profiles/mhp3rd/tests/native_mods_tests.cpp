@@ -358,7 +358,8 @@ void test_sizes() {
             area.arrival_stride == sizeof(ymod_area_arrival) && area.spot_stride == sizeof(ymod_area_spot) &&
             spot.item_stride == sizeof(ymod_area_item) && symbol.size == sizeof(ymod_symbol) &&
             table.size == sizeof(ymod_table) && monster.size == sizeof(ymod_monster) &&
-            weapon.size == sizeof(ymod_weapon) && armor.size == sizeof(ymod_armor),
+            weapon.size == sizeof(ymod_weapon) && armor.size == sizeof(ymod_armor) &&
+            ymod_area_map{}.size == sizeof(ymod_area_map) && area.minimap == nullptr,
         "sdk: in C++ every size and stride starts as this header's");
     // A positional initializer written before the strides keeps its meaning.
     const ymod_area_spot pile{YMOD_SPOT_GATHERING, {1.0f, 2.0f, 3.0f}, 150.0f, 200.0f, 0, nullptr, 0u, 10u, 2u};
@@ -3785,6 +3786,383 @@ void test_report_log() {
     native::reset_for_tests();
 }
 
+// The map's picture an area gives, and its place on it: served as the map's
+// collision pack's entry 0, its numbers in game_sub's and game_task's tables
+// while the quest is played, and the disc's back afterwards.
+void test_map_pictures(psprecomp::Runtime &runtime) {
+    namespace maps = mhp3rd::mods::maps;
+    namespace game = mhp3rd::game;
+    using Bytes = std::vector<std::uint8_t>;
+    const auto bytes = [](std::string_view s) { return Bytes(s.begin(), s.end()); };
+    const auto entry = [](const Bytes &pack, std::size_t i) {
+        const auto entries = game::read_pack(pack);
+        return entries && i < entries->size() ? Bytes((*entries)[i].begin(), (*entries)[i].end()) : Bytes{};
+    };
+    const auto put = [](Bytes &out, std::size_t at, std::uint32_t value) { std::memcpy(out.data() + at, &value, 4u); };
+    const auto bits = [](float value) { return std::bit_cast<std::uint32_t>(value); };
+    // A picture laid out as the game's: `count` images of 160 x 168, 4-bit,
+    // 16 RGBA8888 colours, their pixels `fill`.
+    const auto picture = [&put](std::uint32_t count, std::uint8_t fill) {
+        Bytes out(maps::kPictureHeaderSize + count * maps::kPictureImageSize, fill);
+        std::memcpy(out.data(), ".TMH0.14", 8u);
+        put(out, 8u, count);
+        put(out, 12u, 0u);
+        for (std::uint32_t i = 0; i < count; ++i) {
+            const std::size_t at = 16u + i * maps::kPictureImageSize;
+            const std::uint32_t words[] = {13552u, 0u, 1u, 1u, 13456u, 1u, 4u, 160u | 168u << 16u};
+            for (std::size_t w = 0; w < 8u; ++w) put(out, at + 4u * w, words[w]);
+            const std::uint32_t palette[] = {80u, 2u, 3u, 16u};
+            for (std::size_t w = 0; w < 4u; ++w) put(out, at + 13472u + 4u * w, palette[w]);
+        }
+        return out;
+    };
+    check(picture(1u, 0u).size() == 13568u && picture(2u, 0u).size() == 27120u &&
+            !maps::picture_problem(picture(1u, 0x11u)) && !maps::picture_problem(picture(2u, 0x22u)),
+        "map pictures: one or two images laid out as the game's, 13568 or 27120 bytes, are a picture");
+    Bytes three = picture(1u, 0u);
+    put(three, 8u, 3u);
+    Bytes short_one = picture(1u, 0u);
+    short_one.pop_back();
+    Bytes wide = picture(1u, 0u);
+    put(wide, 16u + 28u, 256u | 168u << 16u);
+    Bytes eight_bit = picture(2u, 0u);
+    put(eight_bit, 16u + maps::kPictureImageSize + 24u, 5u);
+    Bytes palette = picture(1u, 0u);
+    put(palette, 16u + 13472u + 12u, 256u);
+    check(maps::picture_problem(bytes("PNG")) == "its map picture is not a TMH" &&
+            maps::picture_problem(three) ==
+                "its map picture is not one or two images of 13568 or 27120 bytes in all, as the game's are" &&
+            maps::picture_problem(short_one) == maps::picture_problem(three) &&
+            maps::picture_problem(wide) ==
+                "its map picture's image 1 is not 160 by 168 pixels of 4-bit indices into 16 RGBA8888 colours" &&
+            maps::picture_problem(eight_bit) ==
+                "its map picture's image 2 is not 160 by 168 pixels of 4-bit indices into 16 RGBA8888 colours" &&
+            maps::picture_problem(palette) == maps::picture_problem(wide),
+        "map pictures: something not a TMH, three images, a byte short, another size, 8-bit indices or 256 colours "
+        "are not");
+
+    maps::reset_for_tests();
+    mhp3rd::mods::added::reset_for_tests();
+    loader_stand_ins(runtime);
+    const std::filesystem::path folder = std::filesystem::temp_directory_path() / "yakumo_map_pictures_test";
+    std::filesystem::create_directories(folder);
+    const auto write = [&folder](const char *name, const Bytes &data) {
+        std::ofstream(folder / name, std::ios::binary)
+            .write(reinterpret_cast<const char *>(data.data()), static_cast<std::streamsize>(data.size()));
+    };
+    write("model.pmo",
+        bytes(std::string_view("pmo\0"
+                               "102\0MINE",
+            12)));
+    write("ge.bin", bytes("GE"));
+    write("tex.tmh", bytes(".TMH0.14 mine"));
+    write("ground.bin", bytes("4.00 ground"));
+    write("walls.bin", bytes("4.00 walls"));
+    const Bytes castle_picture = picture(1u, 0x5Au);
+    write("map.tmh", castle_picture);
+    write("other.tmh", picture(1u, 0x6Bu));
+    write("two.tmh", picture(2u, 0x7Cu));
+    write("bad.tmh", three);
+
+    // The disc's game_sub and game_task, as they load: the arena's frame
+    // (40000 by 40000 from -20000), its two areas' records (the camp at
+    // (-6100, 6900), the floor at (4000, -2500)), its tent (57, 99); map 9's
+    // two areas, its picture with two images.
+    constexpr std::uint32_t kSub = 0x0A001780u, kTask = 0x0A05E600u;
+    constexpr std::uint32_t kFrame = 0x0A044E0Cu + 20u * 8u, kRecords = 0x0A04514Cu, kTent = 0x0A19D1E8u + 4u * 8u;
+    const auto overlay = [&put](std::uint32_t load, std::string_view name, std::size_t size) {
+        Bytes out(size, 0u);
+        std::memcpy(out.data(), "MWo3", 4u);
+        put(out, 8u, load);
+        put(out, 12u, static_cast<std::uint32_t>(size - 64u));
+        std::memcpy(out.data() + 32u, name.data(), name.size());
+        return out;
+    };
+    Bytes sub = overlay(kSub, "game_sub.ovl", 0x0A045800u - kSub);
+    for (const auto &[at, value] : std::initializer_list<std::pair<std::uint32_t, std::uint32_t>>{
+             {kFrame, bits(40000.0f)}, {kFrame + 4u, bits(40000.0f)}, {kFrame + 8u, bits(-20000.0f)},
+             {kFrame + 12u, bits(-20000.0f)}, {kFrame + 16u, kRecords}, {kRecords, bits(-6100.0f)},
+             {kRecords + 4u, bits(6900.0f)}, {kRecords + 24u, bits(4000.0f)}, {kRecords + 28u, bits(-2500.0f)},
+             {kFrame + 20u, bits(35000.0f)}, {kFrame + 24u, bits(35000.0f)}, {kFrame + 28u, bits(-17500.0f)},
+             {kFrame + 32u, bits(-17500.0f)}, {kFrame + 36u, kRecords + 48u}})
+        put(sub, at - kSub, value);
+    sub[0x0A0457ECu + 8u - kSub] = 2u; // the arena's areas
+    sub[0x0A0457ECu + 9u - kSub] = 2u; // map 9's
+    Bytes task = overlay(kTask, "game_task.ovl", kTent + 64u - kTask);
+    put(task, kTent - kTask, 57u | 99u << 16u);
+    const Bytes area_pack = game::write_pack({bytes("THEIR MODEL"), bytes("SCENE"), {}, bytes("THEIR TMH")});
+    const Bytes hits_pack = game::write_pack({picture(1u, 0x01u), bytes("CAMP 1"), bytes("CAMP 2"), bytes("FLOOR 1"),
+        bytes("FLOOR 2"), bytes("CAMP POINTS"), bytes("FLOOR POINTS")});
+    const Bytes ninth_pack =
+        game::write_pack({picture(2u, 0x02u), bytes("A"), bytes("B"), bytes("C"), bytes("D"), bytes("E"), bytes("F")});
+    bool discs_readable = true;
+    const auto reader = [&](mhp3rd::mods::FileId file) -> std::optional<Bytes> {
+        if (file == 126u) return discs_readable ? std::optional(sub) : std::nullopt;
+        if (file == 123u) return discs_readable ? std::optional(task) : std::nullopt;
+        if (file == 0x1389u || file == 0x138Bu || file == 0x1391u || file == 0x1393u) return area_pack;
+        if (file == 0x138Au || file == 0x138Cu || file == 0x1390u || file == 0x1392u) return Bytes(0x100u, 0u);
+        if (file == 0x1262u) return hits_pack;
+        if (file == 0x1263u) return ninth_pack;
+        return std::nullopt;
+    };
+    maps::read_files_with_for_tests(reader);
+
+    ymod_mod *mod = mhp3rd::mods::native::add_mod("test.pictures", "Picture test", folder.string());
+    const auto *service = static_cast<const ymod_maps *>(mhp3rd::mods::native::host()->service(mod, YMOD_MAPS, 1u));
+    const auto *quests = static_cast<const ymod_quests *>(mhp3rd::mods::native::host()->service(mod, YMOD_QUESTS, 1u));
+    // The castle's numbers: 200 by 225 units a pixel, its x 0, z 0 at (78, 97);
+    // the camp's at (3, 70), its tent at (33, 98).
+    const ymod_area_map castle_map{sizeof(ymod_area_map), "map.tmh", 200.0f, 225.0f, 78.0f, 97.0f, -5, 900};
+    const ymod_area_map camp_map{sizeof(ymod_area_map), "map.tmh", 200.0f, 225.0f, 3.0f, 70.0f, 33, 98};
+    ymod_area castle{sizeof(ymod_area), "castle", 8, 1, "model.pmo", "ge.bin", "tex.tmh", "ground.bin", "walls.bin"};
+    castle.minimap = &castle_map;
+    ymod_area camp{sizeof(ymod_area), "camp", 8, 0, "model.pmo", "ge.bin", "tex.tmh", "ground.bin", "walls.bin"};
+    camp.minimap = &camp_map;
+    check(service != nullptr && service->add_area(mod, &castle) == 0 && service->add_area(mod, &camp) == 0,
+        "map pictures: areas give the map's picture and their places on it (the tent read on area 0 only)");
+    const auto refused = [&](ymod_area area, ymod_area_map map, const char *id, const std::string &line) {
+        area.id = id;
+        area.minimap = &map;
+        return service != nullptr && service->add_area(mod, &area) == -1 && maps::find(id) == nullptr &&
+            logged(line.starts_with("a ymod_area_map") || line.starts_with("area:")
+                    ? line
+                    : "area " + std::string(id) + " is not added: " + line);
+    };
+    constexpr float kNaN = std::numeric_limits<float>::quiet_NaN();
+    constexpr float kInfinity = std::numeric_limits<float>::infinity();
+    const auto with = [&camp_map](auto change) {
+        ymod_area_map map = camp_map;
+        change(map);
+        return map;
+    };
+    check(refused(camp, with([](ymod_area_map &m) { m.picture = "bad.tmh"; }), "bad_layout",
+              "its map picture is not one or two images of 13568 or 27120 bytes in all, as the game's are") &&
+            refused(camp, with([](ymod_area_map &m) { m.picture = "none.tmh"; }), "no_picture",
+                "area: the picture file none.tmh is not in the mod's folder") &&
+            refused(camp, with([](ymod_area_map &m) { m.picture = nullptr; }), "null_picture",
+                "area: no picture file given") &&
+            refused(camp, with([](ymod_area_map &m) { m.units_x = 0.0f; }), "zero_units",
+                "its map's units are not finite numbers above 0") &&
+            refused(camp, with([kNaN](ymod_area_map &m) { m.units_z = kNaN; }), "nan_units",
+                "its map's units are not finite numbers above 0") &&
+            refused(camp, with([](ymod_area_map &m) { m.units_x = -250.0f; }), "negative_units",
+                "its map's units are not finite numbers above 0") &&
+            refused(camp, with([](ymod_area_map &m) { m.units_z = 3.0e37f; }), "huge_units",
+                "its map's units are not finite numbers above 0") &&
+            refused(camp, with([kInfinity](ymod_area_map &m) { m.origin_u = kInfinity; }), "far_origin",
+                "its place on the map is not a finite number") &&
+            refused(camp, with([](ymod_area_map &m) { m.origin_v = 1.0e29f; }), "too_far_origin",
+                "its place on the map is not a finite number") &&
+            refused(camp, with([](ymod_area_map &m) { m.camp_u = 160; }), "tent_right",
+                "its camp's tent is off the map's picture (its pixels are 0 to 159)") &&
+            refused(camp, with([](ymod_area_map &m) { m.camp_v = -1; }), "tent_above",
+                "its camp's tent is off the map's picture (its pixels are 0 to 159)") &&
+            refused(camp, with([](ymod_area_map &m) { m.size = offsetof(ymod_area_map, camp_v); }), "short_map",
+                "a ymod_area_map of " + std::to_string(offsetof(ymod_area_map, camp_v)) +
+                    " bytes is refused: this call reads " +
+                    std::to_string(offsetof(ymod_area_map, camp_v) + sizeof(std::int32_t)) +
+                    " (set its size to sizeof(ymod_area_map))"),
+        "map pictures: a picture not laid out as the game's or missing, units not finite and above 0, a place not "
+        "finite, a camp's tent off the picture and a ymod_area_map too short are refused, with the reason");
+    // Boundaries that are taken: the tent at 0 and 159, an origin outside the
+    // picture, a ymod_area_map wider than this header's (a later SDK's).
+    struct WideMap {
+        ymod_area_map map;
+        std::uint32_t later[2];
+    };
+    WideMap wider{camp_map, {0xFFFFFFFFu, 0xFFFFFFFFu}};
+    wider.map.size = sizeof(WideMap);
+    wider.map.camp_u = 0;
+    wider.map.camp_v = 159;
+    wider.map.origin_u = -400.0f;
+    ymod_area wide_camp = camp;
+    wide_camp.id = "wide_camp";
+    wide_camp.map = 9;
+    wide_camp.minimap = &wider.map;
+    // A mod built before the map's picture: its struct ends before
+    // `minimap`, which is not read.
+    ymod_area older = castle;
+    older.id = "older";
+    older.size = offsetof(ymod_area, minimap);
+    older.minimap = reinterpret_cast<const ymod_area_map *>(std::uintptr_t{1});
+    check(service != nullptr && service->add_area(mod, &wide_camp) == 0 && service->add_area(mod, &older) == 0,
+        "map pictures: the tent at the picture's edges, a place off the picture, a wider ymod_area_map and an "
+        "ymod_area from before the field are taken");
+
+    // A quest's areas give the same picture and units, or none does.
+    const ymod_quest_monster monster{"tigrex", 1, {0.0f, 0.0f, 0.0f}, 0x1E, 0x13, 100};
+    const char *both[] = {"camp"};
+    ymod_quest quest{sizeof(ymod_quest), 62800u, 5, 1, 30u, 0u, 0u, "tigrex", 1u, &monster, 1u, {}, "castle"};
+    quest.areas = both;
+    quest.area_count = 1u;
+    check(quests != nullptr && quests->add(mod, &quest) == 62800, "map pictures: a quest in the castle and the camp");
+    const ymod_area_map other_map = with([](ymod_area_map &m) { m.picture = "other.tmh"; });
+    const ymod_area_map coarse_map = with([](ymod_area_map &m) { m.units_x = 250.0f; });
+    ymod_area other_camp = camp;
+    other_camp.id = "other_camp";
+    other_camp.minimap = &other_map;
+    ymod_area coarse_camp = camp;
+    coarse_camp.id = "coarse_camp";
+    coarse_camp.minimap = &coarse_map;
+    ymod_area bare_camp = camp;
+    bare_camp.id = "bare_camp";
+    bare_camp.minimap = nullptr;
+    check(service->add_area(mod, &other_camp) == 0 && service->add_area(mod, &coarse_camp) == 0 &&
+            service->add_area(mod, &bare_camp) == 0,
+        "map pictures: camps with another picture, other units and none");
+    const auto quest_refused = [&](std::uint32_t id, const char *camp_id, const std::string &line) {
+        const char *camps[] = {camp_id};
+        ymod_quest q = quest;
+        q.id = id;
+        q.areas = camps;
+        return quests->add(mod, &q) == -1 && logged("quest " + std::to_string(id) + " is not added: " + line);
+    };
+    check(quest_refused(62801u, "other_camp", "its areas give different map pictures or units") &&
+            quest_refused(62802u, "coarse_camp", "its areas give different map pictures or units") &&
+            quest_refused(62803u, "bare_camp", "some of its areas give the map's picture and others do not"),
+        "map pictures: a quest whose areas give different pictures, other units, or a picture and none, is refused");
+    std::string why;
+    check(maps::play_quest_in("castle", 62804u) && !maps::play_quest_in("bare_camp", 62804u, &why) &&
+            why == "some of its areas give the map's picture and others do not" &&
+            !maps::play_quest_in("other_camp", 62804u, &why) && why == "its areas give different map pictures or units",
+        "map pictures: and an area is not played with others whose pictures do not go with its own");
+    // A quest that leaves some of the map's areas to the game keeps the
+    // game's units: 250 a pixel on the arena.
+    ymod_quest alone = quest;
+    alone.id = 62805u;
+    alone.areas = nullptr;
+    alone.area_count = 0u;
+    check(quests->add(mod, &alone) == -1 &&
+            logged("quest 62805 is not added: it leaves some of map 8's areas to the game, whose picture has 250 by "
+                   "250 units a pixel, and its areas' have 200 by 225"),
+        "map pictures: a quest in the castle alone, whose units are not the game's, is refused");
+    const ymod_area_map game_scale{sizeof(ymod_area_map), "map.tmh", 250.0f, 250.0f, 100.0f, 74.0f, 0, 0};
+    ymod_area yard = castle;
+    yard.id = "yard";
+    yard.minimap = &game_scale;
+    ymod_quest in_yard = alone;
+    in_yard.id = 62806u;
+    in_yard.area = "yard";
+    check(service->add_area(mod, &yard) == 0 && quests->add(mod, &in_yard) == 62806,
+        "map pictures: one at the game's units is added");
+    // Map 9's picture has two images: one is refused.
+    ymod_area ninth = castle;
+    ninth.id = "ninth";
+    ninth.map = 9;
+    const char *ninth_camp[] = {"wide_camp"};
+    ymod_quest on_ninth = quest;
+    on_ninth.id = 62807u;
+    on_ninth.area = "ninth";
+    on_ninth.areas = ninth_camp;
+    check(service->add_area(mod, &ninth) == 0 && quests->add(mod, &on_ninth) == -1 &&
+            logged("quest 62807 is not added: its map picture has 1 image, map 9's has 2 images"),
+        "map pictures: a picture with another number of images than the game's map's is refused");
+
+    // Played: the collision pack's entry 0 is the picture.
+    auto &memory = runtime.memory();
+    const auto load_overlays = [&](bool with_task) {
+        place_overlay(runtime, kSub, "game_sub.ovl", 0x00050000u);
+        memory.copy_in(kSub + 64u, std::span<const std::uint8_t>(sub).subspan(64u));
+        memory.store16(0x0A0457C4u + 16u, 0x1389u);
+        memory.store16(0x0A04579Cu + 16u, 0x138Au);
+        if (with_task) {
+            place_overlay(runtime, kTask, "game_task.ovl", static_cast<std::uint32_t>(task.size()));
+            memory.copy_in(kTask + 64u, std::span<const std::uint8_t>(task).subspan(64u));
+        } else {
+            place_overlay(runtime, kTask, "lobby_task.ovl", static_cast<std::uint32_t>(task.size()));
+        }
+    };
+    const auto f = [&memory](std::uint32_t at) { return std::bit_cast<float>(memory.load32(at)); };
+    load_overlays(true);
+    memory.store32(0x08AB3640u, 0x09000000u);
+    memory.store16(0x09000000u + 0x60472u, 62800u);
+    const auto served = [&](mhp3rd::mods::FileId file) {
+        const auto b = maps::serve(runtime, file);
+        return b ? *b : Bytes{};
+    };
+    const Bytes collision = served(0x1262u);
+    check(entry(collision, 0) == castle_picture && entry(collision, 1) == bytes("4.00 ground") &&
+            entry(collision, 3) == bytes("4.00 ground") && entry(collision, 5) == bytes("CAMP POINTS"),
+        "map pictures: while the quest is played, the map's collision pack has the picture as its entry 0");
+    // The tables: the frame 160 x 200 by 160 x 225 from the game's x0 and z0,
+    // each area's origin x units + x0, the camp's tent.
+    maps::overlay_loaded(runtime);
+    const bool written = f(kFrame) == 32000.0f && f(kFrame + 4u) == 36000.0f && f(kFrame + 8u) == -20000.0f &&
+        f(kFrame + 12u) == -20000.0f && memory.load32(kFrame + 16u) == kRecords &&
+        f(kRecords) == 3.0f * 200.0f - 20000.0f && f(kRecords + 4u) == 70.0f * 225.0f - 20000.0f &&
+        f(kRecords + 24u) == 78.0f * 200.0f - 20000.0f && f(kRecords + 28u) == 97.0f * 225.0f - 20000.0f &&
+        memory.load16(kTent) == 33u && memory.load16(kTent + 2u) == 98u;
+    check(written, "map pictures: the map's frame, the areas' places and the camp's tent are written into the tables");
+    // The world to the picture as the game takes it: a point of the castle
+    // at (x, z) is pixel (78 + x / 200, 97 + z / 225).
+    const float u = 160.0f * (1000.0f + f(kRecords + 24u) - f(kFrame + 8u)) / f(kFrame);
+    const float v = 160.0f * (-4500.0f + f(kRecords + 28u) - f(kFrame + 12u)) / f(kFrame + 4u);
+    check(u == 83.0f && v == 77.0f, "map pictures: and put the castle's (1000, -4500) on its pixel (83, 77)");
+    const auto disc_values = [&]() {
+        return f(kFrame) == 40000.0f && f(kFrame + 4u) == 40000.0f && f(kRecords) == -6100.0f &&
+            f(kRecords + 4u) == 6900.0f && f(kRecords + 24u) == 4000.0f && f(kRecords + 28u) == -2500.0f;
+    };
+    // Another quest, a game's: the disc's values back, its picture the game's.
+    memory.store16(0x09000000u + 0x60472u, 501u);
+    maps::overlay_loaded(runtime);
+    check(disc_values() && memory.load16(kTent) == 57u && memory.load16(kTent + 2u) == 99u &&
+            maps::serve(runtime, 0x1262u) == nullptr,
+        "map pictures: on another quest the disc's values are back and the game's collision pack loads");
+    // Back on the quest, then the quest ends: game_task goes, game_sub stays.
+    memory.store16(0x09000000u + 0x60472u, 62800u);
+    maps::overlay_loaded(runtime);
+    const bool again = f(kFrame) == 32000.0f && memory.load16(kTent) == 33u;
+    load_overlays(false);
+    memory.store32(kFrame, bits(32000.0f)); // game_sub stays loaded with Yakumo's values
+    memory.store32(kRecords + 24u, bits(78.0f * 200.0f - 20000.0f));
+    maps::overlay_loaded(runtime);
+    check(
+        again && disc_values(), "map pictures: when the quest's game_task goes, game_sub has the disc's values again");
+    // The overlays loaded again, from the disc: written again.
+    load_overlays(true);
+    maps::overlay_loaded(runtime);
+    check(f(kFrame) == 32000.0f && f(kRecords + 24u) == 78.0f * 200.0f - 20000.0f && memory.load16(kTent) == 33u,
+        "map pictures: overlays loaded again on the quest are written again");
+    // A quest in the yard alone: the game's frame kept, its record moved,
+    // the camp's (the game's) and its tent kept.
+    memory.store16(0x09000000u + 0x60472u, 62806u);
+    maps::overlay_loaded(runtime);
+    check(f(kFrame) == 40000.0f && f(kRecords + 24u) == 5000.0f && f(kRecords + 28u) == -1500.0f &&
+            f(kRecords) == -6100.0f && memory.load16(kTent) == 57u && entry(served(0x1262u), 0) == castle_picture,
+        "map pictures: a quest in one area at the game's units moves only that area's record");
+    // A quest whose areas give no picture leaves the tables alone.
+    ymod_area plain = castle;
+    plain.id = "plain";
+    plain.minimap = nullptr;
+    ymod_quest in_plain = in_yard;
+    in_plain.id = 62808u;
+    in_plain.area = "plain";
+    check(service->add_area(mod, &plain) == 0 && quests->add(mod, &in_plain) == 62808,
+        "map pictures: a quest in an area without a picture");
+    memory.store16(0x09000000u + 0x60472u, 62808u);
+    maps::overlay_loaded(runtime);
+    check(disc_values() && memory.load16(kTent) == 57u && entry(served(0x1262u), 0) == entry(hits_pack, 0),
+        "map pictures: keeps the game's picture and tables");
+    // The disc's game_sub unreadable when the quest is played: the picture is
+    // not served and nothing is written.
+    maps::reset_for_tests();
+    discs_readable = false;
+    maps::read_files_with_for_tests(reader);
+    check(service->add_area(mod, &castle) == 0 && service->add_area(mod, &camp) == 0 &&
+            maps::play_quest_in("castle", 62809u) && maps::play_quest_in("camp", 62809u),
+        "map pictures: a quest whose game files cannot be read when it is added");
+    memory.store16(0x09000000u + 0x60472u, 62809u);
+    maps::overlay_loaded(runtime);
+    check(disc_values() && entry(served(0x1262u), 0) == entry(hits_pack, 0) &&
+            entry(served(0x1262u), 3) == bytes("4.00 ground"),
+        "map pictures: is played with the game's picture and tables, its areas served");
+
+    std::error_code ec;
+    std::filesystem::remove_all(folder, ec);
+    maps::reset_for_tests();
+    mhp3rd::mods::added::reset_for_tests();
+}
+
 int main() {
     psprecomp::Runtime runtime(64u * 1024u * 1024u);
     mhp3rd::kernel().install(runtime, 0u, 0x08900000u);
@@ -3866,6 +4244,7 @@ int main() {
     test_map_points(runtime);
     test_map_gathering(runtime);
     test_map_slots(runtime);
+    test_map_pictures(runtime);
     test_pictures(runtime);
     test_report_log();
 

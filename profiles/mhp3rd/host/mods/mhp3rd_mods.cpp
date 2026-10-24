@@ -4,6 +4,7 @@
 #include "mods/file_overlay.hpp"
 #include "mods/mhp3rd_code_mods.hpp"
 #include "mods/mhp3rd_data_bin.hpp"
+#include "mods/mhp3rd_maps.hpp"
 #include "mods/mhp3rd_mod_format.hpp"
 #include "mods/mhp3rd_monsters.hpp"
 #include "mods/mhp3rd_quests.hpp"
@@ -453,6 +454,9 @@ std::vector<std::uint32_t> code_loaded(psprecomp::Runtime &runtime) {
     tables::overlay_loaded(runtime);
     quests::overlay_loaded(runtime);
     monsters::overlay_loaded(runtime);
+    // Areas' map pictures: their places in game_sub's and game_task's tables
+    // while their quest is played, the game's otherwise.
+    maps::overlay_loaded(runtime);
     // Code mods' blocks from the start, and the loaded files': the game is
     // running and at a point where it expects code to have changed.
     std::vector<std::uint32_t> run = std::move(s.pending_runs);

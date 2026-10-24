@@ -53,6 +53,8 @@ constexpr std::size_t kFirstAreaExit = offsetof(ymod_area_exit, door) + sizeof(s
 constexpr std::size_t kFirstAreaArrival = offsetof(ymod_area_arrival, door) + sizeof(std::int32_t);
 constexpr std::size_t kFirstAreaSpot = offsetof(ymod_area_spot, item_stride) + sizeof(std::uint32_t);
 constexpr std::size_t kFirstAreaItem = offsetof(ymod_area_item, chance) + sizeof(std::uint32_t);
+// A struct passed on its own ends there in the first SDK that has it.
+constexpr std::size_t kFirstAreaMap = offsetof(ymod_area_map, camp_v) + sizeof(std::int32_t);
 
 // The `count` elements of an array a mod passes, `stride` bytes apart, each
 // copied as far as both the mod's element and this header's go: fields past
@@ -753,8 +755,10 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
             return refuse("a supply's item or count is out of range");
         rewards.push_back({s.item, static_cast<std::uint8_t>(s.count), 0u, kSupply});
     }
-    // Its areas' ballistas, numbered across them, fit the game's slots.
+    // Its areas' ballistas, numbered across them, fit the game's slots, and
+    // their map pictures go together.
     if (std::optional<std::string> problem = maps::quest_points_problem(area_ids)) return refuse(*problem);
+    if (std::optional<std::string> problem = maps::quest_map_problem(area_ids)) return refuse(*problem);
     // What its areas' gathering points give, by the map's area: named as the
     // rewards are, so the points cannot be used until the quest is built
     // again with the game's text.
@@ -916,6 +920,19 @@ int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
             points.cart = maps::Cart{c.at.x, c.at.y, c.at.z, static_cast<std::uint16_t>(c.facing)};
         }
         spec.points = std::move(points);
+    }
+    // The map's picture and its place on it, when it gives them (a mod built
+    // before them, whose struct ends before `minimap`, gives none): read as
+    // far as both its struct and this header's go, fields past the mod's 0.
+    if (area->size >= offsetof(ymod_area, minimap) + sizeof(area->minimap) && area->minimap != nullptr) {
+        const ymod_area_map *given = area->minimap;
+        if (too_short(mod, given->size, kFirstAreaMap, "ymod_area_map")) return -1;
+        ymod_area_map map{};
+        std::memcpy(static_cast<void *>(&map), given, std::min<std::size_t>(given->size, sizeof(map)));
+        const auto picture = mod_bytes(mod, map.picture, "picture", "area");
+        if (!picture) return -1;
+        spec.minimap =
+            maps::MapPicture{*picture, map.units_x, map.units_z, map.origin_u, map.origin_v, map.camp_u, map.camp_v};
     }
     std::string why;
     return maps::add_area(*runtime, std::move(spec), &why) ? 0 : refuse(why);

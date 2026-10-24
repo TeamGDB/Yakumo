@@ -686,9 +686,11 @@ typedef struct ymod_equipment {
  * of the game's while such a quest is played, and so are its points when it
  * gives them: where the hunter comes in, where he leaves for another area, the
  * camp's supply box, delivery box, bed and cart, and what he gathers and fires
- * there (gathering points, ballistas, cannons). The rest of the area (its
- * scene, camera paths, minimap) stays the game's (docs/MAPS.md). Call
- * add_area() from yakumo_mod_main, before the quests that name it.
+ * there (gathering points, ballistas, cannons), and the map's picture the
+ * minimap draws, with the area's place on it, when it gives them
+ * (ymod_area_map). The rest of the area (its scene, camera paths) stays the
+ * game's (docs/MAPS.md). Call add_area() from yakumo_mod_main, before the
+ * quests that name it.
  *
  * Points are in the area's own units, as its model and collision, finite,
  * their sizes above 0; a facing is a turn in 65536ths (0 faces +z, 16384 +x,
@@ -758,6 +760,34 @@ typedef struct ymod_area_spot {
     /* The stride of `items`: sizeof(ymod_area_item). A C mod sets it; in C++ it starts so. */
     uint32_t item_stride YMOD_SIZE_OF(ymod_area_item);
 } ymod_area_spot;
+/* The map's picture, which the minimap draws (and its two larger views, the
+ * Start menu's Square), and where the area lies on it (docs/MAPS.md, "The
+ * map's picture"). The game keeps one picture for a map: every area a quest
+ * names gives the same picture and units, or none does, and on a quest that
+ * leaves some of the map's areas to the game the units are the game's map's
+ * (the arena's 250 across and down), so that the game's areas stay where its
+ * picture has them. A point (x, z) of the area is drawn at pixel
+ * (origin_u + x / units_x, origin_v + z / units_z) of the picture, and so are
+ * the hunter's arrow and the other icons.
+ *
+ * The same placing tells the game where the map's areas lie against each
+ * other, beyond the minimap: a monster that goes into another area keeps its
+ * place on the map (game_task's 0x0A073664), and monsters aim at a target in
+ * another area through it (0x0A088D08, 0x0A0B0744). So give an area the place
+ * that puts its doorways where its neighbours' are, as the picture draws them.
+ *
+ * Passed on its own, it starts with its size, which the mod sets (in C++ it
+ * starts so). */
+typedef struct ymod_area_map {
+    uint32_t size YMOD_SIZE_OF(ymod_area_map);
+    /* Path in the mod's folder: the picture, a TMH laid out as the game's are: one image (two on maps 4 and
+       17, which keep two) of 160 x 168 pixels, 4-bit indices into 16 RGBA8888 colours, the map in its top
+       160 x 160 (13568 bytes, 27120 with two images). */
+    const char *picture;
+    float units_x, units_z;   /* world units a pixel spans, across (x) and down (z): finite, above 0 */
+    float origin_u, origin_v; /* the pixel the area's own x 0, z 0 lands on (it may lie outside the picture) */
+    int32_t camp_u, camp_v;   /* where the camp's tent icon goes, in pixels, 0 to 159: read on area 0 only */
+} ymod_area_map;
 typedef struct ymod_area {
     uint32_t size YMOD_SIZE_OF(ymod_area);
     const char *id;         /* the mod's name for it */
@@ -785,6 +815,10 @@ typedef struct ymod_area {
     uint32_t exit_stride YMOD_SIZE_OF(ymod_area_exit);
     uint32_t arrival_stride YMOD_SIZE_OF(ymod_area_arrival);
     uint32_t spot_stride YMOD_SIZE_OF(ymod_area_spot);
+    /* NULL, or the map's picture and the area's place on it; with NULL the game's picture and places stay.
+       After the strides, as fields are only added at the end: a struct from an SDK without it ends before it,
+       and its area keeps the game's. */
+    const ymod_area_map *minimap;
 } ymod_area;
 typedef struct ymod_maps {
     uint32_t version;

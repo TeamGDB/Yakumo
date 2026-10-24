@@ -30,7 +30,16 @@ class Runtime;
 //   for an area that gives its points, its points table (1 + 2 x areas +
 //   area, where the map has `areas`): where the hunter comes in, where he
 //   leaves, the camp's supply box, delivery box, bed and cart, and the
-//   gathering points, ballistas and cannons.
+//   gathering points, ballistas and cannons; and, when the quest's areas give
+//   the map's picture, entry 0, the picture the minimap draws.
+//
+// With the picture, while the quest is played and game_sub and game_task are
+// loaded, the tables that place the map's areas on it hold the mod's numbers:
+// the map's frame (game_sub's 0x0A044E0C + 20 x map: width, depth, x0, z0 and
+// a pointer to the areas' records, 24 bytes each, whose first two floats, dx
+// and dz, move an area's points into the frame), and the camp's tent icon
+// (game_task's 0x0A19D1E8 + 4 x map, s16 u and v). The game's are put back on
+// every other quest and when the quest's overlays go (overlay_loaded()).
 //
 // An area whose GE data is larger than the game's is not served, nor the
 // quest's other areas: the game puts the large monsters' GE data right after
@@ -145,6 +154,32 @@ inline constexpr ConditionalWord kConditionalWords[] = {
 [[nodiscard]] std::vector<std::uint16_t> point_words(
     std::uint8_t map, std::uint8_t area, std::size_t count, std::uint16_t first);
 
+// The map's picture and an area's place on it (yakumo/mod.h, ymod_area_map;
+// docs/MAPS.md). A point (x, z) of the area lands on pixel (origin_u + x /
+// units_x, origin_v + z / units_z): the map's frame is 160 units_x by 160
+// units_z, from the game's x0 and z0, and the area's dx and dz are origin_u x
+// units_x + x0 and origin_v x units_z + z0 (0x088D0C88 adds them, 0x088CE854
+// gives the frame, game_task's 0x0A16FD3C scales into the picture).
+struct MapPicture {
+    std::vector<std::uint8_t> picture; // a TMH laid out as kPictureSize says
+    float units_x{}, units_z{};        // world units a pixel spans, across and down
+    float origin_u{}, origin_v{};      // the pixel the area's x 0, z 0 lands on
+    std::int32_t camp_u{}, camp_v{};   // the camp's tent icon, 0 to 159; read on area 0 only
+};
+// The game's pictures (entry 0 of every map's collision pack): a TMH of one
+// image, two on maps 4 and 17, of 160 x 168 pixels, 4-bit indices into 16
+// RGBA8888 colours; the map takes the top 160 x 160 (game_task's layout table,
+// 0x0A197224 + 1160).
+inline constexpr std::uint32_t kPictureSide = 160u;
+inline constexpr std::size_t kPictureHeaderSize = 16u;   // the bank's signature and image count
+inline constexpr std::size_t kPictureImageSize = 13552u; // one image with its palette and headers
+// Why `picture` is not laid out as the game's pictures are, or nothing.
+[[nodiscard]] std::optional<std::string> picture_problem(const std::vector<std::uint8_t> &picture);
+// Why a map picture cannot be an area's (`area` its number), or nothing: a
+// picture not laid out as the game's, units not finite and above 0, an origin
+// not finite or a frame too large to hold, a camp's tent off the picture.
+[[nodiscard]] std::optional<std::string> map_picture_problem(const MapPicture &map, std::uint8_t area);
+
 struct AreaSpec {
     std::string id;                     // the mod's name for it
     std::uint8_t map{}, area{};         // the game's area it takes the place of
@@ -155,6 +190,7 @@ struct AreaSpec {
     std::vector<std::uint8_t> walls;    // and the walls, ceilings and steep slopes
     std::string mod;                    // who adds it, for the log
     std::optional<Points> points;       // none: the game's area's stay
+    std::optional<MapPicture> minimap;  // none: the game's picture and places stay
 };
 
 struct Area {
@@ -170,8 +206,8 @@ struct Area {
 // has a cart, a gathering point gives no item, more than kMostGatherItems, one
 // unnamed or with a count of 0, chances not adding up to 100 or uses outside
 // 1 to kMostGatherUses, something else gives items, its ballistas need words
-// past kBallistaSlots, the area is past kMostAreas, or the loader cannot be
-// taken over.
+// past kBallistaSlots, the area is past kMostAreas, its map picture is not as
+// map_picture_problem() wants it, or the loader cannot be taken over.
 bool add_area(psprecomp::Runtime &runtime, AreaSpec spec, std::string *why = nullptr);
 
 // The area a mod added under `id`, or null.
@@ -187,12 +223,29 @@ bool add_area(psprecomp::Runtime &runtime, AreaSpec spec, std::string *why = nul
 // nothing. Unknown ids are not counted.
 [[nodiscard]] std::optional<std::string> quest_points_problem(const std::vector<std::string> &ids);
 
+// Why the areas `ids`, played by one quest, cannot give the map's picture, or
+// nothing: some give one and others none, they give different pictures or
+// units, or the quest leaves some of the map's areas to the game and their
+// units are not the game's map's (from the game's game_sub, when it can be
+// read; it is checked again when the quest is played), or the picture has
+// another number of images than the game's map's. Unknown ids are not counted.
+[[nodiscard]] std::optional<std::string> quest_map_problem(const std::vector<std::string> &ids);
+
 // Plays `quest` in the area `id` (its own quest, under a mod's id), besides
 // the areas it is played in already. False, with the reason in `why`, when
 // there is no such area, or it is on another map than the quest's others or
 // takes the place of the same game's area as one of them, or the quest's
-// ballistas would need words past kBallistaSlots.
+// ballistas would need words past kBallistaSlots, or its areas' map pictures
+// do not go together (quest_map_problem()).
 bool play_quest_in(std::string_view id, std::uint32_t quest, std::string *why = nullptr);
+
+// After the game loads code (an overlay): while a quest whose areas give the
+// map's picture is played (all of them served) and game_sub and game_task are
+// loaded, writes the map's frame, those areas' dx and dz and the camp's tent
+// into game_sub's and game_task's tables; everywhere else puts back the
+// game's values (from the disc's overlays) where it wrote. An overlay loaded
+// again from the disc is written again.
+void overlay_loaded(psprecomp::Runtime &runtime);
 
 // How write_points() numbers an area's points: the map and area they are in
 // (whose conditional words are passed over) and the first ballista's word,
