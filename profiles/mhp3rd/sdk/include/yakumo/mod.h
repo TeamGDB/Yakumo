@@ -140,7 +140,10 @@ typedef struct ymod_memory {
     /* Guest memory reserved for this mod from the game's allocator, aligned
      * to `alignment` (a power of two, at least 16): its address, or 0. */
     uint32_t (*allocate)(ymod_mod *mod, uint32_t size, uint32_t alignment);
-    void (*release)(ymod_mod *mod, uint32_t address);
+    /* Gives back memory allocate() gave this mod: 0, or -1 with the reason in
+     * the log for an address it did not get from allocate() or gave back
+     * already. */
+    int (*release)(ymod_mod *mod, uint32_t address);
     /* Tells the JIT that guest code in [address, address + length) changed,
      * after writing instructions. */
     void (*code_changed)(uint32_t address, uint32_t length);
@@ -220,8 +223,10 @@ typedef struct ymod_events {
     uint32_t version;
     uint32_t size;
     int (*subscribe)(ymod_mod *mod, int event, ymod_event_fn callback, void *user);
-    /* Stops what subscribe() started with the same event, callback and user. */
-    void (*unsubscribe)(ymod_mod *mod, int event, ymod_event_fn callback, void *user);
+    /* Stops what subscribe() started with the same event, callback and user:
+     * 0, or -1 with the reason in the log when this mod has no such
+     * subscription. */
+    int (*unsubscribe)(ymod_mod *mod, int event, ymod_event_fn callback, void *user);
 } ymod_events;
 
 /* --------------------------------------------------------------------------

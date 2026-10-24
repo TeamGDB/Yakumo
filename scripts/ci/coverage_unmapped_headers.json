@@ -124,7 +124,7 @@
     "reason": "Script mod host declarations. mod_script*.cpp is covered by mhp3rd_script_mods_tests through the real Luau engine."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.h": {
-    "sha256": "3440b23fe001cd09d3685844bb03c8967ba6a8b015d1a337a80448b11c122883",
+    "sha256": "55e3258e9451494caacfcad46a332f414da28a091d708a824f16838add8f8b27",
     "reason": "The C ABI of native mods: types, constants, function-pointer tables, the interface-version macro and YMOD_SIZE_OF, which gives sizes and strides their C++ defaults; no host code. The host implementation in mod_native*.cpp is covered by mhp3rd_native_mods_tests, which also loads a test mod declaring a newer interface and checks the C++ defaults and arrays read by their strides."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.hpp": {

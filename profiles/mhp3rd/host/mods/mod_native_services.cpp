@@ -19,6 +19,8 @@
 #include "kernel/kernel.hpp"
 #include "overlays.hpp"
 
+#include "psprecomp/common.hpp"
+
 #include <algorithm>
 #include <cstddef>
 #include <cmath>
@@ -121,14 +123,19 @@ std::uint32_t memory_allocate(ymod_mod *mod, std::uint32_t size, std::uint32_t a
     return block->address;
 }
 
-void memory_release(ymod_mod *mod, std::uint32_t address) {
+int memory_release(ymod_mod *mod, std::uint32_t address) {
     for (auto it = mod->allocations.begin(); it != mod->allocations.end(); ++it) {
         const MemoryBlock *block = kernel().find_block(static_cast<std::int32_t>(*it));
         if (block == nullptr || block->address != address) continue;
         (void)kernel().free_block(static_cast<std::int32_t>(*it));
         mod->allocations.erase(it);
-        return;
+        return 0;
     }
+    report(mod,
+        "the memory at " + psprecomp::hex32(address) +
+            " is not released: the mod did not allocate it, or released it already",
+        true);
+    return -1;
 }
 
 void memory_code_changed(std::uint32_t address, std::uint32_t length) {
@@ -145,11 +152,17 @@ int events_subscribe(ymod_mod *mod, int event, ymod_event_fn callback, void *use
     return 0;
 }
 
-void events_unsubscribe(ymod_mod *mod, int event, ymod_event_fn callback, void *user) {
-    std::erase_if(state().subscribers, [&](const Subscriber &subscriber) {
-        return subscriber.mod == mod && subscriber.event == event && subscriber.callback == callback &&
-            subscriber.user == user;
-    });
+int events_unsubscribe(ymod_mod *mod, int event, ymod_event_fn callback, void *user) {
+    if (std::erase_if(state().subscribers, [&](const Subscriber &subscriber) {
+            return subscriber.mod == mod && subscriber.event == event && subscriber.callback == callback &&
+                subscriber.user == user;
+        }) > 0u)
+        return 0;
+    report(mod,
+        "event " + std::to_string(event) +
+            " is not unsubscribed: the mod has no subscription to it with that function and user",
+        true);
+    return -1;
 }
 
 int files_replace(ymod_mod *mod, std::uint32_t file, const void *data, std::uint32_t length) {

@@ -511,6 +511,32 @@ void test_hook_changes(psprecomp::Runtime &runtime) {
     check(memory != nullptr && memory->allocate(g_self, 0xFFFFFFF0u, 16u) == 0u &&
             memory->allocate(g_self, 0xFFFFFF00u, 16u) == 0u,
         "native: memory.allocate refuses a size past the memory");
+    // Memory and subscriptions go back only from the mod that took them: 0,
+    // or -1 with the reason on the mod's page.
+    ymod_mod *borrower = native::add_mod("borrower", "Borrower", ".");
+    const std::uint32_t lent = memory->allocate(g_self, 64u, 16u);
+    const int released_by_other = memory->release(borrower, lent);
+    const int released = memory->release(g_self, lent);
+    char lent_at[16];
+    std::snprintf(lent_at, sizeof(lent_at), "0x%08X", lent);
+    const std::string not_released = std::string("the memory at ") + lent_at +
+        " is not released: the mod did not allocate it, or released it already";
+    check(lent != 0u && released_by_other == -1 && reported("Borrower", not_released) && released == 0 &&
+            memory->release(g_self, lent) == -1 && reported("Hook Changes", not_released),
+        "native: memory.release gives back the mod's own block (0), not another mod's or one given back already "
+        "(-1, with the reason)");
+    const auto *own_events = static_cast<const ymod_events *>(native::host()->service(g_self, YMOD_EVENTS, 1u));
+    const ymod_event_fn listener = [](int, std::uint32_t, void *) {};
+    (void)own_events->subscribe(g_self, YMOD_EVENT_FRAME, listener, &g_seen);
+    const std::string not_unsubscribed =
+        "event 0 is not unsubscribed: the mod has no subscription to it with that function and user";
+    check(own_events->unsubscribe(borrower, YMOD_EVENT_FRAME, listener, &g_seen) == -1 &&
+            reported("Borrower", not_unsubscribed) &&
+            own_events->unsubscribe(g_self, YMOD_EVENT_FRAME, listener, &g_seen) == 0 &&
+            own_events->unsubscribe(g_self, YMOD_EVENT_FRAME, listener, &g_seen) == -1 &&
+            reported("Hook Changes", not_unsubscribed),
+        "native: events.unsubscribe stops the mod's own subscription (0), not another mod's or one stopped already "
+        "(-1, with the reason)");
 
     // A mod stopped by a callback before its own runs in the same call or
     // event is not called: the lists run from copies.
