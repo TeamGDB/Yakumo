@@ -1994,13 +1994,19 @@ void test_map_gathering(psprecomp::Runtime &runtime) {
         for (; text[i] != '\0'; ++i) memory.store8(kNames + at + i, static_cast<std::uint8_t>(text[i]));
         memory.store8(kNames + at + i, 0u);
     }
-    // A second area whose gathering names an item the game does not have.
+    // A second area, one of whose two points names an item the game does not
+    // have, and a quest there with a reward.
     const ymod_area_item odd[] = {{"Unknown Thing", 1u, 100u}};
-    ymod_area_spot odd_pile = pile_spot;
-    odd_pile.items = odd;
-    ymod_area odd_yard = one_spot(odd_pile);
+    ymod_area_spot odd_piles[] = {pile_spot, pile_spot};
+    odd_piles[0].items = odd;
+    ymod_area odd_yard = one_spot(odd_piles[0]);
+    odd_yard.spots = odd_piles;
+    odd_yard.spot_count = 2u;
     odd_yard.id = "odd_yard";
     misnamed.area = "odd_yard";
+    const ymod_quest_reward prize[] = {{"Ballista Ammo", 1u, 100u, 0u}};
+    misnamed.rewards = prize;
+    misnamed.reward_count = 1u;
     check(service != nullptr && service->add_area(mod, &odd_yard) == 0 && quests->add(mod, &misnamed) == 62721,
         "gathering: an area whose point names an item the game lacks, and a quest in it, are added");
     const std::optional<Bytes> misnamed_first = built_quest(62721u);
@@ -2016,9 +2022,16 @@ void test_map_gathering(psprecomp::Runtime &runtime) {
             u16(*named, entry_of(*named, 1u, 0u) + 4u) == 10u,
         "gathering: once lobby_task loads, the quest is built again with its points' items named");
     const std::optional<Bytes> misnamed_again = built_quest(62721u);
-    check(misnamed_first && misnamed_again && *misnamed_first == *misnamed_again &&
-            word_at(*misnamed_again, entry_of(*misnamed_again, 1u, 0u)) == 0u,
-        "gathering: a point naming no item of the game's leaves its quest as first built");
+    const std::size_t kept_items = misnamed_again ? word_at(*misnamed_again, entry_of(*misnamed_again, 1u, 1u)) : 0u;
+    const std::size_t prize_items =
+        misnamed_again ? word_at(*misnamed_again, word_at(*misnamed_again, 0x1Cu) + 8u) : 0u;
+    check(misnamed_first && misnamed_again && *misnamed_first != *misnamed_again &&
+            word_at(*misnamed_again, entry_of(*misnamed_again, 1u, 0u)) == 0u && kept_items != 0u &&
+            u16(*misnamed_again, kept_items + 2u) == 1u && u16(*misnamed_again, prize_items + 2u) == 2u &&
+            logged("quest 62721: a gathering point of area 1 names no item of the game's, \"Unknown Thing\"; it "
+                   "gives nothing"),
+        "gathering: a point naming no item of the game's gives nothing, and is reported; the quest's other point "
+        "and its reward are built as named");
 
     std::error_code ec;
     std::filesystem::remove_all(folder, ec);

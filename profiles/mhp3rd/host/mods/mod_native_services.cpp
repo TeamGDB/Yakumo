@@ -671,7 +671,8 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
     for (const maps::Area *a : areas) maps::play_quest_in(a->id, quest->id);
     if (!rewards.empty() || !gathered.empty()) {
         mhp3rd::mods::quests::rebuild_later(quest->id,
-            [spec, rewards, gathered](Runtime &r, std::string *reason) -> std::optional<std::vector<std::uint8_t>> {
+            [mod, spec, rewards, gathered](
+                Runtime &r, std::string *reason) -> std::optional<std::vector<std::uint8_t>> {
                 game::GuestRam ram(r.memory());
                 const std::vector<std::string> names = game::text_table(ram, game::kTextBlock, kItemNames);
                 const auto id_of = [&names, reason](const std::string &name) -> std::optional<std::uint16_t> {
@@ -683,13 +684,25 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
                     return static_cast<std::uint16_t>(found - names.begin());
                 };
                 game::QuestSpec full = spec;
+                // A gathering point naming an item the game does not have
+                // gives nothing; the rest of the quest is built as named.
                 for (std::size_t a = 0; a < gathered.size(); ++a)
-                    for (std::size_t p = 0; p < gathered[a].size(); ++p)
+                    for (std::size_t p = 0; p < gathered[a].size(); ++p) {
+                        std::vector<game::QuestGatherItem> &items = full.gathering[a][p].items;
                         for (const maps::GatherItem &i : gathered[a][p].items) {
-                            const std::optional<std::uint16_t> item = id_of(i.item);
-                            if (!item) return std::nullopt;
-                            full.gathering[a][p].items.push_back({*item, i.count, i.chance});
+                            const auto found = std::find(names.begin(), names.end(), i.item);
+                            if (found == names.end() || found == names.begin()) {
+                                report(mod,
+                                    "quest " + std::to_string(spec.id) + ": a gathering point of area " +
+                                        std::to_string(a) + " names no item of the game's, \"" + i.item +
+                                        "\"; it gives nothing",
+                                    true);
+                                items.clear();
+                                break;
+                            }
+                            items.push_back({static_cast<std::uint16_t>(found - names.begin()), i.count, i.chance});
                         }
+                    }
                 for (const Named &n : rewards) {
                     const std::optional<std::uint16_t> found = id_of(n.item);
                     if (!found) return std::nullopt;
