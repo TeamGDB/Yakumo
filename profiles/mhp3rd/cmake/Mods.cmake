@@ -79,6 +79,11 @@ function(mhp3rd_add_mod_tests)
         MHP3RD_TEMPLATE_TEST_MOD="$<TARGET_FILE:mhp3rd_template_test_mod>"
         MHP3RD_FUTURE_TEST_MOD="$<TARGET_FILE:mhp3rd_future_test_mod>")
     add_dependencies(mhp3rd_native_mods_tests mhp3rd_native_test_mod mhp3rd_template_test_mod mhp3rd_future_test_mod)
+    # The SDK's header as a C++11 mod sees it: compiled with the native tests, never run.
+    add_library(mhp3rd_sdk_cxx11_check OBJECT tests/sdk_cxx11_check.cpp)
+    target_include_directories(mhp3rd_sdk_cxx11_check PRIVATE "${MHP3RD_PROFILE_DIR}/sdk/include")
+    set_target_properties(mhp3rd_sdk_cxx11_check PROPERTIES CXX_STANDARD 11 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+    add_dependencies(mhp3rd_native_mods_tests mhp3rd_sdk_cxx11_check)
     mhp3rd_add_mod_test(mhp3rd_native_mods_tests)
 
     # Script mods through the real Luau engine. The SDK's script template is

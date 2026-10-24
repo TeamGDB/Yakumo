@@ -40,15 +40,60 @@ namespace {
 
 namespace fs = std::filesystem;
 
-// The arrays a mod passes (yakumo/mod.h, "Sizes and strides"): each element
-// as the first SDK has it ends at its last field below, and a stride below
-// that is refused. The ends stay where they are when fields are added.
+// No struct of the SDK ends in padding (yakumo/mod.h, "Sizes and strides"):
+// its last field ends at its sizeof, so a field added later, which starts at
+// or past the sizeof before it, never lands in bytes an older mod left as
+// padding. Adding a field moves its struct's line to the new last field.
+#define YAKUMO_ENDS_AT_SIZEOF(T, last)                                                                                 \
+    static_assert(offsetof(T, last) + sizeof(T::last) == sizeof(T), #T " ends in padding: give it a reserved field")
+YAKUMO_ENDS_AT_SIZEOF(ymod_host, folder);
+YAKUMO_ENDS_AT_SIZEOF(ymod_cpu, fcr31);
+YAKUMO_ENDS_AT_SIZEOF(ymod_memory, code_changed);
+YAKUMO_ENDS_AT_SIZEOF(ymod_hooks, remove);
+YAKUMO_ENDS_AT_SIZEOF(ymod_calls, call);
+YAKUMO_ENDS_AT_SIZEOF(ymod_events, unsubscribe);
+YAKUMO_ENDS_AT_SIZEOF(ymod_files, read_original);
+YAKUMO_ENDS_AT_SIZEOF(ymod_settings, get);
+YAKUMO_ENDS_AT_SIZEOF(ymod_services, import);
+YAKUMO_ENDS_AT_SIZEOF(ymod_symbol, kind);
+YAKUMO_ENDS_AT_SIZEOF(ymod_symbols, overlay_at);
+YAKUMO_ENDS_AT_SIZEOF(ymod_widgets, text_at);
+YAKUMO_ENDS_AT_SIZEOF(ymod_ui, remove);
+YAKUMO_ENDS_AT_SIZEOF(ymod_table, game_rows);
+YAKUMO_ENDS_AT_SIZEOF(ymod_tables, extend);
+YAKUMO_ENDS_AT_SIZEOF(ymod_monster, picture);
+YAKUMO_ENDS_AT_SIZEOF(ymod_vec3, z);
+YAKUMO_ENDS_AT_SIZEOF(ymod_hit_sphere, z);
+YAKUMO_ENDS_AT_SIZEOF(ymod_body_capsule, to);
+YAKUMO_ENDS_AT_SIZEOF(ymod_footstep, size);
+YAKUMO_ENDS_AT_SIZEOF(ymod_monsters, footsteps);
+YAKUMO_ENDS_AT_SIZEOF(ymod_quest_monster, reserved);
+YAKUMO_ENDS_AT_SIZEOF(ymod_quest_texts, client);
+YAKUMO_ENDS_AT_SIZEOF(ymod_quest_reward, reserved);
+YAKUMO_ENDS_AT_SIZEOF(ymod_quest_supply, reserved);
+YAKUMO_ENDS_AT_SIZEOF(ymod_quest, supply_stride);
+YAKUMO_ENDS_AT_SIZEOF(ymod_quests, add);
+YAKUMO_ENDS_AT_SIZEOF(ymod_weapon, give);
+YAKUMO_ENDS_AT_SIZEOF(ymod_armor, give);
+YAKUMO_ENDS_AT_SIZEOF(ymod_equipment, add_armor);
+YAKUMO_ENDS_AT_SIZEOF(ymod_area_exit, door);
+YAKUMO_ENDS_AT_SIZEOF(ymod_area_arrival, door);
+YAKUMO_ENDS_AT_SIZEOF(ymod_area_item, chance);
+YAKUMO_ENDS_AT_SIZEOF(ymod_area_spot, item_stride);
+YAKUMO_ENDS_AT_SIZEOF(ymod_area_map, camp_v);
+YAKUMO_ENDS_AT_SIZEOF(ymod_area, minimap);
+YAKUMO_ENDS_AT_SIZEOF(ymod_maps, add_area);
+#undef YAKUMO_ENDS_AT_SIZEOF
+
+// The arrays a mod passes: each element as the first SDK has it ends at its
+// last field below, and a stride below that is refused. The ends stay where
+// they are when fields are added.
 constexpr std::size_t kFirstHitSphere = offsetof(ymod_hit_sphere, z) + sizeof(float);
 constexpr std::size_t kFirstBodyCapsule = offsetof(ymod_body_capsule, to) + sizeof(ymod_vec3);
 constexpr std::size_t kFirstFootstep = offsetof(ymod_footstep, size) + sizeof(std::int32_t);
-constexpr std::size_t kFirstQuestMonster = offsetof(ymod_quest_monster, size) + sizeof(std::int32_t);
-constexpr std::size_t kFirstQuestReward = offsetof(ymod_quest_reward, line) + sizeof(std::uint32_t);
-constexpr std::size_t kFirstQuestSupply = offsetof(ymod_quest_supply, count) + sizeof(std::uint32_t);
+constexpr std::size_t kFirstQuestMonster = offsetof(ymod_quest_monster, reserved) + sizeof(std::uint32_t);
+constexpr std::size_t kFirstQuestReward = offsetof(ymod_quest_reward, reserved) + sizeof(std::uint32_t);
+constexpr std::size_t kFirstQuestSupply = offsetof(ymod_quest_supply, reserved) + sizeof(std::uint32_t);
 constexpr std::size_t kFirstAreaExit = offsetof(ymod_area_exit, door) + sizeof(std::int32_t);
 constexpr std::size_t kFirstAreaArrival = offsetof(ymod_area_arrival, door) + sizeof(std::int32_t);
 constexpr std::size_t kFirstAreaSpot = offsetof(ymod_area_spot, item_stride) + sizeof(std::uint32_t);

@@ -48,24 +48,37 @@ extern "C" {
  * ymod_quest_monster, ymod_area_exit...) has no size of its own: the array is
  * a pointer, a count and a stride, the bytes from one element to the next
  * (the element's sizeof), given in a field of the struct that holds the
- * pointer or as the argument after the count. Fields are only ever added at
- * the end of a struct. The host reads what both its own header and the mod's
- * cover: a field the mod's header lacks takes its default (0 unless the field
- * says otherwise), and fields the host does not know are ignored. An array
- * whose stride is below its element in the first SDK (interface 1) is
- * refused, with the reason in the log, as is a struct too short for what the
- * call needs; nothing past count times stride is read. ymod_vec3 and
- * ymod_quest_texts lie inside other structs and never grow.
+ * pointer or as the argument after the count.
+ *
+ * Fields are only ever added at the end of a struct, each starting at or past
+ * the struct's sizeof before it, on every platform. No struct ends in padding:
+ * where its fields would leave some (on 64-bit platforms), a `reserved` field
+ * fills it, so a field added later never lands in bytes an older mod left as
+ * padding. `reserved` is 0 (a C mod sets it; in C++ it starts so); the host
+ * never reads it, as it never becomes a field.
+ *
+ * The host reads what both its own header and the mod's cover: a field the
+ * mod's header lacks takes its default (0 unless the field says otherwise),
+ * and fields the host does not know are ignored. A struct the mod passes in,
+ * or a stride, below the struct as the first SDK (interface 1) has it is
+ * refused, with the reason in the log; a struct the host fills in (ymod_symbol,
+ * ymod_table) gets the fields its size holds. Nothing past count times stride
+ * is read. ymod_vec3 and ymod_quest_texts lie inside other structs and never
+ * grow.
  *
  * A C mod sets every `size` and stride it passes to the sizeof of its struct;
- * one left at 0 is refused. In C++ (14 or later) they start as this header's
+ * one left at 0 is refused. In C++14 and later they start as this header's
  * sizes (YMOD_SIZE_OF), and yakumo/mod.hpp passes the strides of arrays given
- * as arguments, so a C++ mod sets none of them.
+ * as arguments, so a C++ mod sets none of them. In C++11, where a struct with
+ * such defaults could not be brace-initialized, they have none, and the mod
+ * sets them as in C.
  */
-#ifdef __cplusplus
+#if defined(__cplusplus) && (__cplusplus >= 201402L || (defined(_MSVC_LANG) && _MSVC_LANG >= 201402L))
 #define YMOD_SIZE_OF(type) = sizeof(type)
+#define YMOD_ZERO = 0
 #else
 #define YMOD_SIZE_OF(type)
+#define YMOD_ZERO
 #endif
 
 /* The interface version this header describes. Services carry versions of
@@ -586,6 +599,7 @@ typedef struct ymod_quest_monster {
     int32_t health;      /* the game's health level: higher is more (0x1E: a Tigrex-based kind's 5400) */
     int32_t attack;      /* the game's attack level (0x13: a low rank hunt; 0x30 hits three times as hard) */
     int32_t size;        /* percent of the kind's size; 0: 100 */
+    uint32_t reserved YMOD_ZERO; /* 0: the struct ends in no padding (Sizes and strides, at the top) */
 } ymod_quest_monster;
 /* Inside ymod_quest, so it never grows: more texts would be fields at the end
  * of ymod_quest. */
@@ -599,10 +613,12 @@ typedef struct ymod_quest_reward {
     uint32_t chance;  /* percent: a group's chances add up to 100 */
     uint32_t line;    /* the reward group it is drawn from: 0 the main reward, drawn several times; 1 and 2
                          two more, as the game's quests have (a commendation, say) */
+    uint32_t reserved YMOD_ZERO; /* 0: the struct ends in no padding */
 } ymod_quest_reward;
 typedef struct ymod_quest_supply {
     const char *item; /* by its name as the game shows it in English: "First-aid Med" */
     uint32_t count;   /* how many, 1 to 99 */
+    uint32_t reserved YMOD_ZERO; /* 0: the struct ends in no padding */
 } ymod_quest_supply;
 typedef struct ymod_quest {
     uint32_t size YMOD_SIZE_OF(ymod_quest);

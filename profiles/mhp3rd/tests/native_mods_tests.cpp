@@ -361,6 +361,13 @@ void test_sizes() {
             weapon.size == sizeof(ymod_weapon) && armor.size == sizeof(ymod_armor) &&
             ymod_area_map{}.size == sizeof(ymod_area_map) && area.minimap == nullptr,
         "sdk: in C++ every size and stride starts as this header's");
+    // Even left uninitialized, a reserved field is 0 in C++.
+    ymod_quest_monster monster_row;
+    ymod_quest_reward reward_row;
+    ymod_quest_supply supply_row;
+    check(monster_row.reserved == 0u && reward_row.reserved == 0u && supply_row.reserved == 0u &&
+            ymod_quest_reward{"Wyvern Gem", 1u, 100u, 0u}.reserved == 0u,
+        "sdk: in C++ a reserved field starts as 0, and a positional initializer leaves it so");
     // A positional initializer written before the strides keeps its meaning.
     const ymod_area_spot pile{YMOD_SPOT_GATHERING, {1.0f, 2.0f, 3.0f}, 150.0f, 200.0f, 0, nullptr, 0u, 10u, 2u};
     check(pile.uses == 10u && pile.extra_uses == 2u && pile.item_stride == sizeof(ymod_area_item),
@@ -1473,7 +1480,7 @@ void test_maps(psprecomp::Runtime &runtime) {
     unstrided.monster_stride = 0u;
     check(quests != nullptr && quests->add(mod, &unstrided) == -1 &&
             logged("quest 62607 is not added: monster_stride is 0, less than the " +
-                std::to_string(offsetof(ymod_quest_monster, size) + sizeof(std::int32_t)) +
+                std::to_string(sizeof(ymod_quest_monster)) +
                 " bytes of a ymod_quest_monster: set it to sizeof(ymod_quest_monster)"),
         "maps: a quest whose monsters' stride is 0 is refused, with the reason");
 
@@ -3383,21 +3390,28 @@ void test_monsters(psprecomp::Runtime &runtime) {
     ymod_quest unstrided_supplies = supplied;
     unstrided_supplies.id = 62025u;
     unstrided_supplies.supply_stride = 0u;
+    ymod_quest_reward dirty_halves[] = {halves[0], halves[1]};
+    dirty_halves[0].reserved = 0xABABABABu;
+    dirty_halves[1].reserved = 0xFFFFFFFFu;
+    ymod_quest dirty = halved;
+    dirty.id = 62027u;
+    dirty.rewards = dirty_halves;
     std::vector<ymod_quest_reward> lavish(73u, ymod_quest_reward{"Wyvern Gem", 1u, 1u, 0u});
     ymod_quest too_many_rewards = rich;
     too_many_rewards.id = 62026u;
     too_many_rewards.rewards = lavish.data();
     too_many_rewards.reward_count = 73u;
     check(quest_service != nullptr && quest_service->add(mod, &halved) == 62021 &&
-            quest_service->add(mod, &wide_halved) == 62022 && quest_service->add(mod, &wide_supplied) == 62023,
-        "quests: rewards and supplies wider than this header's are taken");
+            quest_service->add(mod, &wide_halved) == 62022 && quest_service->add(mod, &wide_supplied) == 62023 &&
+            quest_service->add(mod, &dirty) == 62027,
+        "quests: rewards and supplies wider than this header's are taken, and rewards whose reserved field is not 0");
     check(quest_service != nullptr && quest_service->add(mod, &narrow_rewards) == -1 &&
             logged("quest 62024 is not added: reward_stride is " + std::to_string(offsetof(ymod_quest_reward, line)) +
-                ", less than the " + std::to_string(offsetof(ymod_quest_reward, line) + sizeof(std::uint32_t)) +
+                ", less than the " + std::to_string(sizeof(ymod_quest_reward)) +
                 " bytes of a ymod_quest_reward: set it to sizeof(ymod_quest_reward)") &&
             quest_service->add(mod, &unstrided_supplies) == -1 &&
             logged("quest 62025 is not added: supply_stride is 0, less than the " +
-                std::to_string(offsetof(ymod_quest_supply, count) + sizeof(std::uint32_t)) +
+                std::to_string(sizeof(ymod_quest_supply)) +
                 " bytes of a ymod_quest_supply: set it to sizeof(ymod_quest_supply)") &&
             quest_service->add(mod, &too_many_rewards) == -1 &&
             logged("quest 62026 is not added: it has more than 72 rewards"),
@@ -3453,8 +3467,9 @@ void test_monsters(psprecomp::Runtime &runtime) {
         return differing > 0u && differing <= 2u;
     };
     check(served_size(*mhp3rd::mods::p3rd::quest_file(62021u)) > first_size && same_but_id(62021u, 62022u) &&
-            same_but_id(62018u, 62023u),
-        "quests: wider rewards and supplies are read by their strides, their extra bytes ignored: the same quests");
+            same_but_id(62018u, 62023u) && same_but_id(62021u, 62027u),
+        "quests: wider rewards and supplies are read by their strides, their extra bytes ignored, and a reserved "
+        "field is never read: the same quests");
 
     // What goes wrong with a kind is on its mod's page: with the JIT off, the
     // base's kind checks cannot be hooked.
