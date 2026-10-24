@@ -4549,6 +4549,11 @@ void test_dragonator(psprecomp::Runtime &runtime) {
     mhp3rd::mods::added::reset_for_tests();
     loader_stand_ins(runtime);
     auto &memory = runtime.memory();
+    // The button's code as traced (0x088C2764): a stand-in that sets the
+    // camera's event (byte +3660 of *0x08A2F958) to 3 and returns, with the
+    // words the maps service checks further on.
+    store(runtime, 0x088C2764u,
+        {0x27BDFFF0u, 0x3C0208A3u, 0x8C42F958u, 0x24030003u, 0xA0430E4Cu, 0x03E00008u, 0x27BD0010u});
     for (const auto &[at, word] : std::initializer_list<std::pair<std::uint32_t, std::uint32_t>>{
              {0x088C27B8u, 0x24024650u}, {0x088C2834u, 0x24050003u}, {0x088C2850u, 0x0A20A964u}, {0x088C2854u, 0u}})
         memory.store32(at, word);
@@ -4611,8 +4616,15 @@ void test_dragonator(psprecomp::Runtime &runtime) {
     castle.spots = &button;
     castle.spot_count = 1u;
     castle.spear = &given;
-    check(service != nullptr && service->add_area(mod, &castle) == 0,
-        "dragonator: an area with a dragonator's button and a spear is added, its hooks installed");
+    memory.store32(0x088C2850u, 0u);
+    ymod_area untraced = castle;
+    untraced.id = "untraced";
+    const bool untraced_refused = service != nullptr && service->add_area(mod, &untraced) == -1 &&
+        logged("area untraced is not added: the dragonator's button is not as traced in the game's code");
+    memory.store32(0x088C2850u, 0x0A20A964u);
+    check(untraced_refused && service->add_area(mod, &castle) == 0,
+        "dragonator: an area with a dragonator's button and a spear is added; not where the button's code is not "
+        "as traced");
     const auto refused = [&](ymod_area area, const char *id, const std::string &line) {
         area.id = id;
         return service->add_area(mod, &area) == -1 && maps::find(id) == nullptr &&
@@ -4734,47 +4746,108 @@ void test_dragonator(psprecomp::Runtime &runtime) {
         "dragonator: in an area without a spear, for the gong, with game_task's code not as traced or on another "
         "quest the game's own code places it");
 
-    // The view, in the area loaded now.
-    constexpr std::uint32_t kMapState = 0x09200000u;
+    // The view: the button set the camera's event (byte +3660 of the camera
+    // at *0x08A2F958) to 3, in the area loaded now.
+    constexpr std::uint32_t kMapState = 0x09200000u, kCamera = 0x09300000u;
+    constexpr std::uint32_t kQuest = 0x09000000u + 0x60472u;
     memory.store32(0x09FBEBA0u, kMapState);
     memory.store8(kMapState + 0x9A31u, 1u);
-    const auto look = [&](std::uint32_t event) {
-        cpu = {};
-        cpu.gpr[5] = event;
-        return maps::on_spear_view(runtime, cpu);
+    memory.store32(0x08A2F958u, kCamera);
+    const std::uint32_t event = kCamera + 3660u, slot = 0x0897169Cu + 4u * 13u;
+    const auto press = [&](std::uint8_t set, std::uint8_t before) {
+        memory.store8(event, set);
+        return maps::on_spear_view(runtime, before);
     };
-    const std::uint32_t slot = 0x0897169Cu + 4u * 13u;
-    check(look(3u) && cpu.gpr[5] == 13u && memory.load32(slot) != 0xFFFFFFFFu &&
+    check(press(3u, 0u) && memory.load8(event) == 13u && memory.load32(slot) != 0xFFFFFFFFu &&
             memory.load32(memory.load32(slot) + 16u) == 676u * 4096u &&
             memory.load32(memory.load32(slot) + 64u) == 0x129u && memory.load32(0x08972C9Cu) == 0xFF92A000u,
         "dragonator: the camera's event becomes 13, the castle's view, in a script of Yakumo's own; the ship's "
         "stays");
     const std::uint32_t ours = memory.load32(slot);
-    const bool not_ours = !look(5u) && cpu.gpr[5] == 5u;
+    maps::spear_frame(runtime);
+    const bool held = memory.load32(slot) == ours;
+    memory.store8(event, 0u); // the camera took it
+    maps::spear_frame(runtime);
+    check(held && memory.load32(slot) == 0xFFFFFFFFu,
+        "dragonator: event 13's entry holds the view's script until the camera has taken the event, then is -1 "
+        "(follow an object, as Nibelsnarf's event 13 wants) again");
+    const bool other = !press(5u, 0u) && memory.load8(event) == 5u;
+    const bool unchanged = !press(3u, 3u) && memory.load8(event) == 3u;
     memory.store8(kMapState + 0x9A31u, 0u);
-    const bool elsewhere = !look(4u) && cpu.gpr[5] == 4u;
+    const bool elsewhere = !press(4u, 0u) && memory.load8(event) == 4u;
     memory.store8(kMapState + 0x9A31u, 1u);
-    check(not_ours && elsewhere, "dragonator: another camera event, or the button in another area, is the game's");
-    // Leaving the quest puts the slot back; on the quest it stays.
+    check(other && unchanged && elsewhere && memory.load32(slot) == 0xFFFFFFFFu,
+        "dragonator: another camera event, one the button did not set, or the button in another area, is the "
+        "game's");
+    // Leaving the quest with the event not taken puts the entry back.
+    check(press(3u, 0u) && memory.load8(event) == 13u, "dragonator: the view again");
+    memory.store16(kQuest, 501u);
     maps::overlay_loaded(runtime);
-    const bool kept = memory.load32(slot) == ours;
-    memory.store16(0x09000000u + 0x60472u, 501u);
-    maps::overlay_loaded(runtime);
-    check(kept && memory.load32(slot) == 0xFFFFFFFFu,
-        "dragonator: the camera's slot stays the view's on its quest and is empty again on another");
-    // A slot another mod took: no view, said once; a slot changed after
-    // Yakumo's write is not put back.
-    memory.store16(0x09000000u + 0x60472u, 62660u);
+    check(memory.load32(slot) == 0xFFFFFFFFu, "dragonator: on another quest the entry is -1 again, event taken or not");
+    // An entry another mod changed: no view (event 0), the entry left; one
+    // changed after Yakumo's write is not put back.
+    memory.store16(kQuest, 62660u);
     memory.store32(slot, 0x08B00000u);
-    check(look(3u) && cpu.gpr[5] == 0u && memory.load32(slot) == 0x08B00000u,
-        "dragonator: with the camera's slot taken, the spear fires without a view and the slot is left");
+    check(press(3u, 0u) && memory.load8(event) == 0u && memory.load32(slot) == 0x08B00000u,
+        "dragonator: with event 13's entry changed, the spear fires without a view and the entry is left");
     memory.store32(slot, 0xFFFFFFFFu);
-    check(look(3u) && cpu.gpr[5] == 13u, "dragonator: an empty slot again shows the view");
+    check(press(3u, 0u) && memory.load8(event) == 13u, "dragonator: the game's entry again shows the view");
     memory.store32(slot, 0x08B00010u);
-    memory.store16(0x09000000u + 0x60472u, 501u);
-    maps::overlay_loaded(runtime);
-    check(memory.load32(slot) == 0x08B00010u, "dragonator: a slot changed since Yakumo wrote it is left");
+    memory.store8(event, 0u);
+    maps::spear_frame(runtime);
+    check(memory.load32(slot) == 0x08B00010u, "dragonator: an entry changed since Yakumo wrote it is left");
     memory.store32(slot, 0xFFFFFFFFu);
+    maps::spear_frame(runtime);
+
+    // The hooks themselves, around the game's code: the button's stand-in
+    // above and one of the shot's place (it returns 0, as the game's does off
+    // the sand ship), installed while a quest with a spear is played.
+    store(runtime, 0x0A151320u, {0x27BDFFB0u, 0x27BD0050u, 0x03E00008u, 0x00001021u});
+    const auto shoot = [&]() {
+        for (std::uint32_t at = 0; at < 48u; at += 4u) memory.store32(kOut + at, 0u);
+        auto &gpr = runtime.cpu().gpr;
+        gpr[5] = kHunter;
+        gpr[6] = 1u;
+        gpr[7] = kOut;
+        gpr[8] = kOut + 16u;
+        gpr[9] = kOut + 32u;
+        return call(runtime, 0x0A151320u, 0x09102000u);
+    };
+    const auto press_button = [&]() {
+        memory.store8(event, 0u);
+        (void)call(runtime, 0x088C2764u, 0x09103000u);
+        return memory.load8(event);
+    };
+    maps::overlay_loaded(runtime);
+    mhp3rd::mods::native::frame(runtime);
+    check(shoot() == 1u && mf(kOut) == castle_shot.start[0] && mf(kOut + 16u) == 3714.0f &&
+            mf(kOut + 40u) == castle_shot.step[2],
+        "dragonator: on its quest, the hook after game_task's 0x0A151320 places the game's shot at the spear: 1");
+    check(
+        press_button() == 13u && memory.load32(slot) == ours, "dragonator: the hooks around the button give the view");
+    memory.store8(event, 0u);
+    mhp3rd::mods::native::frame(runtime);
+    check(memory.load32(slot) == 0xFFFFFFFFu, "dragonator: and between frames, once taken, the entry is -1 again");
+    memory.store16(kQuest, 501u);
+    maps::overlay_loaded(runtime);
+    mhp3rd::mods::native::frame(runtime);
+    check(shoot() == 0u && mf(kOut) == 0.0f && press_button() == 3u && memory.load32(slot) == 0xFFFFFFFFu,
+        "dragonator: on another quest the hooks are gone: the game's code alone");
+    memory.store16(kQuest, 62660u);
+    maps::overlay_loaded(runtime);
+    mhp3rd::mods::native::frame(runtime);
+    check(shoot() == 1u && press_button() == 13u, "dragonator: back on its quest they are installed again");
+    memory.store8(event, 0u);
+    mhp3rd::mods::native::frame(runtime);
+    memory.store32(0x0A05E600u, 0u); // game_task gone
+    maps::overlay_loaded(runtime);
+    check(press_button() == 3u, "dragonator: without game_task they are gone");
+    place_overlay(runtime, 0x0A05E600u, "game_task.ovl", 0x00200000u);
+    store(runtime, 0x0A151320u, {0x27BDFFB0u, 0x27BD0050u, 0x03E00008u, 0x00001021u});
+    for (const auto &[at, word] : std::initializer_list<std::pair<std::uint32_t, std::uint32_t>>{
+             {0x0A151348u, 0x30D000FFu}, {0x0A151400u, 0x0E2338E7u}, {0x0A151414u, 0x924500D6u}})
+        memory.store32(at, word);
+
     // A spear without a view: no camera event at all.
     ymod_area_spear blind = given;
     blind.view = 0;
@@ -4783,10 +4856,10 @@ void test_dragonator(psprecomp::Runtime &runtime) {
     yard.spear = &blind;
     check(service->add_area(mod, &yard) == 0 && maps::play_quest_in("yard", 62661u),
         "dragonator: an area whose spear has no view");
-    memory.store16(0x09000000u + 0x60472u, 62661u);
-    check(look(3u) && cpu.gpr[5] == 0u && memory.load32(slot) == 0xFFFFFFFFu,
-        "dragonator: its button starts no camera event, and the slot stays empty");
-    memory.store16(0x09000000u + 0x60472u, 501u);
+    memory.store16(kQuest, 62661u);
+    check(press(3u, 0u) && memory.load8(event) == 0u && memory.load32(slot) == 0xFFFFFFFFu,
+        "dragonator: its button starts no camera event, and the entry stays -1");
+    memory.store16(kQuest, 501u);
     check(served(0x138Bu).empty(), "dragonator: on another quest the game's area pack loads");
 
     // A base that has a spear of its own (the sand ship, after its gong's

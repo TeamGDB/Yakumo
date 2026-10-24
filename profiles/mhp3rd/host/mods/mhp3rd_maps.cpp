@@ -111,24 +111,34 @@ constexpr std::array<CodeWord, 4> kSpearShotCode{{
     {0x0A151400u, 0x0E2338E7u}, // jal 0x088CE39C     (the map)
     {0x0A151414u, 0x924500D6u}, // lbu a1, 0xD6(s2)   (the hunter's area)
 }};
-// The dragonator's button (the executable's 0x088C2764) ends in a jump to
-// 0x0882A590 with the camera's event in a1: 3 for the sand ship's area 1, 4
-// for its area 2, whose scripts (the table at 0x0897169C, by event) look at
-// the ship from places of its own. Yakumo's view is event 13, a slot the
-// table leaves empty (-1), its script the ship's area 1's with the area's eye
-// and target.
-constexpr std::uint32_t kViewJump = 0x088C2850u;
-constexpr std::array<CodeWord, 4> kViewCode{{
+// The dragonator's button, the executable's 0x088C2764, ends in a jump to
+// 0x0882A590, which sets the camera's event (byte +3660 of the camera at
+// *0x08A2F958): 3 for the sand ship's area 1, 4 for its area 2, whose scripts
+// (the table at 0x0897169C, by event) look at the ship from places of its
+// own. The camera takes an event on its next turn (0x088E1870): it reads the
+// event's entry once (0x088E1974, 0x088E13F4), keeps the script with its own
+// state (0x088E13F8) and sets +3660 back to 0. An entry of -1 is not "none": the camera then follows the object
+// given with the event (0x088E197C, 0x088E19E0, 0x088E1558 with +3656), as
+// the game's event 13 does, which 0x0882A908 starts for Nibelsnarf (game_task's
+// 0x0A127468, em047's 0x0A1BC900 and 0x0A1F1780). So Yakumo's view is event
+// 13 with a script of its own (the ship's area 1's with the area's eye and
+// target), held in the entry only from the button until the camera has taken
+// the event, and -1 is put back then.
+constexpr std::uint32_t kButton = 0x088C2764u;
+constexpr std::array<CodeWord, 5> kButtonCode{{
+    {0x088C2764u, 0x27BDFFF0u}, // addiu sp, sp, -16
     {0x088C27B8u, 0x24024650u}, // addiu v0, zero, 18000   (the wait)
     {0x088C2834u, 0x24050003u}, // addiu a1, zero, 3       (event 3)
     {0x088C2850u, 0x0A20A964u}, // j 0x0882A590
     {0x088C2854u, 0x00000000u}, // nop
 }};
+constexpr std::uint32_t kCameraPointer = 0x08A2F958u;
+constexpr std::uint32_t kCameraEvent = 3660u;
 constexpr std::uint32_t kCameraEvents = 0x0897169Cu;
 constexpr std::uint32_t kShipView = 0x08972C8Cu;
 constexpr std::size_t kViewScriptSize = 17u * 4u;
 constexpr std::uint32_t kViewEvent = 13u;
-constexpr std::uint32_t kEmptyEvent = 0xFFFFFFFFu;
+constexpr std::uint32_t kFollowObject = 0xFFFFFFFFu; // event 13's entry as the game has it
 // The map's state, and the area loaded now (a byte of it; the executable's
 // 0x088CE3C4).
 constexpr std::uint32_t kMapStatePointer = 0x09FBEBA0u;
@@ -186,9 +196,13 @@ struct State {
     // script in memory of its own, and whether event 13's slot holds it.
     psprecomp::Runtime *runtime{};
     ymod_mod *host{};
-    ymod_hook shot_hook{}, view_hook{};
+    ymod_hook shot_hook{}, button_before{}, button_after{};
+    bool frame_subscribed{};
+    bool spear_hooked{};          // all of them in place, while a quest with a spear is played
+    bool hooks_refused{};         // said once
+    std::uint32_t event_before{}; // the camera's event when the button was pressed
     std::uint32_t view_script{};
-    bool view_written{};
+    bool view_written{}; // event 13's entry holds the view's script
     bool view_refused{}; // said once
 };
 
@@ -733,39 +747,55 @@ bool code_as_traced(const psprecomp::GuestMemory &memory, const std::array<CodeW
         [&memory](const CodeWord &c) { return memory.contains(c.address, 4u) && memory.load32(c.address) == c.word; });
 }
 
-int spear_shot_hook(ymod_cpu *cpu, void *) {
-    Runtime *runtime = state().runtime;
-    return runtime != nullptr && on_spear_shot(*runtime, *cpu) ? YMOD_RETURN : YMOD_ORIGINAL;
+// The camera at *0x08A2F958, or 0 when it is not there.
+std::uint32_t camera(const psprecomp::GuestMemory &memory) {
+    if (!memory.contains(kCameraPointer, 4u)) return 0u;
+    const std::uint32_t at = memory.load32(kCameraPointer);
+    return memory.contains(at + kCameraEvent, 1u) ? at : 0u;
 }
 
-int spear_view_hook(ymod_cpu *cpu, void *) {
-    if (Runtime *runtime = state().runtime) (void)on_spear_view(*runtime, *cpu);
+// The area loaded now (the executable's 0x088CE3C4), or nothing.
+std::optional<std::uint8_t> area_loaded(const psprecomp::GuestMemory &memory) {
+    if (!memory.contains(kMapStatePointer, 4u)) return std::nullopt;
+    const std::uint32_t map_state = memory.load32(kMapStatePointer);
+    if (!memory.contains(map_state + kAreaLoaded, 1u)) return std::nullopt;
+    return memory.load8(map_state + kAreaLoaded);
+}
+
+int spear_shot_hook(ymod_cpu *cpu, void *) {
+    if (Runtime *runtime = state().runtime) (void)on_spear_shot(*runtime, *cpu);
     return YMOD_CONTINUE;
 }
 
-// The spear's hooks, once, through a mod of Yakumo's own: why they cannot
-// be, or nothing. The view's hook goes where the button's code is as traced.
-std::optional<std::string> attach_spear(Runtime &runtime) {
+int button_before_hook(ymod_cpu *, void *) {
     State &s = state();
-    if (s.shot_hook != 0u && s.view_hook != 0u) return std::nullopt;
-    if (!code_as_traced(runtime.memory(), kViewCode))
-        return "the dragonator's button is not as traced in the game's code";
+    if (s.runtime == nullptr) return YMOD_CONTINUE;
+    const std::uint32_t at = camera(s.runtime->memory());
+    s.event_before = at != 0u ? s.runtime->memory().load8(at + kCameraEvent) : 0u;
+    return YMOD_CONTINUE;
+}
+
+int button_after_hook(ymod_cpu *, void *) {
+    if (Runtime *runtime = state().runtime) (void)on_spear_view(*runtime, state().event_before);
+    return YMOD_CONTINUE;
+}
+
+void spear_frame_event(int, std::uint32_t, void *) {
+    if (Runtime *runtime = state().runtime) spear_frame(*runtime);
+}
+
+// The mod of Yakumo's own the spear's hooks and memory go through.
+ymod_mod *host_mod(Runtime &runtime) {
+    State &s = state();
     native::attach(runtime);
     s.runtime = &runtime;
     if (s.host == nullptr) s.host = native::add_mod("yakumo.maps", "Areas from mods", "");
-    const auto *hooks = static_cast<const ymod_hooks *>(native::host()->service(s.host, YMOD_HOOKS, 1u));
-    if (hooks == nullptr) return "the hooks the spear needs cannot be installed";
-    if (s.shot_hook == 0u)
-        s.shot_hook =
-            hooks->function(s.host, kGameTask.name.data(), kSpearShot, YMOD_HOOK_REPLACE, &spear_shot_hook, nullptr);
-    if (s.view_hook == 0u) s.view_hook = hooks->instruction(s.host, nullptr, kViewJump, &spear_view_hook, nullptr);
-    if (s.shot_hook == 0u || s.view_hook == 0u) return "the hooks the spear needs cannot be installed";
-    return std::nullopt;
+    return s.host;
 }
 
-// Puts the view's script into memory of Yakumo's own and the table's event 13
-// at it: false, said once, when the game's script or the table's slot is not
-// as traced (another mod took the slot).
+// Puts the view's script into memory of Yakumo's own and event 13's entry at
+// it: false, said once, when the game's script or the entry is not as traced
+// (another mod changed it).
 bool write_view(Runtime &runtime, const SpearView &view) {
     State &s = state();
     auto &memory = runtime.memory();
@@ -783,37 +813,83 @@ bool write_view(Runtime &runtime, const SpearView &view) {
     if (!memory.contains(slot, 4u)) return refuse("the camera's table is not there");
     const std::uint32_t now = memory.load32(slot);
     if (s.view_script == 0u) {
-        const auto *service = static_cast<const ymod_memory *>(native::host()->service(s.host, YMOD_MEMORY, 1u));
-        s.view_script = service != nullptr ? service->allocate(s.host, kViewScriptSize, 16u) : 0u;
+        ymod_mod *host = host_mod(runtime);
+        const auto *service = static_cast<const ymod_memory *>(native::host()->service(host, YMOD_MEMORY, 1u));
+        s.view_script = service != nullptr ? service->allocate(host, kViewScriptSize, 16u) : 0u;
         if (s.view_script == 0u) return refuse("no memory for its script");
     }
-    if (now != kEmptyEvent && now != s.view_script)
+    if (now != kFollowObject && now != s.view_script)
         return refuse("the camera's event " + std::to_string(kViewEvent) + " is " + psprecomp::hex32(now) +
-            ", not empty (-1) as the game has it");
+            ", not -1 (follow an object) as the game has it");
     memory.copy_in(s.view_script, *script);
     memory.store32(slot, s.view_script);
     s.view_written = true;
     return true;
 }
 
-// Whether the quest played gives a spear with a view in one of its areas.
-bool view_wanted(const psprecomp::GuestMemory &memory) {
-    const std::optional<std::uint32_t> quest = quest_played(memory);
-    const auto played = quest ? state().quests.find(*quest) : state().quests.end();
-    if (played == state().quests.end()) return false;
-    return std::any_of(played->second.begin(), played->second.end(), [](std::size_t i) {
-        const Added &a = state().areas[i];
-        return a.spear && a.spear->view;
-    });
-}
-
-// Event 13's slot back to empty, where Yakumo wrote and nothing else has since.
+// Event 13's entry back to -1, where Yakumo wrote and nothing else has since.
 void put_view_back(psprecomp::GuestMemory &memory) {
     State &s = state();
     const std::uint32_t slot = kCameraEvents + 4u * kViewEvent;
     if (s.view_written && memory.contains(slot, 4u) && memory.load32(slot) == s.view_script)
-        memory.store32(slot, kEmptyEvent);
+        memory.store32(slot, kFollowObject);
     s.view_written = false;
+}
+
+// Takes the spear's hooks and frame event down, and puts event 13's entry back.
+void unhook_spear(Runtime &runtime) {
+    State &s = state();
+    if (s.host != nullptr) {
+        if (const auto *hooks = static_cast<const ymod_hooks *>(native::host()->service(s.host, YMOD_HOOKS, 1u)))
+            for (const ymod_hook hook : {s.shot_hook, s.button_before, s.button_after})
+                if (hook != 0u) (void)hooks->remove(s.host, hook);
+        if (const auto *events = static_cast<const ymod_events *>(native::host()->service(s.host, YMOD_EVENTS, 1u));
+            events != nullptr && s.frame_subscribed)
+            (void)events->unsubscribe(s.host, YMOD_EVENT_FRAME, &spear_frame_event, nullptr);
+    }
+    s.shot_hook = s.button_before = s.button_after = 0u;
+    s.frame_subscribed = false;
+    s.spear_hooked = false;
+    put_view_back(runtime.memory());
+}
+
+// The spear's hooks, through a mod of Yakumo's own: the shot's place after
+// game_task's 0x0A151320, the button's camera event around 0x088C2764, and a
+// frame event that puts event 13's entry back. All of them or none: false,
+// said once, when one cannot be had.
+bool hook_spear(Runtime &runtime) {
+    State &s = state();
+    (void)host_mod(runtime);
+    const auto *hooks = static_cast<const ymod_hooks *>(native::host()->service(s.host, YMOD_HOOKS, 1u));
+    const auto *events = static_cast<const ymod_events *>(native::host()->service(s.host, YMOD_EVENTS, 1u));
+    if (hooks != nullptr && events != nullptr) {
+        s.shot_hook =
+            hooks->function(s.host, kGameTask.name.data(), kSpearShot, YMOD_HOOK_AFTER, &spear_shot_hook, nullptr);
+        s.button_before = hooks->function(s.host, nullptr, kButton, YMOD_HOOK_BEFORE, &button_before_hook, nullptr);
+        s.button_after = hooks->function(s.host, nullptr, kButton, YMOD_HOOK_AFTER, &button_after_hook, nullptr);
+        s.frame_subscribed = events->subscribe(s.host, YMOD_EVENT_FRAME, &spear_frame_event, nullptr) == 0;
+    }
+    if (hooks != nullptr && events != nullptr && s.shot_hook != 0u && s.button_before != 0u && s.button_after != 0u &&
+        s.frame_subscribed) {
+        s.spear_hooked = true;
+        return true;
+    }
+    unhook_spear(runtime);
+    if (!s.hooks_refused)
+        std::cerr << "[mods] the hooks of the dragonator's spear cannot be installed; its button is the game's\n";
+    s.hooks_refused = true;
+    return false;
+}
+
+// Whether a quest with a spear is played now: game_task is loaded and the
+// quest's areas are served, one of them with a spear.
+bool spear_quest(const psprecomp::GuestMemory &memory) {
+    const std::optional<LoadedOverlay> task = overlay_at(memory, kGameTask.load);
+    if (!task || !iequals(task->name, kGameTask.name)) return false;
+    const std::optional<std::uint32_t> quest = quest_played(memory);
+    if (!quest || !state().quests.contains(*quest)) return false;
+    const std::optional<std::vector<const Added *>> areas = served_areas(memory, *quest);
+    return areas && std::any_of(areas->begin(), areas->end(), [](const Added *a) { return a->spear.has_value(); });
 }
 
 } // namespace
@@ -942,16 +1018,24 @@ bool on_spear_shot(Runtime &runtime, ymod_cpu &cpu) {
     return true;
 }
 
-bool on_spear_view(Runtime &runtime, ymod_cpu &cpu) {
+bool on_spear_view(Runtime &runtime, std::uint32_t event_before) {
     auto &memory = runtime.memory();
-    const std::uint32_t event = cpu.gpr[5]; // a1
-    if ((event != 3u && event != 4u) || !memory.contains(kMapStatePointer, 4u)) return false;
-    const std::uint32_t map_state = memory.load32(kMapStatePointer);
-    if (!memory.contains(map_state + kAreaLoaded, 1u)) return false;
-    const Added *a = spear_area(memory, memory.load8(map_state + kAreaLoaded));
-    if (a == nullptr) return false;
-    cpu.gpr[5] = a->spear->view && write_view(runtime, *a->spear->view) ? kViewEvent : 0u; // 0: no event
+    const std::uint32_t at = camera(memory);
+    const std::optional<std::uint8_t> area = area_loaded(memory);
+    if (at == 0u || !area) return false;
+    const std::uint32_t event = memory.load8(at + kCameraEvent);
+    const Added *a = spear_area(memory, *area);
+    if (a == nullptr || (event != 3u && event != 4u) || event == event_before) return false;
+    memory.store8(at + kCameraEvent,
+        static_cast<std::uint8_t>(a->spear->view && write_view(runtime, *a->spear->view) ? kViewEvent : 0u));
     return true;
+}
+
+void spear_frame(Runtime &runtime) {
+    State &s = state();
+    if (!s.view_written) return;
+    const std::uint32_t at = camera(runtime.memory());
+    if (at == 0u || runtime.memory().load8(at + kCameraEvent) != kViewEvent) put_view_back(runtime.memory());
 }
 
 bool add_area(Runtime &runtime, AreaSpec spec, std::string *why) {
@@ -1022,7 +1106,8 @@ bool add_area(Runtime &runtime, AreaSpec spec, std::string *why) {
         std::string wrong;
         if (!place_spear((*entries)[kSceneEntry], (*entries)[kRecordsEntry], *spec.spear, wrong))
             return fail(std::move(wrong));
-        if (std::optional<std::string> hooks = attach_spear(runtime)) return fail(std::move(*hooks));
+        if (!code_as_traced(runtime.memory(), kButtonCode))
+            return fail("the dragonator's button is not as traced in the game's code");
     }
     if (!s.installed) {
         if (!added::stand_in(runtime, [](Runtime &r, FileId file) { return serve(r, file); }))
@@ -1265,8 +1350,10 @@ std::shared_ptr<const std::vector<std::uint8_t>> serve(Runtime &runtime, FileId 
 
 void overlay_loaded(Runtime &runtime) {
     State &s = state();
-    // The camera's event 13 is the spear's only while its quest is played.
-    if (s.view_written && !view_wanted(runtime.memory())) put_view_back(runtime.memory());
+    // The spear's hooks only while a quest with a spear is played.
+    const bool spear = spear_quest(runtime.memory());
+    if (spear && !s.spear_hooked && !s.hooks_refused) (void)hook_spear(runtime);
+    if (!spear && (s.spear_hooked || s.view_written)) unhook_spear(runtime);
     if (s.quests.empty() && s.written.empty()) return;
     auto &memory = runtime.memory();
     // The quest played, on a quest: game_task holds its HUD and game_sub the
@@ -1320,12 +1407,8 @@ void overlay_loaded(Runtime &runtime) {
 
 void reset_for_tests() {
     State &s = state();
-    // The spear's hooks go with it, so that adding again installs them anew.
-    if (s.host != nullptr)
-        if (const auto *hooks = static_cast<const ymod_hooks *>(native::host()->service(s.host, YMOD_HOOKS, 1u))) {
-            if (s.shot_hook != 0u) (void)hooks->remove(s.host, s.shot_hook);
-            if (s.view_hook != 0u) (void)hooks->remove(s.host, s.view_hook);
-        }
+    // The spear's hooks go with it, so that a quest installs them anew.
+    if (s.runtime != nullptr) unhook_spear(*s.runtime);
     s = {};
 }
 

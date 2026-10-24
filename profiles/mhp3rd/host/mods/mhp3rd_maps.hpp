@@ -56,10 +56,11 @@ struct ymod_cpu;
 //
 // An area with a spear also has, while its quest is played, the game's spear
 // shot placed at it (game_task's 0x0A151320 knows the sand ship's only) and
-// the camera's view of it given by Yakumo's own camera script (event 13, a
-// slot the executable's table at 0x0897169C leaves empty), or none; both
-// through hooks that leave every other quest to the game's code, and the
-// table's slot is put back on every other quest.
+// the camera's view of it given by Yakumo's own camera script, as event 13
+// (whose entry in the executable's table at 0x0897169C, -1, the game reads
+// as "follow an object", for Nibelsnarf), held there only until the camera
+// has taken the event; or none. Through hooks installed only while such a
+// quest is played.
 //
 // The quest played is the accepted quest's id beside the character, which the
 // game itself reads to choose a quest's collision (0x0A065388). The files go
@@ -272,8 +273,8 @@ struct Area {
 // its spear's place is not finite, its pitch past kMostPitch or its mesh not
 // one of its model's, the game's area it takes the place of cannot give the
 // spear a gimmick group (place_spear(); its pack is read from the disc), the
-// hooks the spear needs cannot be installed, or the loader cannot be taken
-// over.
+// dragonator's button is not as traced in the game's code, or the loader
+// cannot be taken over.
 bool add_area(psprecomp::Runtime &runtime, AreaSpec spec, std::string *why = nullptr);
 
 // The area a mod added under `id`, or null.
@@ -320,16 +321,22 @@ bool play_quest_in(std::string_view id, std::uint32_t quest, std::string *why = 
 // (said once in the log; the game's picture stays).
 void overlay_loaded(psprecomp::Runtime &runtime);
 
-// The hooks of the spear: game_task's 0x0A151320 (REPLACE), when asked for
-// the dragonator's shot (a2 1) by a hunter (a1) in an area with a spear of
-// the quest played, gives its place (start in a3, anchor in t0, step in t1,
-// each with a w of 1) and returns 1; and the executable's 0x088C2850, the
-// jump of 0x088C2764 into 0x0882A590 with the dragonator's camera event in
-// a1, makes it Yakumo's event 13 with the area's view, or 0, none, for a
-// spear without one, while the area loaded is such an area. Anything else is
-// left to the game's code: false.
+// The spear's hooks, installed while a quest with a spear is played
+// (overlay_loaded(), with game_task loaded and the quest's areas served) and
+// taken down on every other: after game_task's 0x0A151320, asked for the
+// dragonator's shot (a2 1) by a hunter (a1) in an area of the quest with a
+// spear, on_spear_shot() places it there (start in a3, anchor in t0, step in
+// t1, each with a w of 1) and returns 1 in v0; around the button (the
+// executable's 0x088C2764), when it has set the camera's event (byte +3660
+// of *0x08A2F958) to 3 or 4 in such an area loaded now, on_spear_view() makes
+// it 13, with event 13's entry at Yakumo's script of the area's view, or 0,
+// none, for a spear without one (`event_before`: the event before the
+// button); and between frames spear_frame() puts the entry back to -1 (the
+// game's: follow an object) once the camera has taken the event. Anything
+// else is left to the game: false.
 bool on_spear_shot(psprecomp::Runtime &runtime, struct ::ymod_cpu &cpu);
-bool on_spear_view(psprecomp::Runtime &runtime, struct ::ymod_cpu &cpu);
+bool on_spear_view(psprecomp::Runtime &runtime, std::uint32_t event_before);
+void spear_frame(psprecomp::Runtime &runtime);
 
 // How write_points() numbers an area's points: the map and area they are in
 // (whose conditional words are passed over) and the first ballista's word,
