@@ -766,6 +766,73 @@ void test_shared_overlay_address(psprecomp::Runtime &runtime) {
     for (const ymod_hook hook : {lobby, task, lobby_step, task_step}) hooks->remove(mod, hook);
 }
 
+// A generated unit reaches a function of its own unit by a native jump: the
+// recompiler emits a fixed jal into the same unit as `goto L_<callee>`
+// (tools/codegen_main.cpp, "Fixed same-unit JAL"), which never looks at what
+// is registered at the callee. This stand-in does the same: entered at the
+// caller, it runs the callee inline. A function hook on the callee retires
+// the unit, so the code runs through the JIT, whose calls leave through the
+// dispatcher, and the hook sees calls from its own unit too.
+constexpr std::uint32_t kGeneratedUnit = 0x08A80000u;
+constexpr std::uint32_t kUnitCaller = kGeneratedUnit + 0x100u;
+constexpr std::uint32_t kUnitCallee = kGeneratedUnit + 0x200u;
+int g_unit_runs = 0;
+void generated_unit(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &ctx) {
+    ++g_unit_runs;
+    if (ctx.pc != kUnitCaller && ctx.pc != kUnitCallee) {
+        runtime.stop("the stand-in unit was entered at " + std::to_string(ctx.pc));
+        return;
+    }
+    ctx.gpr[2] = ctx.gpr[4] + 1u; // the callee, inline
+    ctx.pc = ctx.gpr[31];
+}
+void unit_after(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &) {
+    runtime.stop("the unit after was entered");
+}
+// Every word of the unit, and of the one after it, registered as the
+// recompiler's corpora register theirs (an overlay's, when it loads again).
+void register_generated_units(psprecomp::Runtime &runtime) {
+    for (std::uint32_t at = 0; at < 0x4000u; at += 4u) {
+        runtime.register_function(kGeneratedUnit + at, &generated_unit, "recomp_unit_test_0000");
+        runtime.register_function(kGeneratedUnit + 0x4000u + at, &unit_after, "recomp_unit_test_0001");
+    }
+}
+void test_hook_in_generated_unit(psprecomp::Runtime &runtime) {
+    namespace native = mhp3rd::mods::native;
+    ymod_mod *mod = native::add_mod("unit_hooks", "Unit Hooks", ".");
+    const auto *hooks = static_cast<const ymod_hooks *>(native::host()->service(mod, YMOD_HOOKS, 1u));
+    // caller: move s0, ra; jal callee; nop; move ra, s0; jr ra; nop
+    store(runtime, kUnitCaller, {0x03E08021u, 0x0E2A0080u, 0u, 0x0200F821u, 0x03E00008u, 0u});
+    store(runtime, kUnitCallee, {0x24820001u, 0x03E00008u, 0u}); // callee: addiu v0, a0, 1; jr ra
+    register_generated_units(runtime);
+    g_unit_runs = 0;
+    check(call(runtime, kUnitCaller, 10u) == 11u && g_unit_runs == 1 && runtime.cpu().pc == kSentinel,
+        "native: the stand-in unit runs its call to a function of its own inline");
+
+    g_added_seen = 0;
+    const ymod_hook hook = hooks->function(mod, nullptr, kUnitCallee, YMOD_HOOK_BEFORE, &count_added, nullptr);
+    const std::uint32_t result = call(runtime, kUnitCaller, 10u);
+    check(hook != 0u && result == 11u && g_added_seen == 1 && g_unit_runs == 1 && runtime.cpu().pc == kSentinel,
+        "native: a function hook sees the calls from its own generated unit (" + std::to_string(g_added_seen) +
+            " of 1)");
+    check(!runtime.has_function(kGeneratedUnit) && !runtime.has_function(kGeneratedUnit + 0x3FFCu) &&
+            runtime.has_function(kGeneratedUnit + 0x4000u),
+        "native: the hook retires its own unit, all of it, and not the next");
+
+    // The unit's code registered again, as an overlay's when it loads again:
+    // the hook goes back on top and retires it again.
+    register_generated_units(runtime);
+    native::frame(runtime);
+    (void)call(runtime, kUnitCaller, 10u);
+    check(g_added_seen == 2 && g_unit_runs == 1 && runtime.cpu().pc == kSentinel,
+        "native: a unit registered again under a hook is retired again when the hook goes back");
+
+    // The hook gone, the code there runs as the game's, compiled.
+    check(hooks->remove(mod, hook) == 0 && call(runtime, kUnitCaller, 10u) == 11u && g_added_seen == 2 &&
+            g_unit_runs == 1 && runtime.cpu().pc == kSentinel,
+        "native: with the hook removed, the retired unit's code runs compiled, without it");
+}
+
 // Quests mods add: encrypted with the keys in memory, served as files, and
 // the game's id-to-file code given the file for a mod's quest id.
 void test_quests(psprecomp::Runtime &runtime) {
@@ -4407,6 +4474,7 @@ int main() {
     test_hook_changes(runtime);
     test_host_returns(runtime);
     test_shared_overlay_address(runtime);
+    test_hook_in_generated_unit(runtime);
     test_quests(runtime);
     test_tables(runtime);
     test_monsters(runtime);

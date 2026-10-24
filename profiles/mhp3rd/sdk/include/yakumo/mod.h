@@ -173,6 +173,9 @@ typedef struct ymod_memory {
  *  - REPLACE runs the callback instead. The callback sets v0/v1 and returns
  *    YMOD_RETURN to return to the caller, or YMOD_ORIGINAL to run the game's
  *    function after all.
+ * While a function is hooked, the 16 KiB unit of recompiled code that holds
+ * it runs through the JIT instead, so that calls from inside that unit, which
+ * the recompiled code makes as plain jumps, reach the hook too.
  * An instruction hook runs the callback just before the instruction at any
  * address runs, inside native code compiled by the JIT; it cannot redirect.
  *

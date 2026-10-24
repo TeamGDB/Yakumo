@@ -197,6 +197,15 @@ bool install_site(std::uint32_t address, Site &site, const std::string &overlay)
     const auto host = host_functions().find(address);
     site.host = host != host_functions().end() ? host->second.function : nullptr;
     site.host_name = host != host_functions().end() ? host->second.name : std::string();
+    // Recompiled code reaches a function of its own unit by a native jump (a
+    // fixed jal into the same unit is a goto) that never looks at what is
+    // registered at the callee, so the hook would miss those calls. The unit
+    // is retired: the JIT compiles its code from memory, and its calls leave
+    // through the dispatcher, which finds the hook. The unit is found by the
+    // next word too, for a host feature registered at the address itself; a
+    // retired unit leaves nothing registered there, so it is not looked for
+    // again.
+    if (runtime.has_function(address + 4u)) (void)runtime.retire_generated_code(address, address + 8u);
     // Registering drops compiled code there; the game's own first
     // instructions are compiled afterwards, for the hook to run.
     runtime.register_function(address, &hook_entry, "mod_hook");
