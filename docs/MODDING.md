@@ -482,7 +482,18 @@ camp.spots = spots;       camp.spot_count = 2;
 camp.cart = &cart;        // a camp's cart
 ```
 
-The hunter leaving through an exit comes into its area at the arrival from the area he left with the exit's door; two ways between the same areas differ by their doors. An exit leads to another area of the map, places are finite and sizes above 0, and only a camp (area 0) has a cart. A quest played in several areas of one map names them all, each in place of another of the map's areas, a camp and a fighting area say: `quest.areas` (with `quest.area_count`) besides `quest.area`. Their monsters' areas are the map's numbers (0 the camp), except that a monster of area 0 starts in `quest.area` when the quest names one. If one of the quest's areas does not fit where the game's goes, or it or an area its exits and arrivals name is not one of the map's ([MAPS.md](MAPS.md#areas-mods-add)), none of them is served.
+Where the hunter gathers and what he fires are spots too. A gathering point gives its items, named as rewards are, each time it is used; a cannon fires the cannonball (*Cannon Ammo*) he carries there along its facing, and a ballista the ammo he has (*Ballista Ammo*, put in the quest's `supplies`), aimed the way he faces ([MAPS.md](MAPS.md#gathering-ballistas-and-cannons)). The area's model draws them: the game draws no cannon of its own.
+
+```cpp
+static const ymod_area_item balls[] = {{"Cannon Ammo", 1, 100}};    // item, how many, chance (adding up to 100)
+static const ymod_area_spot things[] = {
+    {YMOD_SPOT_CANNON, {-1869.0f, 503.0f, 769.0f}, 200.0f, 300.0f, 6736},     // fires along its facing
+    {YMOD_SPOT_GATHERING, {-1700.0f, 503.0f, 500.0f}, 150.0f, 200.0f, 0,
+        balls, 1, 10, 0}};                         // its items; 10 uses, and no more by chance
+castle.spots = things;    castle.spot_count = 2;
+```
+
+The hunter leaving through an exit comes into its area at the arrival from the area he left with the exit's door; two ways between the same areas differ by their doors. An exit leads to another area of the map, places are finite and sizes above 0, only a camp (area 0) has a cart, and an array is NULL only with a count of 0. A gathering point gives 1 to 16 items, their chances adding up to 100, with 1 to 99 uses in all; nothing else gives any. Every quest played in the area is built with what its gathering points give, and built again with the items' names once the game's text is loaded. A quest played in several areas of one map names them all, each in place of another of the map's areas, a camp and a fighting area say: `quest.areas` (with `quest.area_count`) besides `quest.area`. Their monsters' areas are the map's numbers (0 the camp), except that a monster of area 0 starts in `quest.area` when the quest names one. If one of the quest's areas does not fit where the game's goes, or it or an area its exits and arrivals name is not one of the map's ([MAPS.md](MAPS.md#areas-mods-add)), none of them is served.
 
 ## Panels and overlays
 

@@ -1516,8 +1516,8 @@ void test_map_points(psprecomp::Runtime &runtime) {
     const std::string exit_line = "an exit's area or door is out of range";
     const std::string odd_exit_line = "an exit's place is not a number or its size is not above 0";
     const std::string in_line = "an arrival's facing, area or door is out of range";
-    const std::string thing_line =
-        "a thing to use is not a supply box, delivery box or bed, or its facing is out of range";
+    const std::string thing_line = "a thing to use is not a gathering point, supply box, delivery box, bed, "
+                                   "ballista or cannon, or its facing is out of range";
     const std::string odd_thing_line = "a thing to use's place is not a number or its size is not above 0";
     bool all_refused = refused(too_many, "many", "it has more than 16 exits, arrivals or things to use");
     for (std::size_t i = 0; i < std::size(bad_exits); ++i) {
@@ -1556,6 +1556,7 @@ void test_map_points(psprecomp::Runtime &runtime) {
     ymod_area floor_cart = camp;
     floor_cart.area = 1;
     floor_cart.exits = nullptr;
+    floor_cart.exit_count = 0u;
     all_refused = refused(floor_cart, "floor_cart", "only a camp (area 0) has a cart") && all_refused;
     for (std::size_t i = 0; i < std::size(bad_ins); ++i) {
         ymod_area a = camp;
@@ -1770,6 +1771,254 @@ void test_map_points(psprecomp::Runtime &runtime) {
     memory.store16(0x09000000u + 0x60472u, 62710u);
     check(built && record && record->map == 8u && !older_served && maps::serve(runtime, 0x1262u) != nullptr,
         "points: an older quest struct names no areas, and is played in the game's");
+
+    std::error_code ec;
+    std::filesystem::remove_all(folder, ec);
+    maps::reset_for_tests();
+    mhp3rd::mods::added::reset_for_tests();
+}
+
+// Gathering points, ballistas and cannons: their records' words, what a
+// gathering point gives, and the quests played in such an area, whose lists
+// are built empty first and again with the game's item names.
+void test_map_gathering(psprecomp::Runtime &runtime) {
+    namespace maps = mhp3rd::mods::maps;
+    namespace game = mhp3rd::game;
+    using Bytes = std::vector<std::uint8_t>;
+    const auto u16 = [](const Bytes &b, std::size_t at) {
+        return static_cast<std::uint16_t>(b[at] | (b[at + 1u] << 8u));
+    };
+
+    // The word (+28): a gathering point's list from 1, a ballista's or a
+    // cannon's number among its kind, 0 for the camp's things; checked
+    // against the disc's sand ship (map 6, area 1: gathering 1 and 2,
+    // ballistas 0 and 1, cannons 0 and 1).
+    maps::Points points;
+    const maps::Gathering pile{{{"Cannon Ammo", 1u, 100u}}, 10u, 0u};
+    points.spots = {{maps::SpotKind::Gathering, 0.0f, 400.0f, 1306.0f, 265.0f, 200.0f, 0u, pile},
+        {maps::SpotKind::Cannon, -257.0f, 250.0f, 415.0f, 150.0f, 150.0f, 0xC000u},
+        {maps::SpotKind::Ballista, -280.0f, 243.0f, -124.0f, 200.0f, 200.0f, 0xC000u},
+        {maps::SpotKind::Gathering, 33.0f, 215.0f, -860.0f, 200.0f, 100.0f, 0u, pile},
+        {maps::SpotKind::Cannon, 257.0f, 250.0f, 415.0f, 150.0f, 150.0f, 0x4000u},
+        {maps::SpotKind::Ballista, 280.0f, 243.0f, -124.0f, 200.0f, 200.0f, 0x4000u},
+        {maps::SpotKind::Bed, 0.0f, 0.0f, 0.0f, 130.0f, 300.0f, 0u}};
+    const Bytes table = maps::write_points(points);
+    const auto record = [&table](std::size_t i) { return 0x10u + 32u * i; };
+    std::array<std::uint16_t, 7> words{}, kinds{};
+    for (std::size_t i = 0; i < 7u; ++i) {
+        words[i] = u16(table, record(i) + 28u);
+        kinds[i] = u16(table, record(i) + 30u);
+    }
+    check(word_at(table, 4u) == 2u && word_at(table, 8u) == 7u &&
+            words == std::array<std::uint16_t, 7>{1, 0, 0, 2, 1, 1, 0} &&
+            kinds == std::array<std::uint16_t, 7>{2, 10, 9, 2, 10, 9, 7} && u16(table, record(1) + 24u) == 0xC000u &&
+            u16(table, record(4) + 26u) == 4u,
+        "gathering: gathering points take their lists from 1, ballistas and cannons their numbers among their kind, "
+        "as the disc's sand ship");
+
+    // Through the service.
+    maps::reset_for_tests();
+    mhp3rd::mods::added::reset_for_tests();
+    loader_stand_ins(runtime);
+    const std::filesystem::path folder = std::filesystem::temp_directory_path() / "yakumo_map_gathering_test";
+    std::filesystem::create_directories(folder);
+    const auto write = [&folder](const char *name, std::string_view text) {
+        std::ofstream(folder / name, std::ios::binary).write(text.data(), static_cast<std::streamsize>(text.size()));
+    };
+    write("model.pmo",
+        std::string_view("pmo\0"
+                         "102\0YARD",
+            12));
+    write("ge.bin", "YARD GE");
+    write("tex.tmh", ".TMH yard");
+    write("ground.bin", "4.00 ground");
+    write("walls.bin", "4.00 walls");
+    ymod_mod *mod = mhp3rd::mods::native::add_mod("test.gathering", "Gathering test", folder.string());
+    const auto *service = static_cast<const ymod_maps *>(mhp3rd::mods::native::host()->service(mod, YMOD_MAPS, 1u));
+    const ymod_area_item balls[] = {{"Cannon Ammo", 1u, 100u}};
+    const ymod_area_item bolts[] = {{"Ballista Ammo", 2u, 70u}, {"Cannon Ammo", 1u, 30u}};
+    const ymod_area_spot things[] = {{YMOD_SPOT_CANNON, {-1869.0f, 503.0f, 769.0f}, 200.0f, 300.0f, 6736},
+        {YMOD_SPOT_GATHERING, {-1600.0f, 503.0f, 600.0f}, 150.0f, 200.0f, 0, balls, 1u, 10u, 0u},
+        {YMOD_SPOT_BALLISTA, {2496.0f, 350.0f, 609.0f}, 200.0f, 300.0f, 0},
+        {YMOD_SPOT_GATHERING, {2300.0f, 350.0f, 609.0f}, 150.0f, 200.0f, 0, bolts, 2u, 3u, 2u}};
+    const ymod_area_arrival in{{0.0f, 0.0f, 3300.0f}, 0x8000, 0, 0};
+    ymod_area yard{sizeof(ymod_area), "yard", 8, 1, "model.pmo", "ge.bin", "tex.tmh", "ground.bin", "walls.bin"};
+    yard.arrivals = &in;
+    yard.arrival_count = 1u;
+    yard.spots = things;
+    yard.spot_count = 4u;
+    const std::vector<maps::Gathering> lists = service != nullptr && service->add_area(mod, &yard) == 0
+        ? maps::gathering("yard")
+        : std::vector<maps::Gathering>{};
+    check(lists.size() == 2u && lists[0].items.size() == 1u && lists[0].items[0].item == "Cannon Ammo" &&
+            lists[0].uses == 10u && lists[1].items.size() == 2u && lists[1].items[0].item == "Ballista Ammo" &&
+            lists[1].items[0].count == 2u && lists[1].items[0].chance == 70u && lists[1].uses == 3u &&
+            lists[1].extra_uses == 2u && maps::gathering("nowhere").empty(),
+        "gathering: an area with cannons, a ballista and gathering points is added, its points' lists kept in order");
+
+    const auto refused = [&](ymod_area area, const char *id, const std::string &line) {
+        area.id = id;
+        return service != nullptr && service->add_area(mod, &area) == -1 && maps::find(id) == nullptr &&
+            logged("area " + std::string(id) + " is not added: " + line);
+    };
+    const auto one_spot = [&](const ymod_area_spot &spot) {
+        ymod_area a = yard;
+        a.spots = &spot;
+        a.spot_count = 1u;
+        return a;
+    };
+    const ymod_area_spot pile_spot = things[1];
+    ymod_area_spot no_items = pile_spot;
+    no_items.items = nullptr;
+    ymod_area_spot uncounted = pile_spot;
+    uncounted.item_count = 0u;
+    ymod_area_spot too_many_items = pile_spot;
+    too_many_items.item_count = 17u;
+    ymod_area_spot too_many_uses = pile_spot;
+    too_many_uses.uses = 100u;
+    ymod_area_spot too_many_extra = pile_spot;
+    too_many_extra.extra_uses = 100u;
+    ymod_area_spot over_99 = pile_spot;
+    over_99.uses = 60u;
+    over_99.extra_uses = 40u;
+    ymod_area_spot unused = pile_spot;
+    unused.uses = 0u;
+    const ymod_area_item unnamed[] = {{nullptr, 1u, 100u}};
+    const ymod_area_item none_given[] = {{"Cannon Ammo", 0u, 100u}};
+    const ymod_area_item lots[] = {{"Cannon Ammo", 100u, 100u}};
+    const ymod_area_item never[] = {{"Cannon Ammo", 1u, 0u}};
+    const ymod_area_item uneven[] = {{"Cannon Ammo", 1u, 60u}};
+    const ymod_area_item empty_name[] = {{"", 1u, 100u}};
+    std::vector<ymod_area_spot> bad_items;
+    for (const ymod_area_item *list : {unnamed, none_given, lots, never}) {
+        ymod_area_spot t = pile_spot;
+        t.items = list;
+        bad_items.push_back(t);
+    }
+    ymod_area_spot uneven_spot = pile_spot;
+    uneven_spot.items = uneven;
+    ymod_area_spot empty_name_spot = pile_spot;
+    empty_name_spot.items = empty_name;
+    ymod_area_spot loaded_cannon = things[0];
+    loaded_cannon.items = balls;
+    loaded_cannon.item_count = 1u;
+    ymod_area_spot used_bed = {YMOD_SPOT_BED, {0.0f, 0.0f, 0.0f}, 130.0f, 300.0f, 0};
+    used_bed.uses = 1u;
+    ymod_area_spot gong = things[0];
+    gong.kind = 12;
+    const std::string count_line = "a thing to use counts items it does not give";
+    const std::string bound_line = "a thing to use gives more than 16 items or more than 99 uses";
+    const std::string item_line = "a gathered item's name, count or chance is out of range";
+    const std::string uses_line = "a gathering point's uses are not 1 to 99";
+    bool all_refused = refused(one_spot(no_items), "no_items", count_line);
+    all_refused =
+        refused(one_spot(uncounted), "uncounted", "a gathering point gives no item or more than 16") && all_refused;
+    all_refused = refused(one_spot(too_many_items), "too_many_items", bound_line) && all_refused;
+    all_refused = refused(one_spot(too_many_uses), "too_many_uses", bound_line) && all_refused;
+    all_refused = refused(one_spot(too_many_extra), "too_many_extra", bound_line) && all_refused;
+    all_refused = refused(one_spot(over_99), "over_99", uses_line) && all_refused;
+    all_refused = refused(one_spot(unused), "unused", uses_line) && all_refused;
+    for (std::size_t i = 0; i < bad_items.size(); ++i)
+        all_refused = refused(one_spot(bad_items[i]), ("item" + std::to_string(i)).c_str(), item_line) && all_refused;
+    all_refused =
+        refused(one_spot(uneven_spot), "uneven", "a gathering point's chances do not add up to 100") && all_refused;
+    all_refused =
+        refused(one_spot(empty_name_spot), "empty_name", "a gathered item is unnamed or none of it is given") &&
+        all_refused;
+    all_refused =
+        refused(one_spot(loaded_cannon), "loaded_cannon", "only a gathering point gives items") && all_refused;
+    all_refused = refused(one_spot(used_bed), "used_bed", "only a gathering point gives items") && all_refused;
+    all_refused = refused(one_spot(gong), "gong",
+                      "a thing to use is not a gathering point, supply box, delivery box, bed, ballista or cannon, "
+                      "or its facing is out of range") &&
+        all_refused;
+    check(all_refused,
+        "gathering: items counted but not given, more than 16, more than 99 uses, none or past 99 with the extra "
+        "ones, an item unnamed or of none, 100 or with no chance, chances not adding up to 100, items on a cannon "
+        "or uses on a bed, and a kind not offered (the gong) are refused");
+    ymod_area uncounted_exits = yard;
+    uncounted_exits.exit_count = 1u;
+    ymod_area uncounted_arrivals = yard;
+    uncounted_arrivals.arrivals = nullptr;
+    ymod_area uncounted_spots = yard;
+    uncounted_spots.spots = nullptr;
+    const std::string array_line = "it counts exits, arrivals or things to use it does not give";
+    check(refused(uncounted_exits, "uncounted_exits", array_line) &&
+            refused(uncounted_arrivals, "uncounted_arrivals", array_line) &&
+            refused(uncounted_spots, "uncounted_spots", array_line),
+        "gathering: an area counting exits, arrivals or things it gives no array for is refused");
+
+    // A quest played in the yard: its gathering lists in area 1, empty until
+    // the game's item names are known, then named.
+    const auto *quests = static_cast<const ymod_quests *>(mhp3rd::mods::native::host()->service(mod, YMOD_QUESTS, 1u));
+    const ymod_quest_monster hunted{"tigrex", 0, {0.0f, 0.0f, 0.0f}, 0x1E, 0x13, 100};
+    ymod_quest quest{sizeof(ymod_quest), 62720u, 8, 1, 30u, 0u, 0u, "tigrex", 1u, &hunted, 1u, {}};
+    quest.area = "yard";
+    auto &memory = runtime.memory();
+    const auto built_quest = [&](std::uint32_t id) -> std::optional<Bytes> {
+        const auto file = mhp3rd::mods::p3rd::quest_file(id);
+        if (!file) return std::nullopt;
+        runtime.cpu().gpr[5] = *file;
+        const std::uint32_t size = call(runtime, 0x08864E8Cu, 0x08B3F040u);
+        runtime.cpu().gpr[5] = *file;
+        runtime.cpu().gpr[6] = 0x08C00000u;
+        (void)call(runtime, 0x08863CDCu, 0x08B3F040u);
+        Bytes encrypted(size);
+        memory.copy_out(0x08C00000u, encrypted);
+        game::GuestRam keys_ram(memory);
+        if (const auto keys = game::read_quest_keys(keys_ram)) return game::decrypt_quest(encrypted, *keys);
+        return std::nullopt;
+    };
+    // Area 1's entries: the offset to the point's items, its most and fewest uses.
+    const auto entry_of = [](const Bytes &q, std::size_t area, std::size_t point) {
+        return word_at(q, word_at(q, 0x60u) + 4u * area) + 8u * point;
+    };
+    ymod_quest misnamed = quest;
+    misnamed.id = 62721u;
+    std::optional<Bytes> first =
+        quests != nullptr && quests->add(mod, &quest) == 62720 ? built_quest(62720u) : std::nullopt;
+    check(first && word_at(*first, entry_of(*first, 1u, 0u)) == 0u &&
+            u16(*first, entry_of(*first, 1u, 0u) + 4u) == 10u && u16(*first, entry_of(*first, 1u, 1u) + 4u) == 5u &&
+            u16(*first, entry_of(*first, 1u, 1u) + 6u) == 3u && word_at(*first, entry_of(*first, 0u, 0u)) == 0u,
+        "gathering: a quest in the area is first built with its points' uses and no items");
+    // The text block's item names (table 3): 0 a placeholder, 1 and 2.
+    constexpr std::uint32_t kBlock = 0x08A40640u, kNames = kBlock + 0x3000u;
+    memory.store32(kBlock + 3u * 4u, 0x3000u);
+    memory.store32(kNames, 16u);
+    memory.store32(kNames + 4u, 18u);
+    memory.store32(kNames + 8u, 30u);
+    memory.store32(kNames + 12u, 0xFFFFFFFFu);
+    for (const auto &[at, text] :
+        {std::pair<std::uint32_t, const char *>{16u, "-"}, {18u, "Cannon Ammo"}, {30u, "Ballista Ammo"}}) {
+        std::uint32_t i = 0;
+        for (; text[i] != '\0'; ++i) memory.store8(kNames + at + i, static_cast<std::uint8_t>(text[i]));
+        memory.store8(kNames + at + i, 0u);
+    }
+    // A second area whose gathering names an item the game does not have.
+    const ymod_area_item odd[] = {{"Unknown Thing", 1u, 100u}};
+    ymod_area_spot odd_pile = pile_spot;
+    odd_pile.items = odd;
+    ymod_area odd_yard = one_spot(odd_pile);
+    odd_yard.id = "odd_yard";
+    misnamed.area = "odd_yard";
+    check(service != nullptr && service->add_area(mod, &odd_yard) == 0 && quests->add(mod, &misnamed) == 62721,
+        "gathering: an area whose point names an item the game lacks, and a quest in it, are added");
+    const std::optional<Bytes> misnamed_first = built_quest(62721u);
+    place_overlay(runtime, 0x0A05E600u, "lobby_task.ovl", 0x00200000u);
+    mhp3rd::mods::quests::overlay_loaded(runtime);
+    const std::optional<Bytes> named = built_quest(62720u);
+    const std::size_t pile_items = named ? word_at(*named, entry_of(*named, 1u, 0u)) : 0u;
+    const std::size_t bolt_items = named ? word_at(*named, entry_of(*named, 1u, 1u)) : 0u;
+    check(named && pile_items != 0u && (*named)[pile_items] == 100u && (*named)[pile_items + 1u] == 1u &&
+            u16(*named, pile_items + 2u) == 1u && word_at(*named, pile_items + 4u) == 0xFFFFFFFFu &&
+            (*named)[bolt_items] == 70u && (*named)[bolt_items + 1u] == 2u && u16(*named, bolt_items + 2u) == 2u &&
+            (*named)[bolt_items + 4u] == 30u && u16(*named, bolt_items + 6u) == 1u &&
+            u16(*named, entry_of(*named, 1u, 0u) + 4u) == 10u,
+        "gathering: once lobby_task loads, the quest is built again with its points' items named");
+    const std::optional<Bytes> misnamed_again = built_quest(62721u);
+    check(misnamed_first && misnamed_again && *misnamed_first == *misnamed_again &&
+            word_at(*misnamed_again, entry_of(*misnamed_again, 1u, 0u)) == 0u,
+        "gathering: a point naming no item of the game's leaves its quest as first built");
 
     std::error_code ec;
     std::filesystem::remove_all(folder, ec);
@@ -3099,6 +3348,7 @@ int main() {
     test_equipment(runtime);
     test_maps(runtime);
     test_map_points(runtime);
+    test_map_gathering(runtime);
     test_pictures(runtime);
     test_report_log();
 

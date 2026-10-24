@@ -29,7 +29,8 @@ class Runtime;
 //   the mod's: its ground (1 + 2 x area) and its walls (2 + 2 x area); and,
 //   for an area that gives its points, its points table (1 + 2 x areas +
 //   area, where the map has `areas`): where the hunter comes in, where he
-//   leaves and the camp's supply box, delivery box, bed and cart.
+//   leaves, the camp's supply box, delivery box, bed and cart, and the
+//   gathering points, ballistas and cannons.
 //
 // An area whose GE data is larger than the game's is not served, nor the
 // quest's other areas: the game puts the large monsters' GE data right after
@@ -65,15 +66,40 @@ struct Arrival {
     std::uint16_t facing{};
     std::uint8_t from{}, door{};
 };
-// Something used with the action button (the game's kind 2 records, made into
-// objects by game_task's 0x0A1753C8): the camp's supply box, delivery box and
-// bed, by the game's numbers for them. The hunter uses it within its cylinder
+// Something used with the action button (the game's group 2 records, made
+// into objects by game_task's 0x0A1753C8), by the game's numbers for them: a
+// gathering point (the "?" prompt), the camp's supply box, delivery box and
+// bed, a ballista (it fires the ammo the hunter has, 0x0A1516A4) and
+// a cannon (it fires the cannonball carried there, 0x0A1500F0, from 120 above
+// and 280 ahead along its facing). The hunter uses it within its cylinder
 // (radius across, height centred on y, 0x0A175C2C).
-enum class SpotKind : std::uint8_t { SupplyBox = 5u, DeliveryBox = 6u, Bed = 7u };
+enum class SpotKind : std::uint8_t {
+    Gathering = 2u,
+    SupplyBox = 5u,
+    DeliveryBox = 6u,
+    Bed = 7u,
+    Ballista = 9u,
+    Cannon = 10u
+};
+// One of the items a gathering point gives: by the name the game shows, as a
+// quest's rewards are named, `count` of it with `chance` percent.
+struct GatherItem {
+    std::string item;
+    std::uint8_t count{1}, chance{100};
+};
+// What a gathering point gives: one of its items each time, `uses` times in
+// a quest and up to `extra_uses` more, drawn as the quest starts. The quest
+// holds these (its header +0x60): the point's record names its list by its
+// word (+28), from 1 (game_task's 0x0A175684).
+struct Gathering {
+    std::vector<GatherItem> items;
+    std::uint8_t uses{}, extra_uses{};
+};
 struct Spot {
     SpotKind kind{SpotKind::SupplyBox};
     float x{}, y{}, z{}, radius{}, height{};
     std::uint16_t facing{};
+    Gathering gathering; // a gathering point's; empty for the other kinds
 };
 // A camp's cart, where a hunter who fainted is brought back and set down along
 // its facing (the one kind 4 record, 0x088CE568).
@@ -90,6 +116,10 @@ struct Points {
 // The most of each a points table holds (the game counts them in a byte, and
 // its own areas have at most 5 exits, 6 arrivals and 7 things to use).
 inline constexpr std::size_t kMostPoints = 16u;
+// The most items a gathering point gives (the disc's lists have up to 10) and
+// the most uses it has in a quest.
+inline constexpr std::size_t kMostGatherItems = 16u;
+inline constexpr unsigned kMostGatherUses = 99u;
 // The most areas a map has: the executable's 0x088D0228 reads 13 tables.
 inline constexpr std::size_t kMostAreas = 13u;
 
@@ -115,11 +145,18 @@ struct Area {
 // empty, the map is not one of the game's, a file is not in its format, it has
 // more points than a table holds, a place is not a finite number or a size not
 // above 0, an exit leads to its own area, an area other than a camp (area 0)
-// has a cart, or the loader cannot be taken over.
+// has a cart, a gathering point gives no item, more than kMostGatherItems, one
+// unnamed or with a count of 0, chances not adding up to 100 or uses outside
+// 1 to kMostGatherUses, something else gives items, or the loader cannot be
+// taken over.
 bool add_area(psprecomp::Runtime &runtime, AreaSpec spec, std::string *why = nullptr);
 
 // The area a mod added under `id`, or null.
 [[nodiscard]] const Area *find(std::string_view id);
+
+// What the gathering points of the area `id` give, in the order of their
+// records' words (1 first); empty for an area that gives none or none added.
+[[nodiscard]] std::vector<Gathering> gathering(std::string_view id);
 
 // Plays `quest` in the area `id` (its own quest, under a mod's id), besides
 // the areas it is played in already. False, with the reason in `why`, when
@@ -127,7 +164,10 @@ bool add_area(psprecomp::Runtime &runtime, AreaSpec spec, std::string *why = nul
 // takes the place of the same game's area as one of them.
 bool play_quest_in(std::string_view id, std::uint32_t quest, std::string *why = nullptr);
 
-// The points table written for `points` (docs/MAPS.md).
+// The points table written for `points` (docs/MAPS.md). A record's word
+// (+28) is a gathering point's list, from 1 in the order they are given, and
+// a ballista's or a cannon's number among the area's of its kind, as the
+// disc's sand ship numbers them; 0 for the camp's things.
 [[nodiscard]] std::vector<std::uint8_t> write_points(const Points &points);
 
 // What is served for `file` now: bytes standing in for the game's, or null.

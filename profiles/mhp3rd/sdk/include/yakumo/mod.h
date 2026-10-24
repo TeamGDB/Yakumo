@@ -631,8 +631,9 @@ typedef struct ymod_equipment {
  * (ymod_quest.area, ymod_quest.areas): its model, GE data, textures and
  * collision (a block for its ground and one for its walls) are served instead
  * of the game's while such a quest is played, and so are its points when it
- * gives them: where the hunter comes in, where he leaves for another area and
- * the camp's supply box, delivery box, bed and cart. The rest of the area (its
+ * gives them: where the hunter comes in, where he leaves for another area, the
+ * camp's supply box, delivery box, bed and cart, and what he gathers and fires
+ * there (gathering points, ballistas, cannons). The rest of the area (its
  * scene, camera paths, minimap) stays the game's (docs/MAPS.md). Call
  * add_area() from yakumo_mod_main, before the quests that name it.
  *
@@ -662,18 +663,42 @@ typedef struct ymod_area_arrival {
 } ymod_area_arrival;
 #define YMOD_AREA_QUEST_START (-1)
 /* Something the hunter uses with the action button, where he stands within
- * its upright cylinder. The game's own camps have a supply box of radius 150
- * and height 200, a delivery box the same and a bed of radius 130 and height
- * 300; what is drawn there is the area's model's. */
+ * its upright cylinder; what is drawn there is the area's model's, so a cannon
+ * or a pile of cannonballs is the mod's to model. The game's own camps have a
+ * supply box of radius 150 and height 200, a delivery box the same and a bed
+ * of radius 130 and height 300; its sand ship a gathering point of radius 265,
+ * ballistas of 200 and cannons of 150, each 100 to 200 high. */
+#define YMOD_SPOT_GATHERING 2   /* gathered by hand (the "?" prompt): gives one of its `items` each time */
 #define YMOD_SPOT_SUPPLY_BOX 5
 #define YMOD_SPOT_DELIVERY_BOX 6
 #define YMOD_SPOT_BED 7
+#define YMOD_SPOT_BALLISTA 9    /* the action button fires the ballista ammo the hunter has ("Ballista Ammo",
+                                   in the quest's supplies), aimed the way he faces */
+#define YMOD_SPOT_CANNON 10     /* fires the cannonball he carries there ("Cannon Ammo", which a gathering
+                                   point gives): from 120 above and 280 ahead of `at` along `facing`, in an
+                                   arc that comes down some 5000 away */
+/* One of the items a spot gives. */
+typedef struct ymod_area_item {
+    const char *item; /* by its name as the game shows it in English: "Cannon Ammo" */
+    uint32_t count;   /* how many each time, 1 to 99 */
+    uint32_t chance;  /* percent: a spot's chances add up to 100 */
+} ymod_area_item;
 typedef struct ymod_area_spot {
     int32_t kind;   /* YMOD_SPOT_* */
     ymod_vec3 at;   /* the cylinder's middle */
     float radius;   /* across the ground */
     float height;   /* up and down, half of it above at.y and half below */
-    int32_t facing; /* 0 to 65535: the way the hunter turns to use it (the game's beds have one, its boxes 0) */
+    int32_t facing; /* 0 to 65535: the way the hunter turns to use it (the game's beds have one, its boxes 0),
+                       or the way a cannon fires */
+    /* What it gives, for a spot the hunter gathers at (YMOD_SPOT_GATHERING; NULL and 0 for the others): 1 to
+       16 items, one drawn by their chances each time; `uses` times in a quest (1 to 99), and up to
+       `extra_uses` more, drawn as the quest starts, each further one by another chance (the hunter's skills
+       can change the odds); `uses` + `extra_uses` at most 99. Named as quests name rewards: every quest
+       played in the area is built again with them once the game's text is loaded. */
+    const ymod_area_item *items;
+    uint32_t item_count;
+    uint32_t uses;
+    uint32_t extra_uses;
 } ymod_area_spot;
 typedef struct ymod_area {
     uint32_t size;          /* set to sizeof(ymod_area) before passing one */
@@ -684,8 +709,11 @@ typedef struct ymod_area {
     const char *textures;   /* its textures (TMH), */
     const char *ground;     /* its ground's collision block ("4.00"): what stands on it, */
     const char *walls;      /* and its walls', ceilings' and steep slopes': what runs into them */
-    /* Its points (up to 16 of each). With none of them (all NULL), the game's area's stay: its start, ways in
-       and out and camp, in the game's places. With any, the area has these and none of the game's. */
+    /* Its points (up to 16 of each; an array is NULL only with a count of 0). With none of them (all NULL),
+       the game's area's stay: its start, ways in and out, camp and gathering, in the game's places. With any,
+       the area has these and none of the game's. The spots are ymod_area_spot as this header declares it: a
+       later header that lengthens ymod_area_spot lengthens ymod_area too, so that `size` tells which a mod
+       was built with. */
     const ymod_area_exit *exits;
     uint32_t exit_count;
     const ymod_area_arrival *arrivals;

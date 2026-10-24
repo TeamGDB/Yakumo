@@ -124,7 +124,7 @@
     "reason": "Script mod host declarations. mod_script*.cpp is covered by mhp3rd_script_mods_tests through the real Luau engine."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.h": {
-    "sha256": "9340f3b518086e5888d719c76e65713fd12347bc9068bb744ff2338fc5b93953",
+    "sha256": "83ca4ae88ce061172bc7de79d3a55b025e7f20b8a4b2b2575c4f53d2aae21304",
     "reason": "The C ABI of native mods: types, constants, function-pointer tables and the interface-version macro, no host code. The host implementation in mod_native*.cpp is covered by mhp3rd_native_mods_tests, which also loads a test mod declaring a newer interface."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.hpp": {
@@ -196,8 +196,8 @@
     "reason": "Declarations only. mhp3rd_texts.cpp is covered by mhp3rd_native_mods_tests (names and descriptions placed in a stand-in text block, and again when it reloads)."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_maps.hpp": {
-    "sha256": "ddf319eb179421235f613237539e930baf148e63e5ae32f71f29a4796c4bdb13",
-    "reason": "Declarations only. mhp3rd_maps.cpp is covered by mhp3rd_native_mods_tests (adding areas through the maps service and refusals; serving the area pack, GE data and collision pack composed with the mod's, with the points tables written for areas that give points, while a quest is played in one area or several, on stand-ins for game_sub's tables and the loader)."
+    "sha256": "50a7921438be5467ba2c0553b6de3c8af4cf1ea2e970b3a241c6f40058d0df62",
+    "reason": "Declarations only. mhp3rd_maps.cpp is covered by mhp3rd_native_mods_tests (adding areas through the maps service and refusals; serving the area pack, GE data and collision pack composed with the mod's, with the points tables written for areas that give points, gathering points', ballistas' and cannons' words among them, while a quest is played in one area or several, on stand-ins for game_sub's tables and the loader; the gathering lists of an area's points)."
   },
   "profiles/mhp3rd/host/game/pack_file.hpp": {
     "sha256": "587a49b9f6462bfd51a0ec2e80b3950cf7219fb094032cd6f54ebf28ede1a70e",

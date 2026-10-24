@@ -650,24 +650,48 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
             return refuse("a supply's item or count is out of range");
         rewards.push_back({s.item, static_cast<std::uint8_t>(s.count), 0u, kSupply});
     }
+    // What its areas' gathering points give, by the map's area: named as the
+    // rewards are, so the points cannot be used until the quest is built
+    // again with the game's text.
+    std::vector<std::vector<maps::Gathering>> gathered;
+    for (const maps::Area *a : areas) {
+        std::vector<maps::Gathering> points = maps::gathering(a->id);
+        if (points.empty()) continue;
+        if (gathered.size() <= a->area) gathered.resize(a->area + 1u);
+        spec.gathering.resize(gathered.size());
+        for (const maps::Gathering &g : points) spec.gathering[a->area].push_back({{}, g.uses, g.extra_uses});
+        gathered[a->area] = std::move(points);
+    }
     std::string why;
     const std::optional<std::vector<std::uint8_t>> payload = game::build_quest(spec, &why);
     if (!payload) return refuse(why);
     if (!mhp3rd::mods::quests::add(*runtime, *payload, mod->name, &why)) return refuse(why);
     for (const maps::Area *a : areas) maps::play_quest_in(a->id, quest->id);
-    if (!rewards.empty()) {
-        mhp3rd::mods::quests::rebuild_later(
-            quest->id, [spec, rewards](Runtime &r, std::string *reason) -> std::optional<std::vector<std::uint8_t>> {
+    if (!rewards.empty() || !gathered.empty()) {
+        mhp3rd::mods::quests::rebuild_later(quest->id,
+            [spec, rewards, gathered](Runtime &r, std::string *reason) -> std::optional<std::vector<std::uint8_t>> {
                 game::GuestRam ram(r.memory());
                 const std::vector<std::string> names = game::text_table(ram, game::kTextBlock, kItemNames);
-                game::QuestSpec full = spec;
-                for (const Named &n : rewards) {
-                    const auto found = std::find(names.begin(), names.end(), n.item);
+                const auto id_of = [&names, reason](const std::string &name) -> std::optional<std::uint16_t> {
+                    const auto found = std::find(names.begin(), names.end(), name);
                     if (found == names.end() || found == names.begin()) {
-                        if (reason != nullptr) *reason = "the game has no item named \"" + n.item + "\"";
+                        if (reason != nullptr) *reason = "the game has no item named \"" + name + "\"";
                         return std::nullopt;
                     }
-                    const auto item = static_cast<std::uint16_t>(found - names.begin());
+                    return static_cast<std::uint16_t>(found - names.begin());
+                };
+                game::QuestSpec full = spec;
+                for (std::size_t a = 0; a < gathered.size(); ++a)
+                    for (std::size_t p = 0; p < gathered[a].size(); ++p)
+                        for (const maps::GatherItem &i : gathered[a][p].items) {
+                            const std::optional<std::uint16_t> item = id_of(i.item);
+                            if (!item) return std::nullopt;
+                            full.gathering[a][p].items.push_back({*item, i.count, i.chance});
+                        }
+                for (const Named &n : rewards) {
+                    const std::optional<std::uint16_t> found = id_of(n.item);
+                    if (!found) return std::nullopt;
+                    const std::uint16_t item = *found;
                     if (n.line == kSupply) {
                         full.supplies.push_back({item, n.count});
                         continue;
@@ -710,6 +734,10 @@ int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
             area->spot_count > maps::kMostPoints)
             return refuse(
                 "it has more than " + std::to_string(maps::kMostPoints) + " exits, arrivals or things to use");
+        if ((area->exits == nullptr && area->exit_count > 0u) ||
+            (area->arrivals == nullptr && area->arrival_count > 0u) ||
+            (area->spots == nullptr && area->spot_count > 0u))
+            return refuse("it counts exits, arrivals or things to use it does not give");
         maps::Points points;
         for (std::uint32_t i = 0; area->exits != nullptr && i < area->exit_count; ++i) {
             const ymod_area_exit &e = area->exits[i];
@@ -728,11 +756,29 @@ int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
         }
         for (std::uint32_t i = 0; area->spots != nullptr && i < area->spot_count; ++i) {
             const ymod_area_spot &t = area->spots[i];
-            if ((t.kind != YMOD_SPOT_SUPPLY_BOX && t.kind != YMOD_SPOT_DELIVERY_BOX && t.kind != YMOD_SPOT_BED) ||
-                !facing(t.facing))
-                return refuse("a thing to use is not a supply box, delivery box or bed, or its facing is out of range");
+            const bool known = t.kind == YMOD_SPOT_GATHERING || t.kind == YMOD_SPOT_SUPPLY_BOX ||
+                t.kind == YMOD_SPOT_DELIVERY_BOX || t.kind == YMOD_SPOT_BED || t.kind == YMOD_SPOT_BALLISTA ||
+                t.kind == YMOD_SPOT_CANNON;
+            if (!known || !facing(t.facing))
+                return refuse("a thing to use is not a gathering point, supply box, delivery box, bed, ballista or "
+                              "cannon, or its facing is out of range");
+            // What a gathering point gives: bounded before the items are read.
+            if (t.items == nullptr && t.item_count > 0u) return refuse("a thing to use counts items it does not give");
+            if (t.item_count > maps::kMostGatherItems || t.uses > maps::kMostGatherUses ||
+                t.extra_uses > maps::kMostGatherUses)
+                return refuse("a thing to use gives more than " + std::to_string(maps::kMostGatherItems) +
+                    " items or more than " + std::to_string(maps::kMostGatherUses) + " uses");
+            maps::Gathering gathering{{}, static_cast<std::uint8_t>(t.uses), static_cast<std::uint8_t>(t.extra_uses)};
+            for (std::uint32_t k = 0; t.items != nullptr && k < t.item_count; ++k) {
+                const ymod_area_item &item = t.items[k];
+                if (item.item == nullptr || item.count == 0u || item.count > 99u || item.chance == 0u ||
+                    item.chance > 100u)
+                    return refuse("a gathered item's name, count or chance is out of range");
+                gathering.items.push_back(
+                    {item.item, static_cast<std::uint8_t>(item.count), static_cast<std::uint8_t>(item.chance)});
+            }
             points.spots.push_back({static_cast<maps::SpotKind>(t.kind), t.at.x, t.at.y, t.at.z, t.radius, t.height,
-                static_cast<std::uint16_t>(t.facing)});
+                static_cast<std::uint16_t>(t.facing), std::move(gathering)});
         }
         if (area->cart != nullptr) {
             if (!facing(area->cart->facing)) return refuse("its cart's facing is out of range");

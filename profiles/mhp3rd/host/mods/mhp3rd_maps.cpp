@@ -225,6 +225,30 @@ std::shared_ptr<const std::vector<std::uint8_t>> compose(
     return nullptr;
 }
 
+// Why a spot's gathering cannot be the game's, or nothing. A gathering
+// point gives 1 to kMostGatherItems items, each named, at least 1 of it,
+// their chances adding up to 100 as every list on the disc's quests does,
+// `uses` (and extra ones) from 1 to kMostGatherUses; nothing else gives any.
+std::optional<std::string> gathering_problem(const Spot &spot) {
+    const Gathering &g = spot.gathering;
+    if (spot.kind != SpotKind::Gathering) {
+        if (!g.items.empty() || g.uses != 0u || g.extra_uses != 0u) return "only a gathering point gives items";
+        return std::nullopt;
+    }
+    if (g.items.empty() || g.items.size() > kMostGatherItems)
+        return "a gathering point gives no item or more than " + std::to_string(kMostGatherItems);
+    unsigned total = 0;
+    for (const GatherItem &i : g.items) {
+        if (i.item.empty() || i.count == 0u || i.chance == 0u)
+            return "a gathered item is unnamed or none of it is given";
+        total += i.chance;
+    }
+    if (total != 100u) return "a gathering point's chances do not add up to 100";
+    if (g.uses == 0u || unsigned{g.uses} + g.extra_uses > kMostGatherUses)
+        return "a gathering point's uses are not 1 to " + std::to_string(kMostGatherUses);
+    return std::nullopt;
+}
+
 } // namespace
 
 bool add_area(Runtime &runtime, AreaSpec spec, std::string *why) {
@@ -259,9 +283,11 @@ bool add_area(Runtime &runtime, AreaSpec spec, std::string *why) {
         }
         for (const Arrival &a : p.arrivals)
             if (!finite({a.x, a.y, a.z})) return fail("an arrival's place is not a number");
-        for (const Spot &t : p.spots)
+        for (const Spot &t : p.spots) {
             if (!finite({t.x, t.y, t.z}) || !size(t.radius) || !size(t.height))
                 return fail("a thing to use's place is not a number or its size is not above 0");
+            if (std::optional<std::string> wrong = gathering_problem(t)) return fail(std::move(*wrong));
+        }
         if (p.cart && !finite({p.cart->x, p.cart->y, p.cart->z})) return fail("its cart's place is not a number");
         // The game keeps one cart for the map, the camp's (area 0): game_task
         // puts it there in the camp, and every cart on the disc is area 0's.
@@ -284,6 +310,16 @@ const Area *find(std::string_view id) {
     for (const Added &a : state().areas)
         if (a.area.id == id) return &a.area;
     return nullptr;
+}
+
+std::vector<Gathering> gathering(std::string_view id) {
+    std::vector<Gathering> out;
+    for (const Added &a : state().areas) {
+        if (a.area.id != id || !a.points) continue;
+        for (const Spot &t : a.points->spots)
+            if (t.kind == SpotKind::Gathering) out.push_back(t.gathering);
+    }
+    return out;
 }
 
 bool play_quest_in(std::string_view id, std::uint32_t quest, std::string *why) {
@@ -335,11 +371,19 @@ std::vector<std::uint8_t> write_points(const Points &points) {
         }
     }
     if (!points.spots.empty()) {
+        // The word: a gathering point's list in the quest, from 1 (game_task
+        // reads entry word - 1, 0x0A175684); a ballista's or a cannon's number
+        // among the area's of its kind, as on the disc's sand ship and Sacred
+        // Peak (map 6, areas 1 and 2; map 13, area 1); 0 for the camp's.
+        std::map<SpotKind, std::uint16_t> numbers;
         std::vector<Record> &out = groups.emplace_back(2u, std::vector<Record>{}).second;
         for (std::size_t i = 0; i < points.spots.size(); ++i) {
             const Spot &t = points.spots[i];
+            std::uint16_t word = 0u;
+            if (t.kind == SpotKind::Gathering) word = ++numbers[t.kind];
+            if (t.kind == SpotKind::Ballista || t.kind == SpotKind::Cannon) word = numbers[t.kind]++;
             out.push_back(
-                {t.x, t.y, t.z, t.radius, t.height, t.facing, index(i), 0u, static_cast<std::uint8_t>(t.kind), 0u});
+                {t.x, t.y, t.z, t.radius, t.height, t.facing, index(i), word, static_cast<std::uint8_t>(t.kind), 0u});
         }
     }
     if (points.cart) {
