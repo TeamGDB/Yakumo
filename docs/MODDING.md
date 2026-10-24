@@ -510,6 +510,24 @@ camp.minimap = &camp_map;
 
 The picture is a TMH laid out as the game's: one image (two on maps 4 and 17) of 160 by 168 pixels, 4-bit indices into 16 RGBA8888 colours, the map in its top 160 by 160, with the areas' shapes, numbers and paths drawn in. A quest that leaves some of the map's areas to the game gives the game's units for that map (250 a pixel on the arena), so its areas stay where its picture has them; one whose areas give different pictures or units, or a picture and none, is refused. The places also tell the game where the areas lie against each other: a monster that goes into another area keeps its place on the map, and monsters aim at a target in another area through it, so an area's doorways go where its neighbours' are.
 
+An area can have a dragonator: a button (`YMOD_SPOT_DRAGONATOR`) that thrusts a spear of the area's model out and back, as the game's sand ship does, hitting what it reaches (4 times, 255 damage each), then waits ten minutes before it fires again. The spear is a mesh of the area's model, modelled pointing along −z with its tip 1600 ahead of its origin, and one no node of the base area's scene names (98, one past the arena floor's 98); the game's own spear object draws and moves it, from the base scene's first group of gimmicks, which it takes over ([MAPS.md](MAPS.md#the-dragonator)). While it fires the camera can look at it from a place of the mod's:
+
+```cpp
+static const ymod_area_spot lever[] = {
+    {YMOD_SPOT_DRAGONATOR, {3311.0f, 912.0f, 8269.0f}, 180.0f, 300.0f, 0}};  // its button
+ymod_area_spear spear{};                   // its size set (in C++)
+spear.at = {3714.0f, 416.0f, 9166.0f};     // where the spear's origin rests
+spear.facing = 37683;                      // the way it thrusts, 0 towards +z
+spear.pitch = 0;                           // up, in 65536ths of a turn
+spear.mesh = 98;                           // the model's mesh that is the spear
+spear.view = 1;                            // the camera's view while it fires:
+spear.view_eye = {676.0f, 1116.0f, 6505.0f};
+spear.view_at = {2920.0f, 416.0f, 7606.0f};
+castle.spear = &spear;
+```
+
+An area with a button and no spear is refused, and so is a spear on an area whose base has no group of gimmicks (some camps), a mesh the base scene draws or the model lacks, or a place or view that is not a finite number within reach.
+
 The hunter leaving through an exit comes into its area at the arrival from the area he left with the exit's door; two ways between the same areas differ by their doors. An exit leads to another area of the map, places are finite and sizes above 0, only a camp (area 0) has a cart, and an array is NULL only with a count of 0. A gathering point gives 1 to 16 items, their chances adding up to 100, with 1 to 99 uses in all; nothing else gives any. Every quest played in the area is built with what its gathering points give, and built again with the items' names once the game's text is loaded; a point naming an item the game lacks gives nothing, and the mod's page says so. A quest has at most three ballistas in all its areas, as the game keeps three (two in an area in place of map 12's or 19's area 4, [MAPS.md](MAPS.md#gathering-ballistas-and-cannons)), and an area takes the place of one of a map's areas 0 to 12. A quest played in several areas of one map names them all, each in place of another of the map's areas, a camp and a fighting area say: `quest.areas` (with `quest.area_count`) besides `quest.area`. Their monsters' areas are the map's numbers (0 the camp), except that a monster of area 0 starts in `quest.area` when the quest names one. If one of the quest's areas does not fit where the game's goes, or it or an area its exits and arrivals name is not one of the map's ([MAPS.md](MAPS.md#areas-mods-add)), none of them is served.
 
 ## Panels and overlays
