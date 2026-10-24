@@ -464,7 +464,7 @@ mod.maps()->add_area(mod.handle(), &castle); // 0, or -1 with the reason in the 
 quest.area = "castle_schrade";             // and the quest is played in it
 ```
 
-Add it at start, before the quests that name it. A quest that names an area is on that area's map, so it needs no `map`, and a monster of it whose `area` is 0 starts in the added area; another area number is kept. While such a quest is played, the base area's files are served with the mod's in them; the area's scene, camera paths and minimap stay the game's, and every other quest loads the game's area. The files' formats are in [MAPS.md](MAPS.md); an area from another game is converted into them by a tool of the mod's own.
+Add it at start, before the quests that name it. A quest that names an area is on that area's map, so it needs no `map`, and a monster of it whose `area` is 0 starts in the added area; another area number is kept. While such a quest is played, the base area's files are served with the mod's in them; the area's scene and camera paths stay the game's, and so does the minimap unless the area gives a picture (below), and every other quest loads the game's area. The files' formats are in [MAPS.md](MAPS.md); an area from another game is converted into them by a tool of the mod's own.
 
 An area can also say where the hunter comes in, where he leaves for another area and what he uses there, in its own units; without these, the game's area's stay where the game has them:
 
@@ -494,6 +494,21 @@ static const ymod_area_spot things[] = {
         balls, 1, 10, 0}};                         // its items; 10 uses, and no more by chance
 castle.spots = things;    castle.spot_count = 2;
 ```
+
+The minimap draws one picture per map, and an area can give it with its place on it ([MAPS.md](MAPS.md#the-maps-picture)): a point (x, z) of the area is drawn at pixel (`origin_u` + x / `units_x`, `origin_v` + z / `units_z`), and so are the hunter's arrow and the other icons; the camp gives where its tent icon goes. Every area of the quest gives the same picture and units:
+
+```cpp
+static const ymod_area_map castle_map{sizeof(ymod_area_map), "map/map_picture.tmh",
+    200.9f, 227.2f,    // world units a pixel spans, across and down
+    77.97f, 97.27f};   // the pixel the area's x 0, z 0 lands on
+static const ymod_area_map camp_map{sizeof(ymod_area_map), "map/map_picture.tmh",
+    200.9f, 227.2f, 2.88f, 69.65f,
+    33, 98};           // the camp's tent icon (area 0 only)
+castle.minimap = &castle_map;
+camp.minimap = &camp_map;
+```
+
+The picture is a TMH laid out as the game's: one image (two on maps 4 and 17) of 160 by 168 pixels, 4-bit indices into 16 RGBA8888 colours, the map in its top 160 by 160, with the areas' shapes, numbers and paths drawn in. A quest that leaves some of the map's areas to the game gives the game's units for that map (250 a pixel on the arena), so its areas stay where its picture has them; one whose areas give different pictures or units, or a picture and none, is refused. The places also tell the game where the areas lie against each other: a monster that goes into another area keeps its place on the map, and monsters aim at a target in another area through it, so an area's doorways go where its neighbours' are.
 
 The hunter leaving through an exit comes into its area at the arrival from the area he left with the exit's door; two ways between the same areas differ by their doors. An exit leads to another area of the map, places are finite and sizes above 0, only a camp (area 0) has a cart, and an array is NULL only with a count of 0. A gathering point gives 1 to 16 items, their chances adding up to 100, with 1 to 99 uses in all; nothing else gives any. Every quest played in the area is built with what its gathering points give, and built again with the items' names once the game's text is loaded; a point naming an item the game lacks gives nothing, and the mod's page says so. A quest has at most three ballistas in all its areas, as the game keeps three (two in an area in place of map 12's or 19's area 4, [MAPS.md](MAPS.md#gathering-ballistas-and-cannons)), and an area takes the place of one of a map's areas 0 to 12. A quest played in several areas of one map names them all, each in place of another of the map's areas, a camp and a fighting area say: `quest.areas` (with `quest.area_count`) besides `quest.area`. Their monsters' areas are the map's numbers (0 the camp), except that a monster of area 0 starts in `quest.area` when the quest names one. If one of the quest's areas does not fit where the game's goes, or it or an area its exits and arrivals name is not one of the map's ([MAPS.md](MAPS.md#areas-mods-add)), none of them is served.
 
