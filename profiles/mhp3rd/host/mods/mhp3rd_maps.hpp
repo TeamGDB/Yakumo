@@ -161,7 +161,7 @@ inline constexpr ConditionalWord kConditionalWords[] = {
 // units_x + x0 and origin_v x units_z + z0 (0x088D0C88 adds them, 0x088CE854
 // gives the frame, game_task's 0x0A16FD3C scales into the picture).
 struct MapPicture {
-    std::vector<std::uint8_t> picture; // a TMH laid out as kPictureSize says
+    std::vector<std::uint8_t> picture; // a TMH laid out as the game's (below; picture_problem())
     float units_x{}, units_z{};        // world units a pixel spans, across and down
     float origin_u{}, origin_v{};      // the pixel the area's x 0, z 0 lands on
     std::int32_t camp_u{}, camp_v{};   // the camp's tent icon, 0 to 159; read on area 0 only
@@ -236,15 +236,22 @@ bool add_area(psprecomp::Runtime &runtime, AreaSpec spec, std::string *why = nul
 // there is no such area, or it is on another map than the quest's others or
 // takes the place of the same game's area as one of them, or the quest's
 // ballistas would need words past kBallistaSlots, or its areas' map pictures
-// do not go together (quest_map_problem()).
+// do not go together so far: some give one and others none, they give
+// different pictures or units, or the picture has another number of images
+// than the game's map's (what needs the quest's whole list, its units on a
+// map it leaves areas of to the game, is quest_map_problem()'s).
 bool play_quest_in(std::string_view id, std::uint32_t quest, std::string *why = nullptr);
 
 // After the game loads code (an overlay): while a quest whose areas give the
 // map's picture is played (all of them served) and game_sub and game_task are
 // loaded, writes the map's frame, those areas' dx and dz and the camp's tent
-// into game_sub's and game_task's tables; everywhere else puts back the
-// game's values (from the disc's overlays) where it wrote. An overlay loaded
-// again from the disc is written again.
+// into game_sub's and game_task's tables; everywhere else puts back the words
+// the game loads there (the overlays as the mods have them) where it wrote
+// and nothing has written since. An overlay loaded again is written again.
+// Nothing is written for a quest whose words are not, before the first
+// write, the ones the game loads (another mod changed them after the load),
+// nor, from the start, when the mods' overlays differ from the disc's there
+// (said once in the log; the game's picture stays).
 void overlay_loaded(psprecomp::Runtime &runtime);
 
 // How write_points() numbers an area's points: the map and area they are in
@@ -269,5 +276,8 @@ struct Numbering {
 // `reader` instead of the disc.
 void reset_for_tests();
 void read_files_with_for_tests(std::function<std::optional<std::vector<std::uint8_t>>(FileId)> reader);
+// And the files as the game loads them (the mods' game_sub and game_task)
+// through `reader`, instead of the same reader.
+void read_loaded_files_with_for_tests(std::function<std::optional<std::vector<std::uint8_t>>(FileId)> reader);
 
 } // namespace mhp3rd::mods::maps

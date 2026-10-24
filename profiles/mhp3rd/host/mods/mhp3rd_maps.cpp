@@ -16,6 +16,8 @@
 #include <cstring>
 #include <iostream>
 #include <cmath>
+#include <iomanip>
+#include <limits>
 #include <map>
 #include <set>
 #include <span>
@@ -64,9 +66,14 @@ constexpr std::uint32_t kAreaRecordSize = 24u;
 constexpr std::uint32_t kCampIcons = 0x0A19D1E8u;
 
 // A word Yakumo writes into those tables while a quest is played, and the
-// disc's word there, put back afterwards.
+// word the game loads there (the overlay as the mods have it), which must be
+// in memory before Yakumo writes and is put back afterwards.
 struct TableWrite {
-    std::uint32_t address{}, value{}, disc{};
+    std::uint32_t address{}, value{}, loaded{};
+};
+// Where Yakumo wrote: the word the game loads there and Yakumo's own.
+struct Written {
+    std::uint32_t loaded{}, ours{};
 };
 // What a quest whose areas give the map's picture changes: the picture served
 // as the collision pack's entry 0 and the tables' words.
@@ -91,13 +98,17 @@ struct Served {
 struct State {
     std::vector<Added> areas;
     std::map<std::uint32_t, std::optional<MapPlan>> plans;            // quest id -> its map plan, or none, once known
-    std::map<std::uint32_t, std::uint32_t> written;                   // address -> the disc's word, where Yakumo wrote
-    std::map<FileId, std::optional<std::vector<std::uint8_t>>> discs; // game_sub and game_task, read once
+    std::map<std::uint32_t, Written> written;                         // address -> what was there, where Yakumo wrote
+    std::set<std::uint32_t> left;                                     // quests whose tables another mod changed
+    std::map<FileId, std::optional<std::vector<std::uint8_t>>> discs; // game_sub and game_task as on the disc,
+    std::map<FileId, std::optional<std::vector<std::uint8_t>>> loads; // and as the game loads them, read once
+    std::map<std::uint8_t, std::size_t> picture_sizes;                // map -> its picture's bytes, read once
     std::map<std::uint32_t, std::vector<std::size_t>> quests;         // quest id -> its areas
     std::map<FileId, Served> cache;                                   // composed for the quest being played
     std::map<std::uint8_t, std::size_t> collision_entries;            // map -> its collision pack's entries
     std::set<std::uint32_t> refused;                                  // quests whose areas were refused, once logged
     std::function<std::optional<std::vector<std::uint8_t>>(FileId)> reader;
+    std::function<std::optional<std::vector<std::uint8_t>>(FileId)> loaded_reader;
     bool installed{};
 };
 
@@ -112,6 +123,13 @@ bool starts_with(const std::vector<std::uint8_t> &bytes, std::string_view magic)
 
 std::optional<std::vector<std::uint8_t>> game_file(FileId file) {
     return state().reader ? state().reader(file) : original_file(file);
+}
+
+// The file as the game loads it: as the mods that are on have it.
+std::optional<std::vector<std::uint8_t>> loaded_file(FileId file) {
+    const State &s = state();
+    if (s.loaded_reader) return s.loaded_reader(file);
+    return s.reader ? s.reader(file) : modded_file(file);
 }
 
 std::optional<std::uint32_t> quest_played(const psprecomp::GuestMemory &memory) {
@@ -173,32 +191,34 @@ float bits_float(std::uint32_t bits) {
     return value;
 }
 
-// A number as the log writes it: 250, 200.9.
+// A number as the log writes it, every digit a float has: 250, 200.899994.
 std::string number(float value) {
     std::ostringstream out;
-    out << value;
+    out << std::setprecision(std::numeric_limits<float>::max_digits10) << value;
     return out.str();
 }
 
-// The disc's overlay, read once: nothing when the file is not that overlay,
-// loading where it does.
-const std::vector<std::uint8_t> *disc_overlay(const DiscOverlay &overlay) {
+// The overlay as the disc has it, or with `loaded` as the game loads it, read
+// once: nothing when the file is not that overlay, loading where it does.
+const std::vector<std::uint8_t> *disc_overlay(const DiscOverlay &overlay, bool loaded = false) {
     State &s = state();
-    auto found = s.discs.find(overlay.file);
-    if (found == s.discs.end()) {
-        std::optional<std::vector<std::uint8_t>> bytes = game_file(overlay.file);
+    auto &read = loaded ? s.loads : s.discs;
+    auto found = read.find(overlay.file);
+    if (found == read.end()) {
+        std::optional<std::vector<std::uint8_t>> bytes = loaded ? loaded_file(overlay.file) : game_file(overlay.file);
         const std::optional<p3rd::OverlayImage> image = bytes ? p3rd::overlay_image(*bytes) : std::nullopt;
         const bool named = image && bytes->size() >= 32u + overlay.name.size() &&
             std::memcmp(bytes->data() + 32u, overlay.name.data(), overlay.name.size()) == 0;
         if (!named || image->load != overlay.load) bytes.reset();
-        found = s.discs.emplace(overlay.file, std::move(bytes)).first;
+        found = read.emplace(overlay.file, std::move(bytes)).first;
     }
     return found->second ? &*found->second : nullptr;
 }
 
-// What the disc's overlay holds at `address` once loaded, or nothing outside it.
-std::optional<std::uint32_t> disc_word(const DiscOverlay &overlay, std::uint32_t address) {
-    const std::vector<std::uint8_t> *bytes = disc_overlay(overlay);
+// What the overlay holds at `address` once loaded, as the disc has it or with
+// `loaded` as the game loads it; nothing outside it.
+std::optional<std::uint32_t> disc_word(const DiscOverlay &overlay, std::uint32_t address, bool loaded = false) {
+    const std::vector<std::uint8_t> *bytes = disc_overlay(overlay, loaded);
     if (bytes == nullptr || address < overlay.load || bytes->size() < 4u || address - overlay.load > bytes->size() - 4u)
         return std::nullopt;
     return get32(*bytes, address - overlay.load);
@@ -363,6 +383,17 @@ std::optional<std::string> points_problem(const std::vector<const Added *> &area
     return std::nullopt;
 }
 
+// The bytes of the map's picture as the disc has it (its collision pack's
+// entry 0), read once; nothing when the pack cannot be read.
+std::optional<std::size_t> game_picture_size(std::uint8_t map) {
+    State &s = state();
+    if (const auto known = s.picture_sizes.find(map); known != s.picture_sizes.end()) return known->second;
+    const std::optional<std::vector<std::uint8_t>> pack = game_file(kCollisionPacks + map);
+    const auto entries = pack ? game::read_pack(*pack) : std::nullopt;
+    if (!entries || entries->empty()) return std::nullopt;
+    return s.picture_sizes[map] = (*entries)[kPictureEntry].size();
+}
+
 // Why the areas of one quest cannot give the map's picture, or nothing: some
 // give it and others not, different pictures or units, a picture with another
 // number of images than the game's map's, or, for the quest's `whole` list of
@@ -381,12 +412,9 @@ std::optional<std::string> map_problem(const std::vector<const Added *> &areas, 
             return "its areas give different map pictures or units";
     const std::uint8_t map = areas.front()->area.map;
     const std::string name = "map " + std::to_string(map);
-    const std::optional<std::vector<std::uint8_t>> pack = game_file(kCollisionPacks + map);
-    const auto entries = pack ? game::read_pack(*pack) : std::nullopt;
-    if (entries && !entries->empty()) {
-        if ((*entries)[kPictureEntry].size() != first.picture.size())
-            return "its map picture has " + images(first.picture.size()) + ", " + name + "'s has " +
-                images((*entries)[kPictureEntry].size());
+    if (const std::optional<std::size_t> size = game_picture_size(map)) {
+        if (*size != first.picture.size())
+            return "its map picture has " + images(first.picture.size()) + ", " + name + "'s has " + images(*size);
     } else if (strict) {
         return name + "'s collision pack cannot be read";
     }
@@ -401,9 +429,9 @@ std::optional<std::string> map_problem(const std::vector<const Added *> &areas, 
     }
     const float side = static_cast<float>(kPictureSide);
     if (areas.size() < *count && (side * first.units_x != frame->width || side * first.units_z != frame->depth))
-        return "it leaves some of " + name + "'s areas to the game, whose picture has " + number(frame->width / side) +
-            " by " + number(frame->depth / side) + " units a pixel, and its areas' have " + number(first.units_x) +
-            " by " + number(first.units_z);
+        return "it leaves some of " + name + "'s areas to the game, whose picture spans " + number(frame->width) +
+            " by " + number(frame->depth) + " units: its areas' units must be those / 160, and are " +
+            number(first.units_x) + " by " + number(first.units_z);
     return std::nullopt;
 }
 
@@ -421,17 +449,28 @@ std::optional<MapPlan> make_plan(const std::vector<const Added *> &areas, std::s
     const MapPicture &picture = *areas.front()->minimap;
     MapPlan plan;
     plan.picture = std::make_shared<const std::vector<std::uint8_t>>(picture.picture);
+    // Each word as the game loads it, which is put back afterwards; it must
+    // be the disc's, so that the numbers stand where the code reads them: a
+    // file mod that changes the tables, or game_sub or game_task laid out
+    // anew, keeps them its own.
     bool inside = true;
-    const auto write = [&plan, &inside](std::uint32_t address, std::uint32_t value) {
+    std::optional<std::uint32_t> changed;
+    const auto loaded = [&inside, &changed](std::uint32_t address) -> std::uint32_t {
         const std::optional<std::uint32_t> disc = disc_word(holder(address), address);
-        if (!disc)
+        const std::optional<std::uint32_t> load = disc_word(holder(address), address, true);
+        if (!disc || !load)
             inside = false;
-        else
-            plan.writes.push_back({address, value, *disc});
+        else if (*disc != *load && !changed)
+            changed = address;
+        return load.value_or(0u);
+    };
+    const auto write = [&plan, &loaded](std::uint32_t address, std::uint32_t value) {
+        plan.writes.push_back({address, value, loaded(address)});
     };
     // The frame: 160 pixels of the area's units across and down, from the
-    // game's x0 and z0, which stay.
+    // game's x0 and z0, which stay, as does where the area records are.
     const std::uint32_t record = kMapFrames + kMapFrameSize * map;
+    for (std::uint32_t at = record + 8u; at < record + kMapFrameSize; at += 4u) (void)loaded(at);
     const float side = static_cast<float>(kPictureSide);
     write(record, float_bits(side * picture.units_x));
     write(record + 4u, float_bits(side * picture.units_z));
@@ -452,6 +491,11 @@ std::optional<MapPlan> make_plan(const std::vector<const Added *> &areas, std::s
     }
     if (!inside) {
         why = "map " + std::to_string(map) + "'s records are not in the game's game_sub and game_task as traced";
+        return std::nullopt;
+    }
+    if (changed) {
+        why = "another mod changes " + std::string(holder(*changed).name) + " where map " + std::to_string(map) +
+            "'s places on its picture are (" + psprecomp::hex32(*changed) + ")";
         return std::nullopt;
     }
     return plan;
@@ -492,7 +536,8 @@ std::shared_ptr<const std::vector<std::uint8_t>> compose_collision(
         ballista = after_ballistas(*a, ballista).value_or(kBallistaSlots); // play_quest_in() kept them within
     }
     // The map's picture, when the areas give it and it can be shown.
-    if (const MapPlan *plan = plan_for(quest, areas)) replacements.emplace_back(kPictureEntry, *plan->picture);
+    const MapPlan *plan = plan_for(quest, areas);
+    if (plan && !state().left.contains(quest)) replacements.emplace_back(kPictureEntry, *plan->picture);
     if (auto pack = game::replace_entries(*base, replacements)) return shared(std::move(*pack));
     return nullptr;
 }
@@ -838,30 +883,49 @@ void overlay_loaded(Runtime &runtime) {
     auto &memory = runtime.memory();
     // The quest played, on a quest: game_task holds its HUD and game_sub the
     // tables, and the quest's areas are served.
-    std::vector<TableWrite> wanted;
+    const MapPlan *plan = nullptr;
     const std::optional<LoadedOverlay> task = overlay_at(memory, kGameTask.load);
     const std::optional<LoadedOverlay> sub = overlay_at(memory, kGameSub.load);
     const std::optional<std::uint32_t> quest = quest_played(memory);
     if (task && iequals(task->name, kGameTask.name) && sub && iequals(sub->name, kGameSub.name) && quest &&
-        s.quests.contains(*quest))
-        if (const auto areas = served_areas(memory, *quest))
-            if (const MapPlan *plan = plan_for(*quest, *areas)) wanted = plan->writes;
-    // The game's words back where Yakumo wrote and wants nothing now; an
-    // overlay that has gone took Yakumo's with it, and comes back with the
-    // disc's.
+        s.quests.contains(*quest) && !s.left.contains(*quest))
+        if (const auto areas = served_areas(memory, *quest)) plan = plan_for(*quest, *areas);
+    const auto wanted = [plan](std::uint32_t address) {
+        return plan != nullptr && std::any_of(plan->writes.begin(), plan->writes.end(), [address](const TableWrite &w) {
+            return w.address == address;
+        });
+    };
+    // The game's words back where Yakumo wrote and wants nothing now, unless
+    // something else wrote there since; an overlay that has gone took
+    // Yakumo's with it, and comes back as the game loads it.
     for (auto it = s.written.begin(); it != s.written.end();) {
-        const bool kept =
-            std::any_of(wanted.begin(), wanted.end(), [&it](const TableWrite &w) { return w.address == it->first; });
-        if (kept) {
+        if (wanted(it->first)) {
             ++it;
             continue;
         }
-        if (holder_loaded(memory, it->first)) memory.store32(it->first, it->second);
+        if (holder_loaded(memory, it->first) && memory.load32(it->first) == it->second.ours)
+            memory.store32(it->first, it->second.loaded);
         it = s.written.erase(it);
     }
-    for (const TableWrite &w : wanted) {
+    if (plan == nullptr) return;
+    // Every word is the game's as it loads it, or already Yakumo's (this
+    // quest's, or another's that wrote there), before any is written: a word
+    // something else changed after the load (a mod's memory write) leaves
+    // all of them, said once.
+    for (const TableWrite &w : plan->writes) {
         if (!holder_loaded(memory, w.address)) continue;
-        s.written.try_emplace(w.address, w.disc);
+        const std::uint32_t now = memory.load32(w.address);
+        const auto ours = s.written.find(w.address);
+        if (now == w.value || now == w.loaded || (ours != s.written.end() && now == ours->second.ours)) continue;
+        s.left.insert(*quest);
+        std::cerr << "[mods] quest " << *quest << ": " << holder(w.address).name << " holds " << psprecomp::hex32(now)
+                  << " at " << psprecomp::hex32(w.address) << ", not the " << psprecomp::hex32(w.loaded)
+                  << " the game loads there; another mod changed it, and the map's places are left as they are\n";
+        return;
+    }
+    for (const TableWrite &w : plan->writes) {
+        if (!holder_loaded(memory, w.address)) continue;
+        s.written.try_emplace(w.address, Written{w.loaded, w.value}).first->second.ours = w.value;
         memory.store32(w.address, w.value);
     }
 }
@@ -872,6 +936,10 @@ void reset_for_tests() {
 
 void read_files_with_for_tests(std::function<std::optional<std::vector<std::uint8_t>>(FileId)> reader) {
     state().reader = std::move(reader);
+}
+
+void read_loaded_files_with_for_tests(std::function<std::optional<std::vector<std::uint8_t>>(FileId)> reader) {
+    state().loaded_reader = std::move(reader);
 }
 
 } // namespace mhp3rd::mods::maps

@@ -4113,9 +4113,20 @@ void test_map_pictures(psprecomp::Runtime &runtime) {
     alone.areas = nullptr;
     alone.area_count = 0u;
     check(quests->add(mod, &alone) == -1 &&
-            logged("quest 62805 is not added: it leaves some of map 8's areas to the game, whose picture has 250 by "
-                   "250 units a pixel, and its areas' have 200 by 225"),
+            logged("quest 62805 is not added: it leaves some of map 8's areas to the game, whose picture spans 40000 "
+                   "by 40000 units: its areas' units must be those / 160, and are 200 by 225"),
         "map pictures: a quest in the castle alone, whose units are not the game's, is refused");
+    const ymod_area_map fine_map = with([](ymod_area_map &m) { m.units_x = 250.1f; });
+    ymod_area fine_yard = castle;
+    fine_yard.id = "fine_yard";
+    fine_yard.minimap = &fine_map;
+    ymod_quest in_fine_yard = alone;
+    in_fine_yard.id = 62813u;
+    in_fine_yard.area = "fine_yard";
+    check(service->add_area(mod, &fine_yard) == 0 && quests->add(mod, &in_fine_yard) == -1 &&
+            logged("quest 62813 is not added: it leaves some of map 8's areas to the game, whose picture spans 40000 "
+                   "by 40000 units: its areas' units must be those / 160, and are 250.100006 by 225"),
+        "map pictures: the units it says are refused are printed with every digit a float has");
     const ymod_area_map game_scale{sizeof(ymod_area_map), "map.tmh", 250.0f, 250.0f, 100.0f, 74.0f, 0, 0};
     ymod_area yard = castle;
     yard.id = "yard";
@@ -4140,17 +4151,25 @@ void test_map_pictures(psprecomp::Runtime &runtime) {
 
     // Played: the collision pack's entry 0 is the picture.
     auto &memory = runtime.memory();
-    const auto load_overlays = [&](bool with_task) {
+    // game_sub loaded from `from` (the disc's, or a mod's), with the area
+    // tables serving needs; game_task, or lobby_task in its slot.
+    const auto load_sub = [&](const Bytes &from) {
         place_overlay(runtime, kSub, "game_sub.ovl", 0x00050000u);
-        memory.copy_in(kSub + 64u, std::span<const std::uint8_t>(sub).subspan(64u));
+        memory.copy_in(kSub + 64u, std::span<const std::uint8_t>(from).subspan(64u));
         memory.store16(0x0A0457C4u + 16u, 0x1389u);
         memory.store16(0x0A04579Cu + 16u, 0x138Au);
-        if (with_task) {
+    };
+    const auto load_task = [&](bool game_task) {
+        if (game_task) {
             place_overlay(runtime, kTask, "game_task.ovl", static_cast<std::uint32_t>(task.size()));
             memory.copy_in(kTask + 64u, std::span<const std::uint8_t>(task).subspan(64u));
         } else {
             place_overlay(runtime, kTask, "lobby_task.ovl", static_cast<std::uint32_t>(task.size()));
         }
+    };
+    const auto load_overlays = [&](bool with_task) {
+        load_sub(sub);
+        load_task(with_task);
     };
     const auto f = [&memory](std::uint32_t at) { return std::bit_cast<float>(memory.load32(at)); };
     load_overlays(true);
@@ -4188,17 +4207,30 @@ void test_map_pictures(psprecomp::Runtime &runtime) {
     check(disc_values() && memory.load16(kTent) == 57u && memory.load16(kTent + 2u) == 99u &&
             maps::serve(runtime, 0x1262u) == nullptr,
         "map pictures: on another quest the disc's values are back and the game's collision pack loads");
-    // Back on the quest, then the quest ends: game_task goes, game_sub stays.
+    // Back on the quest; game_sub loaded again mid-quest (the game's words
+    // back in memory): written again, and still put back afterwards.
     memory.store16(0x09000000u + 0x60472u, 62800u);
     maps::overlay_loaded(runtime);
     const bool again = f(kFrame) == 32000.0f && memory.load16(kTent) == 33u;
-    load_overlays(false);
-    memory.store32(kFrame, bits(32000.0f)); // game_sub stays loaded with Yakumo's values
-    memory.store32(kRecords + 24u, bits(78.0f * 200.0f - 20000.0f));
+    load_sub(sub);
+    const bool reloaded = disc_values();
     maps::overlay_loaded(runtime);
-    check(
-        again && disc_values(), "map pictures: when the quest's game_task goes, game_sub has the disc's values again");
-    // The overlays loaded again, from the disc: written again.
+    check(again && reloaded && f(kFrame) == 32000.0f && f(kRecords) == 3.0f * 200.0f - 20000.0f &&
+            f(kRecords + 28u) == 97.0f * 225.0f - 20000.0f && memory.load16(kTent) == 33u,
+        "map pictures: game_sub loaded again mid-quest is written again");
+    // The quest ends: game_task goes (lobby_task in its slot), game_sub stays
+    // loaded with Yakumo's words, which go back; lobby_task's bytes where the
+    // tent was are not written.
+    load_task(false);
+    memory.store32(kTent, 0xA5A5A5A5u);
+    maps::overlay_loaded(runtime);
+    check(disc_values() && f(kFrame + 8u) == -20000.0f && memory.load32(kFrame + 16u) == kRecords &&
+            memory.load32(kTent) == 0xA5A5A5A5u,
+        "map pictures: when the quest's game_task goes, game_sub's words go back and lobby_task is left alone");
+    maps::overlay_loaded(runtime);
+    check(disc_values() && memory.load32(kTent) == 0xA5A5A5A5u,
+        "map pictures: and stay so at the next load, the quest's id still there in the village");
+    // The overlays loaded again on the quest: written again.
     load_overlays(true);
     maps::overlay_loaded(runtime);
     check(f(kFrame) == 32000.0f && f(kRecords + 24u) == 78.0f * 200.0f - 20000.0f && memory.load16(kTent) == 33u,
@@ -4210,6 +4242,41 @@ void test_map_pictures(psprecomp::Runtime &runtime) {
     check(f(kFrame) == 40000.0f && f(kRecords + 24u) == 5000.0f && f(kRecords + 28u) == -1500.0f &&
             f(kRecords) == -6100.0f && memory.load16(kTent) == 57u && entry(served(0x1262u), 0) == castle_picture,
         "map pictures: a quest in one area at the game's units moves only that area's record");
+    // The camp from a wider ymod_area_map (a later SDK's): its size, units,
+    // places and tent read as far as this header goes, its later fields
+    // (all bits set) not.
+    wider.map.origin_v = 70.0f;
+    ymod_area wide_camp8 = camp;
+    wide_camp8.id = "wide_camp8";
+    wide_camp8.minimap = &wider.map;
+    check(service->add_area(mod, &wide_camp8) == 0 && maps::play_quest_in("castle", 62810u) &&
+            maps::play_quest_in("wide_camp8", 62810u),
+        "map pictures: a quest in the castle and the camp from a wider ymod_area_map");
+    memory.store16(0x09000000u + 0x60472u, 62810u);
+    maps::overlay_loaded(runtime);
+    check(f(kFrame) == 32000.0f && f(kFrame + 4u) == 36000.0f && f(kRecords) == -400.0f * 200.0f - 20000.0f &&
+            f(kRecords + 4u) == 70.0f * 225.0f - 20000.0f && memory.load16(kTent) == 0u &&
+            memory.load16(kTent + 2u) == 159u && entry(served(0x1262u), 0) == castle_picture,
+        "map pictures: the wider ymod_area_map's own fields are read, its later ones ignored");
+    // A word another mod changed after the load (a memory write): nothing of
+    // the quest's is written, that word is left, and the picture stays the
+    // game's when the quest's collision is loaded again.
+    check(maps::play_quest_in("castle", 62811u) && maps::play_quest_in("camp", 62811u),
+        "map pictures: another quest in the castle and the camp");
+    memory.store16(0x09000000u + 0x60472u, 501u);
+    maps::overlay_loaded(runtime);
+    load_overlays(true);
+    memory.store32(kRecords + 4u, bits(1234.0f));
+    memory.store16(0x09000000u + 0x60472u, 62811u);
+    maps::overlay_loaded(runtime);
+    const bool left = f(kFrame) == 40000.0f && f(kRecords) == -6100.0f && f(kRecords + 4u) == 1234.0f &&
+        memory.load16(kTent) == 57u && entry(served(0x1262u), 0) == entry(hits_pack, 0);
+    memory.store16(0x09000000u + 0x60472u, 501u);
+    maps::overlay_loaded(runtime);
+    check(left && f(kRecords + 4u) == 1234.0f,
+        "map pictures: a word another mod changed after the load leaves the quest's tables and picture the game's, "
+        "and is not put back");
+    memory.store32(kRecords + 4u, bits(6900.0f));
     // A quest whose areas give no picture leaves the tables alone.
     ymod_area plain = castle;
     plain.id = "plain";
@@ -4223,6 +4290,31 @@ void test_map_pictures(psprecomp::Runtime &runtime) {
     maps::overlay_loaded(runtime);
     check(disc_values() && memory.load16(kTent) == 57u && entry(served(0x1262u), 0) == entry(hits_pack, 0),
         "map pictures: keeps the game's picture and tables");
+    // A file mod's game_sub that changes the camp's dz: the quest's words
+    // are not the disc's, so nothing is written, the mod's word stays and the
+    // picture is the game's.
+    maps::reset_for_tests();
+    maps::read_files_with_for_tests(reader);
+    Bytes modded_sub = sub;
+    put(modded_sub, kRecords + 4u - kSub, bits(1234.0f));
+    maps::read_loaded_files_with_for_tests([&](mhp3rd::mods::FileId file) -> std::optional<Bytes> {
+        if (file == 126u) return modded_sub;
+        return reader(file);
+    });
+    check(service->add_area(mod, &castle) == 0 && service->add_area(mod, &camp) == 0 &&
+            maps::play_quest_in("castle", 62812u) && maps::play_quest_in("camp", 62812u),
+        "map pictures: a quest played with a file mod's game_sub");
+    load_sub(modded_sub);
+    load_task(true);
+    memory.store16(0x09000000u + 0x60472u, 62812u);
+    maps::overlay_loaded(runtime);
+    const bool kept = f(kFrame) == 40000.0f && f(kRecords + 4u) == 1234.0f && f(kRecords + 24u) == 4000.0f &&
+        memory.load16(kTent) == 57u && entry(served(0x1262u), 0) == entry(hits_pack, 0);
+    memory.store16(0x09000000u + 0x60472u, 501u);
+    maps::overlay_loaded(runtime);
+    check(kept && f(kRecords + 4u) == 1234.0f,
+        "map pictures: a file mod's game_sub that changes the quest's words keeps them, and the game's picture");
+    load_overlays(true);
     // The disc's game_sub unreadable when the quest is played: the picture is
     // not served and nothing is written.
     maps::reset_for_tests();
