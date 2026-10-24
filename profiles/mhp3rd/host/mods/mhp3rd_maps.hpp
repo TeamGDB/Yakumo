@@ -2,11 +2,13 @@
 
 #include "mods/mod_library.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -14,6 +16,7 @@
 namespace psprecomp {
 class Runtime;
 }
+struct ymod_cpu;
 
 // Areas mods add (the "yakumo.maps" service): an area of a mod's own takes the
 // place of one of the game's (an area of one of its maps) on the mod's quests
@@ -23,7 +26,9 @@ class Runtime;
 //
 // - each area's pack (by map, the u16 table game_sub keeps at 0x0A0457C4,
 //   plus 2 for each area before it), with the mod's model as entry 0 and its
-//   textures as entry 3; the rest (scene, camera paths, settings) the base's;
+//   textures as entry 3; the rest (scene, camera paths, settings) the base's,
+//   but for an area with a dragonator's spear, whose first gimmick group of
+//   the scene is made the spear (place_spear());
 // - each area's GE data (the table at 0x0A04579C, the same way): the mod's;
 // - the map's collision pack (0x125A + the map), with each area's two blocks
 //   the mod's: its ground (1 + 2 x area) and its walls (2 + 2 x area); and,
@@ -48,6 +53,13 @@ class Runtime;
 // map in game_sub at 0x0A0457EC), or the map's collision pack lacks a block
 // pair and a points table for each of its areas: what is written would land
 // on other entries.
+//
+// An area with a spear also has, while its quest is played, the game's spear
+// shot placed at it (game_task's 0x0A151320 knows the sand ship's only) and
+// the camera's view of it given by Yakumo's own camera script (event 13, a
+// slot the executable's table at 0x0897169C leaves empty), or none; both
+// through hooks that leave every other quest to the game's code, and the
+// table's slot is put back on every other quest.
 //
 // The quest played is the accepted quest's id beside the character, which the
 // game itself reads to choose a quest's collision (0x0A065388). The files go
@@ -88,7 +100,8 @@ enum class SpotKind : std::uint8_t {
     DeliveryBox = 6u,
     Bed = 7u,
     Ballista = 9u,
-    Cannon = 10u
+    Cannon = 10u,
+    Dragonator = 11u // its button: the executable's 0x088C2764 starts the wait, the spear and its shot
 };
 // One of the items a gathering point gives: by the name the game shows, as a
 // quest's rewards are named, `count` of it with `chance` percent.
@@ -180,6 +193,51 @@ inline constexpr std::size_t kPictureImageSize = 13552u; // one image with its p
 // not finite or a frame too large to hold, a camp's tent off the picture.
 [[nodiscard]] std::optional<std::string> map_picture_problem(const MapPicture &map, std::uint8_t area);
 
+// The dragonator's spear an area gives (yakumo/mod.h, ymod_area_spear;
+// docs/MAPS.md, "The dragonator"): a mesh of its model, at rest with its
+// origin at (x, y, z), turned `facing` about y and `pitch` up (65536ths of a
+// turn), pointing along its own -z; and the camera's view while it fires.
+struct SpearView {
+    float eye_x{}, eye_y{}, eye_z{}, at_x{}, at_y{}, at_z{};
+};
+struct Spear {
+    float x{}, y{}, z{};
+    std::uint16_t facing{};
+    std::int16_t pitch{};
+    std::uint16_t mesh{};
+    std::optional<SpearView> view; // none: the camera stays with the hunter
+};
+// How far pitch reaches either way: a quarter turn, straight up or down.
+inline constexpr std::int16_t kMostPitch = 16384;
+
+// Where the game's shot of the dragonator starts, its spear's anchor and the
+// step it moves by: what game_task's 0x0A151320 gives for the sand ship (start
+// 1600 ahead of the spear along it, a step of 350), here for `spear`.
+struct SpearShot {
+    std::array<float, 3> start{}, anchor{}, step{};
+};
+[[nodiscard]] SpearShot spear_shot(const Spear &spear);
+
+// An area pack's scene (entry 1) and its nodes' records (entry 2) with the
+// first gimmick group made the spear's (kind 14, which the executable's
+// 0x088D2E98 makes game_task's spear object of, 0x0A062508) and its first
+// node that draws a mesh made the spear: at rest at the spear's place, turned
+// as it is, drawing `spear.mesh`. Nothing, with the reason in `why`, when they
+// are not laid out as the game's are, the scene has no gimmick group with a
+// node that draws a mesh, or one of its nodes draws `spear.mesh`.
+struct SpearScene {
+    std::vector<std::uint8_t> scene, records;
+};
+[[nodiscard]] std::optional<SpearScene> place_spear(
+    std::span<const std::uint8_t> scene, std::span<const std::uint8_t> records, const Spear &spear, std::string &why);
+
+// The camera's script for the spear's view: the game's script for the sand
+// ship's (event 3, `ship`, as the executable has it at 0x08972C8C) with its
+// eye (command 0x0402) and target (0x0405) the view's, in units of 1/4096;
+// nothing when `ship` is not as traced.
+[[nodiscard]] std::optional<std::vector<std::uint8_t>> view_script(
+    std::span<const std::uint8_t> ship, const SpearView &view);
+
 struct AreaSpec {
     std::string id;                     // the mod's name for it
     std::uint8_t map{}, area{};         // the game's area it takes the place of
@@ -191,6 +249,7 @@ struct AreaSpec {
     std::string mod;                    // who adds it, for the log
     std::optional<Points> points;       // none: the game's area's stay
     std::optional<MapPicture> minimap;  // none: the game's picture and places stay
+    std::optional<Spear> spear;         // its dragonator's spear, which its dragonator's button fires
 };
 
 struct Area {
@@ -207,7 +266,12 @@ struct Area {
 // unnamed or with a count of 0, chances not adding up to 100 or uses outside
 // 1 to kMostGatherUses, something else gives items, its ballistas need words
 // past kBallistaSlots, the area is past kMostAreas, its map picture is not as
-// map_picture_problem() wants it, or the loader cannot be taken over.
+// map_picture_problem() wants it, it has a dragonator's button and no spear,
+// its spear's place is not finite, its pitch past kMostPitch or its mesh not
+// one of its model's, the game's area it takes the place of cannot give the
+// spear a gimmick group (place_spear(); its pack is read from the disc), the
+// hooks the spear needs cannot be installed, or the loader cannot be taken
+// over.
 bool add_area(psprecomp::Runtime &runtime, AreaSpec spec, std::string *why = nullptr);
 
 // The area a mod added under `id`, or null.
@@ -253,6 +317,17 @@ bool play_quest_in(std::string_view id, std::uint32_t quest, std::string *why = 
 // nor, from the start, when the mods' overlays differ from the disc's there
 // (said once in the log; the game's picture stays).
 void overlay_loaded(psprecomp::Runtime &runtime);
+
+// The hooks of the spear: game_task's 0x0A151320 (REPLACE), when asked for
+// the dragonator's shot (a2 1) by a hunter (a1) in an area with a spear of
+// the quest played, gives its place (start in a3, anchor in t0, step in t1,
+// each with a w of 1) and returns 1; and the executable's 0x088C2850, the
+// jump of 0x088C2764 into 0x0882A590 with the dragonator's camera event in
+// a1, makes it Yakumo's event 13 with the area's view, or 0, none, for a
+// spear without one, while the area loaded is such an area. Anything else is
+// left to the game's code: false.
+bool on_spear_shot(psprecomp::Runtime &runtime, struct ::ymod_cpu &cpu);
+bool on_spear_view(psprecomp::Runtime &runtime, struct ::ymod_cpu &cpu);
 
 // How write_points() numbers an area's points: the map and area they are in
 // (whose conditional words are passed over) and the first ballista's word,

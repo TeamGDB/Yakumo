@@ -1367,6 +1367,10 @@ void test_equipment(psprecomp::Runtime &runtime) {
     tables::reset_for_tests();
 }
 
+// A ymod_area as the first SDK (interface 1) has it: up to its map picture;
+// the spear, added since, is read when the size covers it.
+constexpr std::size_t kFirstAreaSize = offsetof(ymod_area, minimap) + sizeof(const ymod_area_map *);
+
 void test_maps(psprecomp::Runtime &runtime) {
     namespace maps = mhp3rd::mods::maps;
     namespace game = mhp3rd::game;
@@ -1704,7 +1708,7 @@ void test_map_points(psprecomp::Runtime &runtime) {
         a.size = static_cast<std::uint32_t>(size);
         return service != nullptr && service->add_area(mod, &a) == -1 && maps::find(id) == nullptr &&
             logged("a ymod_area of " + std::to_string(size) + " bytes is refused: this call reads " +
-                std::to_string(sizeof(ymod_area)) + " (set its size to sizeof(ymod_area))");
+                std::to_string(kFirstAreaSize) + " (set its size to sizeof(ymod_area))");
     };
     check(short_area(offsetof(ymod_area, exits), "before_points") &&
             short_area(offsetof(ymod_area, spot_stride), "before_spot_stride") &&
@@ -1750,7 +1754,7 @@ void test_map_points(psprecomp::Runtime &runtime) {
     const std::string odd_exit_line = "an exit's place is not a number or its size is not above 0";
     const std::string in_line = "an arrival's facing, area or door is out of range";
     const std::string thing_line = "a thing to use is not a gathering point, supply box, delivery box, bed, "
-                                   "ballista or cannon, or its facing is out of range";
+                                   "ballista, cannon or dragonator's button, or its facing is out of range";
     const std::string odd_thing_line = "a thing to use's place is not a number or its size is not above 0";
     bool all_refused = refused(too_many, "many", "it has more than 16 exits, arrivals or things to use");
     for (std::size_t i = 0; i < std::size(bad_exits); ++i) {
@@ -2238,8 +2242,8 @@ void test_map_gathering(psprecomp::Runtime &runtime) {
         refused(one_spot(loaded_cannon), "loaded_cannon", "only a gathering point gives items") && all_refused;
     all_refused = refused(one_spot(used_bed), "used_bed", "only a gathering point gives items") && all_refused;
     all_refused = refused(one_spot(gong), "gong",
-                      "a thing to use is not a gathering point, supply box, delivery box, bed, ballista or cannon, "
-                      "or its facing is out of range") &&
+                      "a thing to use is not a gathering point, supply box, delivery box, bed, ballista, cannon or "
+                      "dragonator's button, or its facing is out of range") &&
         all_refused;
     check(all_refused,
         "gathering: items counted but not given, more than 16, more than 99 uses, none or past 99 with the extra "
@@ -4131,7 +4135,7 @@ void test_map_pictures(psprecomp::Runtime &runtime) {
     older.minimap = reinterpret_cast<const ymod_area_map *>(std::uintptr_t{1});
     check(service != nullptr && service->add_area(mod, &wide_camp) == 0 && service->add_area(mod, &older) == -1 &&
             logged("a ymod_area of " + std::to_string(offsetof(ymod_area, minimap)) +
-                " bytes is refused: this call reads " + std::to_string(sizeof(ymod_area)) +
+                " bytes is refused: this call reads " + std::to_string(kFirstAreaSize) +
                 " (set its size to sizeof(ymod_area))"),
         "map pictures: the tent at the picture's edges, a place off the picture and a wider ymod_area_map are "
         "taken; an ymod_area that ends before the field is refused without reading it");
@@ -4402,6 +4406,395 @@ void test_map_pictures(psprecomp::Runtime &runtime) {
     mhp3rd::mods::added::reset_for_tests();
 }
 
+// The dragonator: a spear an area gives, the button that fires it, the base
+// scene's first gimmick group made the spear's, the game's shot placed at it
+// and the camera's view of it, and the camera's slot put back on other quests.
+void test_dragonator(psprecomp::Runtime &runtime) {
+    namespace maps = mhp3rd::mods::maps;
+    namespace game = mhp3rd::game;
+    using Bytes = std::vector<std::uint8_t>;
+    const auto bytes = [](std::string_view s) { return Bytes(s.begin(), s.end()); };
+    const auto entry = [](const Bytes &pack, std::size_t i) {
+        const auto entries = game::read_pack(pack);
+        return entries && i < entries->size() ? Bytes((*entries)[i].begin(), (*entries)[i].end()) : Bytes{};
+    };
+    const auto put = [](Bytes &out, std::size_t at, std::uint32_t value) { std::memcpy(out.data() + at, &value, 4u); };
+    const auto get = [](const Bytes &in, std::size_t at) {
+        std::uint32_t value{};
+        std::memcpy(&value, in.data() + at, 4u);
+        return value;
+    };
+    const auto bits = [](float value) { return std::bit_cast<std::uint32_t>(value); };
+    const auto near = [](float a, float b) { return std::fabs(a - b) < 0.1f; };
+
+    // A base scene of six nodes: a group, a mesh, the gimmicks from node 2 (a
+    // group of kind 11 whose first member draws nothing, its second mesh 2
+    // with a record whose word is an offset, its third mesh 3), and the
+    // records that say so.
+    const auto scene_of = [&put, &bits](std::initializer_list<std::uint32_t> meshes) {
+        Bytes out(0x1Cu + 0x5Cu * meshes.size(), 0u);
+        put(out, 4u, static_cast<std::uint32_t>(meshes.size() + 1u));
+        put(out, 0x14u, 0x10u);
+        std::size_t k = 0;
+        for (const std::uint32_t mesh : meshes) {
+            const std::size_t at = 0x1Cu + 0x5Cu * k;
+            put(out, at, mesh == 0xFFFFFFFFu ? 0x40000001u : 0x40000002u);
+            put(out, at + 4u, 1u);
+            put(out, at + 8u, 0x5Cu);
+            put(out, at + 12u, static_cast<std::uint32_t>(k));
+            for (std::size_t i = 0; i < 3u; ++i) put(out, at + 0x1Cu + 4u * i, bits(2.0f));
+            put(out, at + 0x3Cu, bits(5.0f));
+            put(out, at + 0x4Cu, mesh);
+            ++k;
+        }
+        return out;
+    };
+    const auto records_of = [&put](std::uint16_t first, std::uint16_t many,
+                                std::initializer_list<std::array<std::uint8_t, 8>> list) {
+        Bytes out(0x10u + 8u * list.size(), 0u);
+        put(out, 0u, static_cast<std::uint32_t>(list.size()));
+        out[12] = static_cast<std::uint8_t>(first);
+        out[14] = static_cast<std::uint8_t>(many);
+        std::size_t k = 0;
+        for (const auto &r : list) std::copy(r.begin(), r.end(), out.begin() + 0x10 + 8 * static_cast<long>(k++));
+        return out;
+    };
+    const Bytes scene = scene_of({0xFFFFFFFFu, 0u, 0xFFFFFFFFu, 0xFFFFFFFFu, 2u, 3u});
+    const Bytes records = records_of(2u, 4u,
+        {{0, 0, 0, 0, 0, 0, 0, 0}, {1, 0, 0x80, 0, 0, 0, 0, 0}, {0xFD, 11, 0, 0, 3, 0, 0, 0},
+            {1, 0, 0x80, 0, 0, 0, 0, 0}, {0x16, 0, 0x80, 6, 0x38, 5, 0, 0}, {1, 0, 0x80, 0, 0, 0, 0, 0}});
+    const maps::Spear spear{3714.0f, 416.0f, 9166.0f, 37683u, 0, 98u, std::nullopt};
+    std::string why;
+    const std::optional<maps::SpearScene> placed = maps::place_spear(scene, records, spear, why);
+    const auto f = [&get](const Bytes &in, std::size_t at) { return std::bit_cast<float>(get(in, at)); };
+    const std::size_t member = 0x1Cu + 0x5Cu * 4u;
+    const float yaw = static_cast<float>(37683.0 * 6.283185307179586 / 65536.0 - 6.283185307179586 / 2.0);
+    check(placed && placed->records[0x10u + 8u * 2u] == 0xFDu && placed->records[0x10u + 8u * 2u + 1u] == 14u &&
+            Bytes(placed->records.begin() + 0x10 + 8 * 4, placed->records.begin() + 0x10 + 8 * 5) ==
+                Bytes{1, 0, 0x80, 0, 0, 0, 0, 0} &&
+            f(placed->scene, member + 0x1Cu) == 1.0f && f(placed->scene, member + 0x24u) == 1.0f &&
+            f(placed->scene, member + 0x2Cu) == 0.0f && near(f(placed->scene, member + 0x30u), yaw) &&
+            f(placed->scene, member + 0x3Cu) == 3714.0f && f(placed->scene, member + 0x44u) == 9166.0f &&
+            get(placed->scene, member + 0x4Cu) == 98u,
+        "dragonator: the base scene's first gimmick group is made the spear's, its first member that draws a mesh "
+        "the spear at its place, turned so its -z points its way, drawing its mesh");
+    Bytes rest_scene = scene, rest_records = records;
+    std::copy(placed->scene.begin() + static_cast<long>(member),
+        placed->scene.begin() + static_cast<long>(member + 0x5C), rest_scene.begin() + static_cast<long>(member));
+    std::copy(placed->records.begin() + 0x10 + 8 * 2, placed->records.begin() + 0x10 + 8 * 3,
+        rest_records.begin() + 0x10 + 8 * 2);
+    std::copy(placed->records.begin() + 0x10 + 8 * 4, placed->records.begin() + 0x10 + 8 * 5,
+        rest_records.begin() + 0x10 + 8 * 4);
+    check(rest_scene == placed->scene && rest_records == placed->records,
+        "dragonator: nothing else of the scene or its records changes");
+    maps::Spear up = spear;
+    up.pitch = 1729;
+    up.facing = 32768u;
+    const auto pitched = maps::place_spear(scene, records, up, why);
+    check(pitched && near(f(pitched->scene, member + 0x2Cu), 0.16577f) && near(f(pitched->scene, member + 0x30u), 0.0f),
+        "dragonator: a spear pointing up and to -z is turned 0.166 about x and none about y, as the sand ship's");
+    maps::Spear named = spear;
+    named.mesh = 3u;
+    const Bytes no_gimmicks = records_of(6u, 0u,
+        {{0, 0, 0, 0, 0, 0, 0, 0}, {1, 0, 0x80, 0, 0, 0, 0, 0}, {0xFD, 11, 0, 0, 3, 0, 0, 0},
+            {1, 0, 0x80, 0, 0, 0, 0, 0}, {0x16, 0, 0x80, 6, 0x38, 5, 0, 0}, {1, 0, 0x80, 0, 0, 0, 0, 0}});
+    const Bytes empty_group = records_of(2u, 4u,
+        {{0, 0, 0, 0, 0, 0, 0, 0}, {1, 0, 0x80, 0, 0, 0, 0, 0}, {0xFD, 11, 0, 0, 1, 0, 0, 0},
+            {1, 0, 0x80, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 0}, {0xFE, 0, 0, 0, 1, 0, 0, 0}});
+    Bytes too_many = records;
+    put(too_many, 0u, 7u);
+    std::string named_why, none_why, empty_why, short_why;
+    check(!maps::place_spear(scene, records, named, named_why) &&
+            named_why == "its spear's mesh 3 is drawn by its base scene's node 5 already" &&
+            !maps::place_spear(scene, no_gimmicks, spear, none_why) &&
+            none_why ==
+                "its base scene has no gimmick group with a node that draws a mesh, which the spear would take" &&
+            !maps::place_spear(scene, empty_group, spear, empty_why) && empty_why == none_why &&
+            !maps::place_spear(scene, too_many, spear, short_why) &&
+            short_why == "its base scene is not laid out as the game's are" &&
+            !maps::place_spear(Bytes(8u, 0u), records, spear, why) && why == short_why,
+        "dragonator: a mesh the scene draws already, no gimmicks, a group whose members draw nothing (ended by a "
+        "record of 0) and a scene shorter than its records are refused");
+
+    // The game's shot: 1600 ahead of the spear, steps of 350 along it.
+    const maps::SpearShot ahead = maps::spear_shot({10.0f, 20.0f, 30.0f, 0u, 0, 0u, std::nullopt});
+    const maps::SpearShot east = maps::spear_shot({0.0f, 0.0f, 0.0f, 16384u, 0, 0u, std::nullopt});
+    const maps::SpearShot ship = maps::spear_shot({0.0f, 63.0f, -1304.0f, 32768u, 1729, 0u, std::nullopt});
+    const maps::SpearShot straight_up = maps::spear_shot({0.0f, 0.0f, 0.0f, 0u, maps::kMostPitch, 0u, std::nullopt});
+    check(ahead.anchor == std::array<float, 3>{10.0f, 20.0f, 30.0f} && near(ahead.start[2], 1630.0f) &&
+            near(ahead.start[0], 10.0f) && near(ahead.step[2], 350.0f) && near(east.step[0], 350.0f) &&
+            near(east.step[2], 0.0f) && near(ship.start[1], 327.0f) && near(ship.start[2], -2882.0f) &&
+            std::fabs(ship.step[1] - 57.8f) < 0.1f && std::fabs(ship.step[2] + 345.2f) < 0.1f &&
+            near(straight_up.step[1], 350.0f),
+        "dragonator: the shot starts 1600 ahead of the spear and steps 350 along its facing and pitch (the sand "
+        "ship's numbers from its own)");
+
+    // The camera's view: the ship's script with the view's eye and target.
+    Bytes ship_script(68u, 0u);
+    const std::uint32_t words[] = {0x00010100u, 0x00050101u, 0x00040104u, 0x00000402u, 0xFF92A000u, 0x00515000u,
+        0x001DE000u, 0x00000405u, 0xFF9F7000u, 0x004F5000u, 0x00045000u, 0x0000010Eu, 0x238E0110u, 0x000F0124u,
+        0x012C0126u, 0x00010127u, 0x00000129u};
+    for (std::size_t i = 0; i < 17u; ++i) put(ship_script, 4u * i, words[i]);
+    const maps::SpearView view{676.0f, 1116.0f, 6505.0f, 2920.0f, 416.0f, -7606.0f};
+    const auto script = maps::view_script(ship_script, view);
+    Bytes changed = ship_script;
+    put(changed, 12u, 0x403u);
+    check(script && get(*script, 16u) == 676u * 4096u && get(*script, 20u) == 1116u * 4096u &&
+            get(*script, 40u) == static_cast<std::uint32_t>(-7606 * 4096) && get(*script, 56u) == 0x012C0126u &&
+            !maps::view_script(changed, view) && !maps::view_script(Bytes(64u, 0u), view),
+        "dragonator: the view's script is the ship's with its eye and target x 4096; a script not as traced is none");
+
+    // Through the service: the game's files, the button's code as traced.
+    maps::reset_for_tests();
+    mhp3rd::mods::added::reset_for_tests();
+    loader_stand_ins(runtime);
+    auto &memory = runtime.memory();
+    for (const auto &[at, word] : std::initializer_list<std::pair<std::uint32_t, std::uint32_t>>{
+             {0x088C27B8u, 0x24024650u}, {0x088C2834u, 0x24050003u}, {0x088C2850u, 0x0A20A964u}, {0x088C2854u, 0u}})
+        memory.store32(at, word);
+    for (std::size_t i = 0; i < 17u; ++i) memory.store32(0x08972C8Cu + 4u * static_cast<std::uint32_t>(i), words[i]);
+    memory.store32(0x0897169Cu + 4u * 13u, 0xFFFFFFFFu);
+    const std::filesystem::path folder = std::filesystem::temp_directory_path() / "yakumo_dragonator_test";
+    std::filesystem::create_directories(folder);
+    const auto write = [&folder](const char *name, const Bytes &data) {
+        std::ofstream(folder / name, std::ios::binary)
+            .write(reinterpret_cast<const char *>(data.data()), static_cast<std::streamsize>(data.size()));
+    };
+    // A model of 99 meshes and one of 98.
+    Bytes model(32u, 0u);
+    std::memcpy(model.data(),
+        "pmo\0"
+        "102\0",
+        8u);
+    model[28] = 99u;
+    write("model.pmo", model);
+    model[28] = 98u;
+    write("model98.pmo", model);
+    write("ge.bin", bytes("GE"));
+    write("tex.tmh", bytes(".TMH0.14 mine"));
+    write("ground.bin", bytes("4.00 ground"));
+    write("walls.bin", bytes("4.00 walls"));
+    const auto overlay = [&put](std::uint32_t load, std::string_view name, std::size_t size) {
+        Bytes out(size, 0u);
+        std::memcpy(out.data(), "MWo3", 4u);
+        put(out, 8u, load);
+        put(out, 12u, static_cast<std::uint32_t>(size - 64u));
+        std::memcpy(out.data() + 32u, name.data(), name.size());
+        return out;
+    };
+    constexpr std::uint32_t kSub = 0x0A001780u;
+    Bytes sub = overlay(kSub, "game_sub.ovl", 0x0A045800u - kSub);
+    sub[0x0A0457C4u + 16u - kSub] = 0x89u; // map 8's packs from 0x1389
+    sub[0x0A0457C4u + 17u - kSub] = 0x13u;
+    sub[0x0A0457C4u + 18u - kSub] = 0x91u; // map 9's from 0x1391
+    sub[0x0A0457C4u + 19u - kSub] = 0x13u;
+    sub[0x0A0457ECu + 8u - kSub] = 2u;
+    sub[0x0A0457ECu + 9u - kSub] = 2u;
+    const Bytes area_pack = game::write_pack({bytes("THEIR MODEL"), scene, records, bytes("THEIR TMH")});
+    const Bytes plain_pack = game::write_pack({bytes("THEIR MODEL"), scene, no_gimmicks, bytes("THEIR TMH")});
+    const Bytes hits_pack = game::write_pack({bytes("MAP"), bytes("CAMP 1"), bytes("CAMP 2"), bytes("FLOOR 1"),
+        bytes("FLOOR 2"), bytes("CAMP POINTS"), bytes("FLOOR POINTS")});
+    maps::read_files_with_for_tests([&](mhp3rd::mods::FileId file) -> std::optional<Bytes> {
+        if (file == 126u) return sub;
+        if (file == 0x1389u || file == 0x138Bu) return area_pack;
+        if (file == 0x1391u) return plain_pack;
+        if (file == 0x138Au || file == 0x138Cu) return Bytes(0x100u, 0u);
+        if (file == 0x1262u) return hits_pack;
+        return std::nullopt;
+    });
+    ymod_mod *mod = mhp3rd::mods::native::add_mod("test.dragonator", "Dragonator test", folder.string());
+    const auto *service = static_cast<const ymod_maps *>(mhp3rd::mods::native::host()->service(mod, YMOD_MAPS, 1u));
+    const ymod_area_spot button{YMOD_SPOT_DRAGONATOR, {3311.0f, 912.0f, 8269.0f}, 180.0f, 300.0f, 0};
+    const ymod_area_spear given{sizeof(ymod_area_spear), {3714.0f, 416.0f, 9166.0f}, 37683, 0, 98, 1,
+        {676.0f, 1116.0f, 6505.0f}, {2920.0f, 416.0f, 7606.0f}};
+    ymod_area castle{sizeof(ymod_area), "castle", 8, 1, "model.pmo", "ge.bin", "tex.tmh", "ground.bin", "walls.bin"};
+    castle.spots = &button;
+    castle.spot_count = 1u;
+    castle.spear = &given;
+    check(service != nullptr && service->add_area(mod, &castle) == 0,
+        "dragonator: an area with a dragonator's button and a spear is added, its hooks installed");
+    const auto refused = [&](ymod_area area, const char *id, const std::string &line) {
+        area.id = id;
+        return service->add_area(mod, &area) == -1 && maps::find(id) == nullptr &&
+            logged(line.starts_with("a ymod_area_spear") ? line : "area " + std::string(id) + " is not added: " + line);
+    };
+    const auto spear_with = [&given](auto change) {
+        ymod_area_spear s = given;
+        change(s);
+        return s;
+    };
+    const ymod_area_spear far_mesh = spear_with([](ymod_area_spear &s) { s.mesh = 99; });
+    const ymod_area_spear drawn_mesh = spear_with([](ymod_area_spear &s) { s.mesh = 3; });
+    const ymod_area_spear nan_place = spear_with([](ymod_area_spear &s) { s.at.y = std::nanf(""); });
+    const ymod_area_spear far_view = spear_with([](ymod_area_spear &s) { s.view_at.x = 600000.0f; });
+    const ymod_area_spear steep = spear_with([](ymod_area_spear &s) { s.pitch = 16385; });
+    const ymod_area_spear turned = spear_with([](ymod_area_spear &s) { s.facing = 65536; });
+    const ymod_area_spear viewless = spear_with([](ymod_area_spear &s) { s.view = 2; });
+    const ymod_area_spear short_spear =
+        spear_with([](ymod_area_spear &s) { s.size = offsetof(ymod_area_spear, view_at); });
+    const auto area_with = [&castle](const ymod_area_spear *spear) {
+        ymod_area a = castle;
+        a.spear = spear;
+        return a;
+    };
+    ymod_area ninth = castle;
+    ninth.map = 9;
+    ninth.area = 0;
+    ymod_area fewer = castle;
+    fewer.model = "model98.pmo";
+    check(refused(area_with(nullptr), "no_spear", "its dragonator's button has no spear to fire") &&
+            refused(area_with(&far_mesh), "far_mesh", "its spear's mesh 99 is not one of its model's 99") &&
+            refused(fewer, "fewer", "its spear's mesh 98 is not one of its model's 98") &&
+            refused(area_with(&drawn_mesh), "drawn_mesh",
+                "its spear's mesh 3 is drawn by its base scene's node 5 already") &&
+            refused(area_with(&nan_place), "nan_place", "its spear's place is not a number") &&
+            refused(area_with(&far_view), "far_view",
+                "its spear's view is not a number within 500000 of the area's middle") &&
+            refused(area_with(&steep), "steep", "its spear's facing, pitch, mesh or view is out of range") &&
+            refused(area_with(&turned), "turned", "its spear's facing, pitch, mesh or view is out of range") &&
+            refused(area_with(&viewless), "viewless", "its spear's facing, pitch, mesh or view is out of range") &&
+            refused(area_with(&short_spear), "short_spear",
+                "a ymod_area_spear of " + std::to_string(offsetof(ymod_area_spear, view_at)) +
+                    " bytes is refused: this call reads " + std::to_string(sizeof(ymod_area_spear)) +
+                    " (set its size to sizeof(ymod_area_spear))") &&
+            refused(ninth, "ninth",
+                "its base scene has no gimmick group with a node that draws a mesh, which the spear would take"),
+        "dragonator: a button without a spear, a mesh past the model's or drawn by the scene, a place or view out of "
+        "reach, a facing, pitch or view flag out of range, a short ymod_area_spear and a base area without a "
+        "gimmick group are refused");
+    // A ymod_area as the first SDK has it ends before `spear`: not read.
+    ymod_area older = castle;
+    older.id = "older";
+    older.spots = nullptr;
+    older.spot_count = 0u;
+    older.size = static_cast<std::uint32_t>(kFirstAreaSize);
+    older.spear = reinterpret_cast<const ymod_area_spear *>(std::uintptr_t{1});
+    check(service->add_area(mod, &older) == 0, "dragonator: a ymod_area that ends before `spear` is taken, without it");
+
+    // The points: the button's record (kind 11, word 0).
+    maps::Points points;
+    points.spots.push_back({maps::SpotKind::Dragonator, 1.0f, 2.0f, 3.0f, 180.0f, 300.0f, 0u, {}});
+    const Bytes table = maps::write_points(points, {8u, 1u, 0u});
+    check(table.size() == 16u + 32u && get(table, 4u) == 2u && table[16u + 30u] == 11u && table[16u + 28u] == 0u,
+        "dragonator: the button is a thing to use of kind 11, word 0");
+
+    // A quest played in the castle: its pack's scene carries the spear.
+    check(maps::play_quest_in("castle", 62660u), "dragonator: a quest in the castle");
+    memory.store32(0x08AB3640u, 0x09000000u);
+    memory.store16(0x09000000u + 0x60472u, 62660u);
+    place_overlay(runtime, kSub, "game_sub.ovl", 0x00050000u);
+    memory.store16(0x0A0457C4u + 16u, 0x1389u);
+    memory.store16(0x0A04579Cu + 16u, 0x138Au);
+    memory.store8(0x0A0457ECu + 8u, 2u);
+    const auto served = [&](mhp3rd::mods::FileId file) {
+        const auto b = maps::serve(runtime, file);
+        return b ? *b : Bytes{};
+    };
+    const Bytes pack = served(0x138Bu);
+    check(entry(pack, 1) == placed->scene && entry(pack, 2) == placed->records &&
+            entry(pack, 3) == bytes(".TMH0.14 mine"),
+        "dragonator: the quest's area pack has the base scene with the spear in its first gimmick group");
+
+    // The shot, asked by a hunter in area 1 of the quest, in game_task.
+    place_overlay(runtime, 0x0A05E600u, "game_task.ovl", 0x00200000u);
+    for (const auto &[at, word] :
+        std::initializer_list<std::pair<std::uint32_t, std::uint32_t>>{{0x0A151320u, 0x27BDFFB0u},
+            {0x0A151348u, 0x30D000FFu}, {0x0A151400u, 0x0E2338E7u}, {0x0A151414u, 0x924500D6u}})
+        memory.store32(at, word);
+    constexpr std::uint32_t kHunter = 0x09100000u, kOut = 0x09101000u;
+    memory.store8(kHunter + 0xD6u, 1u);
+    ymod_cpu cpu{};
+    const auto ask = [&](std::uint32_t kind) {
+        cpu = {};
+        cpu.gpr[5] = kHunter;
+        cpu.gpr[6] = kind;
+        cpu.gpr[7] = kOut;
+        cpu.gpr[8] = kOut + 16u;
+        cpu.gpr[9] = kOut + 32u;
+        for (std::uint32_t at = 0; at < 48u; at += 4u) memory.store32(kOut + at, 0u);
+        return maps::on_spear_shot(runtime, cpu);
+    };
+    const maps::SpearShot castle_shot = maps::spear_shot({3714.0f, 416.0f, 9166.0f, 37683u, 0, 98u, std::nullopt});
+    const auto mf = [&memory](std::uint32_t at) { return std::bit_cast<float>(memory.load32(at)); };
+    check(ask(1u) && cpu.gpr[2] == 1u && mf(kOut) == castle_shot.start[0] && mf(kOut + 8u) == castle_shot.start[2] &&
+            mf(kOut + 12u) == 1.0f && mf(kOut + 16u) == 3714.0f && mf(kOut + 28u) == 1.0f &&
+            mf(kOut + 32u) == castle_shot.step[0] && mf(kOut + 44u) == 1.0f,
+        "dragonator: the game's shot of the dragonator, asked in the castle, is placed at its spear: 1");
+    memory.store8(kHunter + 0xD6u, 0u);
+    const bool other_area = !ask(1u);
+    memory.store8(kHunter + 0xD6u, 1u);
+    const bool gong = !ask(2u);
+    memory.store32(0x0A151414u, 0u);
+    const bool changed_code = !ask(1u);
+    memory.store32(0x0A151414u, 0x924500D6u);
+    memory.store16(0x09000000u + 0x60472u, 501u);
+    const bool other_quest = !ask(1u);
+    memory.store16(0x09000000u + 0x60472u, 62660u);
+    check(other_area && gong && changed_code && other_quest && mf(kOut) == 0.0f,
+        "dragonator: in an area without a spear, for the gong, with game_task's code not as traced or on another "
+        "quest the game's own code places it");
+
+    // The view, in the area loaded now.
+    constexpr std::uint32_t kMapState = 0x09200000u;
+    memory.store32(0x09FBEBA0u, kMapState);
+    memory.store8(kMapState + 0x9A31u, 1u);
+    const auto look = [&](std::uint32_t event) {
+        cpu = {};
+        cpu.gpr[5] = event;
+        return maps::on_spear_view(runtime, cpu);
+    };
+    const std::uint32_t slot = 0x0897169Cu + 4u * 13u;
+    check(look(3u) && cpu.gpr[5] == 13u && memory.load32(slot) != 0xFFFFFFFFu &&
+            memory.load32(memory.load32(slot) + 16u) == 676u * 4096u &&
+            memory.load32(memory.load32(slot) + 64u) == 0x129u && memory.load32(0x08972C9Cu) == 0xFF92A000u,
+        "dragonator: the camera's event becomes 13, the castle's view, in a script of Yakumo's own; the ship's "
+        "stays");
+    const std::uint32_t ours = memory.load32(slot);
+    const bool not_ours = !look(5u) && cpu.gpr[5] == 5u;
+    memory.store8(kMapState + 0x9A31u, 0u);
+    const bool elsewhere = !look(4u) && cpu.gpr[5] == 4u;
+    memory.store8(kMapState + 0x9A31u, 1u);
+    check(not_ours && elsewhere, "dragonator: another camera event, or the button in another area, is the game's");
+    // Leaving the quest puts the slot back; on the quest it stays.
+    maps::overlay_loaded(runtime);
+    const bool kept = memory.load32(slot) == ours;
+    memory.store16(0x09000000u + 0x60472u, 501u);
+    maps::overlay_loaded(runtime);
+    check(kept && memory.load32(slot) == 0xFFFFFFFFu,
+        "dragonator: the camera's slot stays the view's on its quest and is empty again on another");
+    // A slot another mod took: no view, said once; a slot changed after
+    // Yakumo's write is not put back.
+    memory.store16(0x09000000u + 0x60472u, 62660u);
+    memory.store32(slot, 0x08B00000u);
+    check(look(3u) && cpu.gpr[5] == 0u && memory.load32(slot) == 0x08B00000u,
+        "dragonator: with the camera's slot taken, the spear fires without a view and the slot is left");
+    memory.store32(slot, 0xFFFFFFFFu);
+    check(look(3u) && cpu.gpr[5] == 13u, "dragonator: an empty slot again shows the view");
+    memory.store32(slot, 0x08B00010u);
+    memory.store16(0x09000000u + 0x60472u, 501u);
+    maps::overlay_loaded(runtime);
+    check(memory.load32(slot) == 0x08B00010u, "dragonator: a slot changed since Yakumo wrote it is left");
+    memory.store32(slot, 0xFFFFFFFFu);
+    // A spear without a view: no camera event at all.
+    ymod_area_spear blind = given;
+    blind.view = 0;
+    ymod_area yard = castle;
+    yard.id = "yard";
+    yard.spear = &blind;
+    check(service->add_area(mod, &yard) == 0 && maps::play_quest_in("yard", 62661u),
+        "dragonator: an area whose spear has no view");
+    memory.store16(0x09000000u + 0x60472u, 62661u);
+    check(look(3u) && cpu.gpr[5] == 0u && memory.load32(slot) == 0xFFFFFFFFu,
+        "dragonator: its button starts no camera event, and the slot stays empty");
+    memory.store16(0x09000000u + 0x60472u, 501u);
+    check(served(0x138Bu).empty(), "dragonator: on another quest the game's area pack loads");
+
+    std::error_code ec;
+    std::filesystem::remove_all(folder, ec);
+    maps::reset_for_tests();
+    mhp3rd::mods::added::reset_for_tests();
+}
+
 int main() {
     psprecomp::Runtime runtime(64u * 1024u * 1024u);
     mhp3rd::kernel().install(runtime, 0u, 0x08900000u);
@@ -4485,6 +4878,7 @@ int main() {
     test_map_gathering(runtime);
     test_map_slots(runtime);
     test_map_pictures(runtime);
+    test_dragonator(runtime);
     test_pictures(runtime);
     test_report_log();
 

@@ -81,7 +81,8 @@ YAKUMO_ENDS_AT_SIZEOF(ymod_area_arrival, door);
 YAKUMO_ENDS_AT_SIZEOF(ymod_area_item, chance);
 YAKUMO_ENDS_AT_SIZEOF(ymod_area_spot, item_stride);
 YAKUMO_ENDS_AT_SIZEOF(ymod_area_map, camp_v);
-YAKUMO_ENDS_AT_SIZEOF(ymod_area, minimap);
+YAKUMO_ENDS_AT_SIZEOF(ymod_area_spear, view_at);
+YAKUMO_ENDS_AT_SIZEOF(ymod_area, spear);
 YAKUMO_ENDS_AT_SIZEOF(ymod_maps, add_area);
 #undef YAKUMO_ENDS_AT_SIZEOF
 
@@ -107,6 +108,9 @@ constexpr std::size_t kFirstWeapon = offsetof(ymod_weapon, give) + sizeof(std::i
 constexpr std::size_t kFirstArmor = offsetof(ymod_armor, give) + sizeof(std::int32_t);
 constexpr std::size_t kFirstArea = offsetof(ymod_area, minimap) + sizeof(const ymod_area_map *);
 constexpr std::size_t kFirstAreaMap = offsetof(ymod_area_map, camp_v) + sizeof(std::int32_t);
+constexpr std::size_t kFirstAreaSpear = offsetof(ymod_area_spear, view_at) + sizeof(ymod_vec3);
+// Fields added to ymod_area since the first SDK: read when its size covers them.
+constexpr std::size_t kAreaWithSpear = offsetof(ymod_area, spear) + sizeof(const ymod_area_spear *);
 
 // The `count` elements of an array a mod passes, `stride` bytes apart, each
 // copied as far as both the mod's element and this header's go: fields past
@@ -933,10 +937,10 @@ int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
         for (const ymod_area_spot &t : *spots) {
             const bool known = t.kind == YMOD_SPOT_GATHERING || t.kind == YMOD_SPOT_SUPPLY_BOX ||
                 t.kind == YMOD_SPOT_DELIVERY_BOX || t.kind == YMOD_SPOT_BED || t.kind == YMOD_SPOT_BALLISTA ||
-                t.kind == YMOD_SPOT_CANNON;
+                t.kind == YMOD_SPOT_CANNON || t.kind == YMOD_SPOT_DRAGONATOR;
             if (!known || !facing(t.facing))
-                return refuse("a thing to use is not a gathering point, supply box, delivery box, bed, ballista or "
-                              "cannon, or its facing is out of range");
+                return refuse("a thing to use is not a gathering point, supply box, delivery box, bed, ballista, "
+                              "cannon or dragonator's button, or its facing is out of range");
             // What a gathering point gives: bounded before the items are read.
             if (t.items == nullptr && t.item_count > 0u) return refuse("a thing to use counts items it does not give");
             if (t.item_count > maps::kMostGatherItems || t.uses > maps::kMostGatherUses ||
@@ -975,6 +979,22 @@ int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
         if (!picture) return -1;
         spec.minimap =
             maps::MapPicture{*picture, map.units_x, map.units_z, map.origin_u, map.origin_v, map.camp_u, map.camp_v};
+    }
+    // Its dragonator's spear, from a struct whose size covers the field.
+    if (area->size >= kAreaWithSpear && area->spear != nullptr) {
+        const ymod_area_spear *given = area->spear;
+        if (too_short(mod, given->size, kFirstAreaSpear, "ymod_area_spear")) return -1;
+        ymod_area_spear spear{};
+        std::memcpy(static_cast<void *>(&spear), given, std::min<std::size_t>(given->size, sizeof(spear)));
+        if (spear.facing < 0 || spear.facing > 0xFFFF || spear.pitch < -maps::kMostPitch ||
+            spear.pitch > maps::kMostPitch || spear.mesh < 0 || spear.mesh > 0xFFFF ||
+            (spear.view != 0 && spear.view != 1))
+            return refuse("its spear's facing, pitch, mesh or view is out of range");
+        spec.spear = maps::Spear{spear.at.x, spear.at.y, spear.at.z, static_cast<std::uint16_t>(spear.facing),
+            static_cast<std::int16_t>(spear.pitch), static_cast<std::uint16_t>(spear.mesh), std::nullopt};
+        if (spear.view == 1)
+            spec.spear->view = maps::SpearView{spear.view_eye.x, spear.view_eye.y, spear.view_eye.z, spear.view_at.x,
+                spear.view_at.y, spear.view_at.z};
     }
     std::string why;
     return maps::add_area(*runtime, std::move(spec), &why) ? 0 : refuse(why);

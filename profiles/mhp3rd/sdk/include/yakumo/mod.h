@@ -707,11 +707,12 @@ typedef struct ymod_equipment {
  * of the game's while such a quest is played, and so are its points when it
  * gives them: where the hunter comes in, where he leaves for another area, the
  * camp's supply box, delivery box, bed and cart, and what he gathers and fires
- * there (gathering points, ballistas, cannons), and the map's picture the
- * minimap draws, with the area's place on it, when it gives them
- * (ymod_area_map). The rest of the area (its scene, camera paths) stays the
- * game's (docs/MAPS.md). Call add_area() from yakumo_mod_main, before the
- * quests that name it.
+ * there (gathering points, ballistas, cannons, a dragonator's button), the
+ * map's picture the minimap draws, with the area's place on it, when it gives
+ * them (ymod_area_map), and a dragonator's spear (ymod_area_spear). The rest
+ * of the area (its scene, camera paths) stays the game's, but for the spear
+ * (docs/MAPS.md). Call add_area() from yakumo_mod_main, before the quests that
+ * name it.
  *
  * Points are in the area's own units, as its model and collision, finite,
  * their sizes above 0; a facing is a turn in 65536ths (0 faces +z, 16384 +x,
@@ -756,6 +757,10 @@ typedef struct ymod_area_arrival {
 #define YMOD_SPOT_CANNON 10     /* fires the cannonball he carries there ("Cannon Ammo", which a gathering
                                    point gives): from 120 above and 280 ahead of `at` along `facing`, in an
                                    arc that comes down some 5000 away */
+#define YMOD_SPOT_DRAGONATOR 11 /* the dragonator's button: fires the area's spear (ymod_area.spear; an area
+                                   without one is refused) and starts a 10-minute wait, the quest's, before it
+                                   can be fired again; the prompt over the hunter shows it crossed out until
+                                   then. The game's sand ship has a button of radius 180 and height 180 */
 /* One of the items a spot gives. */
 typedef struct ymod_area_item {
     const char *item; /* by its name as the game shows it in English: "Cannon Ammo" */
@@ -809,6 +814,32 @@ typedef struct ymod_area_map {
     float origin_u, origin_v; /* the pixel the area's own x 0, z 0 lands on (it may lie outside the picture) */
     int32_t camp_u, camp_v;   /* where the camp's tent icon goes, in pixels, 0 to 159: read on area 0 only */
 } ymod_area_map;
+/* A dragonator's spear, which the area's YMOD_SPOT_DRAGONATOR fires (docs/MAPS.md, "The dragonator"). It
+ * is a mesh of the area's model, drawn by the game's own spear object: at rest with its origin at `at`,
+ * pointing `facing` and `pitch`; fired, 75 frames after the button, it is thrust 1600 along itself, settles
+ * at 1400, stays out 3 seconds and goes back in 5, turning about its length. Its hit is the game's too: a
+ * sphere of radius 300 that starts 1600 ahead of `at`, goes out to 3000 ahead and comes back to 2800, armed
+ * 4 times (255 damage each, before the monster's hit zones). So model the spear in its own space pointing
+ * along -z, its tip 1600 ahead of its origin (z = -1600), and put `at` where its origin rests.
+ *
+ * The game's areas make the spear's object from a group of their scene's gimmicks: the area's base scene
+ * gives its first group of them to the spear, which draws `mesh` instead of what the group drew (an area
+ * whose base has no such group, as some camps, is refused; docs/MAPS.md). While it fires the camera shows
+ * it from `view_eye`, looking at `view_at`, for 10 seconds (a button skips it), when `view` is 1.
+ *
+ * Passed on its own, it starts with its size, which the mod sets (in C++ it starts so). */
+typedef struct ymod_area_spear {
+    uint32_t size YMOD_SIZE_OF(ymod_area_spear);
+    ymod_vec3 at;     /* where its origin rests, in the area's units: finite */
+    int32_t facing;   /* 0 to 65535: the way it thrusts, a turn about y (0 faces +z, 16384 +x) */
+    int32_t pitch;    /* -16384 to 16384: how far it points up (down below 0), in 65536ths of a turn; the sand
+                         ship's points up 1729 */
+    int32_t mesh;     /* the area model's mesh that is the spear: one that no node of its base scene names, so
+                         that nothing else draws it (98, one past the arena floor's 98; MAPS.md) */
+    int32_t view;     /* 1: the camera shows the spear from view_eye while it fires; 0: it stays with the hunter */
+    ymod_vec3 view_eye; /* where the camera is, finite (read with view 1) */
+    ymod_vec3 view_at;  /* what it looks at, finite */
+} ymod_area_spear;
 typedef struct ymod_area {
     uint32_t size YMOD_SIZE_OF(ymod_area);
     const char *id;         /* the mod's name for it */
@@ -838,6 +869,8 @@ typedef struct ymod_area {
     uint32_t spot_stride YMOD_SIZE_OF(ymod_area_spot);
     /* NULL, or the map's picture and the area's place on it; with NULL the game's picture and places stay. */
     const ymod_area_map *minimap;
+    /* NULL, or its dragonator's spear, which its YMOD_SPOT_DRAGONATOR fires. */
+    const ymod_area_spear *spear;
 } ymod_area;
 typedef struct ymod_maps {
     uint32_t version;

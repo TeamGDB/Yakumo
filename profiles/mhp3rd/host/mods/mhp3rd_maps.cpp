@@ -4,12 +4,15 @@
 #include "mods/mhp3rd_mod_format.hpp"
 #include "mods/mhp3rd_mods.hpp"
 #include "mods/mod_ini.hpp"
+#include "mods/mod_native.hpp"
 
 #include "game/pack_file.hpp"
 #include "overlays.hpp"
 
 #include "psprecomp/common.hpp"
 #include "psprecomp/runtime.hpp"
+
+#include "yakumo/mod.h"
 
 #include <algorithm>
 #include <array>
@@ -65,6 +68,74 @@ constexpr std::uint32_t kMapFrameSize = 20u;
 constexpr std::uint32_t kAreaRecordSize = 24u;
 constexpr std::uint32_t kCampIcons = 0x0A19D1E8u;
 
+// The dragonator (docs/MAPS.md, "The dragonator"). An area pack's scene
+// (entry 1): a header whose word +0x14 is where its first node starts, less
+// 0xC, then nodes of 0x5C bytes, each with the step to the next at +8, its
+// scale (+0x1C), rotation (+0x2C, radians about x, y, z) and translation
+// (+0x3C, floats), and at +0x4C the model's mesh it draws (-1 for a group).
+// Its records (entry 2): a count, three ranges of nodes (u16 first, count)
+// from +4, the third the area's gimmicks, then 8 bytes for each node from
+// +0x10: what it is (byte 0; 0xFD starts a group of the kind in byte 1, 0xFE
+// and 0xFF other markers, 0 ends one), and a word the game makes a pointer of
+// for some kinds. The executable's 0x088D84AC makes an object of each group's
+// members (0x088D2E98 by kind, 0x088D2BE4 passing those that draw a mesh), the
+// spear's (kind 14, game_task's 0x0A062508) for its first member only.
+constexpr std::size_t kSceneEntry = 1u;
+constexpr std::size_t kRecordsEntry = 2u;
+constexpr std::size_t kSceneHeader = 0x1Cu;
+constexpr std::size_t kNodeSize = 0x5Cu;
+constexpr std::size_t kRecordsHeader = 0x10u;
+constexpr std::size_t kRecordSize = 8u;
+constexpr std::uint32_t kNoMesh = 0xFFFFFFFFu;
+constexpr std::uint8_t kGroupMark = 0xFDu;
+constexpr std::uint8_t kSpearKind = 14u;
+// A member the spear object draws: a mesh to draw (byte 0 1), as the sand
+// ship's spear's record has it.
+constexpr std::array<std::uint8_t, kRecordSize> kSpearRecord{1u, 0u, 0x80u, 0u, 0u, 0u, 0u, 0u};
+// A model's mesh count: the u16 at +28 of a PMO "102".
+constexpr std::size_t kModelMeshCount = 28u;
+// The game's shot of the dragonator: game_task's 0x0A151320 (a0 the shot, a1
+// the hunter, a2 1 for the dragonator; a3, t0 and t1 where its start, its
+// spear's anchor and its step go) gives the sand ship's only (map 6, areas 1
+// and 2). It starts 1600 ahead of the spear along it and steps 350.
+constexpr std::uint32_t kSpearShot = 0x0A151320u;
+constexpr float kShotStart = 1600.0f;
+constexpr float kShotStep = 350.0f;
+constexpr std::uint32_t kHunterArea = 0xD6u; // the area a hunter is in, a byte of his object
+struct CodeWord {
+    std::uint32_t address, word;
+};
+constexpr std::array<CodeWord, 4> kSpearShotCode{{
+    {0x0A151320u, 0x27BDFFB0u}, // addiu sp, sp, -80
+    {0x0A151348u, 0x30D000FFu}, // andi s0, a2, 0xFF   (the kind)
+    {0x0A151400u, 0x0E2338E7u}, // jal 0x088CE39C     (the map)
+    {0x0A151414u, 0x924500D6u}, // lbu a1, 0xD6(s2)   (the hunter's area)
+}};
+// The dragonator's button (the executable's 0x088C2764) ends in a jump to
+// 0x0882A590 with the camera's event in a1: 3 for the sand ship's area 1, 4
+// for its area 2, whose scripts (the table at 0x0897169C, by event) look at
+// the ship from places of its own. Yakumo's view is event 13, a slot the
+// table leaves empty (-1), its script the ship's area 1's with the area's eye
+// and target.
+constexpr std::uint32_t kViewJump = 0x088C2850u;
+constexpr std::array<CodeWord, 4> kViewCode{{
+    {0x088C27B8u, 0x24024650u}, // addiu v0, zero, 18000   (the wait)
+    {0x088C2834u, 0x24050003u}, // addiu a1, zero, 3       (event 3)
+    {0x088C2850u, 0x0A20A964u}, // j 0x0882A590
+    {0x088C2854u, 0x00000000u}, // nop
+}};
+constexpr std::uint32_t kCameraEvents = 0x0897169Cu;
+constexpr std::uint32_t kShipView = 0x08972C8Cu;
+constexpr std::size_t kViewScriptSize = 17u * 4u;
+constexpr std::uint32_t kViewEvent = 13u;
+constexpr std::uint32_t kEmptyEvent = 0xFFFFFFFFu;
+// The map's state, and the area loaded now (a byte of it; the executable's
+// 0x088CE3C4).
+constexpr std::uint32_t kMapStatePointer = 0x09FBEBA0u;
+constexpr std::uint32_t kAreaLoaded = 0x9A31u;
+// How far a view's eye and target may be: their units x 4096 fit 32 bits.
+constexpr float kFarthestView = 500000.0f;
+
 // A word Yakumo writes into those tables while a quest is played, and the
 // word the game loads there (the overlay as the mods have it), which must be
 // in memory before Yakumo writes and is put back afterwards.
@@ -87,6 +158,7 @@ struct Added {
     std::vector<std::uint8_t> model, geometry, textures, ground, walls;
     std::optional<Points> points;      // its points, when it gives them
     std::optional<MapPicture> minimap; // the map's picture and its place on it, when it gives them
+    std::optional<Spear> spear;        // its dragonator's spear, when it gives one
     std::optional<bool> fits;          // its GE data fits where the game's goes, once known
 };
 
@@ -110,6 +182,14 @@ struct State {
     std::function<std::optional<std::vector<std::uint8_t>>(FileId)> reader;
     std::function<std::optional<std::vector<std::uint8_t>>(FileId)> loaded_reader;
     bool installed{};
+    // The spear's: the hooks (through a mod of Yakumo's own), the view's
+    // script in memory of its own, and whether event 13's slot holds it.
+    psprecomp::Runtime *runtime{};
+    ymod_mod *host{};
+    ymod_hook shot_hook{}, view_hook{};
+    std::uint32_t view_script{};
+    bool view_written{};
+    bool view_refused{}; // said once
 };
 
 State &state() {
@@ -549,8 +629,22 @@ std::shared_ptr<const std::vector<std::uint8_t>> compose(
         if (file != area_file(memory, kAreaPacks, a->area)) continue;
         const std::optional<std::vector<std::uint8_t>> base = game_file(file);
         if (!base) return nullptr;
-        if (auto pack = game::replace_entries(*base, {{kModelEntry, a->model}, {kTexturesEntry, a->textures}}))
-            return shared(std::move(*pack));
+        std::vector<std::pair<std::size_t, std::span<const std::uint8_t>>> replacements{
+            {kModelEntry, a->model}, {kTexturesEntry, a->textures}};
+        // Its spear, in place of the scene's first gimmick group.
+        const auto entries = a->spear ? game::read_pack(*base) : std::nullopt;
+        std::string why;
+        const std::optional<SpearScene> spear = entries && entries->size() > kRecordsEntry
+            ? place_spear((*entries)[kSceneEntry], (*entries)[kRecordsEntry], *a->spear, why)
+            : std::nullopt;
+        if (spear) {
+            replacements.emplace_back(kSceneEntry, spear->scene);
+            replacements.emplace_back(kRecordsEntry, spear->records);
+        } else if (a->spear) {
+            std::cerr << "[mods] " << a->area.mod << "'s area " << a->area.id << ": its spear is not drawn"
+                      << (why.empty() ? std::string{} : ": " + why) << "\n";
+        }
+        if (auto pack = game::replace_entries(*base, replacements)) return shared(std::move(*pack));
         std::cerr << "[mods] " << a->area.mod << "'s area " << a->area.id << ": the game's area pack "
                   << psprecomp::hex32(file) << " is not as expected; the game's is loaded\n";
         return nullptr;
@@ -583,7 +677,276 @@ std::optional<std::string> gathering_problem(const Spot &spot) {
     return std::nullopt;
 }
 
+// The model's mesh count, or nothing when it is too short to hold one.
+std::optional<std::uint16_t> model_meshes(const std::vector<std::uint8_t> &model) {
+    if (model.size() < kModelMeshCount + 2u) return std::nullopt;
+    return static_cast<std::uint16_t>(model[kModelMeshCount] | model[kModelMeshCount + 1u] << 8u);
+}
+
+// The game's pack for the area `area` takes the place of, as the disc's
+// game_sub names it (its u16 table by map, plus 2 for each area before it).
+std::optional<std::vector<std::uint8_t>> base_pack(const Area &area) {
+    const std::vector<std::uint8_t> *sub = disc_overlay(kGameSub);
+    const std::uint32_t at = kAreaPacks + 2u * area.map;
+    if (sub == nullptr || at - kGameSub.load + 2u > sub->size()) return std::nullopt;
+    const std::size_t i = at - kGameSub.load;
+    return game_file(static_cast<FileId>(((*sub)[i] | (*sub)[i + 1u] << 8u) + 2u * area.area));
+}
+
+// Why a spear cannot be given as it is, or nothing: its place, its view, its
+// pitch (the service checks the facing's range) or its mesh out of range.
+std::optional<std::string> spear_problem(const Spear &spear, const std::vector<std::uint8_t> &model) {
+    const auto finite = [](std::initializer_list<float> values) {
+        return std::all_of(values.begin(), values.end(), [](float v) { return std::isfinite(v); });
+    };
+    if (!finite({spear.x, spear.y, spear.z})) return "its spear's place is not a number";
+    if (spear.pitch < -kMostPitch || spear.pitch > kMostPitch)
+        return "its spear's pitch is past a quarter turn (" + std::to_string(kMostPitch) + ")";
+    if (const SpearView *v = spear.view ? &*spear.view : nullptr) {
+        const auto near = [](float c) { return std::isfinite(c) && std::fabs(c) <= kFarthestView; };
+        if (!near(v->eye_x) || !near(v->eye_y) || !near(v->eye_z) || !near(v->at_x) || !near(v->at_y) || !near(v->at_z))
+            return "its spear's view is not a number within " + number(kFarthestView) + " of the area's middle";
+    }
+    const std::optional<std::uint16_t> meshes = model_meshes(model);
+    if (!meshes || spear.mesh >= *meshes)
+        return "its spear's mesh " + std::to_string(spear.mesh) + " is not one of its model's " +
+            std::to_string(meshes.value_or(0u));
+    return std::nullopt;
+}
+
+// The area of the quest played, served, whose number is `area` and that has a
+// spear: the hooks' business; nothing on any other quest or area.
+const Added *spear_area(const psprecomp::GuestMemory &memory, std::uint32_t area) {
+    State &s = state();
+    const std::optional<std::uint32_t> quest = quest_played(memory);
+    if (!quest || !s.quests.contains(*quest)) return nullptr;
+    const std::optional<std::vector<const Added *>> areas = served_areas(memory, *quest);
+    if (!areas) return nullptr;
+    for (const Added *a : *areas)
+        if (a->area.area == area && a->spear) return a;
+    return nullptr;
+}
+
+template <std::size_t N>
+bool code_as_traced(const psprecomp::GuestMemory &memory, const std::array<CodeWord, N> &code) {
+    return std::all_of(code.begin(), code.end(),
+        [&memory](const CodeWord &c) { return memory.contains(c.address, 4u) && memory.load32(c.address) == c.word; });
+}
+
+int spear_shot_hook(ymod_cpu *cpu, void *) {
+    Runtime *runtime = state().runtime;
+    return runtime != nullptr && on_spear_shot(*runtime, *cpu) ? YMOD_RETURN : YMOD_ORIGINAL;
+}
+
+int spear_view_hook(ymod_cpu *cpu, void *) {
+    if (Runtime *runtime = state().runtime) (void)on_spear_view(*runtime, *cpu);
+    return YMOD_CONTINUE;
+}
+
+// The spear's hooks, once, through a mod of Yakumo's own: why they cannot
+// be, or nothing. The view's hook goes where the button's code is as traced.
+std::optional<std::string> attach_spear(Runtime &runtime) {
+    State &s = state();
+    if (s.shot_hook != 0u && s.view_hook != 0u) return std::nullopt;
+    if (!code_as_traced(runtime.memory(), kViewCode))
+        return "the dragonator's button is not as traced in the game's code";
+    native::attach(runtime);
+    s.runtime = &runtime;
+    if (s.host == nullptr) s.host = native::add_mod("yakumo.maps", "Areas from mods", "");
+    const auto *hooks = static_cast<const ymod_hooks *>(native::host()->service(s.host, YMOD_HOOKS, 1u));
+    if (hooks == nullptr) return "the hooks the spear needs cannot be installed";
+    if (s.shot_hook == 0u)
+        s.shot_hook =
+            hooks->function(s.host, kGameTask.name.data(), kSpearShot, YMOD_HOOK_REPLACE, &spear_shot_hook, nullptr);
+    if (s.view_hook == 0u) s.view_hook = hooks->instruction(s.host, nullptr, kViewJump, &spear_view_hook, nullptr);
+    if (s.shot_hook == 0u || s.view_hook == 0u) return "the hooks the spear needs cannot be installed";
+    return std::nullopt;
+}
+
+// Puts the view's script into memory of Yakumo's own and the table's event 13
+// at it: false, said once, when the game's script or the table's slot is not
+// as traced (another mod took the slot).
+bool write_view(Runtime &runtime, const SpearView &view) {
+    State &s = state();
+    auto &memory = runtime.memory();
+    const auto refuse = [&s](const std::string &why) {
+        if (!s.view_refused) std::cerr << "[mods] the dragonator's view is not shown: " << why << "\n";
+        s.view_refused = true;
+        return false;
+    };
+    std::vector<std::uint8_t> ship(kViewScriptSize);
+    if (!memory.contains(kShipView, kViewScriptSize)) return refuse("the game's script for it is not there");
+    for (std::size_t i = 0; i < ship.size(); ++i) ship[i] = memory.load8(kShipView + static_cast<std::uint32_t>(i));
+    const std::optional<std::vector<std::uint8_t>> script = view_script(ship, view);
+    if (!script) return refuse("the game's script for the sand ship's is not as traced");
+    const std::uint32_t slot = kCameraEvents + 4u * kViewEvent;
+    if (!memory.contains(slot, 4u)) return refuse("the camera's table is not there");
+    const std::uint32_t now = memory.load32(slot);
+    if (s.view_script == 0u) {
+        const auto *service = static_cast<const ymod_memory *>(native::host()->service(s.host, YMOD_MEMORY, 1u));
+        s.view_script = service != nullptr ? service->allocate(s.host, kViewScriptSize, 16u) : 0u;
+        if (s.view_script == 0u) return refuse("no memory for its script");
+    }
+    if (now != kEmptyEvent && now != s.view_script)
+        return refuse("the camera's event " + std::to_string(kViewEvent) + " is " + psprecomp::hex32(now) +
+            ", not empty (-1) as the game has it");
+    memory.copy_in(s.view_script, *script);
+    memory.store32(slot, s.view_script);
+    s.view_written = true;
+    return true;
+}
+
+// Whether the quest played gives a spear with a view in one of its areas.
+bool view_wanted(const psprecomp::GuestMemory &memory) {
+    const std::optional<std::uint32_t> quest = quest_played(memory);
+    const auto played = quest ? state().quests.find(*quest) : state().quests.end();
+    if (played == state().quests.end()) return false;
+    return std::any_of(played->second.begin(), played->second.end(), [](std::size_t i) {
+        const Added &a = state().areas[i];
+        return a.spear && a.spear->view;
+    });
+}
+
+// Event 13's slot back to empty, where Yakumo wrote and nothing else has since.
+void put_view_back(psprecomp::GuestMemory &memory) {
+    State &s = state();
+    const std::uint32_t slot = kCameraEvents + 4u * kViewEvent;
+    if (s.view_written && memory.contains(slot, 4u) && memory.load32(slot) == s.view_script)
+        memory.store32(slot, kEmptyEvent);
+    s.view_written = false;
+}
+
 } // namespace
+
+SpearShot spear_shot(const Spear &spear) {
+    constexpr double kTurn = 6.283185307179586 / 65536.0;
+    const double facing = spear.facing * kTurn, pitch = spear.pitch * kTurn;
+    const std::array<double, 3> ahead{
+        std::sin(facing) * std::cos(pitch), std::sin(pitch), std::cos(facing) * std::cos(pitch)};
+    SpearShot shot;
+    const std::array<float, 3> at{spear.x, spear.y, spear.z};
+    for (std::size_t i = 0; i < 3u; ++i) {
+        shot.anchor[i] = at[i];
+        shot.start[i] = static_cast<float>(at[i] + kShotStart * ahead[i]);
+        shot.step[i] = static_cast<float>(kShotStep * ahead[i]);
+    }
+    return shot;
+}
+
+std::optional<SpearScene> place_spear(
+    std::span<const std::uint8_t> scene, std::span<const std::uint8_t> records, const Spear &spear, std::string &why) {
+    if (scene.size() < kSceneHeader || records.size() < kRecordsHeader) {
+        why = "its base scene is not laid out as the game's are";
+        return std::nullopt;
+    }
+    const std::size_t count = get32(records, 0u);
+    const std::size_t first = std::size_t{get32(scene, 0x14u)} + 0xCu;
+    const std::size_t gimmicks = static_cast<std::size_t>(records[12] | records[13] << 8u);
+    const std::size_t many = static_cast<std::size_t>(records[14] | records[15] << 8u);
+    if (count > (records.size() - kRecordsHeader) / kRecordSize || first > scene.size() ||
+        count > (scene.size() - first) / kNodeSize || gimmicks > count || many > count - gimmicks) {
+        why = "its base scene is not laid out as the game's are";
+        return std::nullopt;
+    }
+    const auto node = [first](std::size_t k) { return first + k * kNodeSize; };
+    const auto record = [](std::size_t k) { return kRecordsHeader + k * kRecordSize; };
+    for (std::size_t k = 0; k < count; ++k) {
+        if (get32(scene, node(k) + 8u) != kNodeSize) {
+            why = "its base scene is not laid out as the game's are";
+            return std::nullopt;
+        }
+        if (get32(scene, node(k) + 0x4Cu) == spear.mesh) {
+            why = "its spear's mesh " + std::to_string(spear.mesh) + " is drawn by its base scene's node " +
+                std::to_string(k) + " already";
+            return std::nullopt;
+        }
+    }
+    // The first group among the gimmicks with a member that draws a mesh: the
+    // members run from the group's mark to the next mark or end (byte 0 0).
+    const auto marker = [&records, &record](std::size_t k) {
+        const std::uint8_t b = records[record(k)];
+        return b == 0u || b >= kGroupMark;
+    };
+    for (std::size_t k = gimmicks; k < gimmicks + many; ++k) {
+        if (records[record(k)] != kGroupMark) continue;
+        for (std::size_t m = k + 1u; m < gimmicks + many && !marker(m); ++m) {
+            if (get32(scene, node(m) + 0x4Cu) == kNoMesh) continue;
+            SpearScene out{{scene.begin(), scene.end()}, {records.begin(), records.end()}};
+            out.records[record(k) + 1u] = kSpearKind;
+            std::copy(
+                kSpearRecord.begin(), kSpearRecord.end(), out.records.begin() + static_cast<std::ptrdiff_t>(record(m)));
+            // Turned so that its -z points the spear's way: the game's
+            // rotation turns about x first, then y.
+            constexpr double kTurn = 6.283185307179586 / 65536.0;
+            constexpr double kHalf = 3.141592653589793;
+            const double yaw = std::remainder(spear.facing * kTurn + kHalf, 2.0 * kHalf);
+            const std::size_t at = node(m);
+            for (std::size_t i = 0; i < 3u; ++i) put_float(out.scene, at + 0x1Cu + 4u * i, 1.0f);
+            put_float(out.scene, at + 0x2Cu, static_cast<float>(spear.pitch * kTurn));
+            put_float(out.scene, at + 0x30u, static_cast<float>(yaw));
+            put_float(out.scene, at + 0x34u, 0.0f);
+            put_float(out.scene, at + 0x3Cu, spear.x);
+            put_float(out.scene, at + 0x40u, spear.y);
+            put_float(out.scene, at + 0x44u, spear.z);
+            put32(out.scene, at + 0x4Cu, spear.mesh);
+            return out;
+        }
+    }
+    why = "its base scene has no gimmick group with a node that draws a mesh, which the spear would take";
+    return std::nullopt;
+}
+
+std::optional<std::vector<std::uint8_t>> view_script(std::span<const std::uint8_t> ship, const SpearView &view) {
+    // 17 words: 0x0100 1, 0x0101 5, 0x0104 4, 0x0402 and the eye, 0x0405 and
+    // the target, then the field of view and the time (300 frames), the last
+    // 0x0129.
+    if (ship.size() != kViewScriptSize || get32(ship, 0u) != 0x00010100u || get32(ship, 12u) != 0x00000402u ||
+        get32(ship, 28u) != 0x00000405u || get32(ship, 64u) != 0x00000129u)
+        return std::nullopt;
+    std::vector<std::uint8_t> out(ship.begin(), ship.end());
+    const auto units = [](float v) {
+        return static_cast<std::uint32_t>(static_cast<std::int32_t>(std::lround(v * 4096.0f)));
+    };
+    const std::array<float, 6> places{view.eye_x, view.eye_y, view.eye_z, view.at_x, view.at_y, view.at_z};
+    for (std::size_t i = 0; i < 3u; ++i) {
+        put32(out, 16u + 4u * i, units(places[i]));
+        put32(out, 32u + 4u * i, units(places[3u + i]));
+    }
+    return out;
+}
+
+bool on_spear_shot(Runtime &runtime, ymod_cpu &cpu) {
+    auto &memory = runtime.memory();
+    const std::uint32_t hunter = cpu.gpr[5]; // a1
+    if ((cpu.gpr[6] & 0xFFu) != 1u || !code_as_traced(memory, kSpearShotCode) ||
+        !memory.contains(hunter + kHunterArea, 1u))
+        return false;
+    const Added *a = spear_area(memory, memory.load8(hunter + kHunterArea));
+    const std::array<std::uint32_t, 3> out{cpu.gpr[7], cpu.gpr[8], cpu.gpr[9]}; // a3, t0, t1
+    if (a == nullptr ||
+        !std::all_of(out.begin(), out.end(), [&memory](std::uint32_t at) { return memory.contains(at, 16u); }))
+        return false;
+    const SpearShot shot = spear_shot(*a->spear);
+    const std::array<const std::array<float, 3> *, 3> vectors{&shot.start, &shot.anchor, &shot.step};
+    for (std::size_t v = 0; v < 3u; ++v) {
+        for (std::size_t i = 0; i < 3u; ++i) memory.store32(out[v] + 4u * i, float_bits((*vectors[v])[i]));
+        memory.store32(out[v] + 12u, float_bits(1.0f));
+    }
+    cpu.gpr[2] = 1u; // v0: placed
+    return true;
+}
+
+bool on_spear_view(Runtime &runtime, ymod_cpu &cpu) {
+    auto &memory = runtime.memory();
+    const std::uint32_t event = cpu.gpr[5]; // a1
+    if ((event != 3u && event != 4u) || !memory.contains(kMapStatePointer, 4u)) return false;
+    const std::uint32_t map_state = memory.load32(kMapStatePointer);
+    if (!memory.contains(map_state + kAreaLoaded, 1u)) return false;
+    const Added *a = spear_area(memory, memory.load8(map_state + kAreaLoaded));
+    if (a == nullptr) return false;
+    cpu.gpr[5] = a->spear->view && write_view(runtime, *a->spear->view) ? kViewEvent : 0u; // 0: no event
+    return true;
+}
 
 bool add_area(Runtime &runtime, AreaSpec spec, std::string *why) {
     State &s = state();
@@ -638,6 +1001,23 @@ bool add_area(Runtime &runtime, AreaSpec spec, std::string *why) {
     if (spec.minimap)
         if (std::optional<std::string> wrong = map_picture_problem(*spec.minimap, spec.area))
             return fail(std::move(*wrong));
+    // A dragonator's button fires the area's spear, which takes a gimmick
+    // group of the game's area's scene.
+    const bool button = spec.points &&
+        std::any_of(spec.points->spots.begin(), spec.points->spots.end(),
+            [](const Spot &t) { return t.kind == SpotKind::Dragonator; });
+    if (button && !spec.spear) return fail("its dragonator's button has no spear to fire");
+    if (spec.spear) {
+        if (std::optional<std::string> wrong = spear_problem(*spec.spear, spec.model)) return fail(std::move(*wrong));
+        const std::optional<std::vector<std::uint8_t>> pack = base_pack({spec.id, spec.map, spec.area, spec.mod});
+        const auto entries = pack ? game::read_pack(*pack) : std::nullopt;
+        if (!entries || entries->size() <= kRecordsEntry)
+            return fail("the game's area it takes the place of cannot be read for its spear");
+        std::string wrong;
+        if (!place_spear((*entries)[kSceneEntry], (*entries)[kRecordsEntry], *spec.spear, wrong))
+            return fail(std::move(wrong));
+        if (std::optional<std::string> hooks = attach_spear(runtime)) return fail(std::move(*hooks));
+    }
     if (!s.installed) {
         if (!added::stand_in(runtime, [](Runtime &r, FileId file) { return serve(r, file); }))
             return fail("the game's file loader cannot be taken over");
@@ -647,7 +1027,7 @@ bool add_area(Runtime &runtime, AreaSpec spec, std::string *why) {
               << int{spec.area} << "\n";
     s.areas.push_back({{std::move(spec.id), spec.map, spec.area, std::move(spec.mod)}, std::move(spec.model),
         std::move(spec.geometry), std::move(spec.textures), std::move(spec.ground), std::move(spec.walls),
-        std::move(spec.points), std::move(spec.minimap)});
+        std::move(spec.points), std::move(spec.minimap), std::move(spec.spear)});
     return true;
 }
 
@@ -879,6 +1259,8 @@ std::shared_ptr<const std::vector<std::uint8_t>> serve(Runtime &runtime, FileId 
 
 void overlay_loaded(Runtime &runtime) {
     State &s = state();
+    // The camera's event 13 is the spear's only while its quest is played.
+    if (s.view_written && !view_wanted(runtime.memory())) put_view_back(runtime.memory());
     if (s.quests.empty() && s.written.empty()) return;
     auto &memory = runtime.memory();
     // The quest played, on a quest: game_task holds its HUD and game_sub the
@@ -931,7 +1313,14 @@ void overlay_loaded(Runtime &runtime) {
 }
 
 void reset_for_tests() {
-    state() = {};
+    State &s = state();
+    // The spear's hooks go with it, so that adding again installs them anew.
+    if (s.host != nullptr)
+        if (const auto *hooks = static_cast<const ymod_hooks *>(native::host()->service(s.host, YMOD_HOOKS, 1u))) {
+            if (s.shot_hook != 0u) (void)hooks->remove(s.host, s.shot_hook);
+            if (s.view_hook != 0u) (void)hooks->remove(s.host, s.view_hook);
+        }
+    s = {};
 }
 
 void read_files_with_for_tests(std::function<std::optional<std::vector<std::uint8_t>>(FileId)> reader) {
