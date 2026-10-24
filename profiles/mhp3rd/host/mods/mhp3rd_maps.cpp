@@ -13,7 +13,9 @@
 #include <algorithm>
 #include <cstring>
 #include <iostream>
+#include <cmath>
 #include <map>
+#include <set>
 #include <span>
 
 namespace mhp3rd::mods::maps {
@@ -40,8 +42,8 @@ constexpr std::uint32_t kQuestIdOffset = 0x60472u;
 struct Added {
     Area area;
     std::vector<std::uint8_t> model, geometry, textures, ground, walls;
-    std::optional<std::vector<std::uint8_t>> points; // its points table, when it gives one
-    std::optional<bool> fits;                        // its GE data fits where the game's goes, once known
+    std::optional<Points> points; // its points, when it gives them
+    std::optional<bool> fits;     // its GE data fits where the game's goes, once known
 };
 
 struct Served {
@@ -53,6 +55,8 @@ struct State {
     std::vector<Added> areas;
     std::map<std::uint32_t, std::vector<std::size_t>> quests; // quest id -> its areas
     std::map<FileId, Served> cache;                           // composed for the quest being played
+    std::map<std::uint8_t, std::size_t> collision_entries;    // map -> its collision pack's entries
+    std::set<std::uint32_t> refused;                          // quests whose areas were refused, once logged
     std::function<std::optional<std::vector<std::uint8_t>>(FileId)> reader;
     bool installed{};
 };
@@ -133,30 +137,74 @@ std::shared_ptr<const std::vector<std::uint8_t>> shared(std::vector<std::uint8_t
     return std::make_shared<const std::vector<std::uint8_t>>(std::move(bytes));
 }
 
+// How many entries the map's collision pack has: the disc's, read once.
+std::optional<std::size_t> collision_entries(std::uint8_t map) {
+    State &s = state();
+    if (const auto known = s.collision_entries.find(map); known != s.collision_entries.end()) return known->second;
+    const std::optional<std::vector<std::uint8_t>> pack = game_file(kCollisionPacks + map);
+    const auto entries = pack ? game::read_pack(*pack) : std::nullopt;
+    if (!entries) return std::nullopt;
+    return s.collision_entries[map] = entries->size();
+}
+
+// Why the quest's areas cannot be played on their map, or nothing. Each must
+// be one of the map's areas, as must every area its exits lead to and its
+// arrivals come from, and the map's collision pack must hold a block pair
+// and a points table for each of its areas; otherwise the blocks and tables
+// written would land on others' (the game reads a ground block as a points
+// table's group count and runs off the pack) or lead nowhere.
+std::optional<std::string> unplayable(const std::vector<const Added *> &areas, std::uint8_t count) {
+    const Added &first = *areas.front();
+    const std::string map = "map " + std::to_string(first.area.map);
+    for (const Added *a : areas) {
+        const auto past = [&](std::uint8_t area) { return area >= count; };
+        if (past(a->area.area))
+            return a->area.id + " takes the place of area " + std::to_string(a->area.area) + " but " + map + " has " +
+                std::to_string(count);
+        if (!a->points) continue;
+        for (const Exit &e : a->points->exits)
+            if (past(e.to))
+                return a->area.id + "'s exit leads to area " + std::to_string(e.to) + ", past " + map + "'s";
+        for (const Arrival &r : a->points->arrivals)
+            if (r.from != kQuestStart && past(r.from))
+                return a->area.id + "'s arrival comes from area " + std::to_string(r.from) + ", past " + map + "'s";
+    }
+    const std::optional<std::size_t> entries = collision_entries(first.area.map);
+    if (!entries || *entries < 1u + 3u * count)
+        return map + "'s collision pack has no block pair and points table for each of its areas";
+    return std::nullopt;
+}
+
+// Whether the quest's areas can be played: once game_sub (which holds the
+// map's area count) is loaded, and only when unplayable() finds nothing.
+bool playable(const std::vector<const Added *> &areas, std::uint32_t quest, const psprecomp::GuestMemory &memory) {
+    const std::optional<std::uint8_t> count = area_count(memory, areas.front()->area.map);
+    if (!count) return false; // asked again once game_sub is there
+    const std::optional<std::string> why = unplayable(areas, *count);
+    if (why && state().refused.insert(quest).second)
+        std::cerr << "[mods] quest " << quest << ": " << *why << "; the game's areas are loaded instead\n";
+    return !why;
+}
+
 // The map's collision pack with every one of the quest's areas' blocks, and
-// the points tables of those that give theirs.
+// the points tables of those that give theirs (playable() has checked that
+// the pack has them all).
 std::shared_ptr<const std::vector<std::uint8_t>> compose_collision(
     const std::vector<const Added *> &areas, FileId file, const psprecomp::GuestMemory &memory) {
     const std::optional<std::vector<std::uint8_t>> base = game_file(file);
-    if (!base) return nullptr;
-    const Added &first = *areas.front();
-    const std::optional<std::uint8_t> count = area_count(memory, first.area.map);
+    const std::optional<std::uint8_t> count = area_count(memory, areas.front()->area.map);
+    if (!base || !count) return nullptr;
+    std::vector<std::vector<std::uint8_t>> tables;
+    tables.reserve(areas.size());
     std::vector<std::pair<std::size_t, std::span<const std::uint8_t>>> replacements;
     for (const Added *a : areas) {
         const std::size_t blocks = 1u + 2u * a->area.area;
         replacements.emplace_back(blocks, a->ground);
         replacements.emplace_back(blocks + 1u, a->walls);
         if (!a->points) continue;
-        if (!count || a->area.area >= *count) {
-            std::cerr << "[mods] " << a->area.mod << "'s area " << a->area.id << ": map " << int{a->area.map}
-                      << " has no points table for area " << int{a->area.area} << "; the game's collision is loaded\n";
-            return nullptr;
-        }
-        replacements.emplace_back(1u + 2u * *count + a->area.area, *a->points);
+        replacements.emplace_back(1u + 2u * *count + a->area.area, tables.emplace_back(write_points(*a->points)));
     }
     if (auto pack = game::replace_entries(*base, replacements)) return shared(std::move(*pack));
-    std::cerr << "[mods] " << first.area.mod << "'s area " << first.area.id << ": the game's collision pack "
-              << psprecomp::hex32(file) << " has no room for its areas' blocks; the game's is loaded\n";
     return nullptr;
 }
 
@@ -196,10 +244,29 @@ bool add_area(Runtime &runtime, AreaSpec spec, std::string *why) {
     if (!starts_with(spec.textures, ".TMH")) return fail("its textures are not a TMH");
     if (!starts_with(spec.ground, "4.00") || !starts_with(spec.walls, "4.00"))
         return fail("its ground or walls are not a collision block (\"4.00\")");
-    if (spec.points &&
-        (spec.points->exits.size() > kMostPoints || spec.points->arrivals.size() > kMostPoints ||
-            spec.points->spots.size() > kMostPoints))
-        return fail("it has more than " + std::to_string(kMostPoints) + " exits, arrivals or things to use");
+    if (spec.points) {
+        const Points &p = *spec.points;
+        if (p.exits.size() > kMostPoints || p.arrivals.size() > kMostPoints || p.spots.size() > kMostPoints)
+            return fail("it has more than " + std::to_string(kMostPoints) + " exits, arrivals or things to use");
+        const auto finite = [](std::initializer_list<float> values) {
+            return std::all_of(values.begin(), values.end(), [](float v) { return std::isfinite(v); });
+        };
+        const auto size = [](float v) { return std::isfinite(v) && v > 0.0f; };
+        for (const Exit &e : p.exits) {
+            if (!finite({e.x, e.y, e.z}) || !size(e.radius) || !size(e.height))
+                return fail("an exit's place is not a number or its size is not above 0");
+            if (e.to == spec.area) return fail("an exit leads to its own area");
+        }
+        for (const Arrival &a : p.arrivals)
+            if (!finite({a.x, a.y, a.z})) return fail("an arrival's place is not a number");
+        for (const Spot &t : p.spots)
+            if (!finite({t.x, t.y, t.z}) || !size(t.radius) || !size(t.height))
+                return fail("a thing to use's place is not a number or its size is not above 0");
+        if (p.cart && !finite({p.cart->x, p.cart->y, p.cart->z})) return fail("its cart's place is not a number");
+        // The game keeps one cart for the map, the camp's (area 0): game_task
+        // puts it there in the camp, and every cart on the disc is area 0's.
+        if (p.cart && spec.area != 0u) return fail("only a camp (area 0) has a cart");
+    }
     if (!s.installed) {
         if (!added::stand_in(runtime, [](Runtime &r, FileId file) { return serve(r, file); }))
             return fail("the game's file loader cannot be taken over");
@@ -207,11 +274,9 @@ bool add_area(Runtime &runtime, AreaSpec spec, std::string *why) {
     }
     std::cout << "[mods] " << spec.mod << " adds area " << spec.id << " in place of map " << int{spec.map} << "'s area "
               << int{spec.area} << "\n";
-    std::optional<std::vector<std::uint8_t>> points;
-    if (spec.points) points = write_points(*spec.points);
     s.areas.push_back({{std::move(spec.id), spec.map, spec.area, std::move(spec.mod)}, std::move(spec.model),
         std::move(spec.geometry), std::move(spec.textures), std::move(spec.ground), std::move(spec.walls),
-        std::move(points)});
+        std::move(spec.points)});
     return true;
 }
 
@@ -326,6 +391,7 @@ std::shared_ptr<const std::vector<std::uint8_t>> serve(Runtime &runtime, FileId 
         if (!fits(s.areas[i], runtime.memory())) return nullptr;
         areas.push_back(&s.areas[i]);
     }
+    if (!playable(areas, *quest, runtime.memory())) return nullptr;
     auto bytes = compose(areas, file, runtime.memory());
     if (bytes) s.cache[file] = {*quest, bytes};
     return bytes;

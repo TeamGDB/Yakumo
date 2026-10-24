@@ -576,8 +576,8 @@ typedef struct ymod_quest {
     const ymod_quest_supply *supplies; /* what the supply box holds at the start (up to 32), named as rewards are */
     uint32_t supply_count;
     const char *const *areas; /* NULL, or areas of the mod's (yakumo.maps, added first) the quest is played in,
-                                 besides `area`: all on one map, each in place of another of its areas (a camp
-                                 and a fighting area, say); `map` is then theirs */
+                                 besides `area`: up to 13, all on one map, each in place of another of its areas
+                                 (a camp and a fighting area, say); `map` is then theirs */
     uint32_t area_count;
 } ymod_quest;
 /* --------------------------------------------------------------------------
@@ -636,8 +636,11 @@ typedef struct ymod_equipment {
  * scene, camera paths, minimap) stays the game's (docs/MAPS.md). Call
  * add_area() from yakumo_mod_main, before the quests that name it.
  *
- * Points are in the area's own units, as its model and collision; a facing is
- * a turn in 65536ths (0 faces +z, 16384 +x, 32768 -z).
+ * Points are in the area's own units, as its model and collision, finite,
+ * their sizes above 0; a facing is a turn in 65536ths (0 faces +z, 16384 +x,
+ * 32768 -z). A quest whose areas, or the areas their exits lead to and their
+ * arrivals come from, are not all among the map's own areas is played in the
+ * game's areas.
  */
 #define YMOD_MAPS "yakumo.maps"
 /* A way out: walking into its upright cylinder takes the hunter to area `to`
@@ -647,7 +650,7 @@ typedef struct ymod_area_exit {
     ymod_vec3 at;  /* the cylinder's middle */
     float radius;  /* across the ground */
     float height;  /* up and down, half of it above at.y and half below */
-    int32_t to;    /* the area it leads to, by the game's number (map 8: 0 the camp, 1 the floor) */
+    int32_t to;    /* the area it leads to, by the game's number (map 8: 0 the camp, 1 the floor); not its own */
     int32_t door;  /* 0 to 255: two ways between the same two areas differ by it */
 } ymod_area_exit;
 /* A way in: where the hunter comes into the area and which way he faces. */
@@ -689,8 +692,9 @@ typedef struct ymod_area {
     uint32_t arrival_count;
     const ymod_area_spot *spots;
     uint32_t spot_count;
-    const ymod_area_arrival *cart; /* NULL, or a camp's cart: a hunter who fainted is brought back there and set down
-                                      along its facing (`from` and `door` are not read) */
+    const ymod_area_arrival *cart; /* NULL, or the camp's cart, on area 0 only (the game keeps one for the map, the
+                                      camp's, so a quest has at most one): a hunter who fainted is brought back
+                                      there and set down along its facing (`from` and `door` are not read) */
 } ymod_area;
 typedef struct ymod_maps {
     uint32_t version;

@@ -29,6 +29,7 @@
 #include <array>
 #include <bit>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -1254,12 +1255,13 @@ void test_maps(psprecomp::Runtime &runtime) {
     // The game's files for the arena's floor, and the map's collision.
     const Bytes area_pack =
         game::write_pack({bytes("THEIR MODEL"), bytes("SCENE"), bytes("SETTINGS"), bytes("THEIR TMH")});
-    const Bytes hits_pack = game::write_pack(
-        {bytes("MAP TMH"), bytes("CAMP 1"), bytes("CAMP 2"), bytes("FLOOR 1"), bytes("FLOOR 2"), bytes("OTHER")});
+    const Bytes hits_pack = game::write_pack({bytes("MAP TMH"), bytes("CAMP 1"), bytes("CAMP 2"), bytes("FLOOR 1"),
+        bytes("FLOOR 2"), bytes("CAMP POINTS"), bytes("FLOOR POINTS")});
     maps::read_files_with_for_tests([&](mhp3rd::mods::FileId file) -> std::optional<Bytes> {
         if (file == 0x138Bu) return area_pack;
         if (file == 0x1262u) return hits_pack;
         if (file == 0x1263u) return bytes("not a pack");
+        if (file == 0x1390u) return Bytes(16u, 0u);    // map 9's first area's GE data
         if (file == 0x138Au) return bytes("THEIR GE"); // the arena's first area's GE data
         if (file == 0x138Cu) return Bytes(0x10000u, 0u);
         return std::nullopt;
@@ -1274,6 +1276,10 @@ void test_maps(psprecomp::Runtime &runtime) {
     place_overlay(runtime, 0x0A001780u, "game_sub.ovl", 0x00050000u);
     memory.store16(0x0A0457C4u + 16u, 0x1389u); // map 8's first area pack
     memory.store16(0x0A04579Cu + 16u, 0x138Au); // and GE data
+    memory.store8(0x0A0457ECu + 8u, 2u);        // and its two areas
+    memory.store8(0x0A0457ECu + 9u, 2u);        // and map 9's
+    memory.store16(0x0A0457C4u + 18u, 0x1391u);
+    memory.store16(0x0A04579Cu + 18u, 0x1390u);
     const auto served = [&](mhp3rd::mods::FileId file) {
         const auto b = maps::serve(runtime, file);
         return b ? *b : Bytes{};
@@ -1290,7 +1296,7 @@ void test_maps(psprecomp::Runtime &runtime) {
     const Bytes collision = served(0x1262u);
     check(entry(collision, 1) == bytes("CAMP 1") && entry(collision, 2) == bytes("CAMP 2") &&
             entry(collision, 3) == bytes("4.00 ground") && entry(collision, 4) == bytes("4.00 walls") &&
-            entry(collision, 5) == bytes("OTHER"),
+            entry(collision, 5) == bytes("CAMP POINTS") && entry(collision, 6) == bytes("FLOOR POINTS"),
         "maps: the map's collision has the mod's ground and walls in the area's blocks, the others the game's");
     check(served(0x1389u).empty() && served(0x138Eu).empty() && served(0x1263u).empty(),
         "maps: the map's other areas and other files are the game's");
@@ -1320,8 +1326,8 @@ void test_maps(psprecomp::Runtime &runtime) {
             maps::play_quest_in("odd", 62602u),
         "maps: a second area is added");
     memory.store16(0x09000000u + 0x60472u, 62602u);
-    check(
-        maps::serve(runtime, 0x1263u) == nullptr, "maps: a collision pack that is not as expected is left the game's");
+    check(maps::serve(runtime, 0x1263u) == nullptr && maps::serve(runtime, 0x1391u) == nullptr,
+        "maps: with a collision pack that is not as expected, the game's area and collision are loaded");
 
     // A quest played in an area names it; one that names an area not added is refused.
     const auto *quests = static_cast<const ymod_quests *>(mhp3rd::mods::native::host()->service(mod, YMOD_QUESTS, 1u));
@@ -1480,33 +1486,77 @@ void test_map_points(psprecomp::Runtime &runtime) {
     ymod_area too_many = camp;
     too_many.exits = many.data();
     too_many.exit_count = 17u;
-    ymod_area_exit bad_exits[] = {door, door, door, door, door};
+    constexpr float kNaN = std::numeric_limits<float>::quiet_NaN();
+    constexpr float kInfinity = std::numeric_limits<float>::infinity();
+    ymod_area_exit bad_exits[] = {door, door, door};
     bad_exits[0].to = 255;
     bad_exits[1].to = -1;
     bad_exits[2].door = 256;
-    bad_exits[3].radius = 0.0f;
-    bad_exits[4].height = -1.0f;
+    ymod_area_exit odd_exits[] = {door, door, door, door, door, door};
+    odd_exits[0].radius = 0.0f;
+    odd_exits[1].height = -1.0f;
+    odd_exits[2].radius = kInfinity;
+    odd_exits[3].height = kNaN;
+    odd_exits[4].at.x = kNaN;
+    odd_exits[5].at.z = -kInfinity;
     ymod_area_arrival bad_ins[] = {ins[0], ins[0], ins[0], ins[0], ins[0]};
     bad_ins[0].facing = 0x10000;
     bad_ins[1].facing = -1;
     bad_ins[2].from = 255;
     bad_ins[3].from = -2;
     bad_ins[4].door = -1;
-    ymod_area_spot bad_things[] = {things[0], things[0], things[0], things[0]};
+    ymod_area_spot bad_things[] = {things[0], things[0]};
     bad_things[0].kind = 8;
-    bad_things[1].radius = 0.0f;
-    bad_things[2].height = -5.0f;
-    bad_things[3].facing = 0x10000;
-    const std::string exit_line = "an exit's area, door or size is out of range";
+    bad_things[1].facing = 0x10000;
+    ymod_area_spot odd_things[] = {things[0], things[0], things[0], things[0]};
+    odd_things[0].radius = 0.0f;
+    odd_things[1].height = -5.0f;
+    odd_things[2].radius = kInfinity;
+    odd_things[3].at.y = kNaN;
+    const std::string exit_line = "an exit's area or door is out of range";
+    const std::string odd_exit_line = "an exit's place is not a number or its size is not above 0";
     const std::string in_line = "an arrival's facing, area or door is out of range";
     const std::string thing_line =
-        "a thing to use is not a supply box, delivery box or bed, or its size or facing is out of range";
+        "a thing to use is not a supply box, delivery box or bed, or its facing is out of range";
+    const std::string odd_thing_line = "a thing to use's place is not a number or its size is not above 0";
     bool all_refused = refused(too_many, "many", "it has more than 16 exits, arrivals or things to use");
     for (std::size_t i = 0; i < std::size(bad_exits); ++i) {
         ymod_area a = camp;
         a.exits = &bad_exits[i];
         all_refused = refused(a, ("exit" + std::to_string(i)).c_str(), exit_line) && all_refused;
     }
+    for (std::size_t i = 0; i < std::size(odd_exits); ++i) {
+        ymod_area a = camp;
+        a.exits = &odd_exits[i];
+        all_refused = refused(a, ("odd_exit" + std::to_string(i)).c_str(), odd_exit_line) && all_refused;
+    }
+    for (std::size_t i = 0; i < std::size(odd_things); ++i) {
+        ymod_area a = camp;
+        a.spots = &odd_things[i];
+        a.spot_count = 1u;
+        all_refused = refused(a, ("odd_thing" + std::to_string(i)).c_str(), odd_thing_line) && all_refused;
+    }
+    ymod_area_arrival nowhere_in = ins[1];
+    nowhere_in.at.y = kInfinity;
+    ymod_area lost = camp;
+    lost.arrivals = &nowhere_in;
+    lost.arrival_count = 1u;
+    all_refused = refused(lost, "lost", "an arrival's place is not a number") && all_refused;
+    ymod_area_arrival cart_nowhere = cart;
+    cart_nowhere.at.x = kNaN;
+    ymod_area lost_cart = camp;
+    lost_cart.cart = &cart_nowhere;
+    all_refused = refused(lost_cart, "lost_cart", "its cart's place is not a number") && all_refused;
+    // An exit back into its own area, and a cart anywhere but a camp.
+    ymod_area_exit loop = door;
+    loop.to = 0;
+    ymod_area looping = camp;
+    looping.exits = &loop;
+    all_refused = refused(looping, "looping", "an exit leads to its own area") && all_refused;
+    ymod_area floor_cart = camp;
+    floor_cart.area = 1;
+    floor_cart.exits = nullptr;
+    all_refused = refused(floor_cart, "floor_cart", "only a camp (area 0) has a cart") && all_refused;
     for (std::size_t i = 0; i < std::size(bad_ins); ++i) {
         ymod_area a = camp;
         a.arrivals = &bad_ins[i];
@@ -1525,8 +1575,9 @@ void test_map_points(psprecomp::Runtime &runtime) {
     cart_off.cart = &bad_cart;
     all_refused = refused(cart_off, "cart", "its cart's facing is out of range") && all_refused;
     check(all_refused,
-        "points: too many, an exit to no area or with a door past 255 or no size, an arrival's facing, area or door "
-        "out of range, a thing that is not the camp's or has no size, and a cart's facing out of range are refused");
+        "points: too many, an exit to no area or its own or with a door past 255, an arrival's facing, area or door "
+        "out of range, a thing that is not the camp's, a cart's facing out of range or a cart off the camp, a place "
+        "that is not a finite number and a size not above 0 (infinite, not a number) are refused");
     std::string why;
     const Bytes pmo = bytes(std::string_view("pmo\0"
                                              "102\0",
@@ -1597,15 +1648,45 @@ void test_map_points(psprecomp::Runtime &runtime) {
             u16(camp_points, 0xDEu) == 7u && f32(camp_points, 0xE0u) == 6000.0f && u16(camp_points, 0xF8u) == 0x4000u,
         "points: the camp's points table is its exits, arrivals, supply box, bed and cart");
     check(entry(collision, 6) == bytes("FLOOR POINTS"), "points: an area that gives none keeps the game's table");
-    // Without game_sub's count, or a map with too few areas, the table has no place.
+    // Past the map's areas, nothing of the quest's is served: its blocks and
+    // table would land on other entries (a ground block read as a table).
     memory.store16(0x09000000u + 0x60472u, 62701u);
     check(maps::play_quest_in("camp", 62701u), "points: another quest in the camp");
     memory.store8(0x0A0457ECu + 8u, 0u);
-    check(maps::serve(runtime, 0x1262u) == nullptr && served(0x138Au) == bytes("CAMP GE"),
-        "points: the collision is the game's when the map has no table for the area; the area's files are served");
+    check(maps::serve(runtime, 0x1262u) == nullptr && maps::serve(runtime, 0x138Au) == nullptr &&
+            maps::serve(runtime, 0x1389u) == nullptr,
+        "points: when the map has no area for the camp, none of its files is served");
     memory.store8(0x0A0457ECu + 8u, 9u);
-    check(maps::serve(runtime, 0x1262u) == nullptr, "points: and when the table's entry would be past the pack's last");
+    check(maps::serve(runtime, 0x1262u) == nullptr && maps::serve(runtime, 0x138Au) == nullptr,
+        "points: nor when the map's collision pack has no table for each of its areas");
     memory.store8(0x0A0457ECu + 8u, 2u);
+    check(served(0x138Au) == bytes("CAMP GE") && entry(served(0x1262u), 5) != bytes("CAMP POINTS"),
+        "points: and with the map's two areas, all of them is");
+    check(maps::add_area(runtime, {"third", 8, 2, pmo, bytes("g"), bytes(".TMH"), bytes("4.00"), bytes("4.00")}) &&
+            maps::play_quest_in("camp", 62703u) && maps::play_quest_in("third", 62703u),
+        "points: an area of the arena past its two, giving no points");
+    memory.store16(0x09000000u + 0x60472u, 62703u);
+    check(maps::serve(runtime, 0x1262u) == nullptr && maps::serve(runtime, 0x138Au) == nullptr &&
+            maps::serve(runtime, 0x1389u) == nullptr,
+        "points: a quest with an area past the map's, even one giving no points, has none of its areas served");
+    // An exit or an arrival naming an area past the map's.
+    maps::Points far_exit;
+    far_exit.exits = {{0.0f, 0.0f, 0.0f, 100.0f, 100.0f, 5u, 0u}};
+    maps::Points far_arrival;
+    far_arrival.arrivals = {{0.0f, 0.0f, 0.0f, 0u, 3u, 0u}};
+    check(maps::add_area(runtime,
+              {"far_exit", 8, 1, pmo, bytes("g"), bytes(".TMH"), bytes("4.00"), bytes("4.00"), "P", far_exit}) &&
+            maps::add_area(runtime,
+                {"far_arrival", 8, 1, pmo, bytes("g"), bytes(".TMH"), bytes("4.00"), bytes("4.00"), "P",
+                    far_arrival}) &&
+            maps::play_quest_in("camp", 62704u) && maps::play_quest_in("far_exit", 62704u) &&
+            maps::play_quest_in("far_arrival", 62705u),
+        "points: areas whose exit leads, or arrival comes from, past the map's areas");
+    memory.store16(0x09000000u + 0x60472u, 62704u);
+    const bool exit_refused = maps::serve(runtime, 0x138Au) == nullptr && maps::serve(runtime, 0x1262u) == nullptr;
+    memory.store16(0x09000000u + 0x60472u, 62705u);
+    check(exit_refused && maps::serve(runtime, 0x138Cu) == nullptr && maps::serve(runtime, 0x1262u) == nullptr,
+        "points: such a quest has none of its areas served");
     // All or nothing: one area too large to fit, and none of the quest's is served.
     check(maps::add_area(
               runtime, {"huge", 8, 1, pmo, Bytes(0x2000u, 1u), bytes(".TMH"), bytes("4.00"), bytes("4.00"), "P"}) &&
@@ -1673,15 +1754,22 @@ void test_map_points(psprecomp::Runtime &runtime) {
             refuse_quest(62715u, {"camp", "camp"}, "it names its area \"camp\" twice"),
         "points: a quest naming an area not added, areas on two maps, two in place of one area or one twice is "
         "refused");
-    // A quest of the struct before `areas` reads none.
+    std::vector<const char *> fourteen(14u, "camp");
+    check(refuse_quest(62717u, fourteen, "it names more than 13 areas"),
+        "points: a quest naming more areas than a map has is refused before they are read");
+    // A quest of the struct before `areas` reads none: the same quest with
+    // the full struct (62710) is played in the camp and the yard.
     ymod_quest older = quest;
     older.size = offsetof(ymod_quest, areas);
     older.id = 62716u;
     older.map = 8;
-    check(quests != nullptr && quests->add(mod, &older) == 62716 && maps::serve(runtime, 0x1262u) != nullptr,
-        "points: an older quest struct names no areas");
+    built = quests != nullptr && quests->add(mod, &older) == 62716 ? built_quest(62716u) : std::nullopt;
+    record = built ? game::read_quest_record(*built) : std::nullopt;
     memory.store16(0x09000000u + 0x60472u, 62716u);
-    check(maps::serve(runtime, 0x1262u) == nullptr, "points: and is played in the game's areas");
+    const bool older_served = maps::serve(runtime, 0x1262u) != nullptr || maps::serve(runtime, 0x138Au) != nullptr;
+    memory.store16(0x09000000u + 0x60472u, 62710u);
+    check(built && record && record->map == 8u && !older_served && maps::serve(runtime, 0x1262u) != nullptr,
+        "points: an older quest struct names no areas, and is played in the game's");
 
     std::error_code ec;
     std::filesystem::remove_all(folder, ec);

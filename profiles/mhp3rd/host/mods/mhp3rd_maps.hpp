@@ -33,7 +33,11 @@ class Runtime;
 //
 // An area whose GE data is larger than the game's is not served, nor the
 // quest's other areas: the game puts the large monsters' GE data right after
-// it in video memory.
+// it in video memory. Nor are a quest's areas when one of them, or an area its
+// exits lead to or its arrivals come from, is past the map's areas (a byte by
+// map in game_sub at 0x0A0457EC), or the map's collision pack lacks a block
+// pair and a points table for each of its areas: what is written would land
+// on other entries.
 //
 // The quest played is the accepted quest's id beside the character, which the
 // game itself reads to choose a quest's collision (0x0A065388). The files go
@@ -86,6 +90,8 @@ struct Points {
 // The most of each a points table holds (the game counts them in a byte, and
 // its own areas have at most 5 exits, 6 arrivals and 7 things to use).
 inline constexpr std::size_t kMostPoints = 16u;
+// The most areas a map has: the executable's 0x088D0228 reads 13 tables.
+inline constexpr std::size_t kMostAreas = 13u;
 
 struct AreaSpec {
     std::string id;                     // the mod's name for it
@@ -107,7 +113,9 @@ struct Area {
 
 // Adds an area. False, with the reason in `why`, when the id is taken or
 // empty, the map is not one of the game's, a file is not in its format, it has
-// more points than a table holds, or the loader cannot be taken over.
+// more points than a table holds, a place is not a finite number or a size not
+// above 0, an exit leads to its own area, an area other than a camp (area 0)
+// has a cart, or the loader cannot be taken over.
 bool add_area(psprecomp::Runtime &runtime, AreaSpec spec, std::string *why = nullptr);
 
 // The area a mod added under `id`, or null.

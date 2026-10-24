@@ -568,6 +568,8 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
     const bool has_area = quest->size >= offsetof(ymod_quest, area) + sizeof(quest->area) && quest->area != nullptr;
     const bool has_areas = quest->size >= offsetof(ymod_quest, area_count) + sizeof(quest->area_count) &&
         quest->areas != nullptr && quest->area_count > 0u;
+    if (has_areas && quest->area_count > maps::kMostAreas)
+        return refuse("it names more than " + std::to_string(maps::kMostAreas) + " areas");
     std::vector<std::string> area_ids;
     if (has_area) area_ids.push_back(quest->area);
     for (std::uint32_t i = 0; has_areas && i < quest->area_count; ++i) area_ids.push_back(text(quest->areas[i]));
@@ -711,8 +713,8 @@ int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
         maps::Points points;
         for (std::uint32_t i = 0; area->exits != nullptr && i < area->exit_count; ++i) {
             const ymod_area_exit &e = area->exits[i];
-            if (!byte(e.to) || e.to == maps::kQuestStart || !byte(e.door) || !(e.radius > 0.0f) || !(e.height > 0.0f))
-                return refuse("an exit's area, door or size is out of range");
+            if (!byte(e.to) || e.to == maps::kQuestStart || !byte(e.door))
+                return refuse("an exit's area or door is out of range");
             points.exits.push_back({e.at.x, e.at.y, e.at.z, e.radius, e.height, static_cast<std::uint8_t>(e.to),
                 static_cast<std::uint8_t>(e.door)});
         }
@@ -727,9 +729,8 @@ int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
         for (std::uint32_t i = 0; area->spots != nullptr && i < area->spot_count; ++i) {
             const ymod_area_spot &t = area->spots[i];
             if ((t.kind != YMOD_SPOT_SUPPLY_BOX && t.kind != YMOD_SPOT_DELIVERY_BOX && t.kind != YMOD_SPOT_BED) ||
-                !facing(t.facing) || !(t.radius > 0.0f) || !(t.height > 0.0f))
-                return refuse("a thing to use is not a supply box, delivery box or bed, or its size or facing is out "
-                              "of range");
+                !facing(t.facing))
+                return refuse("a thing to use is not a supply box, delivery box or bed, or its facing is out of range");
             points.spots.push_back({static_cast<maps::SpotKind>(t.kind), t.at.x, t.at.y, t.at.z, t.radius, t.height,
                 static_cast<std::uint16_t>(t.facing)});
         }

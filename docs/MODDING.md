@@ -482,7 +482,7 @@ camp.spots = spots;       camp.spot_count = 2;
 camp.cart = &cart;        // a camp's cart
 ```
 
-The hunter leaving through an exit comes into its area at the arrival from the area he left with the exit's door; two ways between the same areas differ by their doors. A quest played in several areas of one map names them all, each in place of another of the map's areas, a camp and a fighting area say: `quest.areas` (with `quest.area_count`) besides `quest.area`. Their monsters' areas are the map's numbers (0 the camp), except that a monster of area 0 starts in `quest.area` when the quest names one. If one of the quest's areas does not fit where the game's goes ([MAPS.md](MAPS.md#areas-mods-add)), none of them is served.
+The hunter leaving through an exit comes into its area at the arrival from the area he left with the exit's door; two ways between the same areas differ by their doors. An exit leads to another area of the map, places are finite and sizes above 0, and only a camp (area 0) has a cart. A quest played in several areas of one map names them all, each in place of another of the map's areas, a camp and a fighting area say: `quest.areas` (with `quest.area_count`) besides `quest.area`. Their monsters' areas are the map's numbers (0 the camp), except that a monster of area 0 starts in `quest.area` when the quest names one. If one of the quest's areas does not fit where the game's goes, or it or an area its exits and arrivals name is not one of the map's ([MAPS.md](MAPS.md#areas-mods-add)), none of them is served.
 
 ## Panels and overlays
 
