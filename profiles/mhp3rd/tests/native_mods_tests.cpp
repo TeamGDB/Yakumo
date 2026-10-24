@@ -833,6 +833,158 @@ void test_hook_in_generated_unit(psprecomp::Runtime &runtime) {
         "native: with the hook removed, the retired unit's code runs compiled, without it");
 }
 
+// yakumo/mod.hpp's wrappers, on a monsters service of stand-ins: every one
+// passes its monster and arguments on and reads the answer, and one the
+// host's service is too old for does nothing and answers no.
+struct FakeMonster {
+    std::int32_t motion = -1, blend = -1, slot = -1, attack = -1, effect = -1, joint = -1;
+    float facing = 90.0f, turned = 0.0f, moved_x = 0.0f, moved_z = 0.0f, scale = 0.0f;
+    ymod_vec3 offset{};
+    int aims = 0, ended = -1;
+};
+FakeMonster g_fake;
+constexpr std::uint32_t kFakeMonster = 0x09A00000u;
+int fake_play(std::uint32_t m, std::int32_t motion, std::int32_t blend) {
+    g_fake.motion = motion;
+    g_fake.blend = blend;
+    return m == kFakeMonster ? 0 : -1;
+}
+int fake_finished(std::uint32_t m) {
+    return m == kFakeMonster ? 1 : 0;
+}
+int fake_frame(std::uint32_t, float *frame) {
+    *frame = 12.5f;
+    return 0;
+}
+int fake_at_frame(std::uint32_t, float frame) {
+    return frame == 12.0f ? 1 : 0;
+}
+int fake_position(std::uint32_t, ymod_vec3 *out) {
+    *out = {100.0f, 0.0f, 200.0f};
+    return 0;
+}
+int fake_facing(std::uint32_t, float *degrees) {
+    *degrees = g_fake.facing;
+    return 0;
+}
+int fake_set_facing(std::uint32_t, float degrees) {
+    g_fake.facing = degrees;
+    return 0;
+}
+int fake_target(std::uint32_t, ymod_vec3 *out) {
+    *out = {400.0f, 0.0f, 600.0f}; // 300 across and 400 ahead of the position
+    return 0;
+}
+int fake_aim(std::uint32_t) {
+    ++g_fake.aims;
+    return 0;
+}
+int fake_turn(std::uint32_t, float degrees) {
+    g_fake.turned = degrees;
+    return 1;
+}
+int fake_move(std::uint32_t, float x, float z) {
+    g_fake.moved_x = x;
+    g_fake.moved_z = z;
+    return 0;
+}
+int fake_attack(std::uint32_t, std::int32_t slot, std::int32_t attack) {
+    g_fake.slot = slot;
+    g_fake.attack = attack;
+    return 0;
+}
+int fake_end_attack(std::uint32_t, std::int32_t slot) {
+    g_fake.ended = slot;
+    return 0;
+}
+int fake_effect(std::uint32_t, std::int32_t effect, std::int32_t joint, const ymod_vec3 *offset, float scale) {
+    g_fake.effect = effect;
+    g_fake.joint = joint;
+    g_fake.offset = *offset;
+    g_fake.scale = scale;
+    return 0;
+}
+int fake_health(std::uint32_t, std::int32_t *now, std::int32_t *most) {
+    if (now != nullptr) *now = 0;
+    if (most != nullptr) *most = 7400;
+    return 0;
+}
+void test_sdk_wrappers(psprecomp::Runtime &runtime) {
+    namespace native = mhp3rd::mods::native;
+    ymod_mod *mod = native::add_mod("sdk_wrappers", "SDK Wrappers", ".");
+    const yakumo::Mod wrapped(native::host(), mod);
+    check(wrapped.handle() == mod && wrapped.host() == native::host() && wrapped.memory() != nullptr &&
+            wrapped.hooks() != nullptr && wrapped.monsters() != nullptr && wrapped.maps() != nullptr,
+        "sdk: yakumo::Mod gives its handle, its host and the host's services");
+    check(wrapped.calls() != nullptr && wrapped.events() != nullptr && wrapped.files() != nullptr &&
+            wrapped.settings() != nullptr && wrapped.services() != nullptr && wrapped.symbols() != nullptr &&
+            wrapped.ui() != nullptr && wrapped.tables() != nullptr && wrapped.quests() != nullptr &&
+            wrapped.equipment() != nullptr && wrapped.folder() == ".",
+        "sdk: and each of its services by its own getter, and its folder");
+    wrapped.log("a line from yakumo::Mod");
+    check(logged("a line from yakumo::Mod"), "sdk: yakumo::Mod writes to the mod's log");
+    const std::optional<ymod_symbol> known = wrapped.symbol("armor.model_of_part");
+    check(known && known->kind == YMOD_SYMBOL_FUNCTION && known->address == 0x08869778u &&
+            !wrapped.symbol("no.such.function") && wrapped.hook("no.such.function", YMOD_HOOK_BEFORE, nullptr) == 0u,
+        "sdk: a known name gives its symbol; an unknown name has no symbol, and no hook");
+    runtime.memory().store32(0x08B00000u, 0u);
+    check(wrapped.write<std::uint32_t>(0x08B00000u, 0x12345678u) &&
+            wrapped.read<std::uint32_t>(0x08B00000u) == 0x12345678u && !wrapped.read<std::uint32_t>(0x00000010u) &&
+            !wrapped.write<std::uint32_t>(0x00000010u, 1u),
+        "sdk: yakumo::Mod reads and writes guest memory, and refuses an address outside it");
+
+    ymod_monsters service{};
+    service.version = 1u;
+    service.size = sizeof(ymod_monsters);
+    service.play_motion = &fake_play;
+    service.motion_finished = &fake_finished;
+    service.motion_frame = &fake_frame;
+    service.at_frame = &fake_at_frame;
+    service.position = &fake_position;
+    service.facing = &fake_facing;
+    service.set_facing = &fake_set_facing;
+    service.target = &fake_target;
+    service.aim = &fake_aim;
+    service.turn_to_target = &fake_turn;
+    service.move = &fake_move;
+    service.attack = &fake_attack;
+    service.end_attack = &fake_end_attack;
+    service.effect = &fake_effect;
+    service.health = &fake_health;
+    g_fake = {};
+    const yakumo::Monster monster(service, kFakeMonster);
+    check(monster.object() == kFakeMonster && monster.play(7, 4) && g_fake.motion == 7 && g_fake.blend == 4 &&
+            monster.finished() && monster.frame() == 12.5f && monster.at_frame(12.0f) && !monster.at_frame(3.0f),
+        "sdk: yakumo::Monster plays motions and reads their frames");
+    check(monster.position().z == 200.0f && monster.target().x == 400.0f && monster.distance_to_target() == 500.0f &&
+            monster.set_facing(0.0f) && monster.facing() == 0.0f &&
+            std::fabs(monster.angle_to_target() - 36.8699f) < 0.01f && monster.set_facing(270.0f) &&
+            std::fabs(monster.angle_to_target() - 126.8699f) < 0.01f,
+        "sdk: yakumo::Monster works out how far its target is and how far round, from -180 to 180");
+    check(monster.aim() && g_fake.aims == 1 && monster.turn_to_target(15.0f) && g_fake.turned == 15.0f &&
+            monster.move_forward(30.0f) && g_fake.moved_x == 0.0f && g_fake.moved_z == 30.0f &&
+            monster.move(5.0f, 6.0f) && g_fake.moved_x == 5.0f,
+        "sdk: yakumo::Monster aims, turns and moves in its own frame");
+    check(monster.attack(1, 9) && g_fake.slot == 1 && g_fake.attack == 9 && monster.end_attack(1) &&
+            g_fake.ended == 1 && monster.effect(3, 4, {1.0f, 2.0f, 3.0f}) && g_fake.effect == 3 && g_fake.joint == 4 &&
+            g_fake.offset.y == 2.0f && g_fake.scale == 1.0f,
+        "sdk: yakumo::Monster starts and ends attacks and effects");
+    check(monster.health() == 0 && monster.most_health() == 7400 && monster.fallen(),
+        "sdk: yakumo::Monster reads its health, and has fallen at 0");
+
+    // A service from before the body's functions: those do nothing and say no.
+    ymod_monsters older = service;
+    older.size = static_cast<std::uint32_t>(offsetof(ymod_monsters, motion_frame));
+    g_fake = {};
+    const yakumo::Monster old(older, kFakeMonster);
+    check(old.play(2) && old.frame() == 0.0f && !old.at_frame(12.0f) && old.position().x == 0.0f &&
+            old.facing() == 0.0f && !old.set_facing(10.0f) && old.target().x == 0.0f && !old.aim() &&
+            !old.turn_to_target(5.0f) && !old.move(1.0f, 1.0f) && !old.attack(0, 1) && !old.end_attack(0) &&
+            !old.effect(1, 1) && old.health() == 0 && old.most_health() == 0 && !old.fallen() && g_fake.aims == 0 &&
+            g_fake.facing == 90.0f,
+        "sdk: on a service too old for a function, yakumo::Monster does nothing and answers no");
+}
+
 // Quests mods add: encrypted with the keys in memory, served as files, and
 // the game's id-to-file code given the file for a mod's quest id.
 void test_quests(psprecomp::Runtime &runtime) {
@@ -4955,6 +5107,7 @@ int main() {
     test_host_returns(runtime);
     test_shared_overlay_address(runtime);
     test_hook_in_generated_unit(runtime);
+    test_sdk_wrappers(runtime);
     test_quests(runtime);
     test_tables(runtime);
     test_monsters(runtime);
