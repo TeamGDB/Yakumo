@@ -184,8 +184,8 @@
     "reason": "Declarations only. mhp3rd_monsters.cpp is covered by mhp3rd_native_mods_tests (game kinds, model packs, adding a kind with stand-ins for the traced tables and loader, the base behaviour hooks, behaviour parts, the body, frames, attacks, attack shapes and rows, body capsules, footsteps, pictures, the service) and mhp3rd_script_mods_tests."
   },
   "profiles/mhp3rd/host/game/quest_builder.hpp": {
-    "sha256": "b9a6707f23aa17b5f81f8e4f09b3240e23d1b516a0dae1c9e7ddde43da0d6643",
-    "reason": "Declarations only. quest_builder.cpp is covered by mhp3rd_quest_file_tests (the record, texts, monsters, tables and refusals) and mhp3rd_native_mods_tests (quests built through the quests service)."
+    "sha256": "d2920a74bce480ef6c1758cfacbce59873436b2fc29435e5ab12ec8ca5762b2b",
+    "reason": "Declarations only. quest_builder.cpp is covered by mhp3rd_quest_file_tests (the record, texts, monsters, tables, gathering lists and refusals) and mhp3rd_native_mods_tests (quests built through the quests service, with their areas' gathering lists)."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_equipment.hpp": {
     "sha256": "db5d4bf3479c90470a4af01cc190ba5ea6baf1eb62448ca2d20ed08d6bee2553",

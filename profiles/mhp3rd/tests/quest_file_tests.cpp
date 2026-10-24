@@ -244,8 +244,17 @@ void test_builder() {
     const std::size_t waves = word(q, 0x24u);
     check(word(q, waves) == word(q, waves + 8u) && word(q, word(q, waves) + 4u) == 0x9999u &&
             q[word(q, 0x08u)] == 0xFFu && half(q, word(q, 0x1Cu)) == 0xFFFFu && half(q, word(q, 0x28u)) == 0xFFFFu &&
-            q[word(q, 0x2Cu)] == 0xFFu && word(q, word(q, 0x60u)) == 0u && word(q, word(q, 0x60u) + 4u) == 0u,
-        "builder: no supplies, rewards, gathering or small monsters, each table in the form the game reads as empty");
+            q[word(q, 0x2Cu)] == 0xFFu,
+        "builder: no supplies, rewards or small monsters, each table in the form the game reads as empty");
+    // Gathering (+0x60): every area of a map, up to 13, at 16 entries with no
+    // items, which the game makes points that cannot be used.
+    const std::size_t areas = word(q, 0x60u), nothing_gathered = word(q, areas);
+    bool no_gathering = nothing_gathered != 0u && nothing_gathered + 8u * kMostGatheringPoints <= areas;
+    for (std::size_t a = 0; a < kMostQuestAreas; ++a)
+        no_gathering = no_gathering && word(q, areas + 4u * a) == nothing_gathered;
+    for (std::size_t i = 0; i < 8u * kMostGatheringPoints; i += 4u)
+        no_gathering = no_gathering && word(q, nothing_gathered + i) == 0u;
+    check(no_gathering, "builder: no gathering, each of 13 areas at the same entries with no items");
     QuestSpec none = spec;
     none.monsters.clear();
     QuestSpec many = spec;
@@ -309,6 +318,57 @@ void test_builder() {
     unnamed.supplies = {{0u, 1u}};
     check(!build_quest(overfull, &why) && why.find("supplies") != std::string::npos && !build_quest(unnamed),
         "builder: more supplies than the box holds, and an item 0, are refused");
+
+    // Gathering: area 1's two points (a cannonball pile, and one of two items
+    // with 3 uses and up to 2 more), and one not named yet.
+    QuestSpec gathered = spec;
+    gathered.gathering = {
+        {}, {{{{712u, 1u, 100u}}, 10u, 0u}, {{{683u, 1u, 60u}, {684u, 2u, 40u}}, 3u, 2u}}, {{{}, 4u, 0u}}};
+    const std::optional<Bytes> gathering = build_quest(gathered, &why);
+    const std::size_t table = gathering ? word(*gathering, 0x60u) : 0u;
+    const std::size_t empty_list = gathering ? word(*gathering, table) : 0u;
+    const std::size_t floor = gathering ? word(*gathering, table + 4u) : 0u;
+    const std::size_t pile = gathering ? word(*gathering, floor) : 0u;
+    const std::size_t mixed = gathering ? word(*gathering, floor + 8u) : 0u;
+    const std::size_t third = gathering ? word(*gathering, table + 8u) : 0u;
+    check(gathering && floor != empty_list && half(*gathering, floor + 4u) == 10u &&
+            half(*gathering, floor + 6u) == 10u && (*gathering)[pile] == 100u && (*gathering)[pile + 1u] == 1u &&
+            half(*gathering, pile + 2u) == 712u && word(*gathering, pile + 4u) == 0xFFFFFFFFu &&
+            half(*gathering, floor + 12u) == 5u && half(*gathering, floor + 14u) == 3u && (*gathering)[mixed] == 60u &&
+            half(*gathering, mixed + 2u) == 683u && (*gathering)[mixed + 4u] == 40u && (*gathering)[mixed + 5u] == 2u &&
+            half(*gathering, mixed + 6u) == 684u && word(*gathering, mixed + 8u) == 0xFFFFFFFFu,
+        "builder: an area's points' entries (items, the most and the fewest uses), each list of chance, count and "
+        "item ended by 0xFFFFFFFF");
+    bool others_empty = third != empty_list && word(*gathering, third) == 0u && half(*gathering, third + 4u) == 4u;
+    for (std::size_t a = 3; gathering && a < kMostQuestAreas; ++a)
+        others_empty = others_empty && word(*gathering, table + 4u * a) == empty_list;
+    check(gathering && word(*gathering, empty_list) == 0u && others_empty,
+        "builder: a point not named yet has no items; areas with none and past the spec's at the empty entries");
+    QuestSpec uneven_gathering = spec;
+    uneven_gathering.gathering = {{{{{712u, 1u, 60u}}, 1u, 0u}}};
+    QuestSpec unused = spec;
+    unused.gathering = {{{{{712u, 1u, 100u}}, 0u, 0u}}};
+    QuestSpec unnamed_gathering = spec;
+    unnamed_gathering.gathering = {{{{{0u, 1u, 100u}}, 1u, 0u}}};
+    QuestSpec piled = spec;
+    piled.gathering = {{{std::vector<QuestGatherItem>(17u, {712u, 1u, 0u}), 1u, 0u}}};
+    piled.gathering[0][0].items[0].chance = 100u;
+    QuestSpec spotty = spec;
+    spotty.gathering = {std::vector<QuestGathering>(17u, {{{712u, 1u, 100u}}, 1u, 0u})};
+    QuestSpec sprawling = spec;
+    sprawling.gathering.resize(14u);
+    QuestSpec thirteen = spec;
+    thirteen.gathering.resize(13u);
+    thirteen.gathering[12] = {{{{712u, 1u, 100u}}, 1u, 0u}};
+    const std::optional<Bytes> last = build_quest(thirteen, &why);
+    check(last && word(*last, word(*last, 0x60u) + 48u) != word(*last, word(*last, 0x60u)),
+        "builder: gathering in the 13th area, the last a map has");
+    check(!build_quest(uneven_gathering, &why) && why.find("100") != std::string::npos && !build_quest(unused) &&
+            !build_quest(unnamed_gathering) && !build_quest(piled) && !build_quest(spotty, &why) &&
+            why.find("more gathering points") != std::string::npos && !build_quest(sprawling, &why) &&
+            why.find("more areas") != std::string::npos,
+        "builder: gathered chances not adding up to 100, no uses, an item 0, too many items, points or areas are "
+        "refused");
 }
 
 } // namespace

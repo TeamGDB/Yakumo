@@ -88,6 +88,19 @@ std::optional<std::vector<std::uint8_t>> build_quest(const QuestSpec &spec, std:
         spec.supplies.begin(), spec.supplies.end(), [](const QuestSupply &s) { return s.item == 0u || s.count == 0u; });
     if (spec.supplies.size() > kMostSupplies || unnamed_supply)
         return fail("it has more supplies than the box holds, or one names no item");
+    if (spec.gathering.size() > kMostQuestAreas) return fail("it has gathering in more areas than a map has");
+    for (const std::vector<QuestGathering> &area : spec.gathering) {
+        if (area.size() > kMostGatheringPoints) return fail("an area has more gathering points than a table holds");
+        for (const QuestGathering &g : area) {
+            unsigned total = 0;
+            for (const QuestGatherItem &i : g.items) total += i.chance;
+            const bool unnamed = std::any_of(
+                g.items.begin(), g.items.end(), [](const QuestGatherItem &i) { return i.item == 0u || i.count == 0u; });
+            if (g.items.size() > kMostGatheredItems || unnamed || (!g.items.empty() && (total != 100u || g.uses == 0u)))
+                return fail("a gathering point's chances do not add up to 100, it has no uses, too many items or one "
+                            "naming none");
+        }
+    }
 
     Writer w;
     w.zeros(kHeader);
@@ -157,9 +170,44 @@ std::optional<std::vector<std::uint8_t>> build_quest(const QuestSpec &spec, std:
     }
     w.put16(0xFFFFu);
     w.zeros(10u);
-    // No gathering yet: no points in any area.
+    // Gathering (+0x60): an offset per area of the map, to its points'
+    // entries (an offset to the point's items, the most and the fewest
+    // uses); each item its chance, count and id, a list ended by 0xFFFFFFFF.
+    // A point takes the entry its record's word names, from 1, so an area
+    // with no lists, and every area of a map past the spec's, points at
+    // entries with no items: points that cannot be used, where the game
+    // would otherwise read the table's other words as entries.
+    std::vector<std::vector<std::size_t>> gathered_items(spec.gathering.size());
+    for (std::size_t a = 0; a < spec.gathering.size(); ++a)
+        for (const QuestGathering &g : spec.gathering[a]) {
+            if (g.items.empty()) {
+                gathered_items[a].push_back(0u);
+                continue;
+            }
+            gathered_items[a].push_back(w.here());
+            for (const QuestGatherItem &i : g.items) {
+                w.bytes.push_back(i.chance);
+                w.bytes.push_back(i.count);
+                w.put16(i.item);
+            }
+            w.put32(0xFFFFFFFFu);
+        }
+    std::vector<std::size_t> gathering_entries(kMostQuestAreas, 0u);
+    for (std::size_t a = 0; a < spec.gathering.size(); ++a) {
+        if (spec.gathering[a].empty()) continue;
+        gathering_entries[a] = w.here();
+        for (std::size_t p = 0; p < spec.gathering[a].size(); ++p) {
+            const QuestGathering &g = spec.gathering[a][p];
+            w.put32(static_cast<std::uint32_t>(gathered_items[a][p]));
+            w.put16(static_cast<std::uint16_t>(g.uses + g.extra_uses));
+            w.put16(g.uses);
+        }
+    }
+    const std::size_t no_gathering = w.here();
+    w.zeros(8u * kMostGatheringPoints);
     const std::size_t gathering = w.here();
-    w.zeros(8u);
+    for (const std::size_t entries : gathering_entries)
+        w.put32(static_cast<std::uint32_t>(entries != 0u ? entries : no_gathering));
     const std::size_t small_index = w.put32(0u);
     w.put32(kNoSmallMonsters);
     w.zeros(16u);
