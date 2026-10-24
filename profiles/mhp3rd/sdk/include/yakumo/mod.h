@@ -831,9 +831,7 @@ typedef struct ymod_area {
     uint32_t exit_stride YMOD_SIZE_OF(ymod_area_exit);
     uint32_t arrival_stride YMOD_SIZE_OF(ymod_area_arrival);
     uint32_t spot_stride YMOD_SIZE_OF(ymod_area_spot);
-    /* NULL, or the map's picture and the area's place on it; with NULL the game's picture and places stay.
-       After the strides, as fields are only added at the end: a struct from an SDK without it ends before it,
-       and its area keeps the game's. */
+    /* NULL, or the map's picture and the area's place on it; with NULL the game's picture and places stay. */
     const ymod_area_map *minimap;
 } ymod_area;
 typedef struct ymod_maps {

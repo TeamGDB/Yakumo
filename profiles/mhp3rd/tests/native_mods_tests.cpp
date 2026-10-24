@@ -1584,14 +1584,26 @@ void test_map_points(psprecomp::Runtime &runtime) {
     camp.spots = things;
     camp.spot_count = 2u;
     camp.cart = &cart;
-    // An older mod's struct ends at the walls: no points.
-    ymod_area yard{
-        offsetof(ymod_area, exits), "yard", 8, 1, "floor.pmo", "floor_ge.bin", "tex.tmh", "ground.bin", "walls.bin"};
-    yard.exits = &door; // past its size: not read
-    yard.exit_count = 1u;
+    // An area that gives no points keeps the game's.
+    ymod_area yard{sizeof(ymod_area), "yard", 8, 1, "floor.pmo", "floor_ge.bin", "tex.tmh", "ground.bin", "walls.bin"};
     check(service != nullptr && service->add_area(mod, &camp) == 0 && service->add_area(mod, &yard) == 0 &&
             maps::find("camp") != nullptr && maps::find("yard") != nullptr,
-        "points: an area with points is added, and one of a mod built before them");
+        "points: an area with points is added, and one with none");
+    // Interface 1 is the first SDK: a struct shorter than its ymod_area has a
+    // wrong size, even one that ends where the points or their strides begin,
+    // and is refused with the reason rather than read as giving none.
+    const auto short_area = [&](std::size_t size, const char *id) {
+        ymod_area a = camp;
+        a.id = id;
+        a.size = static_cast<std::uint32_t>(size);
+        return service != nullptr && service->add_area(mod, &a) == -1 && maps::find(id) == nullptr &&
+            logged("a ymod_area of " + std::to_string(size) + " bytes is refused: this call reads " +
+                std::to_string(sizeof(ymod_area)) + " (set its size to sizeof(ymod_area))");
+    };
+    check(short_area(offsetof(ymod_area, exits), "before_points") &&
+            short_area(offsetof(ymod_area, spot_stride), "before_spot_stride") &&
+            short_area(offsetof(ymod_area, minimap), "before_minimap"),
+        "points: a ymod_area that ends before its points, its last stride or its map's picture is refused");
     const auto refused = [&](ymod_area area, const char *id, const std::string &line) {
         area.id = id;
         return service != nullptr && service->add_area(mod, &area) == -1 && maps::find(id) == nullptr &&
@@ -1943,22 +1955,25 @@ void test_map_points(psprecomp::Runtime &runtime) {
     std::vector<const char *> fourteen(14u, "camp");
     check(refuse_quest(62717u, fourteen, "it names more than 13 areas"),
         "points: a quest naming more areas than a map has is refused before they are read");
-    // A quest struct that ends before its monsters' stride cannot give them,
-    // and is refused with the reason: the same quest with the full struct
-    // (62710) is played in the camp and the yard.
-    ymod_quest older = quest;
-    older.size = offsetof(ymod_quest, areas);
-    older.id = 62716u;
-    older.map = 8;
-    const bool older_refused = quests != nullptr && quests->add(mod, &older) == -1 &&
-        mhp3rd::mods::quests::find(62716u) == nullptr &&
-        logged("a ymod_quest of " + std::to_string(offsetof(ymod_quest, areas)) +
-            " bytes is refused: this call reads " +
-            std::to_string(offsetof(ymod_quest, monster_stride) + sizeof(std::uint32_t)) +
-            " (set its size to sizeof(ymod_quest))");
+    // Interface 1 is the first SDK: a quest struct shorter than its ymod_quest
+    // has a wrong size and is refused with the reason, while the same quest
+    // with the full struct (62710) is played in the camp and the yard.
+    const auto short_quest = [&](std::size_t size, std::uint32_t id) {
+        ymod_quest q = quest;
+        q.size = static_cast<std::uint32_t>(size);
+        q.id = id;
+        q.map = 8;
+        return quests != nullptr && quests->add(mod, &q) == -1 && mhp3rd::mods::quests::find(id) == nullptr &&
+            logged("a ymod_quest of " + std::to_string(size) + " bytes is refused: this call reads " +
+                std::to_string(sizeof(ymod_quest)) + " (set its size to sizeof(ymod_quest))");
+    };
+    const bool older_refused = short_quest(offsetof(ymod_quest, areas), 62716u) &&
+        short_quest(offsetof(ymod_quest, reward_stride), 62718u) &&
+        short_quest(offsetof(ymod_quest, supply_stride), 62719u);
     memory.store16(0x09000000u + 0x60472u, 62710u);
     check(older_refused && maps::serve(runtime, 0x1262u) != nullptr,
-        "points: a quest struct too short for its monsters' stride is refused, with the reason");
+        "points: a quest struct shorter than the first SDK's, one that reaches its monsters' stride but not its "
+        "rewards' or supplies' among them, is refused with the reason, not taken without them");
 
     std::error_code ec;
     std::filesystem::remove_all(folder, ec);
@@ -2684,6 +2699,14 @@ void test_monsters(psprecomp::Runtime &runtime) {
     missing.id = "missing";
     missing.motions = "model/none.bin";
     ymod_monster old{sizeof(std::uint32_t)};
+    ymod_monster before_picture = spec;
+    before_picture.id = "before_picture";
+    before_picture.size = static_cast<std::uint32_t>(offsetof(ymod_monster, picture));
+    check(service != nullptr && service->add(mod, &before_picture) == -1 &&
+            logged("a ymod_monster of " + std::to_string(offsetof(ymod_monster, picture)) +
+                " bytes is refused: this call reads " + std::to_string(sizeof(ymod_monster)) +
+                " (set its size to sizeof(ymod_monster))"),
+        "monsters: a ymod_monster that ends before its picture is refused, with the reason");
     check(service != nullptr && service->add(mod, &escape) == -1 &&
             logged("monster: the model file ../yakumo_monster_test/model/model.pac is not in the mod's folder") &&
             service->add(mod, &missing) == -1 && service->add(mod, &old) == -1 && service->add(mod, nullptr) == -1,
@@ -3994,15 +4017,18 @@ void test_map_pictures(psprecomp::Runtime &runtime) {
     wide_camp.id = "wide_camp";
     wide_camp.map = 9;
     wide_camp.minimap = &wider.map;
-    // A mod built before the map's picture: its struct ends before
-    // `minimap`, which is not read.
+    // A struct that ends before `minimap` has a wrong size (interface 1 has
+    // it): refused, and `minimap`, past its size, is not read.
     ymod_area older = castle;
     older.id = "older";
     older.size = offsetof(ymod_area, minimap);
     older.minimap = reinterpret_cast<const ymod_area_map *>(std::uintptr_t{1});
-    check(service != nullptr && service->add_area(mod, &wide_camp) == 0 && service->add_area(mod, &older) == 0,
-        "map pictures: the tent at the picture's edges, a place off the picture, a wider ymod_area_map and an "
-        "ymod_area from before the field are taken");
+    check(service != nullptr && service->add_area(mod, &wide_camp) == 0 && service->add_area(mod, &older) == -1 &&
+            logged("a ymod_area of " + std::to_string(offsetof(ymod_area, minimap)) +
+                " bytes is refused: this call reads " + std::to_string(sizeof(ymod_area)) +
+                " (set its size to sizeof(ymod_area))"),
+        "map pictures: the tent at the picture's edges, a place off the picture and a wider ymod_area_map are "
+        "taken; an ymod_area that ends before the field is refused without reading it");
 
     // A quest's areas give the same picture and units, or none does.
     const ymod_quest_monster monster{"tigrex", 1, {0.0f, 0.0f, 0.0f}, 0x1E, 0x13, 100};

@@ -98,7 +98,14 @@ constexpr std::size_t kFirstAreaExit = offsetof(ymod_area_exit, door) + sizeof(s
 constexpr std::size_t kFirstAreaArrival = offsetof(ymod_area_arrival, door) + sizeof(std::int32_t);
 constexpr std::size_t kFirstAreaSpot = offsetof(ymod_area_spot, item_stride) + sizeof(std::uint32_t);
 constexpr std::size_t kFirstAreaItem = offsetof(ymod_area_item, chance) + sizeof(std::uint32_t);
-// A struct passed on its own ends there in the first SDK that has it.
+// The structs a mod passes on its own, as the first SDK (interface 1) has
+// them: a size below is a wrong one, refused with the reason; a field added
+// after them is read when the size covers it.
+constexpr std::size_t kFirstMonster = offsetof(ymod_monster, picture) + sizeof(const char *);
+constexpr std::size_t kFirstQuest = offsetof(ymod_quest, supply_stride) + sizeof(std::uint32_t);
+constexpr std::size_t kFirstWeapon = offsetof(ymod_weapon, give) + sizeof(std::int32_t);
+constexpr std::size_t kFirstArmor = offsetof(ymod_armor, give) + sizeof(std::int32_t);
+constexpr std::size_t kFirstArea = offsetof(ymod_area, minimap) + sizeof(const ymod_area_map *);
 constexpr std::size_t kFirstAreaMap = offsetof(ymod_area_map, camp_v) + sizeof(std::int32_t);
 
 // The `count` elements of an array a mod passes, `stride` bytes apart, each
@@ -472,14 +479,14 @@ std::optional<std::vector<std::uint8_t>> mod_bytes(
 int32_t monsters_add(ymod_mod *mod, const ymod_monster *monster) {
     Runtime *runtime = state().runtime;
     if (runtime == nullptr || mod == nullptr || mod->failed || monster == nullptr ||
-        too_short(mod, monster->size, offsetof(ymod_monster, motions) + sizeof(monster->motions), "ymod_monster"))
+        too_short(mod, monster->size, kFirstMonster, "ymod_monster"))
         return -1;
     const auto model = mod_bytes(mod, monster->model, "model");
     const auto geometry = mod_bytes(mod, monster->geometry, "geometry");
     const auto motions = mod_bytes(mod, monster->motions, "motions");
     // A picture that cannot be read leaves the kind the base's.
     std::vector<std::uint8_t> picture;
-    if (monster->size >= offsetof(ymod_monster, picture) + sizeof(monster->picture) && monster->picture != nullptr) {
+    if (monster->picture != nullptr) {
         if (const auto png = mod_bytes(mod, monster->picture, "picture")) {
             if (std::optional<pictures::Pixels> pixels = pictures::from_png(*png))
                 picture = std::move(*pixels);
@@ -490,10 +497,9 @@ int32_t monsters_add(ymod_mod *mod, const ymod_monster *monster) {
         }
     }
     if (!model || !geometry || !motions) return -1;
-    const bool has_effects = monster->size >= offsetof(ymod_monster, effects) + sizeof(monster->effects);
     monsters::Spec spec{monster->id != nullptr ? monster->id : "",
         monster->based_on != nullptr ? monster->based_on : "", *model, *geometry, *motions, mod->name, mod,
-        has_effects && monster->effects != nullptr ? monster->effects : "", std::move(picture)};
+        monster->effects != nullptr ? monster->effects : "", std::move(picture)};
     std::string why;
     const std::optional<std::uint8_t> kind = monsters::add(*runtime, spec, &why);
     if (!kind) report(mod, "monster " + spec.id + " is not added: " + why, true);
@@ -693,9 +699,8 @@ int monsters_end_attack(uint32_t monster, int32_t slot) {
 
 int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
     Runtime *runtime = state().runtime;
-    // Its monsters' stride is the last field it needs.
     if (runtime == nullptr || mod == nullptr || mod->failed || quest == nullptr ||
-        too_short(mod, quest->size, offsetof(ymod_quest, monster_stride) + sizeof(quest->monster_stride), "ymod_quest"))
+        too_short(mod, quest->size, kFirstQuest, "ymod_quest"))
         return -1;
     const auto text = [](const char *s) { return std::string(s != nullptr ? s : ""); };
     const auto kind_of = [](const char *id) { return id != nullptr ? monsters::kind(id) : std::nullopt; };
@@ -765,21 +770,16 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
     };
     constexpr std::uint32_t kSupply = 0xFFFFFFFFu;
     std::vector<Named> rewards;
-    // A struct too short for a stride has no such array.
-    const bool has_rewards = quest->size >= offsetof(ymod_quest, reward_stride) + sizeof(quest->reward_stride);
-    const bool has_supplies = quest->size >= offsetof(ymod_quest, supply_stride) + sizeof(quest->supply_stride);
     constexpr std::size_t kMostRewards = game::kMostRewardGroups * game::kMostRewardItems;
-    if (has_rewards && quest->rewards != nullptr && quest->reward_count > kMostRewards)
+    if (quest->rewards != nullptr && quest->reward_count > kMostRewards)
         return refuse("it has more than " + std::to_string(kMostRewards) + " rewards");
-    if (has_supplies && quest->supplies != nullptr && quest->supply_count > game::kMostSupplies)
+    if (quest->supplies != nullptr && quest->supply_count > game::kMostSupplies)
         return refuse("it has more supplies than the box holds");
-    const auto given_rewards = has_rewards ? elements(quest->rewards, quest->reward_count, quest->reward_stride,
-                                                 kFirstQuestReward, "reward_stride", "ymod_quest_reward", why)
-                                           : std::optional(std::vector<ymod_quest_reward>{});
+    const auto given_rewards = elements(quest->rewards, quest->reward_count, quest->reward_stride, kFirstQuestReward,
+        "reward_stride", "ymod_quest_reward", why);
     if (!given_rewards) return refuse(why);
-    const auto given_supplies = has_supplies ? elements(quest->supplies, quest->supply_count, quest->supply_stride,
-                                                   kFirstQuestSupply, "supply_stride", "ymod_quest_supply", why)
-                                             : std::optional(std::vector<ymod_quest_supply>{});
+    const auto given_supplies = elements(quest->supplies, quest->supply_count, quest->supply_stride, kFirstQuestSupply,
+        "supply_stride", "ymod_quest_supply", why);
     if (!given_supplies) return refuse(why);
     for (const ymod_quest_reward &r : *given_rewards) {
         if (r.item == nullptr || r.count == 0u || r.count > 99u || r.chance == 0u || r.chance > 100u ||
@@ -874,7 +874,7 @@ int32_t quests_add(ymod_mod *mod, const ymod_quest *quest) {
 int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
     Runtime *runtime = state().runtime;
     if (runtime == nullptr || mod == nullptr || mod->failed || area == nullptr ||
-        too_short(mod, area->size, offsetof(ymod_area, walls) + sizeof(area->walls), "ymod_area"))
+        too_short(mod, area->size, kFirstArea, "ymod_area"))
         return -1;
     const auto text = [](const char *s) { return std::string(s != nullptr ? s : ""); };
     const auto refuse = [mod, area, &text](const std::string &why) {
@@ -891,10 +891,8 @@ int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
     if (!model || !geometry || !textures || !ground || !walls) return -1;
     maps::AreaSpec spec{text(area->id), static_cast<std::uint8_t>(area->map), static_cast<std::uint8_t>(area->area),
         *model, *geometry, *textures, *ground, *walls, mod->name};
-    // Its points, when it gives any (a mod built before them, whose struct
-    // ends before their strides, gives none).
-    if (area->size >= offsetof(ymod_area, spot_stride) + sizeof(area->spot_stride) &&
-        (area->exits != nullptr || area->arrivals != nullptr || area->spots != nullptr || area->cart != nullptr)) {
+    // Its points, when it gives any.
+    if (area->exits != nullptr || area->arrivals != nullptr || area->spots != nullptr || area->cart != nullptr) {
         const auto facing = [](int32_t f) { return f >= 0 && f <= 0xFFFF; };
         const auto byte = [](int32_t b) { return b >= 0 && b <= 0xFF; };
         if (area->exit_count > maps::kMostPoints || area->arrival_count > maps::kMostPoints ||
@@ -966,10 +964,9 @@ int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
         }
         spec.points = std::move(points);
     }
-    // The map's picture and its place on it, when it gives them (a mod built
-    // before them, whose struct ends before `minimap`, gives none): read as
-    // far as both its struct and this header's go, fields past the mod's 0.
-    if (area->size >= offsetof(ymod_area, minimap) + sizeof(area->minimap) && area->minimap != nullptr) {
+    // The map's picture and its place on it, when it gives them: read as far
+    // as both its struct and this header's go, fields past the mod's 0.
+    if (area->minimap != nullptr) {
         const ymod_area_map *given = area->minimap;
         if (too_short(mod, given->size, kFirstAreaMap, "ymod_area_map")) return -1;
         ymod_area_map map{};
@@ -986,7 +983,7 @@ int32_t maps_add_area(ymod_mod *mod, const ymod_area *area) {
 int32_t equipment_add_weapon(ymod_mod *mod, const ymod_weapon *weapon) {
     Runtime *runtime = state().runtime;
     if (runtime == nullptr || mod == nullptr || mod->failed || weapon == nullptr ||
-        too_short(mod, weapon->size, offsetof(ymod_weapon, give) + sizeof(weapon->give), "ymod_weapon"))
+        too_short(mod, weapon->size, kFirstWeapon, "ymod_weapon"))
         return -1;
     const auto text = [](const char *s) { return std::string(s != nullptr ? s : ""); };
     const auto refuse = [mod, weapon, &text](const std::string &why) {
@@ -1006,7 +1003,7 @@ int32_t equipment_add_weapon(ymod_mod *mod, const ymod_weapon *weapon) {
 int32_t equipment_add_armor(ymod_mod *mod, const ymod_armor *armor) {
     Runtime *runtime = state().runtime;
     if (runtime == nullptr || mod == nullptr || mod->failed || armor == nullptr ||
-        too_short(mod, armor->size, offsetof(ymod_armor, give) + sizeof(armor->give), "ymod_armor"))
+        too_short(mod, armor->size, kFirstArmor, "ymod_armor"))
         return -1;
     const auto text = [](const char *s) { return std::string(s != nullptr ? s : ""); };
     const auto refuse = [mod, armor, &text](const std::string &why) {
