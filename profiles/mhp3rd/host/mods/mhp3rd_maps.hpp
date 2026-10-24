@@ -218,13 +218,15 @@ struct SpearShot {
 };
 [[nodiscard]] SpearShot spear_shot(const Spear &spear);
 
-// An area pack's scene (entry 1) and its nodes' records (entry 2) with the
-// first gimmick group made the spear's (kind 14, which the executable's
-// 0x088D2E98 makes game_task's spear object of, 0x0A062508) and its first
-// node that draws a mesh made the spear: at rest at the spear's place, turned
-// as it is, drawing `spear.mesh`. Nothing, with the reason in `why`, when they
-// are not laid out as the game's are, the scene has no gimmick group with a
-// node that draws a mesh, or one of its nodes draws `spear.mesh`.
+// An area pack's scene (entry 1) and its nodes' records (entry 2) with a
+// gimmick group made the spear's (kind 14, which the executable's 0x088D2E98
+// makes game_task's spear object of, 0x0A062508): the scene's own spear
+// group if it has one (the sand ship's), so that it has one spear, else its
+// first group; and the group's first node that draws a mesh made the spear:
+// at rest at the spear's place, turned as it is, drawing `spear.mesh`.
+// Nothing, with the reason in `why`, when they are not laid out as the
+// game's are, the scene has no gimmick group with a node that draws a mesh,
+// or one of its nodes draws `spear.mesh`.
 struct SpearScene {
     std::vector<std::uint8_t> scene, records;
 };

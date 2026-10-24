@@ -4789,6 +4789,20 @@ void test_dragonator(psprecomp::Runtime &runtime) {
     memory.store16(0x09000000u + 0x60472u, 501u);
     check(served(0x138Bu).empty(), "dragonator: on another quest the game's area pack loads");
 
+    // A base that has a spear of its own (the sand ship, after its gong's
+    // group): the spear takes the spear's group, so that one spear moves.
+    const Bytes ship_scene = scene_of({0xFFFFFFFFu, 80u, 0xFFFFFFFFu, 81u});
+    const Bytes ship_records = records_of(0u, 4u,
+        {{0xFD, 13, 0, 0, 1, 0, 0, 0}, {1, 0, 0x80, 0, 0, 0, 0, 0}, {0xFD, 14, 0, 0, 1, 0, 0, 0},
+            {1, 0, 0x80, 0, 0, 0, 0, 0}});
+    const auto on_ship = maps::place_spear(ship_scene, ship_records, spear, why);
+    int spear_groups = 0;
+    for (std::size_t k = 0; on_ship && k < 4u; ++k)
+        spear_groups += on_ship->records[0x10u + 8u * k] == 0xFDu && on_ship->records[0x10u + 8u * k + 1u] == 14u;
+    check(on_ship && spear_groups == 1 && on_ship->records[0x10u + 1u] == 13u &&
+            get(on_ship->scene, 0x1Cu + 0x5Cu * 3u + 0x4Cu) == 98u && get(on_ship->scene, 0x1Cu + 0x5Cu + 0x4Cu) == 80u,
+        "dragonator: a base with a spear group of its own has it taken, the gong's left, one spear in all");
+
     std::error_code ec;
     std::filesystem::remove_all(folder, ec);
     maps::reset_for_tests();

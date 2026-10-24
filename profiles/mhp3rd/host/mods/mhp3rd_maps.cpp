@@ -861,14 +861,15 @@ std::optional<SpearScene> place_spear(
             return std::nullopt;
         }
     }
-    // The first group among the gimmicks with a member that draws a mesh: the
-    // members run from the group's mark to the next mark or end (byte 0 0).
+    // A group among the gimmicks with a member that draws a mesh: the members
+    // run from the group's mark to the next mark or end (byte 0 0). The
+    // scene's own spear group first (the sand ship's), so that it keeps one
+    // spear, then the first group of any kind.
     const auto marker = [&records, &record](std::size_t k) {
         const std::uint8_t b = records[record(k)];
         return b == 0u || b >= kGroupMark;
     };
-    for (std::size_t k = gimmicks; k < gimmicks + many; ++k) {
-        if (records[record(k)] != kGroupMark) continue;
+    const auto take = [&](std::size_t k) -> std::optional<SpearScene> {
         for (std::size_t m = k + 1u; m < gimmicks + many && !marker(m); ++m) {
             if (get32(scene, node(m) + 0x4Cu) == kNoMesh) continue;
             SpearScene out{{scene.begin(), scene.end()}, {records.begin(), records.end()}};
@@ -891,7 +892,12 @@ std::optional<SpearScene> place_spear(
             put32(out.scene, at + 0x4Cu, spear.mesh);
             return out;
         }
-    }
+        return std::nullopt;
+    };
+    for (const bool spears_only : {true, false})
+        for (std::size_t k = gimmicks; k < gimmicks + many; ++k)
+            if (records[record(k)] == kGroupMark && (!spears_only || records[record(k) + 1u] == kSpearKind))
+                if (std::optional<SpearScene> out = take(k)) return out;
     why = "its base scene has no gimmick group with a node that draws a mesh, which the spear would take";
     return std::nullopt;
 }

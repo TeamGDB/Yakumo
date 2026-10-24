@@ -823,8 +823,9 @@ typedef struct ymod_area_map {
  * along -z, its tip 1600 ahead of its origin (z = -1600), and put `at` where its origin rests.
  *
  * The game's areas make the spear's object from a group of their scene's gimmicks: the area's base scene
- * gives its first group of them to the spear, which draws `mesh` instead of what the group drew (an area
- * whose base has no such group, as some camps, is refused; docs/MAPS.md). While it fires the camera shows
+ * gives the spear its own spear's group when it has one (the sand ship's area 1), else its first group of
+ * them, and the spear draws `mesh` instead of what the group drew (an area whose base has no such group,
+ * as some camps, is refused; docs/MAPS.md). While it fires the camera shows
  * it from `view_eye`, looking at `view_at`, for 10 seconds (a button skips it), when `view` is 1.
  *
  * Passed on its own, it starts with its size, which the mod sets (in C++ it starts so). */
