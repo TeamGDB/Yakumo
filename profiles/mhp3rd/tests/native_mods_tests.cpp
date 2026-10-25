@@ -1491,10 +1491,14 @@ void test_equipment(psprecomp::Runtime &runtime) {
     memory.store32(kBlock + 29u * 4u, 0x4000u);
     memory.store32(kBlock + 30u * 4u, 0x7000u);
     // The armor model-to-file code: the model (a1) in v0 and the base (a2) in
-    // v1 at the hooked instruction, then their sum.
+    // v1, then their sum, 16 bits of it. And the table of bases, u16
+    // [sex][part], seven parts per sex, as the game has it.
     store(runtime, 0x088A5958u,
         {0x27BDFFF0u, 0xAFBF0008u, 0x00A01021u, 0x00C01821u, 0x8FBF0008u, 0u, 0x27BD0010u, 0x00431021u, 0x3042FFFFu,
             0x03E00008u, 0u});
+    constexpr std::array<std::uint16_t, 14> kFileBases{
+        0x30Fu, 0x38Cu, 0x409u, 0x486u, 0x503u, 0x580u, 0x58Eu, 0x85u, 0x102u, 0x17Fu, 0x1FCu, 0x279u, 0x2F6u, 0x304u};
+    for (std::size_t i = 0; i < kFileBases.size(); ++i) memory.store16(0x089E892Cu + 2u * i, kFileBases[i]);
     std::ofstream(folder / "helm_m.pmo", std::ios::binary) << "HELM-M";
     std::ofstream(folder / "helm_f.pmo", std::ios::binary) << "HELM-F";
     ymod_armor helm{sizeof(ymod_armor), "black_helm", "head", 3, "helm_m.pmo", "helm_f.pmo", "Black Helm",
@@ -1509,27 +1513,31 @@ void test_equipment(psprecomp::Runtime &runtime) {
     const std::optional<tables::Placement> heads = tables::placement("armor.head");
     const std::uint32_t helm_row = heads ? heads->address + 256u * 40u : 0u;
     const std::uint32_t plain_row = heads ? heads->address + 257u * 40u : 0u;
-    check(heads && heads->address != kHeads && heads->rows >= 258u && memory.load16(helm_row) == 1000u &&
-            memory.load16(helm_row + 2u) == 1001u && memory.load8(helm_row + 4u) == 0x1Fu &&
+    const std::uint16_t male_model = memory.load16(helm_row), female_model = memory.load16(helm_row + 2u);
+    check(heads && heads->address != kHeads && heads->rows >= 258u && male_model > 0x400u && female_model > 0x400u &&
+            male_model != female_model && memory.load8(helm_row + 4u) == 0x1Fu &&
             memory.load32(helm_row + 8u) == 2000u && memory.load32(helm_row + 0x14u) == 0x00120010u &&
-            memory.load16(plain_row) == 1002u && memory.load16(plain_row + 2u) == 1002u &&
             memory.load32(plain_row + 8u) == 500u,
-        "equipment: an armor record is the base's, with its own models (one number for both when only a male "
-        "model is given) and price");
-    const auto armor_file = [&runtime](std::uint32_t model, std::uint32_t base, std::uint32_t sex, std::uint32_t kind) {
+        "equipment: an armor record is the base's, with models of its own past the game's, and its price");
+    const auto armor_file = [&runtime](std::uint32_t model, std::uint32_t base) {
         runtime.cpu().gpr[5] = model;
         runtime.cpu().gpr[6] = base;
-        runtime.cpu().gpr[16] = 0x089E892Cu + 2u * (sex * 7u + kind);
         return call(runtime, 0x088A5958u, 0u);
     };
-    const std::uint32_t male_file = armor_file(1000u, 0x500u, 0u, 4u);
-    const std::uint32_t female_file = armor_file(1001u, 0x279u, 1u, 4u);
+    // Regression: the game adds the base for the sex and part to the model
+    // in three places, and the character select's and lobby_task's own hunter
+    // had no hook: a mod's model numbered from 1000 loaded unrelated files
+    // there (male legs 0x486 + 1008: file 0x876, 43,888 bytes). Now the plain
+    // sum gives the mod's file, for each sex, with nothing hooked.
+    const std::uint32_t male_file = armor_file(male_model, 0x503u);
+    const std::uint32_t female_file = armor_file(female_model, 0x279u);
+    const std::uint32_t plain_file = armor_file(memory.load16(plain_row), 0x503u);
     check(mhp3rd::mods::added::serves(male_file) && mhp3rd::mods::added::serves(female_file) &&
-            male_file != female_file && armor_file(1002u, 0x279u, 1u, 4u) == armor_file(1002u, 0x500u, 0u, 4u) &&
-            armor_file(0x22u, 0x500u, 0u, 4u) == 0x522u && armor_file(1000u, 0x300u, 0u, 0u) == 0x6E8u &&
-            armor_file(1000u, 0x500u, 2u, 4u) == 0x8E8u,
-        "equipment: an armor model gives its own file for each sex; the game's models, the same number for another "
-        "part and places past the table of bases as before");
+            male_file != female_file && mhp3rd::mods::added::serves(plain_file) && plain_file != male_file &&
+            plain_file != female_file && armor_file(memory.load16(plain_row + 2u), 0x279u) == plain_file &&
+            armor_file(0x22u, 0x503u) == 0x525u && armor_file(male_model, 0x486u) != male_file,
+        "equipment: an armor model and the part's base give its own file for each sex (the male's for both when "
+        "only a male model is given); the game's models and other parts' bases as before");
     equipment::frame(runtime);
     check(mhp3rd::game::text_entry(ram, kBlock, 29, 256u) == "Black Helm" &&
             mhp3rd::game::text_entry(ram, kBlock, 30, 147u) == "A helm a mod added." &&
@@ -1555,6 +1563,14 @@ void test_equipment(psprecomp::Runtime &runtime) {
     no_female.id = "no_female";
     no_female.model_female = "missing.pmo";
     ymod_armor short_armor{sizeof(std::uint32_t)};
+    // Code not as traced where the game adds model and base: refused.
+    memory.store32(0x088A5974u, 0u);
+    ymod_armor untraced = helm;
+    untraced.id = "untraced";
+    check(service != nullptr && service->add_armor(mod, &untraced) == -1 &&
+            logged("armor untraced is not added: the game's armor model-to-file code is not as traced"),
+        "equipment: armor is refused when the game's model-to-file code is not as traced");
+    memory.store32(0x088A5974u, 0x00431021u);
     check(service != nullptr && service->add_armor(mod, &helm) == -1 &&
             logged("armor black_helm is not added: the id \"black_helm\" is taken or empty") &&
             service->add_armor(mod, &no_part) == -1 &&

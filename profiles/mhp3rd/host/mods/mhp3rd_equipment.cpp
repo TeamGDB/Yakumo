@@ -69,13 +69,15 @@ constexpr std::uint32_t kMaleModelField = 0x00u;
 constexpr std::uint32_t kFemaleModelField = 0x02u;
 constexpr std::uint32_t kArmorPriceField = 0x08u;
 constexpr std::uint32_t kArmorDescriptionField = 0x1Au;
-// Where the game has an armor's model in v0 and its file base in v1, with s0
-// still at the base's place in the table of bases (u16 [sex][part], seven
-// parts per sex, at 0x089E892C), before it restores s0 and adds the two
-// (0x088A5974, addu v0, v0, v1).
+// The game turns an armor model into its file by adding the base for the
+// hunter's sex and part (u16 [sex][part], seven parts per sex, at 0x089E892C)
+// and keeping 16 bits, in three places: the hunter's file function
+// (0x088A58DC: the base in v1 at 0x088A5968, the sum at 0x088A5974), the
+// character select's hunters' (0x088F46D8) and a hunter class of lobby_task's
+// own (0x0A10EE8C). Nothing bounds the model.
 constexpr std::uint32_t kArmorFile = 0x088A5968u; // lw ra, 8(sp)
 constexpr std::uint32_t kArmorFileWord = 0x8FBF0008u;
-constexpr std::uint32_t kArmorAdd = 0x088A5974u;
+constexpr std::uint32_t kArmorAdd = 0x088A5974u; // addu v0, v0, v1
 constexpr std::uint32_t kArmorAddWord = 0x00431021u;
 constexpr std::uint32_t kFileBases = 0x089E892Cu;
 constexpr std::uint32_t kBasesPerSex = 7u;
@@ -107,8 +109,6 @@ struct Armor {
     std::string id;
     const Part *part{};
     std::uint16_t number{};
-    std::array<std::uint16_t, 2> models{}; // male, female
-    std::array<FileId, 2> files{};
 };
 
 // A piece to put in the equipment box once the village loads.
@@ -124,10 +124,8 @@ struct State {
     std::vector<Armor> armors;
     std::vector<Gift> gifts;
     std::map<std::uint32_t, std::uint16_t> armor_added; // rows each part got, by kind
-    std::uint16_t next_armor_model{kFirstArmorModel};
-    bool armor_hooked{};
-    std::map<std::uint32_t, std::uint16_t> added;  // rows each class got, by kind
-    std::map<std::uint32_t, std::uint16_t> models; // models each class got, by kind
+    std::map<std::uint32_t, std::uint16_t> added;       // rows each class got, by kind
+    std::map<std::uint32_t, std::uint16_t> models;      // models each class got, by kind
     ymod_mod *host{};
     Runtime *runtime{};
     bool hooked{};
@@ -156,33 +154,11 @@ int give_file(ymod_cpu *cpu, void *) {
     return YMOD_CONTINUE;
 }
 
-// An armor model of a mod's: its file, whatever the base for the part and sex.
-int give_armor_file(ymod_cpu *cpu, void *) {
-    const std::uint32_t at = cpu->gpr[16]; // s0
-    if (at < kFileBases || (at - kFileBases) % 2u != 0u) return YMOD_CONTINUE;
-    const std::uint32_t index = (at - kFileBases) / 2u, sex = index / kBasesPerSex, kind = index % kBasesPerSex;
-    if (sex > 1u) return YMOD_CONTINUE;
-    const auto model = static_cast<std::uint16_t>(cpu->gpr[2]); // v0
-    for (const Armor &a : state().armors)
-        if (a.part->armor.kind == kind && a.models[sex] == model) {
-            cpu->gpr[3] = a.files[sex] - model; // v1: the sum is the mod's file
-            break;
-        }
-    return YMOD_CONTINUE;
-}
-
-bool hook_armor(Runtime &runtime) {
-    State &s = state();
-    if (s.armor_hooked) return true;
-    s.runtime = &runtime;
-    if (runtime.memory().load32(kArmorFile) != kArmorFileWord || runtime.memory().load32(kArmorAdd) != kArmorAddWord)
-        return false;
-    native::attach(runtime);
-    if (s.host == nullptr) s.host = native::add_mod("yakumo.equipment", "Equipment from mods", "");
-    const auto *hooks = static_cast<const ymod_hooks *>(native::host()->service(s.host, YMOD_HOOKS, 1u));
-    s.armor_hooked =
-        hooks != nullptr && hooks->instruction(s.host, nullptr, kArmorFile, &give_armor_file, nullptr) != 0u;
-    return s.armor_hooked;
+// The game's armor model-to-file code as traced, with the table of bases there.
+bool armor_code_as_traced(const psprecomp::GuestMemory &memory) {
+    return memory.contains(kArmorFile, 4u) && memory.load32(kArmorFile) == kArmorFileWord &&
+        memory.contains(kArmorAdd, 4u) && memory.load32(kArmorAdd) == kArmorAddWord &&
+        memory.contains(kFileBases, 2u * 2u * kBasesPerSex);
 }
 
 void each_frame(int, std::uint32_t, void *) {
@@ -239,7 +215,7 @@ std::optional<std::uint16_t> add_armor(Runtime &runtime, const ArmorSpec &spec, 
     if (table == nullptr) return fail("the part's table is not known");
     if (spec.based_on == 0u || spec.based_on >= table->rows)
         return fail("the base " + std::to_string(spec.based_on) + " is not one of the part's pieces");
-    if (!hook_armor(runtime)) return fail("the game's armor model-to-file code is not as traced");
+    if (!armor_code_as_traced(runtime.memory())) return fail("the game's armor model-to-file code is not as traced");
     if (!hook(runtime)) return fail("the game's model-to-file code is not as traced");
 
     const auto number = static_cast<std::uint16_t>(table->rows + s.armor_added[part->armor.kind]);
@@ -260,12 +236,18 @@ std::optional<std::uint16_t> add_armor(Runtime &runtime, const ArmorSpec &spec, 
     const std::uint32_t base = *at + spec.based_on * table->row;
     const std::uint32_t row = *at + number * table->row;
     for (std::uint32_t i = 0; i < table->row; i += 4u) memory.store32(row + i, memory.load32(base + i));
-    const std::uint16_t male_model = s.next_armor_model++;
-    const std::uint16_t female_model = female == male ? male_model : s.next_armor_model++;
-    memory.store16(row + kMaleModelField, male_model);
-    memory.store16(row + kFemaleModelField, female_model);
+    // Its models: for each sex, the number whose sum with the part's base is
+    // the mod's file, so every place the game adds them loads it. Past the
+    // game's models (files from 0xC000, bases below 0x600), so never 0, which
+    // is the part bare; the game only compares models past its own.
+    const auto model_for = [&memory, part](FileId file, std::uint32_t sex) {
+        return static_cast<std::uint16_t>(
+            file - memory.load16(kFileBases + 2u * (sex * kBasesPerSex + part->armor.kind)));
+    };
+    memory.store16(row + kMaleModelField, model_for(male, 0u));
+    memory.store16(row + kFemaleModelField, model_for(female, 1u));
     if (spec.price != 0u) memory.store32(row + kArmorPriceField, spec.price);
-    s.armors.push_back({spec.id, part, number, {male_model, female_model}, {male, female}});
+    s.armors.push_back({spec.id, part, number});
     if (spec.give) s.gifts.push_back({spec.id, part->armor.kind, number});
 
     const std::string label = spec.mod + "'s " + spec.id;

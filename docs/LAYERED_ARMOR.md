@@ -66,9 +66,11 @@ skills, the smithy, the item box. None of it goes through `0x08869778`, and in
 the game the Equipment screen on a quest listed the real Silver Sol pieces
 with their skills while the hunter was drawn in the Yukumo set.
 `0x08869564`, a second model lookup by id rather than by record, serves
-another kind of hunter object (`0x088F46D8` is its file function; one such
-object was seen while the village loads, not what it is for); layered armor
-leaves it alone.
+another kind of hunter object: the character select's hunters, one for each
+character of the save (`0x088F46D8` is their file function; three were made
+while the character select loaded, each with its character's armor), and a
+hunter class of `lobby_task`'s own (`0x0A10EE8C`), not seen in use. Layered
+armor leaves them alone.
 
 ### What layered armor changes
 
@@ -136,7 +138,8 @@ on. The claim rests on the replacement writing no memory at all.
 
 - A hunter created male (the save has only a female hunter). The male half
   of the table is chosen by the same bit as the game's own code.
-- What the objects drawn through `0x088F46D8` are; they keep the real pieces.
+- What `lobby_task`'s own hunter class (`0x0A10EE8C`) draws. It and the
+  character select keep the real pieces.
 - Changing equipment at the item box with layered armor on.
 - Pieces with special heads (head models 112, 114, 118) chosen as a look.
 - An ad hoc session with layered armor on.

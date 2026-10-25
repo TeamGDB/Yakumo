@@ -82,11 +82,12 @@ struct ArmorSpec {
 // reason in `why`) when the part or base is unknown, the id taken, the model
 // empty, the part's table cannot grow or the game's code is not as traced.
 // Its record is the base's (defence, resistances, skills, slots, who may
-// wear it) with its own models, price and description; its models get
-// numbers from kFirstArmorModel, past the game's, and the files are served
-// through an instruction hook where the game turns an armor model into its
-// file (0x088A5968).
-inline constexpr std::uint16_t kFirstArmorModel = 1000u;
+// wear it) with its own models, price and description. Its files are served
+// as files added from memory, and its model for each sex is the file less the
+// base the game adds for that sex and part (0x089E892C), so each place that
+// turns an armor model into its file loads the mod's: the hunter on a quest
+// and in the village (0x088A58DC), the character select (0x088F46D8) and
+// lobby_task's own hunter (0x0A10EE8C).
 [[nodiscard]] std::optional<std::uint16_t> add_armor(
     psprecomp::Runtime &runtime, const ArmorSpec &spec, std::string *why = nullptr);
 
