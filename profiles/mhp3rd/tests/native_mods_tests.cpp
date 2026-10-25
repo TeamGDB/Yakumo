@@ -1362,6 +1362,16 @@ void test_equipment(psprecomp::Runtime &runtime) {
         {0x34030028u, 0u, 0x00A3102Bu, 0x1040000Eu, 0u, 0x340805D1u, 0u, 0u, 0u, 0u, 0x00A82021u, 0x3082FFFFu,
             0x03E00008u, 0u});
     store(runtime, 0x088A5A24u, {0x3402DEADu, 0x03E00008u, 0u});
+    // The same code in the character select's hunters' file function, with
+    // the class in s0 and the sum kept in a0 (then returned in v0), and in
+    // lobby_task's own hunter class, with the class in s1: count 40, first
+    // file 0x5D1, 0xDEAD past the count.
+    const auto weapon_file_code = [&runtime](std::uint32_t at) {
+        store(runtime, at,
+            {0x34030028u, 0u, 0x00A3102Bu, 0x1040000Cu, 0u, 0x340805D1u, 0u, 0u, 0u, 0u, 0u, 0u, 0x00A82021u,
+                0x3084FFFFu, 0x03E00008u, 0x00801021u, 0x3402DEADu, 0x03E00008u, 0u});
+    };
+    weapon_file_code(0x088F474Cu);
 
     const std::filesystem::path folder = std::filesystem::temp_directory_path() / "yakumo_weapon_test";
     std::filesystem::create_directories(folder);
@@ -1396,6 +1406,15 @@ void test_equipment(psprecomp::Runtime &runtime) {
     check(served >= mhp3rd::mods::added::kFirstFreeId && mhp3rd::mods::added::serves(served) &&
             file_for(10u) == 1499u && file_for(41u) == 0xDEADu,
         "equipment: its model gives its own file; the game's models and others past the count as before");
+    // Regression: the character select clamped the mod's model below the
+    // class's count and loaded the class's last model (0x5F8 for model 40).
+    const auto title_file_for = [&runtime](std::uint32_t model) {
+        runtime.cpu().gpr[5] = model;
+        runtime.cpu().gpr[16] = 0u;
+        return call(runtime, 0x088F474Cu, 0u);
+    };
+    check(title_file_for(40u) == served && title_file_for(10u) == 1499u && title_file_for(41u) == 0xDEADu,
+        "equipment: the character select's hunters load its own file too; the game's models as before");
     equipment::frame(runtime);
     mhp3rd::game::GuestRam ram(memory);
     check(mhp3rd::game::text_count(ram, kBlock, 5) == 93u &&
@@ -1417,6 +1436,20 @@ void test_equipment(psprecomp::Runtime &runtime) {
     equipment::frame(runtime);
     check(memory.load8(mhp3rd::game::kEquipmentBox + 12u) == 0u, "equipment: not given outside the village");
     place_overlay(runtime, 0x0A05E600u, "lobby_task.ovl", 0x00200000u);
+    weapon_file_code(0x0A10EF20u);
+    mhp3rd::mods::native::overlay_loaded(runtime, 0x0A05E600u);
+    const auto lobby_file_for = [&runtime](std::uint32_t model) {
+        runtime.cpu().gpr[5] = model;
+        runtime.cpu().gpr[17] = 0u;
+        return call(runtime, 0x0A10EF20u, 0u);
+    };
+    const std::uint32_t lobby_mod = lobby_file_for(40u), lobby_game = lobby_file_for(10u);
+    // Code there that is not as traced (another overlay's): left alone.
+    memory.store32(0x0A10EF54u, 0x30847FFFu); // andi a0, a0, 0x7FFF
+    const std::uint32_t lobby_other = lobby_file_for(40u);
+    memory.store32(0x0A10EF54u, 0x3084FFFFu);
+    check(lobby_mod == served && lobby_game == 1499u && lobby_other == 0x5D1u + 40u,
+        "equipment: lobby_task's own hunter loads its own file; the game's models as before; other code untouched");
     memory.store16(mhp3rd::game::kHunterName, 'A');
     equipment::frame(runtime);
     equipment::frame(runtime);

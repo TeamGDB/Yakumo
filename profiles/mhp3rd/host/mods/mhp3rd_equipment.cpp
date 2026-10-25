@@ -89,12 +89,23 @@ constexpr std::uint32_t kDescriptionField = 0x18u;
 
 // The class's model count, u16 every 4 bytes by class (kind - 5).
 constexpr std::uint32_t kModelCounts = 0x089CD1F8u;
-// The model-to-file code: a1 the model, v1 the class's count, s0 the class;
-// then a0 the model plus the class's first file.
-constexpr std::uint32_t kClamp = 0x088A59E4u; // sltu v0, a1, v1
-constexpr std::uint32_t kClampWord = 0x00A3102Bu;
-constexpr std::uint32_t kFile = 0x088A5A08u; // andi v0, a0, 0xFFFF
-constexpr std::uint32_t kFileWord = 0x3082FFFFu;
+// The model-to-file code, the same in the three functions that read these
+// counts: a1 the model and v1 the class's count where it clamps the model
+// below the count, then a0 the model plus the class's first file where it
+// keeps 16 bits of the sum, the class in a saved register throughout.
+struct WeaponFileCode {
+    const char *overlay; // nullptr: the executable
+    std::uint32_t clamp, clamp_word, file, file_word;
+    std::uint32_t cls; // the register holding the class
+};
+constexpr std::array<WeaponFileCode, 3> kWeaponFileCode{{
+    // The hunter's file function (0x088A58DC), on a quest and in the village.
+    {nullptr, 0x088A59E4u, 0x00A3102Bu, 0x088A5A08u, 0x3082FFFFu, 16u}, // sltu v0, a1, v1; andi v0, a0, 0xFFFF
+    // The character select's hunters' (0x088F46D8).
+    {nullptr, 0x088F4754u, 0x00A3102Bu, 0x088F4780u, 0x3084FFFFu, 16u}, // sltu v0, a1, v1; andi a0, a0, 0xFFFF
+    // A hunter class of lobby_task's own (0x0A10EE8C).
+    {"lobby_task", 0x0A10EF28u, 0x00A3102Bu, 0x0A10EF54u, 0x3084FFFFu, 17u},
+}};
 
 struct Weapon {
     std::string id;
@@ -142,15 +153,26 @@ const Weapon *mod_model(std::uint32_t cls, std::uint32_t model) {
     return nullptr;
 }
 
+// Whether the word at `address` is `word`: an overlay's code is checked when
+// it runs, as it is not there when the hooks go in.
+bool code_is(std::uint32_t address, std::uint32_t word) {
+    const Runtime *runtime = state().runtime;
+    return runtime != nullptr && runtime->memory().contains(address, 4u) && runtime->memory().load32(address) == word;
+}
+
 // A mod's model number is past the class's count: let it through.
-int unclamp(ymod_cpu *cpu, void *) {
-    if (mod_model(cpu->gpr[16], cpu->gpr[5] & 0xFFFFu) != nullptr) cpu->gpr[3] = 0xFFFFu; // v1
+int unclamp(ymod_cpu *cpu, void *user) {
+    const auto *code = static_cast<const WeaponFileCode *>(user);
+    if (code_is(code->clamp, code->clamp_word) && mod_model(cpu->gpr[code->cls], cpu->gpr[5] & 0xFFFFu) != nullptr)
+        cpu->gpr[3] = 0xFFFFu; // v1
     return YMOD_CONTINUE;
 }
 
 // And its file is the mod's, not the class's first plus the number.
-int give_file(ymod_cpu *cpu, void *) {
-    if (const Weapon *w = mod_model(cpu->gpr[16], cpu->gpr[5] & 0xFFFFu)) cpu->gpr[4] = w->file; // a0
+int give_file(ymod_cpu *cpu, void *user) {
+    const auto *code = static_cast<const WeaponFileCode *>(user);
+    if (!code_is(code->file, code->file_word)) return YMOD_CONTINUE;
+    if (const Weapon *w = mod_model(cpu->gpr[code->cls], cpu->gpr[5] & 0xFFFFu)) cpu->gpr[4] = w->file; // a0
     return YMOD_CONTINUE;
 }
 
@@ -169,15 +191,21 @@ bool hook(Runtime &runtime) {
     State &s = state();
     if (s.hooked) return true;
     s.runtime = &runtime;
-    if (runtime.memory().load32(kClamp) != kClampWord || runtime.memory().load32(kFile) != kFileWord) return false;
+    // The executable's code is checked now; lobby_task's when it runs.
+    for (const WeaponFileCode &code : kWeaponFileCode)
+        if (code.overlay == nullptr && (!code_is(code.clamp, code.clamp_word) || !code_is(code.file, code.file_word)))
+            return false;
     native::attach(runtime);
     if (s.host == nullptr) s.host = native::add_mod("yakumo.equipment", "Equipment from mods", "");
     const auto *hooks = static_cast<const ymod_hooks *>(native::host()->service(s.host, YMOD_HOOKS, 1u));
     const auto *events = static_cast<const ymod_events *>(native::host()->service(s.host, YMOD_EVENTS, 1u));
-    s.hooked = hooks != nullptr && events != nullptr &&
-        hooks->instruction(s.host, nullptr, kClamp, &unclamp, nullptr) != 0u &&
-        hooks->instruction(s.host, nullptr, kFile, &give_file, nullptr) != 0u &&
-        events->subscribe(s.host, YMOD_EVENT_FRAME, &each_frame, nullptr) == 0;
+    s.hooked = hooks != nullptr && events != nullptr;
+    for (const WeaponFileCode &code : kWeaponFileCode) {
+        void *user = const_cast<WeaponFileCode *>(&code);
+        s.hooked = s.hooked && hooks->instruction(s.host, code.overlay, code.clamp, &unclamp, user) != 0u &&
+            hooks->instruction(s.host, code.overlay, code.file, &give_file, user) != 0u;
+    }
+    s.hooked = s.hooked && events->subscribe(s.host, YMOD_EVENT_FRAME, &each_frame, nullptr) == 0;
     return s.hooked;
 }
 

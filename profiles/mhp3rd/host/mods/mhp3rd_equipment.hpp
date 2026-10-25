@@ -23,8 +23,11 @@ class Runtime;
 // - makes the class's record table a row longer (the four getters that read
 //   it, 0x0885CB38 to 0x0885D8C8) and copies the base's record into the row;
 // - gives it a model number past the class's models (counts at 0x089CD1F8)
-//   and serves the mod's model as a file added for that number, through two
-//   instruction hooks in the model-to-file code (0x088A59E4, 0x088A5A08);
+//   and serves the mod's model as a file added for that number, through
+//   instruction hooks in the three places that turn a model into its file:
+//   the hunter's (0x088A59E4, 0x088A5A08), the character select's
+//   (0x088F4754, 0x088F4780) and lobby_task's own hunter's (0x0A10EF28,
+//   0x0A10EF54);
 // - gives that model the base's sound banks in the class's table of banks by
 //   model (moved with a row for it, weapon.<class>.sounds), which a quest
 //   reads for the hunter's weapon with no bound;
