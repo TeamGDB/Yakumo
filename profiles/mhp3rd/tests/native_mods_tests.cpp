@@ -1320,7 +1320,17 @@ void test_equipment(psprecomp::Runtime &runtime) {
     mhp3rd::mods::added::reset_for_tests();
     loader_stand_ins(runtime);
     tables::write_traced_code_for_tests(runtime, "weapon.great_sword");
+    tables::write_traced_code_for_tests(runtime, "weapon.great_sword.sounds");
     auto &memory = runtime.memory();
+    // The great swords' sound banks by model (40 rows of 6 bytes): model n
+    // has banks 0x800 + 2n and 0x801 + 2n, shared pair n % 3.
+    constexpr std::uint32_t kSwordSounds = 0x089EAA7Cu;
+    for (std::uint32_t m = 0; m < 40u; ++m) {
+        memory.store16(kSwordSounds + 6u * m, static_cast<std::uint16_t>(0x800u + 2u * m));
+        memory.store16(kSwordSounds + 6u * m + 2u, static_cast<std::uint16_t>(0x801u + 2u * m));
+        memory.store16(kSwordSounds + 6u * m + 4u, static_cast<std::uint16_t>(m % 3u));
+    }
+    memory.store16(kSwordSounds + 6u * 40u, 0xEAFCu); // the bytes after them, as the game's next table has
     // Great sword 3: model 0x1D, rarity 2, price 1000, description 3.
     constexpr std::uint32_t kSwords = 0x08997AA0u;
     for (std::uint32_t i = 0; i < 92u * 28u; i += 4u) memory.store32(kSwords + i, 0u);
@@ -1367,6 +1377,16 @@ void test_equipment(psprecomp::Runtime &runtime) {
     check(swords && swords->address != kSwords && swords->rows >= 93u && memory.load16(row) == 40u &&
             memory.load8(row + 2u) == 2u && memory.load32(row + 4u) == 1234u && memory.load32(row + 8u) == 0x005A010Au,
         "equipment: its record is the base's, with a model past the class's and its own price");
+    // Regression: a quest loads the weapon's sound banks by model with no
+    // bound; model 40 read file 0xEAFC from past the table, whose size of
+    // gigabytes overran the loader's queue and stopped the game.
+    const std::optional<tables::Placement> banks = tables::placement("weapon.great_sword.sounds");
+    const std::uint32_t bank = banks ? banks->address + 6u * 40u : 0u;
+    check(banks && banks->address != kSwordSounds && banks->rows >= 41u &&
+            memory.load32(0x089EA1D0u) == banks->address && memory.load16(bank) == 0x800u + 2u * 0x1Du &&
+            memory.load16(bank + 2u) == 0x801u + 2u * 0x1Du && memory.load16(bank + 4u) == 0x1Du % 3u &&
+            memory.load16(banks->address + 6u * 39u) == 0x800u + 2u * 39u,
+        "equipment: its model has the base's sound banks in the class's moved table, the game's rows kept");
     const auto file_for = [&runtime](std::uint32_t model) {
         runtime.cpu().gpr[5] = model;
         runtime.cpu().gpr[16] = 0u;
@@ -1416,6 +1436,38 @@ void test_equipment(psprecomp::Runtime &runtime) {
     no_model.id = "no_model";
     no_model.model = "missing.pac";
     ymod_weapon old{sizeof(std::uint32_t)};
+    // A second great sword: the next model, its own base's banks, the
+    // first's kept. A base whose model the banks do not reach is refused.
+    memory.store16(swords->address + 4u * 28u, 0x05u); // great sword 4: model 5
+    ymod_weapon second = blade;
+    second.id = "second_blade";
+    second.based_on = 4;
+    second.give = 0;
+    const std::int32_t second_id = service != nullptr ? service->add_weapon(mod, &second) : -1;
+    const std::optional<tables::Placement> more_banks = tables::placement("weapon.great_sword.sounds");
+    const std::optional<tables::Placement> more_swords = tables::placement("weapon.great_sword");
+    check(second_id == 93 && more_banks && more_banks->rows >= 42u && more_swords &&
+            memory.load16(more_swords->address + 93u * 28u) == 41u &&
+            memory.load16(more_banks->address + 6u * 41u) == 0x800u + 2u * 5u &&
+            memory.load16(more_banks->address + 6u * 40u) == 0x800u + 2u * 0x1Du &&
+            memory.load32(0x089EA1D0u) == more_banks->address,
+        "equipment: a second weapon of the class gets the next model and its base's banks; the first's stay");
+    memory.store16(more_swords->address + 5u * 28u, 40u); // great sword 5: a model past the banks
+    ymod_weapon unbanked = blade;
+    unbanked.id = "unbanked";
+    unbanked.based_on = 5;
+    check(service != nullptr && service->add_weapon(mod, &unbanked) == -1 &&
+            logged("weapon unbanked is not added: the base's model has no sound banks in the class's table"),
+        "equipment: a base whose model has no sound banks is refused");
+    // Another mod changed the list of the classes' banks: the weapon is refused.
+    memory.store32(0x089EA1D0u, 0x08900000u);
+    ymod_weapon moved_banks = blade;
+    moved_banks.id = "moved_banks";
+    check(service != nullptr && service->add_weapon(mod, &moved_banks) == -1 &&
+            logged("weapon moved_banks is not added: the class's sound banks cannot grow: the game's code that reads "
+                   "it is not as traced"),
+        "equipment: banks whose list another mod changed are refused");
+    memory.store32(0x089EA1D0u, more_banks->address);
     check(service != nullptr && service->add_weapon(mod, &taken) == -1 &&
             logged("weapon black_blade is not added: the id \"black_blade\" is taken or empty") &&
             service->add_weapon(mod, &unknown) == -1 && service->add_weapon(mod, &no_base) == -1 &&

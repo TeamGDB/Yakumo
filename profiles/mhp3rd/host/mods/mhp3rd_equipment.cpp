@@ -25,24 +25,25 @@ using psprecomp::Runtime;
 
 struct Class {
     WeaponClass weapon;
-    std::string_view table; // its game table
-    std::uint32_t names{};  // its text tables: names by id, then descriptions
+    std::string_view table;  // its game table
+    std::string_view sounds; // its sound banks by model, a game table too
+    std::uint32_t names{};   // its text tables: names by id, then descriptions
     std::uint32_t descriptions{};
 };
 // The name tables pair with the kinds as docs/DEBUG_MENU.md lists them.
 constexpr std::array<Class, 12> kClasses{{
-    {{"great_sword", 5u}, "weapon.great_sword", 5u, 6u},
-    {{"sword_and_shield", 6u}, "weapon.sword_and_shield", 7u, 8u},
-    {{"hammer", 7u}, "weapon.hammer", 9u, 10u},
-    {{"lance", 8u}, "weapon.lance", 11u, 12u},
-    {{"heavy_bowgun", 9u}, "weapon.heavy_bowgun", 13u, 14u},
-    {{"light_bowgun", 11u}, "weapon.light_bowgun", 15u, 16u},
-    {{"long_sword", 12u}, "weapon.long_sword", 17u, 18u},
-    {{"switch_axe", 13u}, "weapon.switch_axe", 19u, 20u},
-    {{"gunlance", 14u}, "weapon.gunlance", 21u, 22u},
-    {{"bow", 15u}, "weapon.bow", 23u, 24u},
-    {{"dual_blades", 16u}, "weapon.dual_blades", 25u, 26u},
-    {{"hunting_horn", 17u}, "weapon.hunting_horn", 27u, 28u},
+    {{"great_sword", 5u}, "weapon.great_sword", "weapon.great_sword.sounds", 5u, 6u},
+    {{"sword_and_shield", 6u}, "weapon.sword_and_shield", "weapon.sword_and_shield.sounds", 7u, 8u},
+    {{"hammer", 7u}, "weapon.hammer", "weapon.hammer.sounds", 9u, 10u},
+    {{"lance", 8u}, "weapon.lance", "weapon.lance.sounds", 11u, 12u},
+    {{"heavy_bowgun", 9u}, "weapon.heavy_bowgun", "weapon.heavy_bowgun.sounds", 13u, 14u},
+    {{"light_bowgun", 11u}, "weapon.light_bowgun", "weapon.light_bowgun.sounds", 15u, 16u},
+    {{"long_sword", 12u}, "weapon.long_sword", "weapon.long_sword.sounds", 17u, 18u},
+    {{"switch_axe", 13u}, "weapon.switch_axe", "weapon.switch_axe.sounds", 19u, 20u},
+    {{"gunlance", 14u}, "weapon.gunlance", "weapon.gunlance.sounds", 21u, 22u},
+    {{"bow", 15u}, "weapon.bow", "weapon.bow.sounds", 23u, 24u},
+    {{"dual_blades", 16u}, "weapon.dual_blades", "weapon.dual_blades.sounds", 25u, 26u},
+    {{"hunting_horn", 17u}, "weapon.hunting_horn", "weapon.hunting_horn.sounds", 27u, 28u},
 }};
 constexpr std::array<WeaponClass, 12> kWeaponClasses{{kClasses[0].weapon, kClasses[1].weapon, kClasses[2].weapon,
     kClasses[3].weapon, kClasses[4].weapon, kClasses[5].weapon, kClasses[6].weapon, kClasses[7].weapon,
@@ -297,7 +298,8 @@ std::optional<std::uint16_t> add_weapon(Runtime &runtime, const WeaponSpec &spec
         return fail("the id \"" + spec.id + "\" is taken or empty");
     if (spec.model.empty()) return fail("it has no model");
     const tables::Table *table = tables::find(cls->table);
-    if (table == nullptr) return fail("the class's table is not known");
+    const tables::Table *sounds = tables::find(cls->sounds);
+    if (table == nullptr || sounds == nullptr) return fail("the class's table is not known");
     if (spec.based_on == 0u || spec.based_on >= table->rows)
         return fail("the base " + std::to_string(spec.based_on) + " is not one of the class's weapons");
     auto &memory = runtime.memory();
@@ -309,17 +311,27 @@ std::optional<std::uint16_t> add_weapon(Runtime &runtime, const WeaponSpec &spec
     std::string reason;
     const std::optional<std::uint32_t> at = tables::extend(runtime, cls->table, number + 1u, &reason);
     if (!at) return fail("the class's table cannot grow: " + reason);
-    const FileId file = added::free_id();
-    if (file == 0u || !added::add(runtime, file, spec.model)) return fail("its model cannot be served");
-    ++s.added[cls->weapon.kind];
-
     // The record: the base's, with its own model, price and, once the text
     // block is loaded, description.
     const std::uint32_t base = *at + spec.based_on * table->row;
     const std::uint32_t row = *at + number * table->row;
-    for (std::uint32_t i = 0; i < table->row; i += 4u) memory.store32(row + i, memory.load32(base + i));
+    const std::uint16_t base_model = memory.load16(base + kModelField);
     const auto model =
-        static_cast<std::uint16_t>(memory.load16(kModelCounts + 4u * cls_index) + s.models[cls->weapon.kind]++);
+        static_cast<std::uint16_t>(memory.load16(kModelCounts + 4u * cls_index) + s.models[cls->weapon.kind]);
+    // Its sound banks: the base's, at its model. A quest loads the banks of
+    // the hunter's weapon by model with no bound, and a model past the
+    // class's rows took file ids from the bytes after them.
+    if (base_model >= sounds->rows) return fail("the base's model has no sound banks in the class's table");
+    const std::optional<std::uint32_t> banks = tables::extend(runtime, cls->sounds, model + 1u, &reason);
+    if (!banks) return fail("the class's sound banks cannot grow: " + reason);
+    const FileId file = added::free_id();
+    if (file == 0u || !added::add(runtime, file, spec.model)) return fail("its model cannot be served");
+    ++s.added[cls->weapon.kind];
+    ++s.models[cls->weapon.kind];
+    for (std::uint32_t i = 0; i < sounds->row; i += 2u)
+        memory.store16(*banks + model * sounds->row + i, memory.load16(*banks + base_model * sounds->row + i));
+
+    for (std::uint32_t i = 0; i < table->row; i += 4u) memory.store32(row + i, memory.load32(base + i));
     memory.store16(row + kModelField, model);
     if (spec.price != 0u) memory.store32(row + kPriceField, spec.price);
     s.weapons.push_back({spec.id, cls, number, model, file, spec.give});

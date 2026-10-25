@@ -443,7 +443,7 @@ helm.give = 1;
 const int32_t id = mod.equipment()->add_armor(mod.handle(), &helm); // its id in its part, or -1
 ```
 
-Add them at start. Their stats are the base's for now.
+Add them at start. Their stats are the base's for now, and a weapon makes its base's sounds.
 
 ## Maps
 

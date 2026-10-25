@@ -656,8 +656,8 @@ typedef struct ymod_quest {
 } ymod_quest;
 /* --------------------------------------------------------------------------
  * "yakumo.equipment" 1: weapons mods add. A weapon starts from one of the
- * game's of its class (its attack, element, sharpness, slots, rarity and
- * upgrades) and has its own model, name, description and price
+ * game's of its class (its attack, element, sharpness, slots, rarity,
+ * upgrades and sounds) and has its own model, name, description and price
  * (docs/EQUIPMENT_MODS.md), and armor the same way. Call add_weapon() and
  * add_armor() from yakumo_mod_main.
  */

@@ -25,6 +25,9 @@ class Runtime;
 // - gives it a model number past the class's models (counts at 0x089CD1F8)
 //   and serves the mod's model as a file added for that number, through two
 //   instruction hooks in the model-to-file code (0x088A59E4, 0x088A5A08);
+// - gives that model the base's sound banks in the class's table of banks by
+//   model (moved with a row for it, weapon.<class>.sounds), which a quest
+//   reads for the hunter's weapon with no bound;
 // - adds its name to the class's name table, at its id, and its description
 //   to the description table, whose index the record keeps at +0x18;
 // - when asked, puts one in the equipment box once the village loads.
@@ -50,7 +53,8 @@ struct WeaponSpec {
 
 // Adds a weapon and returns its id in its class, or nothing (with the reason
 // in `why`) when the class or base is unknown, the id taken, the model empty,
-// a table cannot grow or the game's code is not as traced.
+// a table cannot grow, the base's model has no sound banks or the game's
+// code is not as traced.
 [[nodiscard]] std::optional<std::uint16_t> add_weapon(
     psprecomp::Runtime &runtime, const WeaponSpec &spec, std::string *why = nullptr);
 

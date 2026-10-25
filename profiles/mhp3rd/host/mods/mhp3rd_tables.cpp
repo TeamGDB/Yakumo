@@ -301,6 +301,28 @@ const std::vector<Definition> &definitions() {
                 {0x0885D5F0u, 0x3C020899u, 0x0885D5F8u, 0x244236ECu},
                 {0x0885D8C0u, 0x3C030899u, 0x0885D8C8u, 0x246336ECu}},
             {}},
+        // Each weapon class's sound banks, by model number (6 bytes): the
+        // bank's header file and its body (u16 each, a "Head"/"Prog" header of
+        // 2 KiB and its samples), and a byte that picks the class's shared
+        // pair (0x089EA15C). A quest loads the banks of the hunter's weapon
+        // (0x088B9BEC, through the model 0x0885E6C8 gives), reaching the
+        // class's rows through the list of the twelve at 0x089EA1D0 (by kind
+        // less 5, 0 for kind 10), with no bound; each has as many rows as the
+        // class has models (0x089CD1F8). A model past them read the next
+        // table's bytes as file ids (docs/EQUIPMENT_MODS.md).
+        {{"weapon.great_sword.sounds", "", 0x089EAA7Cu, 6u, 40u}, 0x10000u, {}, {}, {}, {{0x089EA1D0u, 0x089EAA7Cu}}},
+        {{"weapon.sword_and_shield.sounds", "", 0x089EA990u, 6u, 39u}, 0x10000u, {}, {}, {},
+            {{0x089EA1D4u, 0x089EA990u}}},
+        {{"weapon.hammer.sounds", "", 0x089EA8A4u, 6u, 39u}, 0x10000u, {}, {}, {}, {{0x089EA1D8u, 0x089EA8A4u}}},
+        {{"weapon.lance.sounds", "", 0x089EA7B4u, 6u, 40u}, 0x10000u, {}, {}, {}, {{0x089EA1DCu, 0x089EA7B4u}}},
+        {{"weapon.heavy_bowgun.sounds", "", 0x089EA710u, 6u, 27u}, 0x10000u, {}, {}, {}, {{0x089EA1E0u, 0x089EA710u}}},
+        {{"weapon.light_bowgun.sounds", "", 0x089EA66Cu, 6u, 27u}, 0x10000u, {}, {}, {}, {{0x089EA1E8u, 0x089EA66Cu}}},
+        {{"weapon.long_sword.sounds", "", 0x089EA598u, 6u, 35u}, 0x10000u, {}, {}, {}, {{0x089EA1ECu, 0x089EA598u}}},
+        {{"weapon.switch_axe.sounds", "", 0x089EA4FCu, 6u, 26u}, 0x10000u, {}, {}, {}, {{0x089EA1F0u, 0x089EA4FCu}}},
+        {{"weapon.gunlance.sounds", "", 0x089EA434u, 6u, 33u}, 0x10000u, {}, {}, {}, {{0x089EA1F4u, 0x089EA434u}}},
+        {{"weapon.bow.sounds", "", 0x089EA384u, 6u, 29u}, 0x10000u, {}, {}, {}, {{0x089EA1F8u, 0x089EA384u}}},
+        {{"weapon.dual_blades.sounds", "", 0x089EA2C4u, 6u, 32u}, 0x10000u, {}, {}, {}, {{0x089EA1FCu, 0x089EA2C4u}}},
+        {{"weapon.hunting_horn.sounds", "", 0x089EA204u, 6u, 32u}, 0x10000u, {}, {}, {}, {{0x089EA200u, 0x089EA204u}}},
         // The event quests the game includes, offered at the counter where the
         // downloaded ones are when there are none (u16 ids, 0 after the
         // last). The loop at 0x0A0B1324 loads each into the next free download slot

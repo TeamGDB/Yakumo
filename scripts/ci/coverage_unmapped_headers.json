@@ -124,7 +124,7 @@
     "reason": "Script mod host declarations. mod_script*.cpp is covered by mhp3rd_script_mods_tests through the real Luau engine."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.h": {
-    "sha256": "6ab300d270b46acbe22933def70e8a7269668a6ca571ec2ced63149ec79d9c71",
+    "sha256": "ecde672743f6d2da7719fca56e553ab3ed8df5981eef2aebd2851113856542be",
     "reason": "The C ABI of native mods: types, constants, function-pointer tables, the interface-version macro, and YMOD_SIZE_OF and YMOD_ZERO, which give sizes, strides and reserved fields their defaults in C++14 and later; no host code. The host implementation in mod_native*.cpp is covered by mhp3rd_native_mods_tests, which also loads a test mod declaring a newer interface and checks the C++ defaults, arrays read by their strides and reserved fields left unread; the host static_asserts that no struct ends in padding, and tests/sdk_cxx11_check.cpp compiles the header as C++11."
   },
   "profiles/mhp3rd/sdk/include/yakumo/mod.hpp": {
@@ -188,8 +188,8 @@
     "reason": "Declarations and limits only. quest_builder.cpp is covered by mhp3rd_quest_file_tests (the record, texts, monsters, tables, gathering lists and refusals) and mhp3rd_native_mods_tests (quests built through the quests service, with their areas' gathering lists, and kMostRewardItems bounding a quest's rewards before they are read)."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_equipment.hpp": {
-    "sha256": "db5d4bf3479c90470a4af01cc190ba5ea6baf1eb62448ca2d20ed08d6bee2553",
-    "reason": "Declarations only. mhp3rd_equipment.cpp is covered by mhp3rd_native_mods_tests (adding a weapon and armor on stand-ins for the tables, model-to-file code and text block; refusals; giving one in the village)."
+    "sha256": "e6dcacf1fe8ada2fd023e8ce4b7f82390021cc98b90ad5f9c24a0935bd734b8b",
+    "reason": "Declarations only. mhp3rd_equipment.cpp is covered by mhp3rd_native_mods_tests (adding a weapon and armor on stand-ins for the tables, model-to-file code and text block; a weapon's sound banks, its base's at its model, a second weapon's and the refusals of a base with no banks and of a changed list of banks; refusals; giving one in the village)."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_texts.hpp": {
     "sha256": "b01bbd08352a3153836e540c74de80ddd3ab2d02ad2325ee17d3bbe7932410ce",
