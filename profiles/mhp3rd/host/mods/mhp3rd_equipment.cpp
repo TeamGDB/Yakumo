@@ -25,25 +25,30 @@ using psprecomp::Runtime;
 
 struct Class {
     WeaponClass weapon;
-    std::string_view table;  // its game table
-    std::string_view sounds; // its sound banks by model, a game table too
-    std::uint32_t names{};   // its text tables: names by id, then descriptions
+    std::string_view table; // its game table
+    // The game tables the game reads by model number with no bound: the
+    // sound banks for every class, and for the bowguns a byte that picks a
+    // placement; empty where it has none.
+    std::array<std::string_view, 2> by_model{};
+    std::uint32_t names{}; // its text tables: names by id, then descriptions
     std::uint32_t descriptions{};
 };
 // The name tables pair with the kinds as docs/DEBUG_MENU.md lists them.
 constexpr std::array<Class, 12> kClasses{{
-    {{"great_sword", 5u}, "weapon.great_sword", "weapon.great_sword.sounds", 5u, 6u},
-    {{"sword_and_shield", 6u}, "weapon.sword_and_shield", "weapon.sword_and_shield.sounds", 7u, 8u},
-    {{"hammer", 7u}, "weapon.hammer", "weapon.hammer.sounds", 9u, 10u},
-    {{"lance", 8u}, "weapon.lance", "weapon.lance.sounds", 11u, 12u},
-    {{"heavy_bowgun", 9u}, "weapon.heavy_bowgun", "weapon.heavy_bowgun.sounds", 13u, 14u},
-    {{"light_bowgun", 11u}, "weapon.light_bowgun", "weapon.light_bowgun.sounds", 15u, 16u},
-    {{"long_sword", 12u}, "weapon.long_sword", "weapon.long_sword.sounds", 17u, 18u},
-    {{"switch_axe", 13u}, "weapon.switch_axe", "weapon.switch_axe.sounds", 19u, 20u},
-    {{"gunlance", 14u}, "weapon.gunlance", "weapon.gunlance.sounds", 21u, 22u},
-    {{"bow", 15u}, "weapon.bow", "weapon.bow.sounds", 23u, 24u},
-    {{"dual_blades", 16u}, "weapon.dual_blades", "weapon.dual_blades.sounds", 25u, 26u},
-    {{"hunting_horn", 17u}, "weapon.hunting_horn", "weapon.hunting_horn.sounds", 27u, 28u},
+    {{"great_sword", 5u}, "weapon.great_sword", {"weapon.great_sword.sounds"}, 5u, 6u},
+    {{"sword_and_shield", 6u}, "weapon.sword_and_shield", {"weapon.sword_and_shield.sounds"}, 7u, 8u},
+    {{"hammer", 7u}, "weapon.hammer", {"weapon.hammer.sounds"}, 9u, 10u},
+    {{"lance", 8u}, "weapon.lance", {"weapon.lance.sounds"}, 11u, 12u},
+    {{"heavy_bowgun", 9u}, "weapon.heavy_bowgun", {"weapon.heavy_bowgun.sounds", "weapon.heavy_bowgun.placements"}, 13u,
+        14u},
+    {{"light_bowgun", 11u}, "weapon.light_bowgun", {"weapon.light_bowgun.sounds", "weapon.light_bowgun.placements"},
+        15u, 16u},
+    {{"long_sword", 12u}, "weapon.long_sword", {"weapon.long_sword.sounds"}, 17u, 18u},
+    {{"switch_axe", 13u}, "weapon.switch_axe", {"weapon.switch_axe.sounds"}, 19u, 20u},
+    {{"gunlance", 14u}, "weapon.gunlance", {"weapon.gunlance.sounds"}, 21u, 22u},
+    {{"bow", 15u}, "weapon.bow", {"weapon.bow.sounds"}, 23u, 24u},
+    {{"dual_blades", 16u}, "weapon.dual_blades", {"weapon.dual_blades.sounds"}, 25u, 26u},
+    {{"hunting_horn", 17u}, "weapon.hunting_horn", {"weapon.hunting_horn.sounds"}, 27u, 28u},
 }};
 constexpr std::array<WeaponClass, 12> kWeaponClasses{{kClasses[0].weapon, kClasses[1].weapon, kClasses[2].weapon,
     kClasses[3].weapon, kClasses[4].weapon, kClasses[5].weapon, kClasses[6].weapon, kClasses[7].weapon,
@@ -308,8 +313,11 @@ std::optional<std::uint16_t> add_weapon(Runtime &runtime, const WeaponSpec &spec
         return fail("the id \"" + spec.id + "\" is taken or empty");
     if (spec.model.empty()) return fail("it has no model");
     const tables::Table *table = tables::find(cls->table);
-    const tables::Table *sounds = tables::find(cls->sounds);
-    if (table == nullptr || sounds == nullptr) return fail("the class's table is not known");
+    std::vector<const tables::Table *> by_model;
+    for (const std::string_view name : cls->by_model)
+        if (!name.empty()) by_model.push_back(tables::find(name));
+    if (table == nullptr || std::count(by_model.begin(), by_model.end(), nullptr) != 0)
+        return fail("the class's table is not known");
     if (spec.based_on == 0u || spec.based_on >= table->rows)
         return fail("the base " + std::to_string(spec.based_on) + " is not one of the class's weapons");
     auto &memory = runtime.memory();
@@ -328,18 +336,25 @@ std::optional<std::uint16_t> add_weapon(Runtime &runtime, const WeaponSpec &spec
     const std::uint16_t base_model = memory.load16(base + kModelField);
     const auto model =
         static_cast<std::uint16_t>(memory.load16(kModelCounts + 4u * cls_index) + s.models[cls->weapon.kind]);
-    // Its sound banks: the base's, at its model. A quest loads the banks of
-    // the hunter's weapon by model with no bound, and a model past the
-    // class's rows took file ids from the bytes after them.
-    if (base_model >= sounds->rows) return fail("the base's model has no sound banks in the class's table");
-    const std::optional<std::uint32_t> banks = tables::extend(runtime, cls->sounds, model + 1u, &reason);
-    if (!banks) return fail("the class's sound banks cannot grow: " + reason);
+    // The rows the game reads by model, the base's at its model: its sound
+    // banks (a quest loads the banks of the hunter's weapon by model with no
+    // bound, and a model past the class's rows took file ids from the bytes
+    // after them) and a bowgun's placement.
+    std::vector<std::uint32_t> placed;
+    for (const tables::Table *t : by_model) {
+        if (base_model >= t->rows) return fail("the base's model has no row in " + t->name);
+        const std::optional<std::uint32_t> at_model = tables::extend(runtime, t->name, model + 1u, &reason);
+        if (!at_model) return fail(t->name + " cannot grow: " + reason);
+        placed.push_back(*at_model);
+    }
     const FileId file = added::free_id();
     if (file == 0u || !added::add(runtime, file, spec.model)) return fail("its model cannot be served");
     ++s.added[cls->weapon.kind];
     ++s.models[cls->weapon.kind];
-    for (std::uint32_t i = 0; i < sounds->row; i += 2u)
-        memory.store16(*banks + model * sounds->row + i, memory.load16(*banks + base_model * sounds->row + i));
+    for (std::size_t t = 0; t < by_model.size(); ++t)
+        for (std::uint32_t i = 0; i < by_model[t]->row; ++i)
+            memory.store8(
+                placed[t] + model * by_model[t]->row + i, memory.load8(placed[t] + base_model * by_model[t]->row + i));
 
     for (std::uint32_t i = 0; i < table->row; i += 4u) memory.store32(row + i, memory.load32(base + i));
     memory.store16(row + kModelField, model);

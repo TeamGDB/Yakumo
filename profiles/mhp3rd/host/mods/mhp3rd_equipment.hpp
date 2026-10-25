@@ -28,9 +28,10 @@ class Runtime;
 //   the hunter's (0x088A59E4, 0x088A5A08), the character select's
 //   (0x088F4754, 0x088F4780) and lobby_task's own hunter's (0x0A10EF28,
 //   0x0A10EF54);
-// - gives that model the base's sound banks in the class's table of banks by
-//   model (moved with a row for it, weapon.<class>.sounds), which a quest
-//   reads for the hunter's weapon with no bound;
+// - gives that model the base's rows in the tables the game reads by model
+//   with no bound (moved with a row for it): the class's sound banks
+//   (weapon.<class>.sounds), which a quest loads for the hunter's weapon, and
+//   a bowgun's placement (weapon.<class>.placements);
 // - adds its name to the class's name table, at its id, and its description
 //   to the description table, whose index the record keeps at +0x18;
 // - when asked, puts one in the equipment box once the village loads.
@@ -56,8 +57,8 @@ struct WeaponSpec {
 
 // Adds a weapon and returns its id in its class, or nothing (with the reason
 // in `why`) when the class or base is unknown, the id taken, the model empty,
-// a table cannot grow, the base's model has no sound banks or the game's
-// code is not as traced.
+// a table cannot grow, the base's model has no row in a table read by model
+// or the game's code is not as traced.
 [[nodiscard]] std::optional<std::uint16_t> add_weapon(
     psprecomp::Runtime &runtime, const WeaponSpec &spec, std::string *why = nullptr);
 

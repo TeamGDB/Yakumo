@@ -188,8 +188,8 @@
     "reason": "Declarations and limits only. quest_builder.cpp is covered by mhp3rd_quest_file_tests (the record, texts, monsters, tables, gathering lists and refusals) and mhp3rd_native_mods_tests (quests built through the quests service, with their areas' gathering lists, and kMostRewardItems bounding a quest's rewards before they are read)."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_equipment.hpp": {
-    "sha256": "9e821f617f18949d62d6975d3f4b280f57e60ef8b5d19e42c805058734f1cdf2",
-    "reason": "Declarations only. mhp3rd_equipment.cpp is covered by mhp3rd_native_mods_tests (adding a weapon and armor on stand-ins for the tables, model-to-file code and text block; a weapon's file on the character select and lobby_task's own hunter and code there not as traced left alone, a weapon's sound banks, its base's at its model, a second weapon's and the refusals of a base with no banks and of a changed list of banks; armor models whose sum with the part's base is the mod's file for each sex, and the refusal of armor code not as traced; refusals; giving one in the village)."
+    "sha256": "15d7968c7f2c687f25138f877317bdf6927643f68197e29307fff580a1aea9eb",
+    "reason": "Declarations only. mhp3rd_equipment.cpp is covered by mhp3rd_native_mods_tests (adding a weapon and armor on stand-ins for the tables, model-to-file code and text block; a weapon's file on the character select and lobby_task's own hunter and code there not as traced left alone, a weapon's sound banks, its base's at its model, a second weapon's and the refusals of a base with no banks and of a changed list of banks; a heavy bowgun's placement, its base's at its model, and game_task's code pointed at the copy; armor models whose sum with the part's base is the mod's file for each sex, and the refusal of armor code not as traced; refusals; giving one in the village)."
   },
   "profiles/mhp3rd/host/mods/mhp3rd_texts.hpp": {
     "sha256": "b01bbd08352a3153836e540c74de80ddd3ab2d02ad2325ee17d3bbe7932410ce",

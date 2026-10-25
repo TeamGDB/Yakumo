@@ -323,6 +323,17 @@ const std::vector<Definition> &definitions() {
         {{"weapon.bow.sounds", "", 0x089EA384u, 6u, 29u}, 0x10000u, {}, {}, {}, {{0x089EA1F8u, 0x089EA384u}}},
         {{"weapon.dual_blades.sounds", "", 0x089EA2C4u, 6u, 32u}, 0x10000u, {}, {}, {}, {{0x089EA1FCu, 0x089EA2C4u}}},
         {{"weapon.hunting_horn.sounds", "", 0x089EA204u, 6u, 32u}, 0x10000u, {}, {}, {}, {{0x089EA200u, 0x089EA204u}}},
+        // The bowguns' placements, a byte by model number (0, 1 or 2): which
+        // of three ways game_task's hunter update (0x0A1150AC) lays out a
+        // vector for the bowgun held, read with no bound: the light bowguns'
+        // table for class 6, the heavy bowguns' otherwise (the game's swords
+        // have models past these rows, so it is reached for bowguns). As many
+        // rows as the class has models; game_task forms each table's address
+        // once (docs/EQUIPMENT_MODS.md).
+        {{"weapon.heavy_bowgun.placements", "", 0x089F4FCCu, 1u, 27u}, 0x10000u,
+            {{0x0A1150A4u, 0x3C02089Fu, 0x0A1150A8u, 0x24434FCCu}}, {}, "game_task"},
+        {{"weapon.light_bowgun.placements", "", 0x089F4EECu, 1u, 27u}, 0x10000u,
+            {{0x0A1151C0u, 0x3C02089Fu, 0x0A1151C4u, 0x24434EECu}}, {}, "game_task"},
         // The event quests the game includes, offered at the counter where the
         // downloaded ones are when there are none (u16 ids, 0 after the
         // last). The loop at 0x0A0B1324 loads each into the next free download slot

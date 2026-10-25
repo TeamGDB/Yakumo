@@ -1490,15 +1490,15 @@ void test_equipment(psprecomp::Runtime &runtime) {
     unbanked.id = "unbanked";
     unbanked.based_on = 5;
     check(service != nullptr && service->add_weapon(mod, &unbanked) == -1 &&
-            logged("weapon unbanked is not added: the base's model has no sound banks in the class's table"),
+            logged("weapon unbanked is not added: the base's model has no row in weapon.great_sword.sounds"),
         "equipment: a base whose model has no sound banks is refused");
     // Another mod changed the list of the classes' banks: the weapon is refused.
     memory.store32(0x089EA1D0u, 0x08900000u);
     ymod_weapon moved_banks = blade;
     moved_banks.id = "moved_banks";
     check(service != nullptr && service->add_weapon(mod, &moved_banks) == -1 &&
-            logged("weapon moved_banks is not added: the class's sound banks cannot grow: the game's code that reads "
-                   "it is not as traced"),
+            logged("weapon moved_banks is not added: weapon.great_sword.sounds cannot grow: the game's code that "
+                   "reads it is not as traced"),
         "equipment: banks whose list another mod changed are refused");
     memory.store32(0x089EA1D0u, more_banks->address);
     check(service != nullptr && service->add_weapon(mod, &taken) == -1 &&
@@ -1507,6 +1507,42 @@ void test_equipment(psprecomp::Runtime &runtime) {
             service->add_weapon(mod, &no_model) == -1 && service->add_weapon(mod, &old) == -1 &&
             service->add_weapon(mod, nullptr) == -1,
         "equipment: a taken id, an unknown class, a base past the class's, a missing model and short structs are refused");
+
+    // A heavy bowgun: its placement byte, which game_task reads by model
+    // with no bound, is its base's at its model, in a copy game_task's code
+    // is pointed at each time it loads.
+    tables::write_traced_code_for_tests(runtime, "weapon.heavy_bowgun");
+    tables::write_traced_code_for_tests(runtime, "weapon.heavy_bowgun.sounds");
+    tables::write_traced_code_for_tests(runtime, "weapon.heavy_bowgun.placements");
+    constexpr std::uint32_t kBowguns = 0x08990464u, kBowgunSounds = 0x089EA710u, kPlacements = 0x089F4FCCu;
+    for (std::uint32_t i = 0; i < 67u * 80u; i += 4u) memory.store32(kBowguns + i, 0u);
+    memory.store16(kBowguns + 2u * 80u, 5u); // heavy bowgun 2: model 5
+    memory.store16(0x089CD1F8u + 4u * 4u, 27u);
+    for (std::uint32_t m = 0; m < 27u; ++m) {
+        memory.store16(kBowgunSounds + 6u * m, static_cast<std::uint16_t>(0xA00u + m));
+        memory.store8(kPlacements + m, static_cast<std::uint8_t>(m % 3u));
+    }
+    memory.store8(kPlacements + 27u, 0x26u); // the bytes after them, as the game's next data has
+    memory.store8(kPlacements + 28u, 0x01u);
+    std::ofstream(folder / "bowgun.pac", std::ios::binary) << "BOWGUN";
+    ymod_weapon bowgun{sizeof(ymod_weapon), "black_bowgun", "heavy_bowgun", 2, "bowgun.pac", "Black Bowgun",
+        "A bowgun a mod added.", 0u, 0};
+    const std::int32_t bowgun_id = service != nullptr ? service->add_weapon(mod, &bowgun) : -1;
+    const std::optional<tables::Placement> placements = tables::placement("weapon.heavy_bowgun.placements");
+    const std::optional<tables::Placement> bowgun_banks = tables::placement("weapon.heavy_bowgun.sounds");
+    check(bowgun_id == 67 && placements && placements->address != kPlacements && placements->rows >= 28u &&
+            memory.load8(placements->address + 27u) == 5u % 3u && memory.load8(placements->address + 26u) == 26u % 3u &&
+            bowgun_banks && memory.load16(bowgun_banks->address + 6u * 27u) == 0xA05u,
+        "equipment: a heavy bowgun's model has its base's placement and sound banks, the game's rows kept");
+    place_overlay(runtime, 0x0A05E600u, "game_task.ovl", 0x00200000u);
+    store(runtime, 0x0A1150A4u, {0x3C02089Fu, 0x24434FCCu});
+    tables::overlay_loaded(runtime);
+    const std::uint32_t placed_at = placements ? placements->address : 0u;
+    check(memory.load32(0x0A1150A4u) == (0x3C020000u | ((placed_at + 0x8000u) >> 16u)) &&
+            memory.load32(0x0A1150A8u) == (0x24430000u | (placed_at & 0xFFFFu)),
+        "equipment: game_task's code that reads the placements is pointed at the copy when it loads");
+    place_overlay(runtime, 0x0A05E600u, "lobby_task.ovl", 0x00200000u);
+    mhp3rd::mods::native::overlay_loaded(runtime, 0x0A05E600u);
 
     // Armor: a row of the part's table, its male and female models through
     // the armor model-to-file code, its name and description, one in the box.
