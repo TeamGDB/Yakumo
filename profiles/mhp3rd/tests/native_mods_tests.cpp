@@ -1381,6 +1381,14 @@ void test_equipment(psprecomp::Runtime &runtime) {
         static_cast<const ymod_equipment *>(mhp3rd::mods::native::host()->service(mod, YMOD_EQUIPMENT, 1u));
     ymod_weapon blade{sizeof(ymod_weapon), "black_blade", "great_sword", 3, "blade.pac", "Black Blade",
         "A blade a mod added.", 1234u, 1};
+    // The character select's code not as traced: nothing is hooked, the weapon refused.
+    memory.store32(0x088F4780u, 0u);
+    ymod_weapon early = blade;
+    early.id = "early";
+    check(service != nullptr && service->add_weapon(mod, &early) == -1 &&
+            logged("weapon early is not added: the game's model-to-file code is not as traced"),
+        "equipment: a weapon is refused when a model-to-file function of the executable is not as traced");
+    memory.store32(0x088F4780u, 0x3084FFFFu);
     check(service != nullptr && service->add_weapon(mod, &blade) == 92, "equipment: a weapon is added as the next id");
     const std::optional<tables::Placement> swords = tables::placement("weapon.great_sword");
     const std::uint32_t row = swords ? swords->address + 92u * 28u : 0u;
