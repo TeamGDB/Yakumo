@@ -56,6 +56,8 @@ class Fixture(unittest.TestCase):
         self.prefix = self.package.name[:-7]
         fixed = {
             'LICENSE': 'PUBLIC PROJECT LICENSE',
+            'profiles/mhp3rd/host/adhoc/COPYING': 'PUBLIC AD HOC LICENSE',
+            'profiles/mhp3rd/host/adhoc/EXCEPTION': 'PUBLIC AD HOC EXCEPTION',
             'profiles/mhp3rd/packaging/linux/yakumo.sh': '#!/bin/sh\nexec Yakumo\n',
             'profiles/mhp3rd/packaging/linux/README.txt': 'PUBLIC INSTALLATION GUIDE',
             'profiles/mhp3rd/packaging/THIRD_PARTY_NOTICES.md': 'PUBLIC THIRD PARTY NOTICES',
@@ -86,6 +88,8 @@ class Fixture(unittest.TestCase):
             'fonts/NotoSansCJKjp-Regular.otf': self.font,
             'lib/libSDL3.so.0': elf(),
             'licenses/Yakumo-LICENSE.txt': fixed['LICENSE'].encode(),
+            'licenses/Yakumo-adhoc-GPL-3.0.txt': fixed['profiles/mhp3rd/host/adhoc/COPYING'].encode(),
+            'licenses/Yakumo-adhoc-EXCEPTION.txt': fixed['profiles/mhp3rd/host/adhoc/EXCEPTION'].encode(),
             'licenses/THIRD_PARTY_NOTICES.md': fixed['profiles/mhp3rd/packaging/THIRD_PARTY_NOTICES.md'].encode(),
             'licenses/DearImGui-LICENSE.txt': fixed['profiles/mhp3rd/third_party/imgui/LICENSE.txt'].encode(),
             'licenses/tiny-AES-c-UNLICENSE.txt': fixed['profiles/mhp3rd/third_party/tiny_aes/UNLICENSE'].encode(),

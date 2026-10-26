@@ -147,6 +147,8 @@ done
 
 cp "$sources/NotoSansCJKjp-Regular.otf" "$stage/fonts/"
 cp "$repo_dir/LICENSE" "$stage/licenses/Yakumo-LICENSE.txt"
+cp "$profile_dir/host/adhoc/COPYING" "$stage/licenses/Yakumo-adhoc-GPL-3.0.txt"
+cp "$profile_dir/host/adhoc/EXCEPTION" "$stage/licenses/Yakumo-adhoc-EXCEPTION.txt"
 cp "$here/../THIRD_PARTY_NOTICES.md" "$stage/licenses/THIRD_PARTY_NOTICES.md"
 cp "$deps_build/SDL3-$SDL3_VERSION/LICENSE.txt" "$stage/licenses/SDL3-LICENSE.txt"
 # The FFmpeg build leaves its licence and a note of its source and configure

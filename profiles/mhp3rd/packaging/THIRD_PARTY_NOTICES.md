@@ -1,6 +1,6 @@
 # Third-party notices
 
-Yakumo is distributed under the MIT License (`Yakumo-LICENSE.txt`). Its released builds also contain the third-party software listed here, each under its own license. The license texts are in the same directory as this file: `licenses/` in the tarball, `/app/share/licenses/io.github.teamgdb.Yakumo/` (also `/app/lib/yakumo/licenses/`) in the Flatpak, and `Yakumo.app/Contents/Resources/licenses/` on macOS.
+Yakumo is distributed under the MIT License (`Yakumo-LICENSE.txt`), except for its ad hoc networking, which is under the GNU General Public License, version 3 or later (`Yakumo-adhoc-GPL-3.0.txt`), with the Classpath exception 2.0 (`Yakumo-adhoc-EXCEPTION.txt`). The source of the ad hoc networking is in <https://github.com/TeamGDB/Yakumo> under `profiles/mhp3rd/host/adhoc`, at the release tag or commit that the version in Yakumo's menu names. Yakumo's released builds also contain the third-party software listed here, each under its own license. The license texts are in the same directory as this file: `licenses/` in the tarball, `/app/share/licenses/io.github.teamgdb.Yakumo/` (also `/app/lib/yakumo/licenses/`) in the Flatpak, and `Yakumo.app/Contents/Resources/licenses/` on macOS.
 
 Yakumo does not include any game assets or original game files: no disc image, no copy of the game's executable or data, and no textures, models, audio or video from the game. You must provide the files from your own legally obtained copy of the game.
 

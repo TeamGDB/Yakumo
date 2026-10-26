@@ -56,6 +56,8 @@ class WindowsPolicyTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.licenses = {
             'licenses/Yakumo-LICENSE.txt': ('LICENSE', b'Public MIT fixture\n'),
+            'licenses/Yakumo-adhoc-GPL-3.0.txt': ('profiles/mhp3rd/host/adhoc/COPYING', b'Public GPL fixture\n'),
+            'licenses/Yakumo-adhoc-EXCEPTION.txt': ('profiles/mhp3rd/host/adhoc/EXCEPTION', b'Public exception fixture\n'),
             'licenses/THIRD_PARTY_NOTICES.md': ('profiles/mhp3rd/packaging/THIRD_PARTY_NOTICES.md', b'Public notices fixture\n'),
             'licenses/DearImGui-LICENSE.txt': ('profiles/mhp3rd/third_party/imgui/LICENSE.txt', b'Public ImGui fixture\n'),
             'licenses/tiny-AES-c-UNLICENSE.txt': ('profiles/mhp3rd/third_party/tiny_aes/UNLICENSE', b'Public AES fixture\n'),

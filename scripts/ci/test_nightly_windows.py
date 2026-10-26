@@ -290,6 +290,7 @@ cp "$4/bin/Yakumo.exe" "$YAKUMO_WORK/dist/yakumo-$2-windows-x86_64-portable.zip"
         for name in ['msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll']:
             (crt / name).write_bytes(b'synthetic public CRT')
         for name in ['LICENSE', 'profiles/mhp3rd/packaging/THIRD_PARTY_NOTICES.md',
+                     'profiles/mhp3rd/host/adhoc/COPYING', 'profiles/mhp3rd/host/adhoc/EXCEPTION',
                      'profiles/mhp3rd/third_party/imgui/LICENSE.txt',
                      'profiles/mhp3rd/third_party/tiny_aes/UNLICENSE',
                      'profiles/mhp3rd/third_party/xxhash/LICENSE']:

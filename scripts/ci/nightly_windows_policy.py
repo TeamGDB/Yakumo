@@ -185,6 +185,8 @@ class WindowsPolicy:
         self.folded = set()
         self.fixed = {
             'licenses/Yakumo-LICENSE.txt': 'LICENSE',
+            'licenses/Yakumo-adhoc-GPL-3.0.txt': 'profiles/mhp3rd/host/adhoc/COPYING',
+            'licenses/Yakumo-adhoc-EXCEPTION.txt': 'profiles/mhp3rd/host/adhoc/EXCEPTION',
             'licenses/THIRD_PARTY_NOTICES.md': 'profiles/mhp3rd/packaging/THIRD_PARTY_NOTICES.md',
             'licenses/DearImGui-LICENSE.txt': 'profiles/mhp3rd/third_party/imgui/LICENSE.txt',
             'licenses/tiny-AES-c-UNLICENSE.txt': 'profiles/mhp3rd/third_party/tiny_aes/UNLICENSE',

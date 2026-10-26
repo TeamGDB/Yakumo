@@ -201,6 +201,8 @@ def inspect_linux(path, root=ROOT):
         'yakumo': root / 'profiles/mhp3rd/packaging/linux/yakumo.sh',
         'README.txt': root / 'profiles/mhp3rd/packaging/linux/README.txt',
         'licenses/Yakumo-LICENSE.txt': root / 'LICENSE',
+        'licenses/Yakumo-adhoc-GPL-3.0.txt': root / 'profiles/mhp3rd/host/adhoc/COPYING',
+        'licenses/Yakumo-adhoc-EXCEPTION.txt': root / 'profiles/mhp3rd/host/adhoc/EXCEPTION',
         'licenses/THIRD_PARTY_NOTICES.md': root / 'profiles/mhp3rd/packaging/THIRD_PARTY_NOTICES.md',
         'licenses/DearImGui-LICENSE.txt': root / 'profiles/mhp3rd/third_party/imgui/LICENSE.txt',
         'licenses/tiny-AES-c-UNLICENSE.txt': root / 'profiles/mhp3rd/third_party/tiny_aes/UNLICENSE',

@@ -85,7 +85,7 @@ class MacPolicyTests(unittest.TestCase):
     def test_complete_signed_synthetic_bundle(self):
         policy, payloads = self.fixture()
         self.consume(policy, payloads)
-        self.assertEqual(len(payloads), 379)
+        self.assertEqual(len(payloads), 381)
         self.assertEqual(len(policy.overlays), 355)
 
     def test_allowed_directories_do_not_change_exact_file_set(self):

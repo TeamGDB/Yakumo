@@ -25,7 +25,7 @@
 	<key>CFBundleGetInfoString</key>
 	<string>Yakumo @VERSION@</string>
 	<key>NSHumanReadableCopyright</key>
-	<string>Yakumo @VERSION@. MIT License. Includes no game assets.</string>
+	<string>Yakumo @VERSION@. MIT License; ad hoc networking GPL-3.0-or-later with the Classpath exception. Includes no game assets.</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>@MINIMUM_SYSTEM_VERSION@</string>
 	<key>LSApplicationCategoryType</key>

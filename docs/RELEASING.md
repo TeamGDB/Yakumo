@@ -339,7 +339,7 @@ The first configure needs an SDL3 built for Android to find; the release script 
 1. Fetches the pinned SDL3 and the fallback font, checks their SHA-256 and builds SDL3 for Android 10 once.
 2. Reconfigures the build directory as a release (`MHP3RD_RELEASE`, no checkout paths, `android-29`) against that SDL3 and rebuilds `libmain.so` if that changed it.
 3. Checks that every overlay library is there and newer than the framework headers.
-4. Packs the APK with `packaging/android/build_apk.sh`: the native libraries, SDL's Java activity and the app's own, the font, and under `assets/licenses` the third-party notices, SDL's licence, FFmpeg's LGPL with where its source is, and the font's licence. The version name is `git describe`; the version code is the number of commits, so a later release installs as an update.
+4. Packs the APK with `packaging/android/build_apk.sh`: the native libraries, SDL's Java activity and the app's own, the font, and under `assets/licenses` Yakumo's licence, the ad hoc networking's GPL and Classpath exception, the third-party notices, the licences of Dear ImGui, tiny-AES-c, xxHash and SDL, FFmpeg's LGPL with where its source is, and the font's licence. The version name is `git describe`; the version code is the number of commits, so a later release installs as an update.
 5. Signs it with the release key, verifies the signature, refuses it if it holds any game file or if a library imports a function Android 10 lacks, and prints its size and SHA-256.
 
 ### The release key
