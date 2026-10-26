@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// Copyright (c) 2026 Yakumo contributors
+// See COPYING, EXCEPTION and README.md in this directory.
+
 #pragma once
 
 // The client side of a PSP ad hoc server: matchmaking over adhocctl and every
