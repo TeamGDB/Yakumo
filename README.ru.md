@@ -181,8 +181,9 @@ ctest --test-dir out/framework -C Release --output-on-failure
 - [tiny-AES-c](https://github.com/kokke/tiny-AES-c) — установщик и поддержка сохранений PSP
 - [stb_truetype](https://github.com/nothings/stb) — растеризация шрифтов
 - [svanheulen/mhef](https://github.com/svanheulen/mhef) — описание формата архива игры от сообщества
+- [aemu](https://github.com/MrColdbird/aemu) и [aemu_postoffice](https://github.com/Kethen/aemu_postoffice) — протоколы серверов ad hoc, на которых работает мультиплеер Yakumo
 - [Cinzel](https://github.com/NDISCOVER/Cinzel) и [Shippori Mincho](https://github.com/fontdasu/ShipporiMincho) — шрифты логотипа, под лицензией SIL Open Font License
 
 ## Лицензия
 
-Репозиторий распространяется под лицензией MIT, см. [`LICENSE`](LICENSE). Лицензии сторонних файлов находятся рядом с ними, а их происхождение перечислено в [`docs/SOURCE_PROVENANCE.md`](docs/SOURCE_PROVENANCE.md).
+Репозиторий распространяется под лицензией MIT (см. [`LICENSE`](LICENSE)), кроме сетевого кода ad hoc в [`profiles/mhp3rd/host/adhoc`](profiles/mhp3rd/host/adhoc): он распространяется под GNU GPL версии 3 или более поздней с исключением Classpath, чтобы он и его изменения оставались открытыми для проектов с теми же протоколами; подробности в его [README](profiles/mhp3rd/host/adhoc/README.md). Лицензии сторонних файлов находятся рядом с ними, а их происхождение перечислено в [`docs/SOURCE_PROVENANCE.md`](docs/SOURCE_PROVENANCE.md).

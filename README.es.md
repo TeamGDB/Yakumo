@@ -181,8 +181,9 @@ Para dar soporte a otro juego, consulta [`docs/PROFILE_GUIDE.md`](docs/PROFILE_G
 - [tiny-AES-c](https://github.com/kokke/tiny-AES-c): instalador y compatibilidad con las partidas guardadas de PSP
 - [stb_truetype](https://github.com/nothings/stb): rasterización de fuentes
 - [svanheulen/mhef](https://github.com/svanheulen/mhef): documentación de la comunidad sobre el formato de archivo del juego
+- [aemu](https://github.com/MrColdbird/aemu) y [aemu_postoffice](https://github.com/Kethen/aemu_postoffice): los protocolos de los servidores ad hoc que usa el multijugador de Yakumo
 - [Cinzel](https://github.com/NDISCOVER/Cinzel) y [Shippori Mincho](https://github.com/fontdasu/ShipporiMincho): tipografías del logotipo, bajo la SIL Open Font License
 
 ## Licencia
 
-El repositorio se distribuye bajo la licencia MIT; consulta [`LICENSE`](LICENSE). Los archivos de terceros conservan sus licencias junto a ellos; [`docs/SOURCE_PROVENANCE.md`](docs/SOURCE_PROVENANCE.md) enumera sus orígenes y licencias.
+El repositorio se distribuye bajo la licencia MIT (consulta [`LICENSE`](LICENSE)), salvo el código de red ad hoc de [`profiles/mhp3rd/host/adhoc`](profiles/mhp3rd/host/adhoc), que se distribuye bajo la GNU GPL, versión 3 o posterior, con la excepción Classpath, para que este código y sus cambios sigan abiertos a los proyectos que comparten sus protocolos; consulta su [README](profiles/mhp3rd/host/adhoc/README.md). Los archivos de terceros conservan sus licencias junto a ellos; [`docs/SOURCE_PROVENANCE.md`](docs/SOURCE_PROVENANCE.md) enumera sus orígenes y licencias.
