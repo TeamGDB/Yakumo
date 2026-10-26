@@ -361,6 +361,8 @@ class AndroidPolicy:
                 self.resources['res/' + name] = file
         require(len(self.resources) == 24)
         self.fixed = {'assets/licenses/Yakumo-LICENSE.txt': self.root / 'LICENSE',
+                      'assets/licenses/Yakumo-adhoc-GPL-3.0.txt': self.root / 'profiles/mhp3rd/host/adhoc/COPYING',
+                      'assets/licenses/Yakumo-adhoc-EXCEPTION.txt': self.root / 'profiles/mhp3rd/host/adhoc/EXCEPTION',
                       'assets/licenses/THIRD_PARTY_NOTICES.md': self.root / 'profiles/mhp3rd/packaging/THIRD_PARTY_NOTICES.md',
                       'assets/licenses/DearImGui-LICENSE.txt': self.root / 'profiles/mhp3rd/third_party/imgui/LICENSE.txt',
                       'assets/licenses/tiny-AES-c-UNLICENSE.txt': self.root / 'profiles/mhp3rd/third_party/tiny_aes/UNLICENSE',

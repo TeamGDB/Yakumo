@@ -196,6 +196,8 @@ class MacPolicy:
                           b'@MINIMUM_SYSTEM_VERSION@', target.encode()),
                       APP + 'Resources/licenses/FFmpeg-SOURCE.txt': _ffmpeg_notice(self.root)}
         paths = {'Yakumo-LICENSE.txt': self.root / 'LICENSE',
+                 'Yakumo-adhoc-GPL-3.0.txt': self.root / 'profiles/mhp3rd/host/adhoc/COPYING',
+                 'Yakumo-adhoc-EXCEPTION.txt': self.root / 'profiles/mhp3rd/host/adhoc/EXCEPTION',
                  'THIRD_PARTY_NOTICES.md': package / 'THIRD_PARTY_NOTICES.md',
                  'DearImGui-LICENSE.txt': third / 'imgui/LICENSE.txt',
                  'tiny-AES-c-UNLICENSE.txt': third / 'tiny_aes/UNLICENSE',

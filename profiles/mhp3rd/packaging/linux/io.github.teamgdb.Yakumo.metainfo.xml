@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>io.github.teamgdb.Yakumo</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>MIT</project_license>
+  <project_license>MIT AND GPL-3.0-or-later WITH Classpath-exception-2.0</project_license>
   <name>Yakumo</name>
   <summary>Native port of Monster Hunter Portable 3rd HD Ver.</summary>
   <developer id="io.github.teamgdb">

@@ -123,6 +123,8 @@ for dll in "${ffmpeg_dlls[@]}"; do cp "$bin/$dll" "$root/"; done
 for dll in "${crt_dlls[@]}"; do cp "$crt/$dll" "$root/"; done
 licenses="$root/licenses"
 cp "$repo_dir/LICENSE" "$licenses/Yakumo-LICENSE.txt"
+cp "$profile_dir/host/adhoc/COPYING" "$licenses/Yakumo-adhoc-GPL-3.0.txt"
+cp "$profile_dir/host/adhoc/EXCEPTION" "$licenses/Yakumo-adhoc-EXCEPTION.txt"
 cp "$profile_dir/packaging/THIRD_PARTY_NOTICES.md" "$licenses/THIRD_PARTY_NOTICES.md"
 cp "$sdl3_root/LICENSE.txt" "$licenses/SDL3-LICENSE.txt"
 cp "$bin/FFmpeg-LICENSE.txt" "$bin/FFmpeg-SOURCE.txt" "$licenses/"

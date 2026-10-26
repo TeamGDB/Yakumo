@@ -85,10 +85,13 @@ while IFS= read -r -d '' file; do class_files+=("$file"); done < <(find "$work/c
     "${class_files[@]}"
 
 echo "linking resources"
-# The licences of what the APK carries: the third-party notices, SDL's and
-# FFmpeg's (with where its source is), and the font's when it is packed.
+# The licences of what the APK carries: Yakumo's own (the ad hoc networking
+# has its own), the third-party notices, SDL's and FFmpeg's (with where its
+# source is), and the font's when it is packed.
 mkdir -p "$work/assets/licenses"
 cp "$repo/LICENSE" "$work/assets/licenses/Yakumo-LICENSE.txt"
+cp "$repo/profiles/mhp3rd/host/adhoc/COPYING" "$work/assets/licenses/Yakumo-adhoc-GPL-3.0.txt"
+cp "$repo/profiles/mhp3rd/host/adhoc/EXCEPTION" "$work/assets/licenses/Yakumo-adhoc-EXCEPTION.txt"
 cp "$here/../THIRD_PARTY_NOTICES.md" "$work/assets/licenses/"
 cp "$repo/profiles/mhp3rd/third_party/imgui/LICENSE.txt" "$work/assets/licenses/DearImGui-LICENSE.txt"
 cp "$repo/profiles/mhp3rd/third_party/tiny_aes/UNLICENSE" "$work/assets/licenses/tiny-AES-c-UNLICENSE.txt"

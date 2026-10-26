@@ -117,6 +117,7 @@ class AndroidPackageContracts(unittest.TestCase):
         self.addCleanup(self.fixture.cleanup)
         self.root = Path(self.fixture.name)
         for name in ['LICENSE', 'profiles/mhp3rd/packaging/THIRD_PARTY_NOTICES.md',
+                     'profiles/mhp3rd/host/adhoc/COPYING', 'profiles/mhp3rd/host/adhoc/EXCEPTION',
                      'profiles/mhp3rd/third_party/imgui/LICENSE.txt', 'profiles/mhp3rd/third_party/tiny_aes/UNLICENSE',
                      'profiles/mhp3rd/third_party/xxhash/LICENSE', 'profiles/mhp3rd/cmake/FFmpeg.cmake',
                      'profiles/mhp3rd/packaging/linux/sources.sh', 'profiles/mhp3rd/packaging/android/AndroidManifest.xml']:
