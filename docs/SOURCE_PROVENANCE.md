@@ -18,9 +18,13 @@ The framework contains no EBOOT/PRX decryption. The mhp3rd profile's installer (
 
 ## Ad hoc networking
 
-`profiles/mhp3rd/host/adhoc` and `profiles/mhp3rd/host/hle/hle_adhoc.cpp` let the game's ad hoc play reach other players through the PSP ad hoc servers players already run. The client was written for this project from the protocols' documented and observed behaviour: the servers' published packet layouts, opcodes and ports, and the traffic between the game and a server. No code was copied or adapted from other implementations. The PSP library calls it serves follow their public API descriptions and the game's own calls, traced while it runs.
+`profiles/mhp3rd/host/adhoc` and `profiles/mhp3rd/host/hle/hle_adhoc.cpp` let the game's ad hoc play reach other players through the PSP ad hoc servers players already run, or through a server Yakumo hosts itself. These servers speak two protocols that others designed, and Yakumo works with their servers and clients thanks to that work: the adhocctl matchmaking protocol (TCP 27312) of [aemu](https://github.com/MrColdbird/aemu) by MrColdbird and the relay protocol (TCP 27313) of [aemu_postoffice](https://github.com/Kethen/aemu_postoffice) by Kethen, both of which PPSSPP also speaks. Interoperating relies on these facts: the ports, opcodes and packet layouts, the relay's init record types and its block limits (10 KiB for a datagram, 50 KiB for a stream block).
 
-The built-in server (`server.cpp`, used by *Host a session* and `--adhoc-server`) was also written for this project from the same protocols' documented and observed behaviour: the packet layouts, opcodes, ports and the order of the messages a server sends, checked against the project's own client. No code, structure or text was copied or adapted from other server implementations. The local network discovery protocol (`discovery.cpp`) is the project's own design.
+The client was written for this project from those facts and the observed traffic between the game and a server, and tested against running servers. It is an independent implementation of these protocols. The PSP library calls it serves follow their public API descriptions and the game's own calls, traced while it runs.
+
+The built-in server (`server.cpp`, used by *Host a Session* and `--adhoc-server`) was also written for this project from the same protocols' facts and observed behaviour: the packet layouts, opcodes, ports and the order of the messages a server sends, checked against the project's own client. The local network discovery protocol (`discovery.cpp`) is the project's own design.
+
+The files in `profiles/mhp3rd/host/adhoc` are licensed under the GNU General Public License, version 3 or later, with the Classpath exception 2.0; `hle_adhoc.cpp` and the rest of the repository stay under the MIT License. The GPL keeps this code, and changes to it, open to the projects that share these protocols, such as aemu, aemu_postoffice, adhoc-ng and PPSSPP, which may remove the exception when they use it. Without the exception, the GPL would extend to every Yakumo build as a whole and to the mods players load; with it, the rest of Yakumo keeps its MIT terms and mods may use any license. New ad hoc networking code goes in that directory; its [README](../profiles/mhp3rd/host/adhoc/README.md) describes the boundary.
 
 ## Texture packs
 
@@ -70,3 +74,5 @@ Released builds carry these notices in `profiles/mhp3rd/packaging/THIRD_PARTY_NO
 ## Contribution rule
 
 Do not paste or adapt source from a project whose license is incompatible with the destination file. Reimplement required behavior from specifications, observations or independently documented semantics, and record the source of third-party material when it is intentionally included under a compatible license.
+
+Code in `profiles/mhp3rd/host/adhoc` is under the GPL with the Classpath exception. New ad hoc networking code goes there, and code from there stays there rather than moving into MIT-licensed files.

@@ -760,7 +760,7 @@ Hosting and joining turn **Ad Hoc Play** on and fill in **Server** (the host's o
 
 **A server without the game.** `Yakumo --adhoc-server [port]` runs the same server alone in a terminal, announced on the local network, and prints the addresses to join; Ctrl+C stops it. It needs neither game data nor a window.
 
-A server has two parts, both over TCP: the matchmaking service on port **27312**, which knows who is in which gathering hall, and a relay on port **27313**, which carries the game's own traffic between the players. Yakumo needs both, so pick a server that runs the relay (servers list it as *AemuPostoffice* data mode).
+A server has two parts, both over TCP: the matchmaking service on port **27312**, which knows who is in which gathering hall, and a relay on port **27313**, which carries the game's own traffic between the players. Both protocols come from the PSP online community: the matchmaking one from [aemu](https://github.com/MrColdbird/aemu), the relay from [aemu_postoffice](https://github.com/Kethen/aemu_postoffice). Yakumo needs both, so pick a server that runs the relay (servers list it as *AemuPostoffice* data mode).
 
 ### Setting it up
 
@@ -1415,7 +1415,7 @@ host/fonts/game_font.*           The game's text font: loading, fitting glyphs i
 host/hle/hle_utility.cpp         sceUtility on-screen keyboard and message dialog
 host/hle/hle_savedata.cpp        sceUtility save-data dialog
 host/hle/hle_adhoc.cpp           sceNet, sceNetAdhoc, sceNetAdhocctl, sceNetAdhocDiscover, sceWlanDrv, sceUtilityNetconf
-host/adhoc/                      Client for PSP ad hoc servers: wire formats, network thread, diagnostics
+host/adhoc/                      Ad hoc client, built-in server and LAN discovery (GPL-3.0-or-later with the Classpath exception)
 host/hle/utility_dialog.hpp      Status life cycle shared by the dialogs
 host/save_data/                  AES-128, PARAM.SFO, the save-data encryption and hashes, save folders
 host/gpu/ge_state.{hpp,cpp}      GE command state machine: display lists to draw calls

@@ -19,6 +19,7 @@ Use minimal synthetic examples where possible. Keep game files and saves local; 
 - Never commit game data: disc images, `EBOOT` or `DATA.BIN` contents, generated game code, overlay corpora or saves. Do not include personal paths, user names, machine names, device addresses or credentials.
 - Do not share pirated copies or distribute Yakumo builds bundled with copyrighted game content through project spaces. See the [game-content policy](CODE_OF_CONDUCT.md#piracy-and-game-content).
 - Write implementations yourself. Do not copy or translate code line by line from projects with licenses incompatible with this repository's MIT license. Public documentation, constants, offsets and format facts can inform your work. Record the origin of intentionally included third-party code as described in [SOURCE_PROVENANCE.md](docs/SOURCE_PROVENANCE.md).
+- The ad hoc networking in `profiles/mhp3rd/host/adhoc` is under GPL-3.0-or-later with the Classpath exception, and contributions to it are accepted under the same terms. New ad hoc networking code (protocols, client, server, discovery) goes in that directory, and its code must not move into MIT-licensed files; see its [README](profiles/mhp3rd/host/adhoc/README.md).
 
 ## Getting started
 
