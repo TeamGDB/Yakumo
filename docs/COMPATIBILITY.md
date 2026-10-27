@@ -29,6 +29,7 @@ What works on each platform, as last checked by hand. Each row is a part of the 
 | Downloadable content | ✅ a player's `ULJM05800QST` folder is read by the download menu | ❔ | ❔ | ❔ | ❔ |
 | Free camera (experimental) | ✅ `8690816`: the village and the Misty Peaks base camp, keyboard and mouse and the input script's virtual gamepad, photo mode at 30 and 60 frames a second [#162] | ❔ | ❔ | ❔ | ❔ |
 | Lock-on camera [#163] | ✅ `69dff80`: the small arena (event quest with Arzuros, Lagombi and Volvidon) from the full test save, the input script's virtual gamepad: R3 locks and follows the monster through its charges, the stick, the D-pad and L let go, the monster's death lets go, R3 in chords (screenshot, menu, free camera) never locks, the free camera suspends it; leaving the area checked only by setting the game's flag, not by walking out | ❔ | ❔ | ❔ | ❔ |
+| Analog camera after a climb [#225] | ❔ | ❔ | ❔ | ✅ `aa7af39` with a temporary trace of the game's camera height preset: the full test save, the input script's virtual gamepad, Barioth's Tundra area: the second stick's vertical push is kept from the game while climbing the ice wall and coming over its top, the preset stays put, and the camera is back at its normal distance after the climb; the follow camera and a 40-second fight with Barioth, pushing the stick up and down throughout, leave the preset unchanged; the village passes the stick through as before. Aiming a bow or a bowgun was not checked (the save carries neither) | ❔ |
 | Multiplayer | ✅ with a Steam Deck through an ad hoc server: hall and a full quest [#2] | ❔ | ✅ with a Mac through an ad hoc server: hall and a full quest [#2] | ❔ | ❔ |
 
 Rows marked ❌ on every platform are missing features rather than platform problems.
@@ -71,6 +72,7 @@ unverified for this fix; see [Layered armor](LAYERED_ARMOR.md#smithy-previews).
 | macOS 27 | Apple M1, 8 GB | Apple M1, MoltenVK | `65daf82` (the hot spring's glints at 60 fps, [#168]: 240 presents in a row from a scripted run, against `MHP3RD_INTERPOLATION_NO_NEAREST_INSTANCES`) | 2026-09-27 |
 | Android 15 emulator (API 35, arm64) | Apple M1, 8 GB | SwiftShader | `cf5af0d` (display cutout, #170) | 2026-09-27 |
 | Android 10 emulator (API 29, arm64) | Apple M1, 8 GB | SwiftShader | `cf5af0d` (display cutout, #170) | 2026-09-27 |
+| Windows 11 Pro | AMD Ryzen 5 5600, 16 GB | AMD Radeon RX 5600 XT | `aa7af39` (analog camera after a climb and in a fight, #225) | 2026-11-10 |
 
 ## Coverage-expansion device checks (2026-10-04)
 
@@ -184,6 +186,7 @@ To report a result without editing the page, open a **Test report** issue.
 [#170]: https://github.com/TeamGDB/Yakumo/issues/170
 [#210]: https://github.com/TeamGDB/Yakumo/issues/210
 [#212]: https://github.com/TeamGDB/Yakumo/issues/212
+[#225]: https://github.com/TeamGDB/Yakumo/issues/225
 
 ## Android user-file checks (2026-10-08)
 

@@ -56,8 +56,8 @@
     "reason": "Reviewed opaque type and function declarations only; no executable code is exempted. The runtime API adapter and frame-rate policy remain subject to normal diff coverage."
   },
   "profiles/mhp3rd/host/camera/game_camera.hpp": {
-    "sha256": "2b329a57dc0aa3f48ceba6814475efc1fee3f0f2cf2ab0e51f85f3ee024e6c24",
-    "reason": "Reviewed include and read-only follow-point declaration only; no executable header body changed. Valid, stale, nonfinite and foreign-runtime cases are exercised in analog_camera_tests.cpp; implementation mappings keep the normal diff gate."
+    "sha256": "224909da844c892fd564054fd66da0a4eb708b2a3b8527be4643ffcc9cefdcdb",
+    "reason": "Reviewed include, read-only follow-point and second-stick declarations and the SecondStick aggregate with its rest defaults; no executable header body is exempted. The follow point's valid, stale, nonfinite and foreign-runtime cases, the vertical hold and every second-stick state (driven, held, aiming, mouse turn, option off) are exercised in analog_camera_tests.cpp; implementation mappings keep the normal diff gate."
   },
   "profiles/mhp3rd/host/debug/game_state.hpp": {
     "sha256": "932f726319efbccfc87c967d20ddacfd227cb91d3c1d077555d1637379038d14",

@@ -17,7 +17,8 @@ class GuestMemory;
 // update; the port wraps that helper and, for that one caller, adjusts the
 // camera's angle and eye offset before the game runs its collision checks. The
 // game keeps every other decision: presets, recentring, cutscenes and every
-// camera mode that has no driver here yet, which then keeps the stock stick.
+// camera mode that has no driver here yet, which then keeps the stock stick
+// but for its vertical push (game_camera_holds_vertical).
 namespace mhp3rd::camera {
 
 using RotationFunction = void (*)(psprecomp::Runtime &, psprecomp::AllegrexContext &);
@@ -46,6 +47,13 @@ void game_camera_frame(psprecomp::Runtime &runtime);
 // The port is driving the game's camera right now, so the game must not also
 // act on the second stick: its own turn and vertical presets would fight ours.
 [[nodiscard]] bool game_camera_driving();
+// Analog camera is on and the game's camera is in a mode left to the game
+// (climbing a wall, coming over its top, other special modes): its turn may
+// have the second stick, but not the vertical push. The game reads that push
+// as a step of its camera's height preset, which outlasts the mode; back in
+// the follow camera the stick tilts instead and cannot step it back, so the
+// camera stayed closer to the hunter after a climb (issue #225).
+[[nodiscard]] bool game_camera_holds_vertical();
 // Read-only diagnostic of the current follow camera's look-at point. Empty
 // without a validated, recently updated camera; never writes guest state.
 [[nodiscard]] std::optional<std::array<float, 3>> game_camera_follow_point(const psprecomp::GuestMemory &memory);
@@ -81,8 +89,19 @@ void game_camera_anticipate_aim(psprecomp::Runtime &runtime);
 // a camera mode without a driver) the game's own turn is one speed, on or
 // off, and the mouse can only switch it: -1 or +1 while the mouse moves left
 // or right fast enough this frame, 0 otherwise. Vertical motion has nowhere
-// to go there: the game's second stick up and down are recentring commands.
+// to go there: the game's second stick up and down step its height presets.
 [[nodiscard]] int game_camera_mouse_stock_turn();
+
+// The second stick (pad bytes 10 and 11, 0x80 at rest) as the game is to read
+// it this sample, from the stick the player holds: kept from the game while
+// the port drives the camera, stretched while a weapon aims, without its
+// vertical push in the modes left to the game, and switched on by the mouse
+// for the game's own turn while the stick is idle.
+struct SecondStick {
+    std::uint8_t x{0x80u};
+    std::uint8_t y{0x80u};
+};
+[[nodiscard]] SecondStick game_camera_second_stick(SecondStick held);
 
 // Full-deflection speed for the current camera: Aim speed while a bow or a
 // bowgun aims, Camera speed otherwise.
