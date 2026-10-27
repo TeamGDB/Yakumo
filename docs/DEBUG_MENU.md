@@ -202,6 +202,14 @@ The shared runner closes only its owned process/copies after the finite run;
 `cancel` alone does not abandon the player's ordinary quest. All encounter code
 and commands are compiled out with `MHP3RD_RELEASE=ON`.
 
+Normal **Abandon Quest** remains the in-game cleanup route. Wait for the result
+overlay and save prompt before selecting **No** when preserving a copied save;
+kernel vblanks can advance while quest teardown is still running. A bounded
+private run traced Barioth's deleting destructor at `0x0A1CC470` and the base
+actor destructor at `0x0A08C788`, observed the target model lifetime end, then
+returned to the village with an empty monster table and unchanged save files.
+The preset does not call these destructors directly.
+
 For repeated fixed-tick measurements and baseline/candidate comparisons, use
 the [one-command private benchmark](DEVICE_TESTING.md#barioth-encounter-performance).
 

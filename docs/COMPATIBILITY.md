@@ -677,3 +677,511 @@ Windows x64, source commit `90ab685` (`hud-enhancements`, based on `90b66a6`):
 - Physical Android touch input, physical-controller gameplay, other desktop
   platforms, multiplayer and a complete weapon/HUD matrix were not verified.
   Native line coverage was not measured on Windows.
+
+## Barioth encounter and sparse CPU skinning (2026-10-18)
+
+Tools-only source `fe1711092d156c84927484600717ac57a5cef2b0` and optimized
+native source `d9ea6820047ca290b2004c7f0237db5ea9352a1a` use the same cached
+native AOT code and all 355 compatible overlays. Framework/runtime headers,
+generated code, overlays, shaders and graphics quality are unchanged. Testing
+used an Apple M1 Mac with 8 GiB, macOS 27.0 (26A428), Apple M1 Vulkan 1.1.357
+and MoltenVK 1.4.2. These are developer artifacts with observation/camera
+diagnostics, not exact release-package certification.
+
+A private baseline CPU sample identified weighted vertex decoding and renderer
+submission. Twenty post-ready trace windows in original Tundra quest 507 counted
+47,410,890 indexed min/max-span vertices for 14,887,446 index references
+(3.1846 times as many; worst primitive 32.75 times). This includes all skinned
+scene draws, rather than attributing every draw to Barioth. The old decoder
+skins unused vertices between sparse indices. Eligible sparse CPU draws now
+gather only referenced vertices, retaining the same index order and arithmetic.
+Full spans remain for temporal interpolation, which can need vertices referenced
+only by an older frame; interpolated 45/60/90/120 FPS receives no performance
+improvement claim. Raw GPU, through, morph and noncontiguous paths also retain
+their existing behavior. `MHP3RD_NO_SPARSE_VERTEX_DECODE=1` restores the old path.
+
+The [automatic encounter](DEBUG_MENU.md#fast-barioth-encounter) uses the original
+quest departure/map/actor/model lifecycle, then relocates the hunter near the
+landed Barioth. Ready observations confirmed kind 5, its live PMO model, original
+Tundra area 7, five actors (one Barioth and four small monsters), advancing quest
+time and normal lock-on camera. Snow, effects, AI and attacks remain active.
+This deliberately tests the normal environment rather than an arena. Original
+quest abandonment hit Barioth's deleting destructor once and the base actor
+destructor five times, ended the target lifetime, released the test camera and
+returned to village readiness with an empty monster table. All four copied save
+files remained byte-identical. Only owned developer processes/copies were
+cleaned up; player installations and unrelated sessions were not stopped.
+
+Six fixed-mode runs compare the same `d9ea682` native artifact with the rollback
+switch set (off) versus unset (on), in order off/on, on/off, off/on. Both use the
+same copied save/settings/game, developer RTC epoch 1780000000000000 us, native
+AOT/overlays, original language, muted audio, no texture pack, 480×272 internal
+resolution (×1), 960×544 window, Immediate presentation and manual 30 FPS.
+GPU compatibility Auto resolved to off in every run. The collector warmed up
+to quest tick 89550 and measured approximately 300 further original 30 Hz ticks
+per run, retaining actual start/end ticks. RTC was pinned; identical AI/RNG
+trajectories or pixel-identical motion are not asserted. Separate-process AI
+and draw-count variation remains a limitation. No external game/compiler was
+observed by the private timing guard during these six runs. AC power and no
+recorded thermal warning do not establish fixed clocks or sustained thermals.
+
+Values below are medians of the three run medians (frame-time p95/p99 are
+medians of the three per-run percentiles). CPU/GPU times are per game frame;
+wait includes pacing. Vertex space is each one-second window's frame maximum.
+
+| Metric | Old CPU path (off) | Sparse CPU path (on) |
+| --- | --- | --- |
+| CPU guest / render / guest + render, ms | 3.786 / 6.915 / 10.803 | 3.738 / 6.409 / 10.383 |
+| GPU, ms | 1.167 | 1.231 |
+| Wait / pacing, ms | 22.580 / 21.829 | 22.987 / 22.134 |
+| Vertex space, MiB | 5.318 | 3.548 |
+| Speed, % | 99.979 | 100.022 |
+| Game frames/emulated s / presents/wall s | 29.971 / 29.975 | 29.971 / 29.978 |
+| Present time median / p95 / p99, ms | 33.308 / 36.230 / 36.918 | 33.311 / 36.063 / 37.299 |
+
+The paired render medians decreased by 3.2%, 7.0% and 11.4%; the aggregate
+render median decreased by 7.3%, combined guest/render by 3.9% and vertex space
+by 33.3%. The target already sustained 30 FPS: these results establish reduced
+CPU work and buffer space, not a higher game rate or improved p99. GPU time
+did not improve. The ready/final captures for all six runs were inspected;
+normal attacks and camera motion differ, with no observed geometry/texture
+corruption. A prior interrupted ensemble with a concurrent game/build in an
+unrelated worktree was excluded entirely.
+
+Two separate 600-tick continuous-scene diagnostics alternated the same switch
+each second. Each supplied ten on and ten off telemetry windows after warmup.
+Off/on render medians were 7.119/6.310 ms and 6.536/5.700 ms (11.4% and 12.8%
+lower); render time per draw decreased by 8.1% and 10.4%. These corroborate the
+CPU effect in evolving combat, but mixed-mode frame-time/vertex-space peaks
+are not pooled with the fixed-mode comparison. Both diagnostics completed
+without observed external game/compiler interference and their actual game
+captures were inspected.
+
+An additional two pairs compared the separate tools-only `fe17110` and final
+`d9ea682` artifacts, in before/after then after/before order, with the same
+settings and fixed quest-tick interval. The guard observed no external
+game/compiler interference. Medians of the two per-run summaries were:
+
+| Metric | Before (`fe17110`) | After (`d9ea682`) |
+| --- | --- | --- |
+| CPU guest / render / guest + render, ms | 3.510 / 7.010 / 10.582 | 3.630 / 6.380 / 10.040 |
+| GPU / wait / pacing, ms | 1.227 / 22.845 / 22.092 | 1.275 / 23.336 / 22.557 |
+| Speed, % | 100.010 | 99.957 |
+| Game frames/emulated s / presents/wall s | 29.971 / 29.974 | 29.971 / 29.961 |
+| Present time median / p95 / p99, ms | 33.336 / 35.943 / 36.815 | 33.330 / 36.070 / 37.195 |
+
+Render medians decreased by 8.9% and 9.1% in the two pairs. Aggregate render
+decreased by 9.0% and combined guest/render by 5.1%, while guest and GPU time
+increased slightly. This agrees with a CPU rendering improvement without
+establishing an FPS, p95 or p99 gain. All four runs' ready/final frames showed
+the actual loaded Barioth and original environment without observed rendering
+corruption; normal AI poses were not pixel-identical.
+
+Real-game correctness diagnostics compared over 608,000 gathered draws with
+full-span reference vertices, with zero differences. Separate 120 FPS replay
+checks reported zero of 522,240 pixels different, including the active combat
+window. Ready and combat captures were inspected by the agent for recognizable
+Barioth geometry, hunter/camera, terrain, snow/effects and texture correctness;
+this is not human play or a completed hunt. The renderer-enabled macOS suite
+passed 81/81 tests. A separate headless coverage-stub release build with
+`MHP3RD_DEBUG_MENU=ON` excluded developer debug sources/macros/symbols and
+encounter strings. Public synthetic tests and ordinary CI require no game data
+or timing thresholds.
+
+The severe 5–20 FPS Android symptom in #330 was not reproduced on this Mac.
+The follow-up below records Windows and Redmi 12C measurements; Lenovo and
+Snapdragon 685 remain unverified. This work identifies a combat CPU cost; it
+does not establish the complete cause of that
+device-specific slowdown or resolve the separate 120 FPS animation report.
+Arbitrary spawning, selective live despawning, an arena, other monsters, audio,
+complete hunts, multiplayer and sustained thermal behavior remain unverified.
+
+## Windows and Redmi 12C Barioth follow-up (2026-10-19)
+
+These measurements extend the previous Mac investigation. The original native
+sources remain `fe1711092d156c84927484600717ac57a5cef2b0` (tools-only baseline)
+and `4fde48f4b62be51fe7decdef40d1d75d631d8fc1` (optimized; its executable
+implementation is `d9ea682`). They predate integration with main `5bacba3`.
+All runs reuse native AOT and all 355 compatible overlays. Framework/runtime
+sources and headers are unchanged. No paid devices were used.
+
+Windows: Windows 11 Pro 10.0.26200, Ryzen 5 5600, Radeon RX 5600 XT driver
+32.0.21045.5002, MSVC 19.44 Release. Six fixed-mode rollback runs use the same
+`4fde48f` executable, in off/on, on/off, off/on order. Controls match the Mac
+30 FPS fixture: pinned RTC, original Tundra quest 507, tick 89550 warmup and
+300 measured game ticks, 480×272 internal / 960×544 window, Immediate,
+compatibility Auto resolved off, no texture pack and muted audio. A private
+process guard recorded no competing game/compiler. All twelve endpoint game
+captures were inspected; attacks, jumping and close camera movement showed no
+observed geometry/texture corruption. Medians of the three per-run summaries:
+
+| Metric | Old CPU path | Sparse CPU path |
+| --- | --- | --- |
+| CPU guest / render, ms | 9.007 / 6.737 | 7.313 / 5.912 |
+| GPU / wait / pacing, ms | 0.844 / 17.650 / 17.459 | 0.859 / 20.137 / 19.947 |
+| Vertex space, MiB | 5.610 | 3.558 |
+| Speed, % | 99.966 | 99.963 |
+| Game frames/emulated s / presents/wall s | 29.971 / 29.955 | 29.971 / 29.967 |
+| Present time median / p95 / p99, ms | 33.180 / 43.948 / 46.457 | 33.357 / 37.291 / 43.648 |
+
+Render decreased 12.2% and vertex space 36.6%. Guest time and scheduling varied;
+the percentile improvement was not consistent in each pair, and these results
+do not establish a generally higher game rate or better p99. The full Windows
+suite passed 74/74 on this source.
+
+Android: **Redmi 12C, model 22126RN91Y**, MediaTek MT6769V/CZ (platform mt6768),
+Android 14/API 34, arm64-v8a, Mali-G52 MC2 Vulkan 1.1.177 driver r32p1. This is
+**not** the Redmi Note 13 / Snapdragon 685 reported in #330. Its USB connection
+was reached through a loopback-only SSH/ADB forward. A separately signed,
+debuggable `.devicetest` package used app-private copied fixtures; the stable
+player installation was not replaced or launched.
+
+NDK r28c/API 29 Release developer builds use the same 90 native AOT objects and
+all 355 overlays. The complete APK native inventories and generated testing
+contracts were compared: only `libmain.so` differs; the 358 dependency/overlay
+libraries are byte-identical. Neither comparison uses interpreter fallback.
+The normal game loads its actual Barioth/PMO, Tundra area 7 and five actors
+(one Barioth, four small monsters). AI/attacks, snow and effects remain active;
+the hunter does not attack and Barioth's observed HP remains 2508.
+
+Each scale has three paired ten-second comparisons, baseline/fixed, fixed/baseline,
+baseline/fixed, with tick 89550 warmup and 300 measured ticks. Same copied saves,
+RTC, manual 30 FPS, no texture pack, muted audio and GPU compatibility Auto
+resolved off. Actual presentation is FIFO at a 1650×720 surface; actual internal
+targets are 623×272 (×1) and 1247×544 (×2), reflecting the phone's aspect ratio.
+Medians of the three per-run summaries (p95/p99 are medians of per-run percentiles):
+
+| Metric | ×1 baseline | ×1 fixed | ×2 baseline | ×2 fixed |
+| --- | --- | --- | --- | --- |
+| CPU guest / render, ms | 10.226 / 16.798 | 10.736 / 15.682 | 11.806 / 17.019 | 11.686 / 15.443 |
+| GPU / wait / pacing, ms | 18.807 / 6.560 / 3.885 | 17.628 / 6.891 / 4.013 | 27.296 / 7.412 / 0.151 | 27.089 / 7.089 / 0.678 |
+| Speed, % | 99.954 | 100.064 | 94.976 | 97.466 |
+| Game frames/emulated s / presents/wall s | 29.971 / 29.965 | 29.971 / 29.979 | 29.971 / 28.465 | 29.971 / 29.203 |
+| Present time median / p95 / p99, ms | 33.111 / 37.805 / 53.830 | 33.175 / 36.935 / 53.317 | 33.980 / 38.127 / 74.897 | 33.992 / 37.630 / 71.824 |
+
+Render decreased 6.6% at ×1 and 9.3% at ×2. GPU cost remains significant at ×2;
+this CPU optimization does not establish a GPU fix. All 24 original ready/final
+frames were inspected, including real attacks/jumps and effects, with no observed
+corruption. USB charging stayed at 100%; recorded battery temperature rose from
+28.3 to about 33 °C, with thermal HAL status 0. These observations do not prove
+fixed clocks or sustained thermal stability. AI paths, draws and scheduling vary.
+
+After the reporter identified takeoff/air attacks, two reversed pairs measured
+1800 ticks (60 emulated seconds) at ×2 on the same original before/after sources.
+Aggregate CPU render was 15.437→14.590 ms, speed 96.282→97.444%, present rate
+28.856→29.205 FPS and median/p95/p99 33.943/37.991/71.342→33.970/38.013/72.620 ms.
+The eight endpoint frames were inspected; normal combat continued without
+observed corruption. This longer comparison confirms lower CPU work but **does
+not improve p99**. Individual long frames and camera motion remain; endpoint
+pictures alone cannot assign a spike to a particular attack. The severe
+5–20 FPS symptom has not been reproduced on this different phone.
+
+Eight native Android configurations passed: GE/default, scalar, old sparse path,
+checked decode, debug/encounter, performance overlay, compact and compact+log.
+The checked case uses the exact trace environment registered by CTest. An initial
+manual invocation omitted required trace switches; it was corrected and all eight
+were rerun without changing tests. Public CI uses synthetic fixtures and has no
+private combat workload or flaky performance thresholds.
+
+### Integration and conservative-shader measurements
+
+After integration with main `5bacba3`, the native C++ snapshot `30ab0d0`
+contains the same sparse implementation as `d189dce`. Harness `7ad8250` adds
+incremental Android log transport. Additional reversed pairs used the previous
+controls: two 300-tick Mac pairs, two 900-tick Windows pairs and two 900-tick
+Android ×2 pairs. These are separate ensembles, not pooled with the earlier
+sources/durations. Medians of the two per-run summaries:
+
+| Metric | Mac old / sparse | Windows old / sparse | Redmi ×2 baseline / fixed |
+| --- | --- | --- | --- |
+| CPU guest, ms | 3.082 / 2.917 | 8.996 / 8.971 | 11.291 / 11.894 |
+| CPU render, ms | 5.904 / 4.876 | 6.773 / 5.962 | 14.952 / 14.930 |
+| GPU, ms | 1.181 / 1.213 | 0.845 / 0.844 | 26.777 / 26.434 |
+| Wait, ms | 24.242 / 25.438 | 17.766 / 18.813 | 8.094 / 7.865 |
+| Pacing, ms | 23.597 / 24.797 | 17.566 / 18.616 | 0.332 / 1.051 |
+| Speed, % | 99.949 / 100.012 | 99.937 / 99.946 | 97.332 / 96.933 |
+| Presents/wall s | 29.968 / 29.979 | 29.969 / 29.951 | 29.157 / 29.066 |
+| Present median, ms | 33.382 / 33.401 | 33.377 / 33.305 | 33.679 / 33.610 |
+| Present p95, ms | 35.581 / 34.895 | 43.707 / 43.652 | 37.064 / 37.642 |
+| Present p99, ms | 36.361 / 35.522 | 45.174 / 45.444 | 71.894 / 69.781 |
+
+Game rate remains 29.971 frames per **emulated** second in all six columns.
+The Mac and Windows CPU render reductions were 17.4% and 12.0%. The longer
+Android comparison was effectively flat, with differing AI paths/draw counts;
+there is no general Android FPS or p99 improvement claim. All 24 endpoint game
+frames were inspected. All four Mac before/after endpoint comparisons were
+pixel-identical (0/522,240 pixels different). Normal terrain occlusion and close
+camera movement occur in the original map; a frustum check cannot certify
+occlusion. The collector also rejects a target outside the frustum when the
+warmup ends. Android retained a warm application pipeline cache between owned
+restarts; its byte identity was not pinned, so these are not cold-start claims.
+
+A separate approximately 80-second diagnostic video at native source `7ad8250`
+started without the owned application's pipeline-cache file, which was restored
+afterward. Driver/system caches were untouched. Inspected frames showed actual
+Barioth jumps, attacks, landings, snow and effects without observed corruption.
+The worst sampled second was 25.44 presented FPS. Encoding/readback changes the
+workload: this video is excluded from timing comparisons and does not identify
+the cause of each frame-time spike.
+
+**Forced compatibility On reproduces a severe slowdown on this Redmi 12C.**
+It does not establish that the reporter's Snapdragon 685 Auto selected On.
+On retains its conservative feature/frames-in-flight policy; Auto remained Off
+in the normal comparisons. One 1800-tick before/after pair compares native
+`7ad825092be9bc03e5c6889b3e893c84b3d20de3` with
+`92031b2e54b7813b5e30649d6aff38bdbcda64d9`, using the same ×2/manual-30/RTC/quest controls:
+
+| Metric | Original plain shader | Alpha-free plain variant |
+| --- | --- | --- |
+| CPU guest / render, ms | 16.822 / 33.208 | 15.573 / 30.977 |
+| GPU timestamp | unavailable | unavailable |
+| Wait / pacing, ms | 63.209 / 8.204 | 57.666 / 7.988 |
+| Speed, % | 29.231 | 31.461 |
+| Game frames/emulated s / presents/wall s | 29.971 / 8.762 | 29.971 / 9.429 |
+| Present median / p95 / p99, ms | 112.214 / 145.342 / 158.634 | 104.313 / 139.077 / 149.480 |
+
+The variant has no specialization constants and no SPIR-V `OpKill`, and is
+selected only when the existing pipeline proof needs no alpha test. Genuine
+alpha rejection retains the original plain shader. A refused optional module
+or pipeline also retains it. All other compatibility workarounds and Auto
+activation remain unchanged. The normal specialized and tested-plain SPIR-V
+binaries were byte-identical before/after with the same compiler. Public shader
+regressions enforce absence of `OpKill`/specialization constants in the new
+variant and retain rejection in the tested variant; the old source fails that
+regression. Actual alpha/depth/texture pixel contracts also pass the rollback
+and refused-pipeline paths.
+
+Because AI/clock variation confounds separate processes, two additional
+900-tick continuous diagnostics used exactly the same native libraries with
+`alternate-alpha` (harness `0f0c222`). Complete one-second windows strictly
+inside each measurement interval were matched to native `perf_second`
+observations; all scalar render values agreed within their printed rounding.
+The existing alpha switch selects the tested/plain path off and eligible
+alpha-free pipelines on. All game AI, geometry and effects remain active.
+
+| Diagnostic | Old / new windows | CPU render, ms | Fence wait, ms | Presents/wall s |
+| --- | --- | --- | --- | --- |
+| First | 45 / 44 | 28.20 / 28.75 | 50.77 / 47.23 | 9.3 / 9.4 |
+| Second | 48 / 49 | 34.25 / 35.30 | 52.74 / 49.59 | 8.5 / 8.8 |
+
+Recorded draws were closely matched: 553/552 and 652/652 per frame. Fence wait
+fell 7.0% and 6.0%, while CPU rendering increased slightly and presentation
+remained around 9 FPS. This is a modest synchronization-wait improvement, **not
+a complete fix for the severe compatibility-mode slowdown**. GPU timestamps
+remain disabled by that policy; no hardware early-depth counter was captured.
+The inferred mechanism is supported by the compiled shader and Arm's linked
+Bifrost documentation in [SOURCE_PROVENANCE.md](SOURCE_PROVENANCE.md), rather
+than claiming direct hardware-counter proof. Mixed-mode present percentiles
+are not presented as fixed-path results. Eight original/candidate/diagnostic
+endpoint frames were inspected without observed corruption.
+
+Final native validation on `92031b2`: all 85 renderer-enabled macOS cases passed
+in one serial run; all 78 Windows cases passed. The eight relevant Android
+native configurations had already passed on the integrated implementation.
+The full Python suite passed 366 tests with six explicit skips after adding
+alternating contracts; affected suites also exercise the final rollback
+allow-list and warmup-visibility guard. These ordinary tests use synthetic
+fixtures and no combat timing thresholds. Original player installation/settings
+remain untouched; only the separate test package, copied fixtures and owned
+processes were used. Tablet/Snapdragon 685, audible playback, full hunts,
+multiplayer and sustained thermal stability remain unverified.
+
+### Review after rebasing onto main (2026-10-25)
+
+The branch was rebased onto main `4a5debd`; the commit IDs earlier in this
+section predate that rebase. Review fixes since those checks: the plain shader's
+alpha-free variant falls back to the original plain shader when the start-up
+self-test draws wrong with it; encounter readiness counts guest frames instead
+of debug-hook calls; the initial-area wrapper is removed once the area is
+chosen; the collector refuses a run whose polling passes a boundary by more than
+a tenth of the interval (at least 60 ticks); and Android test packages no longer
+write periodic frame captures. Native checks use the C++ of `750a123`, the same
+AOT objects and all 355 overlays.
+
+macOS (the M1 above): the renderer-enabled suite passed 80 of 87. All seven
+failures are assertions that need loopback TCP (the ad hoc server and the network
+menu's session), which the agent environment refused; one run of the
+compatibility variant also failed five fast-forward menu assertions, which passed
+when it was rerun. The Python suite passed 361 of 368 with six explicit skips;
+the remaining test needs `ps`, which that environment also refused. Two 900-tick
+rollback pairs on `7395bb2` (same renderer, earlier encounter tooling): CPU
+render 3.182→2.457 and 3.307→2.739 ms, vertex space 5.6→3.3 and 5.6→3.6 MiB,
+speed 100%.
+
+Windows (the PC above): the serial suite passed 80 of 80, including the new
+miscompiled alpha-free fallback. In an earlier parallel run (`-j2`) on `3d0a4d2`
+one renderer test crashed inside AMD's shader compiler (`amdxc64.dll`,
+0xC0000409) during start-up, while a second test instance started with the same
+data directory; it then passed three isolated runs, and that test's shaders
+outside compatibility mode are main's. Two 900-tick rollback pairs with matched
+draw counts: CPU render 5.871→5.200 and 6.752→5.889 ms, vertex space 5.1→3.3
+and 5.6→3.6 MiB, speed 100%, present p99 44.5–45.1 ms throughout. All eight
+endpoint frames were inspected without observed corruption.
+
+**Android packages made before `750a123` wrote a frame capture every 60
+presents.** The generated contract named the capture folder without turning
+the periodic capture off, as native runs do. On the Redmi 12C at ×2, in a
+60-second window with no harness polling, all 28 seconds that wrote a capture
+held a 71.7–97.0 ms frame and none of the other 32 did; per-second CPU render
+was unaffected (medians 14.9/15.0 ms) and guest time absorbed the stall. The
+Android speed, presentation rate and frame-time percentiles earlier in this
+section therefore include this harness stall; the regular ~2-second p99 frames
+are not game behavior. With the corrected contract, the same 60-second window
+had no second above 50 ms (worst 49.5 ms).
+
+One 900-tick ×2 run per row, same `libmain.so` and copied fixtures as above,
+manual 30 FPS, pinned RTC, muted audio, USB power; battery 27.9–29.9 °C,
+thermal HAL status 0:
+
+| Package / mode | Speed, % | Presents/wall s | Present median / p95 / p99, ms |
+| --- | --- | --- | --- |
+| Old contract, compatibility Auto (off) | 95.99 | 28.77 | 34.14 / 37.54 / 73.77 |
+| Corrected, compatibility Auto (off) | 99.95 | 29.97 | 33.37 / 36.77 / 38.42 |
+| Corrected, compatibility On | 32.41 | 9.74 | 102.93 / 115.06 / 121.56 |
+| Corrected, compatibility On, `MHP3RD_FRAMES_IN_FLIGHT=2` | 100.08 | 29.99 | 33.36 / 36.55 / 38.00 |
+
+The last row is a private diagnostic package: its manifest adds only
+`MHP3RD_FRAMES_IN_FLIGHT=2`. Its log confirmed compatibility On, the plain
+shader passing the start-up self-test and two frames in flight; the third row's
+log confirmed one. Endpoint frames of both rows showed correct rendering. **On
+this phone the single frame in flight, not the plain shader, accounts for most of
+the compatibility-mode slowdown**: wait fell from 59.3 to 6.6 ms per frame and
+CPU render from 25.1 to 14.5 ms. These are single, unalternated runs (a
+first compatibility run was aborted by a 20-second remote ADB read timeout).
+Compatibility On still keeps one frame in flight; this PR does not change that
+policy. Whether two frames in flight are safe on the other drivers that mode
+serves has not been tested.
+
+### Snapdragon 8 Gen 3 tablet at 90 and 120 (2026-10-25)
+
+Lenovo TB321FU (Snapdragon 8 Gen 3, Adreno 750, driver 0.762.28, Android 15),
+USB power, internal resolution Auto (2560×1600), the full HD texture pack
+(4,747 files), Video settings otherwise as a player uses them, the copied 100%
+save and the developer Barioth preset in an isolated device-test package. Each
+window is the game's own per-second lines without harness polling, and
+SurfaceFlinger's present times for the game's layer. Sources: `96d1327` (before)
+and `8f924eb` (after); runs before the final ones used
+`MHP3RD_TRACE_INTERPOLATION`, and the 150-second fights captured a frame when
+a second fell below 108 presents.
+
+With *Lower when behind* off, 120 already held: 119.6 presents a second in the
+village, every one of 125 SurfaceFlinger presents a refresh apart, and 118 in
+the fight. With it on (the default), the governor stepped 120→90→60→45 in the
+title scene, whose long stretches of game code make 10–30% of presents late,
+kept 90 and 120 blocked for 30 s and more into the village, and left a rate it
+had just climbed to after its first two seconds. Its rule of two late seconds
+in a row also took a breath attack close to the camera down to 90 for 30 s or
+more (seen with the first governor change alone, which still had that rule).
+
+| Rate, governor on | `96d1327` | Changed |
+| --- | --- | --- |
+| 90, village (45 s) | 45 for 26 s, then 83–90 | 90 for 41 s (60 for the first 4 s after the title), median 89.9; 125 of 125 presents a refresh apart |
+| 90, fight (45 s) | median 88.9, minimum 64.3 | 90 throughout, median 89.7, minimum 83.7; 125 of 125 a refresh apart |
+| 120, village (45 s) | 45 for 22 s, 90 for 21 s | 120 for 40 s, median 119.7 (governor changes only) |
+| 120, fight | 45 s: 90 for 29 s, then 120 | 150 s: 120 throughout; median 117.6, minimum 83.9, 30 s below 114 with the governor changes only; median 119.7, minimum 108.8, 6 s below 114 and none below 108 with coarse effects too |
+
+The 90 rows and the last 120 figures come from `8f924eb`; the others from the
+governor changes before coarse effects were added.
+
+Fragment shader invocation queries on every draw call of some presents
+(a private diagnostic; the queries themselves slowed the run) found about 8
+screens of fragments per picture in the fight, and 20–24 when a breath cloud
+was near the camera: blended, textured quads without depth writes, with PSP
+textures of 64×64 or 64×128 and their 256×256 pack images, covering 1–5 screens
+each. Those seconds needed up to 47 ms of GPU time per game frame, and
+`vkQueuePresentKHR` held the game's thread for up to 15 ms. Shading such draws
+in 2×2 blocks, alternated each second in one 150-second fight, raised the
+slowest second from 102.7 to 112.2 presents and cut the worst game frame from
+47 to 34 ms of GPU time (74 seconds each). Full-resolution captures of a breath
+cloud and of mist over the monster showed no visible blocks. At ×4
+(1741×1088) without it, the same fight had 8 seconds below 114 instead of 30.
+
+Not verified: other Android GPUs with `VK_KHR_fragment_shading_rate` (Mali,
+older Adreno), desktop GPUs that offer it (Windows AMD/NVIDIA, Steam Deck),
+other monsters' effects and areas, and long play beyond these windows. MoltenVK
+on the Mac offers no shading rate, so its renderer tests keep shading every
+pixel; the Mac suite passed 81 of 88, the 7 failures being the loopback network
+checks this environment blocks.
+
+#### Review and regression checks (2026-10-26)
+
+A review of these commits found that a restart from the governor's own step
+to 30 lifted the block of 45 at once (a 30/45 loop on a GPU that cannot take
+45), that a display slower than the rate would be retried after every load,
+that wait-free costs also chose how far to step down, and that GPU
+compatibility mode switched on in play kept coarse shading. All were fixed
+(`05a9be6`). A Redmi 12C run of the first fix at ×1 and 60 then showed the
+one remaining risk of wait-free climbing: after a load it climbed from 30 to
+60, fell to 56% speed for three seconds (frames of 61–82 ms) and stepped down
+again. Such a climb is now allowed once, after a load that forgave a late step.
+The tablet figures above were measured before these fixes.
+
+Code of `05a9be6` unless noted:
+
+| Platform | Check | Result |
+| --- | --- | --- |
+| Apple M1, MoltenVK | CTest | 81 of 88; the 7 failures are the loopback network checks this environment blocks (the known flaky QoL menu checks failed in some earlier runs of the same suite) |
+| Apple M1 | Barioth, 30, ×1 | median 33.36 ms, p99 36.17 ms (`8f924eb`; earlier 33.29/35.89) |
+| Apple M1 | Barioth, 60 with the governor, ×4, 60 Hz | 60 throughout, median 16.67 ms, p99 19.30 ms; per-pixel effects (no shading rate) |
+| Windows 11, RX 5600 XT | CTest, serial | 81 of 81 |
+| Windows 11, RX 5600 XT | Barioth, 30, ×1 | median 33.27 ms, p99 45.53 ms (`8f924eb`; earlier p99 44.5–45.1) |
+| Windows 11, RX 5600 XT | Barioth, 120 asked, 60 Hz display, ×4 | 60 throughout, median 16.69 ms, p99 24.19 ms; per-pixel effects (no shading rate) |
+| Redmi 12C, Mali-G52 | Barioth, 30, ×2, old and new libraries alternated | old 33.37 / 34.38 ms median (p99 37.5 / 41.4); new 33.50 / 33.39 ms (p99 37.6 / 37.6); the spread is the phone's, not the change's |
+| Redmi 12C | 60 with the governor, ×1 and ×2, 60 s windows | 60→45 for late presents in the title scene, 45→30 for want of time, no climb after; no second above 50 ms |
+
+Not verified after the fixes: the Steam Deck (unreachable) and drivers other
+than Adreno 750 that offer the 2×2 shading rate. The tablet follows.
+
+#### The tablet on the final code, and a player's step to 30 (2026-10-26)
+
+The player's own hunt on the tablet with `8f924eb` (120, governor on) logged
+`120 -> 30: the game fell behind real time (speed 96%, spare 0.5 ms a frame,
+0.97 ms a blended present)` as a new area appeared, and 120 then waited out
+its 30 s block; the player turned the governor off. The step down asked the
+rate it landed on to save what was missing plus the 3 ms margin a faster rate
+keeps, and 120's presents cost only about 3 ms a frame, so only 30 fitted.
+`05a9be6` did the same. Since `02f7fdc` a game below 90% speed still drops at
+once to the rate that fits (the Redmi 12C at 56% still goes from 60 to 30); a
+game a little behind, or keeping up without time to spare, steps one rate at a
+time. The benchmark fight never fell below 97% speed, so this rule is covered
+by unit tests with the logged figures, not by a device run.
+
+Code of `02f7fdc`, the same tablet, settings and preset as above:
+
+| Check | Result |
+| --- | --- |
+| 120, governor on, fight 150 s | 120 throughout; median 117.8, minimum 91.4, 26 s below 114. The slowest seconds had the monster close over ice debris: 6,300–7,100 draw calls a second and up to 45 ms of GPU time for a game frame |
+| 120, governor off, fight 150 s | median 119.5, minimum 98.2, 12 s below 114 |
+| 90, governor on, village 45 s | 60 for the first 4 s after the title, then 90; median 89.8; 125 of 125 presents a refresh apart |
+| 90, governor on, fight 45 s | 90 throughout, median 89.9, minimum 74.8; 125 of 125 a refresh apart |
+| 120, governor off, coarse effects alternated each second, fight 150 s | with them: median 111.7, minimum 89.0, 25 s below 108, worst game frame 48.6 ms of GPU time; without: 111.2, 82.0, 30 s, 51.0 ms |
+| Apple M1, CTest | 81 of 88, the same 7 loopback checks |
+
+Single fights vary: the same build had 6 and 26 seconds below 114 in two
+120-fps fights, and the last fight, fifth in an hour while charging, was
+slower on both halves of the alternation. Coarse effects still came out ahead
+on every figure, by less than in the first comparison (102.7 to 112.2 for the
+slowest second).
+
+### Combined commits on main (2026-10-27)
+
+The commits named in this section were combined into six and rebased onto
+main `96bb1c8`; the IDs above are those of the commits that were measured.
+A review after the last device runs changed:
+
+- Draws that sample a picture the renderer drew (a haze over the screen) are
+  no longer shaded in 2×2 blocks: that texture has the internal resolution.
+  This rule has not run on a device.
+- The pipeline key file's flag word, version check and coarse-key rule moved
+  into `coarse_shading.hpp`, with unit tests; the file format is unchanged.
+- Otherwise comments and documentation.
+
+Code of `d6682d6`:
+
+| Platform | Check | Result |
+| --- | --- | --- |
+| Apple M1, MoltenVK | CTest | 81 of 88, the same 7 loopback checks; `mhp3rd_coarse_shading_tests` fails for each of four broken copies of the new rules |
+| Apple M1 | The governor commit alone (`7205849`; built before a comment-only change) | `mhp3rd_interpolation_tests` pass |
+
+Not run on this code: Windows, the Redmi 12C, the Snapdragon 8 Gen 3 tablet
+and the Steam Deck.
