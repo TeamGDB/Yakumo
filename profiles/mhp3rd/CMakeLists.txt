@@ -43,6 +43,16 @@ if(MHP3RD_GENERATED)
     endif()
     message(STATUS "mhp3rd: camera rotation helper in ${MHP3RD_CAMERA_HELPER_UNIT}")
 
+    # Developer encounter setup wraps the game's initial-area choice. Locate
+    # its unit without coupling the host to one generated partition.
+    foreach(unit IN LISTS MHP3RD_GENERATED)
+        file(STRINGS "${unit}" encounter_hit REGEX "register_function\\(0x088BDEECu, &recomp_unit_[0-9]+," LIMIT_COUNT 1)
+        if(encounter_hit)
+            string(REGEX MATCH "recomp_unit_[0-9]+" MHP3RD_ENCOUNTER_HELPER_UNIT "${encounter_hit}")
+            break()
+        endif()
+    endforeach()
+
     # Hiding the HUD (host/gpu/game_hud.cpp) wraps the game's 2D functions the
     # same way, so their units are read from the corpus too, in one pass.
     set(MHP3RD_HUD_FUNCTIONS
@@ -401,17 +411,23 @@ if(MHP3RD_DEBUG_MENU AND NOT MHP3RD_RELEASE)
     target_sources(Yakumo PRIVATE
         host/debug/debug_console.cpp
         host/debug/debug_tools.cpp
+        host/debug/encounter.cpp
         host/debug/game_state.cpp
         host/debug/quest_start.cpp)
     if(MHP3RD_RENDERER)
         target_sources(Yakumo PRIVATE host/ui/debug_screen.cpp)
     endif()
     target_compile_definitions(Yakumo PRIVATE MHP3RD_DEBUG_MENU=1)
+    if(MHP3RD_ENCOUNTER_HELPER_UNIT)
+        target_compile_definitions(Yakumo PRIVATE MHP3RD_ENCOUNTER_HELPER_UNIT=${MHP3RD_ENCOUNTER_HELPER_UNIT})
+    endif()
     message(STATUS "mhp3rd: developer tools compiled in (shown with MHP3RD_DEBUG_MENU=1)")
 
     # The game's structures as the tools read and write them, on a buffer.
     add_executable(mhp3rd_debug_tools_tests
         tests/debug_tools_tests.cpp
+        tests/encounter_tests.cpp
+        host/debug/encounter.cpp
         host/debug/game_state.cpp
         host/debug/quest_start.cpp
         host/game/game_data.cpp)
@@ -1150,7 +1166,7 @@ if(MHP3RD_RENDERER_TESTS)
     if(MHP3RD_DEBUG_MENU AND NOT MHP3RD_RELEASE)
         target_sources(mhp3rd_renderer_ui_tests PRIVATE
             host/debug/debug_console.cpp host/debug/debug_tools.cpp
-            host/debug/game_state.cpp host/debug/quest_start.cpp host/ui/debug_screen.cpp)
+            host/debug/encounter.cpp host/debug/game_state.cpp host/debug/quest_start.cpp host/ui/debug_screen.cpp)
         target_compile_definitions(mhp3rd_renderer_ui_tests PRIVATE MHP3RD_DEBUG_MENU=1)
     endif()
     add_dependencies(mhp3rd_renderer_ui_tests mhp3rd_shaders mhp3rd_version)

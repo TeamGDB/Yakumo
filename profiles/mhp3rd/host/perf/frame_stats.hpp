@@ -217,5 +217,8 @@ private:
 inline constexpr std::size_t kHistoryFrames = 192u;
 [[nodiscard]] const std::array<float, kHistoryFrames> &frame_history();
 [[nodiscard]] std::size_t history_cursor();
+// Monotonic present sequence for collecting the rolling history without
+// duplicating overlapping readbacks. Pauses do not reset this sequence.
+[[nodiscard]] std::uint64_t history_sequence();
 
 } // namespace mhp3rd::perf

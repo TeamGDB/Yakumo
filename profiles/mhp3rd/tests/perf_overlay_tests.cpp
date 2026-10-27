@@ -120,6 +120,21 @@ void log_contracts() {
         check(perf::last_second().valid, "statistics are collected with and without the log");
     }
 }
+
+void history_contracts() {
+    const auto first = perf::history_sequence();
+    const auto cursor = perf::history_cursor();
+    for (std::size_t i = 0; i < perf::kHistoryFrames + 3u; ++i) perf::count_present();
+    check(perf::history_sequence() == first + perf::kHistoryFrames + 3u &&
+            perf::history_cursor() == (cursor + 3u) % perf::kHistoryFrames,
+        "present sequence disambiguates full ring wraps from repeated history reads");
+    const auto before_pause = perf::history_sequence();
+    perf::restart_measurement();
+    perf::end_frame(0u, false);
+    check(perf::history_sequence() == before_pause, "pause/restart and an unpresented flip do not invent samples");
+    perf::end_frame(33333u, true);
+    check(perf::history_sequence() == before_pause + 1u, "a presented guest frame advances history once");
+}
 } // namespace
 
 int main(int argc, char **argv) {
@@ -132,6 +147,7 @@ int main(int argc, char **argv) {
     mode_contracts();
     compact_pixels();
     log_contracts();
+    history_contracts();
     std::filesystem::remove_all(sandbox);
     std::cout << (failures == 0 ? "PASS" : "FAIL") << ": performance overlays (" << failures << " failures)\n";
     return failures == 0 ? 0 : 1;

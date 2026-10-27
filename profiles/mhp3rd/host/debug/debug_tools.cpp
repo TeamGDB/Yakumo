@@ -1,6 +1,7 @@
 #include "debug/debug_tools.hpp"
 
 #include "debug/debug_console.hpp"
+#include "debug/encounter.hpp"
 #include "debug/game_state.hpp"
 #include "debug/quest_start.hpp"
 #include "game/guest_ram.hpp"
@@ -12,13 +13,23 @@
 
 #include "psprecomp/guest_memory.hpp"
 #include "psprecomp/runtime.hpp"
+#if defined(MHP3RD_HAS_RENDERER)
+#include "camera/lock_on.hpp"
+#endif
 
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <iostream>
 #include <optional>
 #include <utility>
+
+#if defined(MHP3RD_ENCOUNTER_HELPER_UNIT)
+namespace psprecomp {
+void MHP3RD_ENCOUNTER_HELPER_UNIT(Runtime &, AllegrexContext &);
+}
+#endif
 
 namespace mhp3rd::debug {
 
@@ -43,11 +54,45 @@ struct State {
     std::deque<Request> pending;
     HeldCheats held;
     std::vector<std::string> quest;
+    encounter::Controller encounter;
+    bool encounter_hook{};
+    bool encounter_focus{};
 };
 
 State &state() {
     static State s;
     return s;
+}
+
+std::uint64_t monotonic_ms() {
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+}
+
+psprecomp::Runtime::RecompiledFunction initial_area_original() {
+#if defined(MHP3RD_ENCOUNTER_HELPER_UNIT)
+    return &psprecomp::MHP3RD_ENCOUNTER_HELPER_UNIT;
+#else
+    return nullptr;
+#endif
+}
+
+bool encounter_writes_allowed() {
+    const auto &held = state().held;
+    return blocked_reason().empty() && !mods::serving() && !held.health && !held.stamina && !held.timer &&
+        !held.one_hit;
+}
+
+void initial_area_choice(psprecomp::Runtime &rt, psprecomp::AllegrexContext &ctx) {
+    const auto original = initial_area_original();
+    if (!original) return;
+    const auto return_pc = ctx.gpr[31];
+    const auto owner = psprecomp::capture_runtime_execution_context();
+    original(rt, ctx);
+    GuestRam ram(rt.memory());
+    state().encounter.initial_choice(ram, return_pc,
+        ctx.pc == return_pc && psprecomp::runtime_execution_context_matches(owner), encounter_writes_allowed());
 }
 
 void run_pending(Ram &ram) {
@@ -131,6 +176,28 @@ void frame(psprecomp::Runtime &runtime) {
     run_pending(ram);
     console_frame(ram);
     if (blocked_reason().empty()) held_cheats_frame(ram, s.held);
+    const auto before = s.encounter.phase();
+    const auto action = s.encounter.tick(ram, monotonic_ms(), encounter_writes_allowed());
+#if defined(MHP3RD_HAS_RENDERER)
+    if (action == encounter::Action::Focus) {
+        camera::lock_on_tap();
+        s.encounter_focus = true;
+    }
+#else
+    (void)action;
+#endif
+    const auto after = s.encounter.phase();
+    if (before != after) log(s.encounter.status());
+    if (after == encounter::Phase::Idle || after == encounter::Phase::Finished || after == encounter::Phase::Failed) {
+        if (s.encounter_hook) {
+            runtime.register_function(encounter::kInitialAreaChoice, initial_area_original(), "encounter_original");
+            s.encounter_hook = false;
+        }
+#if defined(MHP3RD_HAS_RENDERER)
+        if (s.encounter_focus) camera::lock_on_release("encounter ended");
+#endif
+        s.encounter_focus = false;
+    }
     s.quest = quest_lines(ram);
 }
 
@@ -182,6 +249,42 @@ void request_quest_start(std::uint16_t id) {
     }
     const quests::Quest copy = *quest;
     request("start quest " + std::to_string(id), [copy](Ram &ram) { return quests::start(ram, copy); });
+}
+
+void request_encounter_start() {
+    const char *mode = std::getenv("MHP3RD_DEVICE_TEST");
+    if (!mode || std::strcmp(mode, "1") != 0) {
+        log("encounter refused: explicit developer device-test mode required");
+        return;
+    }
+    const auto *quest = find_quest(encounter::kQuest);
+    if (!quest || !initial_area_original() || !state().runtime) {
+        log("encounter refused: original quest/native corpus unavailable");
+        return;
+    }
+    const auto copy = *quest;
+    request("prepare Barioth encounter", [copy](Ram &ram) {
+        auto &s = state();
+        if (mods::serving() || s.held.health || s.held.stamina || s.held.timer || s.held.one_hit)
+            return std::string("encounter refused: disable DATA.BIN mods and held quest cheats");
+        auto result = s.encounter.begin(ram, copy, monotonic_ms());
+        if (result == "encounter preparing barioth-tundra" && !s.encounter_hook) {
+            s.runtime->register_function(encounter::kInitialAreaChoice, &initial_area_choice, "encounter_initial_area");
+            s.encounter_hook = true;
+        }
+        return result;
+    });
+}
+
+void request_encounter_cancel() {
+    request("cancel encounter preparation", [](Ram &) {
+        state().encounter.cancel();
+        return state().encounter.status();
+    });
+}
+
+std::string encounter_status() {
+    return state().encounter.status();
 }
 
 void log(const std::string &line) {

@@ -157,6 +157,13 @@ Repeated comparisons, optimization claims and extended interpolation/fast-forwar
 variants remain deferred. A local warmed run should take a few minutes; first
 device installation/transfers are reported separately and still obey total caps.
 
+The separate [Barioth encounter benchmark](DEVICE_TESTING.md#barioth-encounter-performance)
+reuses the copied-fixture adapters for original quest 507, automatic encounter
+placement and fixed-tick baseline/candidate collection. It retains component
+timings, unique presented frame durations and required capture review. It does
+not add private combat runs or timing thresholds to ordinary public CI, or
+extend the QUICK release evidence above.
+
 ## Private fixture contract
 
 `suite_fixtures` contains finite navigation programs using the same actions as
