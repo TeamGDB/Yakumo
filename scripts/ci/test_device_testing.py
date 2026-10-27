@@ -346,6 +346,21 @@ class DeviceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             dt.Adb({'package': 'io.github.teamgdb.yakumo', 'serial': 'usb'}, self.run_dir, 10)
 
+    def test_android_pinned_rtc_contract_and_cli(self):
+        package='org.example.yakumo.devicetest'
+        for epoch in (946684800000000,1780000000000000,4102444800000000):
+            output=self.root/'pinned.xml';contract=self.root/'pinned.json'
+            self.assertEqual(dt.main(['android-manifest','--package',package,'--output',str(output),
+                                     '--contract',str(contract),'--observations','--rtc-epoch-us',str(epoch)]),0)
+            expected=dt.android_contract(package,'log',True,epoch)
+            self.assertEqual(json.loads(contract.read_text()),expected)
+            self.assertIn('SDL_ENV.MHP3RD_DEVICE_TEST_RTC_US',output.read_text())
+            self.assertIn(str(epoch),output.read_text())
+            self.assertNotEqual(expected,dt.android_contract(package,'log',True))
+        for epoch in (True,946684799999999,4102444800000001,'1780000000000000'):
+            with self.assertRaises(ValueError):dt.android_contract(package,'log',True,epoch)
+        with self.assertRaises(ValueError):dt.android_contract(package,'log',False,1780000000000000)
+
     def test_subprocess_failure_timeout_and_metrics(self):
         with self.assertRaises(RuntimeError):
             dt.command([sys.executable, '-c', "import sys; print('failure'); sys.exit(3)"], time.monotonic() + (10 if os.name == 'nt' else 2))

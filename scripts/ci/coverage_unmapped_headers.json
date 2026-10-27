@@ -68,8 +68,8 @@
     "reason": "Reviewed documentation-only additions for physical scancodes and owned window lifecycle commands. Parsing, input/release behavior and rejection cases are tested in the out-of-line implementation; no executable header body changed."
   },
   "profiles/mhp3rd/host/gpu/vulkan_renderer.hpp": {
-    "sha256": "da8d09b0d501f8f5436b9da4d3f64c4e6ae395c816a49949bd0ff37f7a485382",
-    "reason": "Reviewed activation-consumer declaration and comments only; no executable header body changed. This header has no standalone LLVM line map in the native inventory. On/Auto activation, inactive states, one-shot consumption, UI display and expiry are tested in renderer/UI regressions; out-of-line renderer and menu implementations remain subject to the normal diff gate."
+    "sha256": "4d6163f32aab8886a868df562555192786ff1a2770f6e4873b1ded975a80d908",
+    "reason": "Reviewed activation-consumer and full-skinning-span policy declarations/comments only; no executable header body changed. Renderer/UI regressions cover compatibility activation, one-shot consumption, expiry, interpolation and ordinary presentation; GE fixtures retain previously unreferenced vertices for temporal replay. Out-of-line implementations remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/gpu/texture_pack_import.hpp": {
     "sha256": "238e36ba2e5b2ce197d432c60bf80cde774e28d3f4eb8bcb3eb80412eab41b5a",
@@ -118,5 +118,9 @@
   "profiles/mhp3rd/host/adhoc/session.hpp": {
     "sha256": "ac79b740596caa7837bda631c59127f1345500b975309d959d978f3354de3453",
     "reason": "Reviewed license header comment only. The header declares the session functions shared with the HLE layer; no executable body is exempted. Out-of-line implementations remain subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/debug/debug_tools.hpp": {
+    "sha256": "1dc65fe7bb951f1f690bc887da60147c4ba795c49726faba837dc2a0b8d430af",
+    "reason": "Reviewed encounter command/status function declarations only; no new executable body is exempted. Native console refusal/status contracts, synthetic encounter lifecycle tests and out-of-line implementations remain subject to the normal changed-line coverage gate. Existing HeldCheats fields/defaulted comparison are unchanged."
   }
 }
