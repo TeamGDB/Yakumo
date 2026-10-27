@@ -1815,8 +1815,12 @@ struct VulkanRenderer::Impl {
         std::uint32_t rejected_shared{}; // of those, with other draws of the same mesh
         std::uint32_t repaired{};        // instances of a mesh given a nearer partner than drawing order's
         float max_own_motion{};
-        std::chrono::steady_clock::duration blend_time{};  // CPU time of blended presents
-        std::chrono::steady_clock::duration plain_time{};  // CPU time of the other presents
+        std::chrono::steady_clock::duration blend_time{}; // CPU time of blended presents
+        std::chrono::steady_clock::duration plain_time{}; // CPU time of the other presents
+        // Of those, waiting for the GPU or the display: a present slot, an
+        // image, the queue's submit and present.
+        std::chrono::steady_clock::duration blend_waits{};
+        std::chrono::steady_clock::duration plain_waits{};
         std::chrono::steady_clock::duration max_late{};    // latest present after its time
         std::chrono::steady_clock::duration replay_time{}; // of blend_time: recording the draw calls again
         double gpu_ms{};                                   // GPU time of the blended presents' replays
@@ -1836,9 +1840,12 @@ struct VulkanRenderer::Impl {
     pacing::PresentClock present_clock;
     pacing::RateGovernor governor;
     InterpolationStats interpolation_stats;
-    // Measured costs, kept across seconds for the governor.
+    // Measured costs, kept across seconds for the governor: what a present
+    // costs the game, and its own work without its waits.
     double blend_cost_ms{};
     double plain_cost_ms{};
+    double blend_work_ms{-1.0};
+    double plain_work_ms{-1.0};
     std::uint64_t governor_second{}; // perf::Summary::second last given to the governor
     // The pictures of the older and newer frames, copied at their flips, and
     // a target per present slot for the blended frames.
@@ -1859,6 +1866,8 @@ struct VulkanRenderer::Impl {
     // CPU time of the presents made while the game's code ran, since the
     // flip; they stop at half a game frame.
     std::chrono::steady_clock::duration busy_presents{};
+    // The last submit_and_present's time in vkQueueSubmit and vkQueuePresentKHR.
+    std::chrono::steady_clock::duration queue_wait{};
     // A swapchain image acquired before recording a present between flips,
     // for submit_and_present to present.
     std::optional<std::uint32_t> acquired_image;
@@ -3857,7 +3866,8 @@ void VulkanRenderer::Impl::submit_and_present(
     // MoltenVK waits for the next drawable here rather than in the acquire.
     const perf::Clock::time_point submit_start = perf::Clock::now();
     if (vkQueueSubmit(queue, 1u, &submit, fence) == VK_ERROR_DEVICE_LOST) device_lost("a frame's submit");
-    perf::add_wait_time(perf::Clock::now() - submit_start, perf::Stall::Submit);
+    queue_wait = perf::Clock::now() - submit_start;
+    perf::add_wait_time(queue_wait, perf::Stall::Submit);
 
     if (can_present) {
         VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
@@ -3868,7 +3878,9 @@ void VulkanRenderer::Impl::submit_and_present(
         present.pImageIndices = &image_index;
         const perf::Clock::time_point present_start = perf::Clock::now();
         const VkResult presented = vkQueuePresentKHR(queue, &present);
-        perf::add_wait_time(perf::Clock::now() - present_start, perf::Stall::Present);
+        const perf::Clock::duration present_wait = perf::Clock::now() - present_start;
+        queue_wait += present_wait;
+        perf::add_wait_time(present_wait, perf::Stall::Present);
         if (presented == VK_ERROR_OUT_OF_DATE_KHR) swapchain_dirty = true;
         if (presented == VK_SUBOPTIMAL_KHR) swapchain_check = true;
 #if defined(__ANDROID__)
@@ -8208,7 +8220,8 @@ bool VulkanRenderer::Impl::present_between(const pacing::PresentClock::Present &
     VkFence fence = present_fences[slot];
     const perf::Clock::time_point wait_start = perf::Clock::now();
     wait_fence(fence, "the wait for a present slot");
-    perf::add_wait_time(perf::Clock::now() - wait_start, perf::Stall::Fence);
+    Clock::duration waited = perf::Clock::now() - wait_start;
+    perf::add_wait_time(waited, perf::Stall::Fence);
     if (present_timed[slot]) {
         std::array<std::uint64_t, 4> results{};
         if (vkGetQueryPoolResults(device, present_timer, slot * 2u, 2u, sizeof(results), results.data(),
@@ -8238,6 +8251,7 @@ bool VulkanRenderer::Impl::present_between(const pacing::PresentClock::Present &
     const perf::Clock::time_point acquire_start = perf::Clock::now();
     const VkResult acquired =
         vkAcquireNextImageKHR(device, swapchain, 3'000'000u, acquire_semaphore(commands), VK_NULL_HANDLE, &image_index);
+    waited += perf::Clock::now() - acquire_start;
     perf::add_wait_time(perf::Clock::now() - acquire_start, perf::Stall::Acquire);
     if (acquired == VK_ERROR_OUT_OF_DATE_KHR) swapchain_dirty = true;
     if (acquired == VK_SUBOPTIMAL_KHR) swapchain_check = true;
@@ -8298,6 +8312,7 @@ bool VulkanRenderer::Impl::present_between(const pacing::PresentClock::Present &
     }
     ui_draw_data = frame_ui;
     submit_and_present(commands, fence, image, true, false);
+    waited += queue_wait;
     // MHP3RD_INTERPOLATION_EXTRA_MS: busy CPU time added to each blended
     // present, to try the step-down on a fast machine as if it were a slow one.
     static const double extra_ms = [] {
@@ -8328,8 +8343,10 @@ bool VulkanRenderer::Impl::present_between(const pacing::PresentClock::Present &
     if (blended) {
         ++stats.blended;
         stats.blend_time += spent;
+        stats.blend_waits += waited;
     } else {
         stats.plain_time += spent;
+        stats.plain_waits += waited;
     }
     if (account) perf::add_render_time(spent);
     perf::count_present();
@@ -8591,9 +8608,20 @@ void VulkanRenderer::Impl::report_interpolation() {
         return std::chrono::duration<double, std::milli>(duration).count();
     };
     const std::uint32_t plain = stats.presents - stats.blended;
-    // Costs are kept across seconds: a second at 30 measures none.
-    if (stats.blended != 0u) blend_cost_ms = ms(stats.blend_time) / stats.blended;
-    if (plain != 0u) plain_cost_ms = ms(stats.plain_time) / plain;
+    // Costs are kept across seconds: a second at 30 measures none. What a
+    // present costs the game includes its waits for the GPU and the display;
+    // its work leaves them out. The governor weighs the work only on its one
+    // try after a restart that forgave a late step: the waits grow as a
+    // slower rate lets the GPU lower its clock, so they would keep a rate
+    // that fits from being tried then.
+    if (stats.blended != 0u) {
+        blend_cost_ms = ms(stats.blend_time) / stats.blended;
+        blend_work_ms = ms(stats.blend_time - stats.blend_waits) / stats.blended;
+    }
+    if (plain != 0u) {
+        plain_cost_ms = ms(stats.plain_time) / plain;
+        plain_work_ms = ms(stats.plain_time - stats.plain_waits) / plain;
+    }
     const double frames_now = std::max(1u, stats.frames);
     const std::uint32_t reasons_known =
         stats.plain_newest + stats.plain_oldest + stats.plain_cut + stats.plain_textures;
@@ -8638,6 +8666,8 @@ void VulkanRenderer::Impl::report_interpolation() {
         second.idle_ms = summary.pacing_ms;
         second.blend_ms = blend_cost_ms;
         second.plain_ms = plain_cost_ms;
+        second.blend_work_ms = blend_work_ms;
+        second.plain_work_ms = plain_work_ms;
         second.interpolation_ms = (ms(stats.blend_time) + ms(stats.plain_time)) / frames_now;
         second.presents = stats.presents;
         second.skipped = stats.skipped + stats.over_budget;
@@ -8905,7 +8935,7 @@ bool VulkanRenderer::present(
         impl.submit_frame();
         ++impl.frames;
         impl.present_clock.set_presents_per_frame(pacing::presents_per_frame(impl.governor.rate()));
-        impl.present_clock.flip(moment_us, to_us(now));
+        if (impl.present_clock.flip(moment_us, to_us(now))) impl.governor.restart();
         impl.cycle_active = impl.newer_picture_valid;
         static const bool check = std::getenv("MHP3RD_CHECK_REPLAY") != nullptr;
         if (check && impl.frames % 150u == 0u) impl.check_replay();
@@ -8970,6 +9000,8 @@ void VulkanRenderer::set_fast_forward(bool on) {
     impl_->fast_forward = on;
     // The first flip of a fast stretch is shown.
     impl_->fast_forward_shown = {};
+    // A load ran fast: what follows is another scene.
+    if (!on) impl_->governor.restart();
 }
 
 void VulkanRenderer::pause_interpolation() {
@@ -8978,6 +9010,7 @@ void VulkanRenderer::pause_interpolation() {
     // the frames' moments start over when it resumes.
     impl_->present_clock.reset();
     impl_->cycle_active = false;
+    impl_->governor.restart();
 }
 
 void VulkanRenderer::set_still(bool still) {
