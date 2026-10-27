@@ -145,7 +145,8 @@ struct Summary {
 // turned off every other second, so one run measures them against the paths
 // they replaced under the same load. Each [perf] line ends in "alt on" or
 // "alt off" for the second it covers. Names: direct, lookup, reuse, merge,
-// store, decode, alpha, uploads, clearload, gpudecode, texturedecode, opaque, sparse.
+// store, decode, alpha, uploads, clearload, gpudecode, texturedecode, opaque, sparse,
+// coarse.
 enum class NewPath : std::uint8_t {
     Direct,
     Lookup,
@@ -160,6 +161,7 @@ enum class NewPath : std::uint8_t {
     TextureDecode,
     Opaque,
     Sparse,
+    Coarse,
     Count
 };
 // True while `path` is to take its old route this second.
