@@ -16,7 +16,16 @@
 //   MHP3RD_DESCRIPTOR_POOL_SETS=N   every pool holds N sets
 //   MHP3RD_DESCRIPTOR_POOL_LIMIT=N  at most N pools of each kind
 
+// The Android app resolves vk* through volk's function-pointer table instead
+// of linking libvulkan.so directly, so a custom GPU driver can back it
+// (host/platform/android_gpu_driver.hpp); every header and source file that
+// calls a vk* function switches the same way, so volk.h's own vulkan.h
+// inclusion (with prototypes suppressed) is the first one seen everywhere.
+#if defined(MHP3RD_ANDROID_APP)
+#include <volk.h>
+#else
 #include <vulkan/vulkan.h>
+#endif
 
 #include <cstddef>
 #include <cstdint>
