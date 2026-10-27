@@ -102,5 +102,21 @@
   "profiles/mhp3rd/host/ui/ui.hpp": {
     "sha256": "7e876045929b8a83f9c7bfbc846d5a5bef11c9602da8548130414531ba80e6ac",
     "reason": "Reviewed function declarations and a comment documenting the optional paused-menu refresh callback; no executable body is exempted. Menu and editor implementations remain subject to the normal diff gate. Paused real-game display-list replay requires a separate device check."
+  },
+  "profiles/mhp3rd/host/adhoc/client.hpp": {
+    "sha256": "e4d5852adef895bc3e10a4c005cc894a81eb07779d8c90ae804610bb0458735e",
+    "reason": "Reviewed license header comment only. The header declares types, enums, aggregate member defaults and the client interface; no executable body is exempted. Out-of-line implementations remain subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/adhoc/discovery.hpp": {
+    "sha256": "9d2d3638d34e639bcbea82cdd94fe1632554176978e64ec5ffc1e66c3b965e5b",
+    "reason": "Reviewed license header comment only. The header documents the LAN discovery protocol and declares its port constant, aggregates and the Discovery interface; no executable body is exempted. Out-of-line implementations remain subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/adhoc/server.hpp": {
+    "sha256": "2f8a19a43dd3409048d082584df0de6e0a268c4391157ba5c81a8039c2e7031f",
+    "reason": "Reviewed license header comment only. The header declares the server configuration and status aggregates and the Server interface; no executable body is exempted. Out-of-line implementations remain subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/adhoc/session.hpp": {
+    "sha256": "ac79b740596caa7837bda631c59127f1345500b975309d959d978f3354de3453",
+    "reason": "Reviewed license header comment only. The header declares the session functions shared with the HLE layer; no executable body is exempted. Out-of-line implementations remain subject to the normal diff gate."
   }
 }
