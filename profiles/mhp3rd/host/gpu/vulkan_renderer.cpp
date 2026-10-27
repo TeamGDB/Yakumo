@@ -6,6 +6,7 @@
 #include "game_hud.hpp"
 #include "replacement_textures.hpp"
 #include "mmpx.hpp"
+#include "coarse_shading.hpp"
 #include "opaque_alpha.hpp"
 #include "ui_textures.hpp"
 #include "texture_decode.hpp"
@@ -283,6 +284,8 @@ struct PipelineKey {
     // The raw vertex shader, which decodes the guest's vertex bytes, and its
     // check build (MHP3RD_CHECK_GPU_DECODE).
     bool raw{};
+    // Shaded once per 2x2 pixels: a translucent effect (coarse_shading.hpp).
+    bool coarse{};
 
     auto operator<=>(const PipelineKey &) const = default;
 };
@@ -654,6 +657,9 @@ private:
 
 struct VulkanRenderer::Impl {
     bool opaque_draws{true}; // NO_OPAQUE_DRAWS restores discard and blending.
+    // Translucent effects shaded in 2x2 blocks (coarse_shading.hpp): the
+    // driver offers that shading rate and MHP3RD_NO_COARSE_EFFECTS is unset.
+    bool coarse_effects{};
     struct Texture {
         // True only for the actual uploaded original pixels. Unknown, failed,
         // replacement and in-flight decoded images keep the conservative path.
@@ -2670,6 +2676,61 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
     std::cout << "[render] robust buffer access " << (impl.robust_buffers ? "on" : "off") << "\n";
     VkDeviceCreateInfo device_info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     device_info.pEnabledFeatures = &enabled_features;
+    // Translucent effects shaded in 2x2 blocks (coarse_shading.hpp), with
+    // the pipeline shading rate of VK_KHR_fragment_shading_rate. The other
+    // two ways of setting a rate, per primitive and per region, stay off.
+    VkPhysicalDeviceFragmentShadingRateFeaturesKHR shading_rate{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
+    {
+        const auto offered = [&](const char *name) {
+            return std::any_of(
+                device_extensions.begin(), device_extensions.end(), [&](const VkExtensionProperties &extension) {
+                    return std::strcmp(extension.extensionName, name) == 0;
+                });
+        };
+        const char *why = nullptr;
+        if (std::getenv("MHP3RD_NO_COARSE_EFFECTS") != nullptr)
+            why = "MHP3RD_NO_COARSE_EFFECTS";
+        else if (impl.gpu_compat)
+            why = "GPU compatibility mode";
+        else if (impl.facts.api_version < VK_API_VERSION_1_1)
+            why = "the device is older than Vulkan 1.1";
+        else if (!offered(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME))
+            why = "the driver has no VK_KHR_fragment_shading_rate";
+        else if (!offered(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME))
+            why = "the driver has no VK_KHR_create_renderpass2";
+        if (why == nullptr) {
+            VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+            features.pNext = &shading_rate;
+            vkGetPhysicalDeviceFeatures2(impl.physical_device, &features);
+            if (shading_rate.pipelineFragmentShadingRate != VK_TRUE) why = "the driver has no pipeline shading rate";
+        }
+        if (why == nullptr) {
+            const auto rates_of = reinterpret_cast<PFN_vkGetPhysicalDeviceFragmentShadingRatesKHR>(
+                vkGetInstanceProcAddr(impl.instance, "vkGetPhysicalDeviceFragmentShadingRatesKHR"));
+            std::uint32_t count = 0u;
+            if (rates_of != nullptr) rates_of(impl.physical_device, &count, nullptr);
+            std::vector<VkPhysicalDeviceFragmentShadingRateKHR> rates(
+                count, {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_KHR});
+            if (count != 0u) rates_of(impl.physical_device, &count, rates.data());
+            const bool two_by_two = std::any_of(rates.begin(), rates.end(), [](const auto &rate) {
+                return rate.fragmentSize.width == 2u && rate.fragmentSize.height == 2u &&
+                    (rate.sampleCounts & VK_SAMPLE_COUNT_1_BIT) != 0u;
+            });
+            if (!two_by_two) why = "the driver has no 2x2 shading rate";
+        }
+        if (why == nullptr) {
+            shading_rate.pNext = nullptr;
+            shading_rate.primitiveFragmentShadingRate = VK_FALSE;
+            shading_rate.attachmentFragmentShadingRate = VK_FALSE;
+            enabled_device_extensions.push_back(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME);
+            enabled_device_extensions.push_back(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
+            device_info.pNext = &shading_rate;
+            impl.coarse_effects = true;
+        }
+        std::cout << "[render] translucent effects shaded "
+                  << (why == nullptr ? std::string("in 2x2 blocks from x4") : std::string("per pixel: ") + why) << "\n";
+    }
     device_info.queueCreateInfoCount = 1u;
     device_info.pQueueCreateInfos = &queue_info;
     device_info.enabledExtensionCount = static_cast<std::uint32_t>(enabled_device_extensions.size());
@@ -5101,14 +5162,13 @@ void VulkanRenderer::Impl::save_pipeline_cache() {
 namespace {
 
 constexpr std::uint32_t kPipelineKeysMagic = 0x4B504B59u; // "YKPK"
-constexpr std::uint32_t kPipelineKeysVersion = 1u;
 constexpr std::uint32_t kPipelineKeyWords = 12u;
 constexpr std::uint32_t kMaxPipelineKeys = 4096u;
 
 std::array<std::uint32_t, kPipelineKeyWords> key_words(const PipelineKey &key) {
     return {key.blend ? 1u : 0u, key.source_factor, key.destination_factor, key.equation, key.depth_test ? 1u : 0u,
         key.depth_write ? 1u : 0u, key.depth_function, key.cull ? 1u : 0u, key.cull_clockwise ? 1u : 0u, key.color_mask,
-        key.alpha_test ? 1u : 0u, key.raw ? 1u : 0u};
+        key.alpha_test ? 1u : 0u, shader_word(key.raw, key.coarse)};
 }
 
 PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words) {
@@ -5124,7 +5184,8 @@ PipelineKey key_from(const std::array<std::uint32_t, kPipelineKeyWords> &words) 
     key.cull_clockwise = words[8] != 0u;
     key.color_mask = words[9] & 0xFu;
     key.alpha_test = words[10] != 0u;
-    key.raw = words[11] != 0u;
+    key.raw = raw_shader(words[11]);
+    key.coarse = coarse_shader(words[11]);
     return key;
 }
 
@@ -5137,7 +5198,7 @@ void VulkanRenderer::Impl::save_pipeline_keys() {
     std::vector<std::uint32_t> data{kPipelineKeysMagic, kPipelineKeysVersion, kPipelineKeyWords, 0u};
     std::uint32_t count = 0u;
     const auto add = [&](const PipelineKey &key) {
-        if (count >= kMaxPipelineKeys) return;
+        if (count >= kMaxPipelineKeys || !keeps_pipeline_key(key.coarse, coarse_effects)) return;
         const auto words = key_words(key);
         data.insert(data.end(), words.begin(), words.end());
         ++count;
@@ -5176,7 +5237,7 @@ void VulkanRenderer::Impl::prewarm_pipelines() {
         in.read(reinterpret_cast<char *>(data.data()), size);
         if (!in) return;
     }
-    if (data[0] != kPipelineKeysMagic || data[1] != kPipelineKeysVersion || data[2] != kPipelineKeyWords ||
+    if (data[0] != kPipelineKeysMagic || !readable_pipeline_keys(data[1]) || data[2] != kPipelineKeyWords ||
         data.size() != 4u + static_cast<std::size_t>(data[3]) * kPipelineKeyWords)
         return;
     std::vector<PipelineKey> keys;
@@ -5184,7 +5245,8 @@ void VulkanRenderer::Impl::prewarm_pipelines() {
         std::array<std::uint32_t, kPipelineKeyWords> words{};
         std::copy_n(
             data.begin() + 4 + static_cast<std::ptrdiff_t>(i) * kPipelineKeyWords, kPipelineKeyWords, words.begin());
-        keys.push_back(key_from(words));
+        const PipelineKey key = key_from(words);
+        if (keeps_pipeline_key(key.coarse, coarse_effects)) keys.push_back(key);
     }
     prewarm->thread = std::thread([this, keys = std::move(keys)] {
         const auto start = std::chrono::steady_clock::now();
@@ -5365,6 +5427,13 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
     info.pDynamicState = &dynamic_state;
     info.layout = pipeline_layout;
     info.renderPass = render_pass;
+    VkPipelineFragmentShadingRateStateCreateInfoKHR shading_rate{
+        VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR};
+    shading_rate.fragmentSize = {2u, 2u};
+    shading_rate.combinerOps[0] = VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+    shading_rate.combinerOps[1] = VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+    // A key kept from a run on a device with coarse shading is made per pixel.
+    if (key.coarse && coarse_effects) info.pNext = &shading_rate;
     VkPipeline pipeline{};
     // MHP3RD_GPU_FAIL_PIPELINES=1 refuses every pipeline with the
     // specialization constant, as a driver that cannot build one would, so
@@ -5387,6 +5456,20 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
     if (result == VK_SUCCESS) {
         health->pipelines_made.fetch_add(1u, std::memory_order_relaxed);
         return pipeline;
+    }
+    if (info.pNext != nullptr) {
+        // A driver that offers the 2x2 rate but refuses it for this pipeline:
+        // the effect is shaded per pixel, and the rest is left as it is.
+        info.pNext = nullptr;
+        static std::atomic<bool> logged{};
+        if (!logged.exchange(true))
+            log_line(std::string("[render] a 2x2 shaded pipeline was refused (") + vk_result_name(result) +
+                "); shading it per pixel");
+        result = create(pipeline_cache);
+        if (result == VK_SUCCESS) {
+            health->pipelines_made.fetch_add(1u, std::memory_order_relaxed);
+            return pipeline;
+        }
     }
     if (stages[1].module == plain_alpha_free_fragment_shader) {
         health->pipelines_failed.fetch_add(1u, std::memory_order_relaxed);
@@ -5461,6 +5544,8 @@ void VulkanRenderer::Impl::turn_on_compat(const std::string &reason) {
         prewarm->stop = true;
         prewarm->thread.join();
     }
+    // Translucent effects shaded per pixel again, by pipelines made from now on.
+    coarse_effects = false;
     if (pipeline_cache != VK_NULL_HANDLE) {
         vkDestroyPipelineCache(device, pipeline_cache, nullptr);
         pipeline_cache = VK_NULL_HANDLE;
@@ -5485,8 +5570,8 @@ void VulkanRenderer::Impl::turn_on_compat(const std::string &reason) {
     const bool first = frames == 0u && !recording;
     if (first && std::getenv("MHP3RD_FRAMES_IN_FLIGHT") == nullptr) slot_count = 1u;
     log_line("[gpu-compat] on (" + reason +
-        "): no specialization constants, pipeline cache, background pipelines, skipped loads or GPU "
-        "timestamps" +
+        "): no specialization constants, pipeline cache, background pipelines, skipped loads, GPU "
+        "timestamps or coarse shading" +
         (first ? "; " + std::to_string(slot_count) + " frame" + (slot_count == 1u ? "" : "s") + " in flight"
                : "; frames in flight as they were") +
         "; robust buffer access as the device was made (" + (robust_buffers ? "on" : "off") + ")");
@@ -7611,6 +7696,9 @@ void VulkanRenderer::submit(const DrawCall &call, const GuestMemory &memory) {
                 call.alpha_test.enabled, call.alpha_test.function, call.alpha_test.reference, call.alpha_test.mask))
             key.alpha_test = false;
     }
+    key.coarse = impl.coarse_effects && !perf::alternate_off(perf::NewPath::Coarse) &&
+        coarse_effect_draw(call.through, call.clear_mode, key.blend, key.depth_write, call.texture.enabled,
+            framebuffer_source.target != nullptr, impl.target_extent.height);
     VkPipeline pipeline = impl.pipeline_for(key);
     if (pipeline == VK_NULL_HANDLE) return;
 

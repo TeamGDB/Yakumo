@@ -856,6 +856,14 @@ if(PSPRECOMP_BUILD_TESTS)
     set_tests_properties(mhp3rd_opaque_alpha_tests PROPERTIES TIMEOUT 30)
 endif()
 
+add_executable(mhp3rd_coarse_shading_tests tests/coarse_shading_tests.cpp)
+target_include_directories(mhp3rd_coarse_shading_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+set_target_properties(mhp3rd_coarse_shading_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_coarse_shading_tests COMMAND mhp3rd_coarse_shading_tests)
+    set_tests_properties(mhp3rd_coarse_shading_tests PROPERTIES TIMEOUT 30)
+endif()
+
 # Frame interpolation checks: matching draws, cuts, blending, the present
 # clock and the frame rate governor.
 add_executable(mhp3rd_interpolation_tests
