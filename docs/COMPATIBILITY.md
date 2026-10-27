@@ -680,9 +680,9 @@ Windows x64, source commit `90ab685` (`hud-enhancements`, based on `90b66a6`):
 
 ## Barioth encounter and sparse CPU skinning (2026-10-18)
 
-Tools-only source `fe1711092d156c84927484600717ac57a5cef2b0` and optimized
-native source `d9ea6820047ca290b2004c7f0237db5ea9352a1a` use the same cached
-native AOT code and all 355 compatible overlays. Framework/runtime headers,
+The tools-only baseline (the encounter tooling alone) and the optimized source
+(with sparse gathering) use the same cached native AOT code and all 355
+compatible overlays. Framework/runtime headers,
 generated code, overlays, shaders and graphics quality are unchanged. Testing
 used an Apple M1 Mac with 8 GiB, macOS 27.0 (26A428), Apple M1 Vulkan 1.1.357
 and MoltenVK 1.4.2. These are developer artifacts with observation/camera
@@ -712,7 +712,7 @@ returned to village readiness with an empty monster table. All four copied save
 files remained byte-identical. Only owned developer processes/copies were
 cleaned up; player installations and unrelated sessions were not stopped.
 
-Six fixed-mode runs compare the same `d9ea682` native artifact with the rollback
+Six fixed-mode runs compare the same optimized native artifact with the rollback
 switch set (off) versus unset (on), in order off/on, on/off, off/on. Both use the
 same copied save/settings/game, developer RTC epoch 1780000000000000 us, native
 AOT/overlays, original language, muted audio, no texture pack, 480×272 internal
@@ -757,12 +757,12 @@ are not pooled with the fixed-mode comparison. Both diagnostics completed
 without observed external game/compiler interference and their actual game
 captures were inspected.
 
-An additional two pairs compared the separate tools-only `fe17110` and final
-`d9ea682` artifacts, in before/after then after/before order, with the same
+An additional two pairs compared the separate tools-only and optimized
+artifacts, in before/after then after/before order, with the same
 settings and fixed quest-tick interval. The guard observed no external
 game/compiler interference. Medians of the two per-run summaries were:
 
-| Metric | Before (`fe17110`) | After (`d9ea682`) |
+| Metric | Before (tools only) | After (optimized) |
 | --- | --- | --- |
 | CPU guest / render / guest + render, ms | 3.510 / 7.010 / 10.582 | 3.630 / 6.380 / 10.040 |
 | GPU / wait / pacing, ms | 1.227 / 22.845 / 22.092 | 1.275 / 23.336 / 22.557 |
@@ -798,16 +798,14 @@ complete hunts, multiplayer and sustained thermal behavior remain unverified.
 
 ## Windows and Redmi 12C Barioth follow-up (2026-10-19)
 
-These measurements extend the previous Mac investigation. The original native
-sources remain `fe1711092d156c84927484600717ac57a5cef2b0` (tools-only baseline)
-and `4fde48f4b62be51fe7decdef40d1d75d631d8fc1` (optimized; its executable
-implementation is `d9ea682`). They predate integration with main `5bacba3`.
+These measurements extend the previous Mac investigation with the same
+tools-only baseline and optimized sources, from before integration with main.
 All runs reuse native AOT and all 355 compatible overlays. Framework/runtime
 sources and headers are unchanged. No paid devices were used.
 
 Windows: Windows 11 Pro 10.0.26200, Ryzen 5 5600, Radeon RX 5600 XT driver
 32.0.21045.5002, MSVC 19.44 Release. Six fixed-mode rollback runs use the same
-`4fde48f` executable, in off/on, on/off, off/on order. Controls match the Mac
+optimized executable, in off/on, on/off, off/on order. Controls match the Mac
 30 FPS fixture: pinned RTC, original Tundra quest 507, tick 89550 warmup and
 300 measured game ticks, 480×272 internal / 960×544 window, Immediate,
 compatibility Auto resolved off, no texture pack and muted audio. A private
@@ -885,9 +883,9 @@ private combat workload or flaky performance thresholds.
 
 ### Integration and conservative-shader measurements
 
-After integration with main `5bacba3`, the native C++ snapshot `30ab0d0`
-contains the same sparse implementation as `d189dce`. Harness `7ad8250` adds
-incremental Android log transport. Additional reversed pairs used the previous
+After integration with main, the native C++ contains the same sparse
+implementation, and the harness reads Android logs incrementally.
+Additional reversed pairs used the previous
 controls: two 300-tick Mac pairs, two 900-tick Windows pairs and two 900-tick
 Android ×2 pairs. These are separate ensembles, not pooled with the earlier
 sources/durations. Medians of the two per-run summaries:
@@ -916,7 +914,7 @@ occlusion. The collector also rejects a target outside the frustum when the
 warmup ends. Android retained a warm application pipeline cache between owned
 restarts; its byte identity was not pinned, so these are not cold-start claims.
 
-A separate approximately 80-second diagnostic video at native source `7ad8250`
+A separate approximately 80-second diagnostic video of the integrated code
 started without the owned application's pipeline-cache file, which was restored
 afterward. Driver/system caches were untouched. Inspected frames showed actual
 Barioth jumps, attacks, landings, snow and effects without observed corruption.
@@ -927,9 +925,9 @@ the cause of each frame-time spike.
 **Forced compatibility On reproduces a severe slowdown on this Redmi 12C.**
 It does not establish that the reporter's Snapdragon 685 Auto selected On.
 On retains its conservative feature/frames-in-flight policy; Auto remained Off
-in the normal comparisons. One 1800-tick before/after pair compares native
-`7ad825092be9bc03e5c6889b3e893c84b3d20de3` with
-`92031b2e54b7813b5e30649d6aff38bdbcda64d9`, using the same ×2/manual-30/RTC/quest controls:
+in the normal comparisons. One 1800-tick before/after pair compares the
+integrated code without and with the alpha-free plain variant, using the same
+×2/manual-30/RTC/quest controls:
 
 | Metric | Original plain shader | Alpha-free plain variant |
 | --- | --- | --- |
@@ -953,7 +951,7 @@ and refused-pipeline paths.
 
 Because AI/clock variation confounds separate processes, two additional
 900-tick continuous diagnostics used exactly the same native libraries with
-`alternate-alpha` (harness `0f0c222`). Complete one-second windows strictly
+the harness's `alternate-alpha` mode. Complete one-second windows strictly
 inside each measurement interval were matched to native `perf_second`
 observations; all scalar render values agreed within their printed rounding.
 The existing alpha switch selects the tested/plain path off and eligible
@@ -975,7 +973,7 @@ than claiming direct hardware-counter proof. Mixed-mode present percentiles
 are not presented as fixed-path results. Eight original/candidate/diagnostic
 endpoint frames were inspected without observed corruption.
 
-Final native validation on `92031b2`: all 85 renderer-enabled macOS cases passed
+Final native validation with the alpha-free variant: all 85 renderer-enabled macOS cases passed
 in one serial run; all 78 Windows cases passed. The eight relevant Android
 native configurations had already passed on the integrated implementation.
 The full Python suite passed 366 tests with six explicit skips after adding
@@ -988,15 +986,14 @@ multiplayer and sustained thermal stability remain unverified.
 
 ### Review after rebasing onto main (2026-10-25)
 
-The branch was rebased onto main `4a5debd`; the commit IDs earlier in this
-section predate that rebase. Review fixes since those checks: the plain shader's
+The branch was then rebased onto main. Review fixes since those checks: the plain shader's
 alpha-free variant falls back to the original plain shader when the start-up
 self-test draws wrong with it; encounter readiness counts guest frames instead
 of debug-hook calls; the initial-area wrapper is removed once the area is
 chosen; the collector refuses a run whose polling passes a boundary by more than
 a tenth of the interval (at least 60 ticks); and Android test packages no longer
-write periodic frame captures. Native checks use the C++ of `750a123`, the same
-AOT objects and all 355 overlays.
+write periodic frame captures. Native checks use the C++ with these fixes, the
+same AOT objects and all 355 overlays.
 
 macOS (the M1 above): the renderer-enabled suite passed 80 of 87. All seven
 failures are assertions that need loopback TCP (the ad hoc server and the network
@@ -1004,12 +1001,12 @@ menu's session), which the agent environment refused; one run of the
 compatibility variant also failed five fast-forward menu assertions, which passed
 when it was rerun. The Python suite passed 361 of 368 with six explicit skips;
 the remaining test needs `ps`, which that environment also refused. Two 900-tick
-rollback pairs on `7395bb2` (same renderer, earlier encounter tooling): CPU
+rollback pairs on the same renderer with earlier encounter tooling: CPU
 render 3.182→2.457 and 3.307→2.739 ms, vertex space 5.6→3.3 and 5.6→3.6 MiB,
 speed 100%.
 
 Windows (the PC above): the serial suite passed 80 of 80, including the new
-miscompiled alpha-free fallback. In an earlier parallel run (`-j2`) on `3d0a4d2`
+miscompiled alpha-free fallback. In an earlier parallel run (`-j2`)
 one renderer test crashed inside AMD's shader compiler (`amdxc64.dll`,
 0xC0000409) during start-up, while a second test instance started with the same
 data directory; it then passed three isolated runs, and that test's shaders
@@ -1018,7 +1015,7 @@ draw counts: CPU render 5.871→5.200 and 6.752→5.889 ms, vertex space 5.1→3
 and 5.6→3.6 MiB, speed 100%, present p99 44.5–45.1 ms throughout. All eight
 endpoint frames were inspected without observed corruption.
 
-**Android packages made before `750a123` wrote a frame capture every 60
+**Android packages made before these fixes wrote a frame capture every 60
 presents.** The generated contract named the capture folder without turning
 the periodic capture off, as native runs do. On the Redmi 12C at ×2, in a
 60-second window with no harness polling, all 28 seconds that wrote a capture
@@ -1059,8 +1056,9 @@ USB power, internal resolution Auto (2560×1600), the full HD texture pack
 (4,747 files), Video settings otherwise as a player uses them, the copied 100%
 save and the developer Barioth preset in an isolated device-test package. Each
 window is the game's own per-second lines without harness polling, and
-SurfaceFlinger's present times for the game's layer. Sources: `96d1327` (before)
-and `8f924eb` (after); runs before the final ones used
+SurfaceFlinger's present times for the game's layer. Before is the code
+reviewed above; after adds the governor changes and coarse effects. Runs
+before the final ones used
 `MHP3RD_TRACE_INTERPOLATION`, and the 150-second fights captured a frame when
 a second fell below 108 presents.
 
@@ -1073,15 +1071,15 @@ had just climbed to after its first two seconds. Its rule of two late seconds
 in a row also took a breath attack close to the camera down to 90 for 30 s or
 more (seen with the first governor change alone, which still had that rule).
 
-| Rate, governor on | `96d1327` | Changed |
+| Rate, governor on | Before | Changed |
 | --- | --- | --- |
 | 90, village (45 s) | 45 for 26 s, then 83–90 | 90 for 41 s (60 for the first 4 s after the title), median 89.9; 125 of 125 presents a refresh apart |
 | 90, fight (45 s) | median 88.9, minimum 64.3 | 90 throughout, median 89.7, minimum 83.7; 125 of 125 a refresh apart |
 | 120, village (45 s) | 45 for 22 s, 90 for 21 s | 120 for 40 s, median 119.7 (governor changes only) |
 | 120, fight | 45 s: 90 for 29 s, then 120 | 150 s: 120 throughout; median 117.6, minimum 83.9, 30 s below 114 with the governor changes only; median 119.7, minimum 108.8, 6 s below 114 and none below 108 with coarse effects too |
 
-The 90 rows and the last 120 figures come from `8f924eb`; the others from the
-governor changes before coarse effects were added.
+The 90 rows and the last 120 figures come from the code with coarse effects;
+the others from the governor changes before coarse effects were added.
 
 Fragment shader invocation queries on every draw call of some presents
 (a private diagnostic; the queries themselves slowed the run) found about 8
@@ -1105,26 +1103,26 @@ checks this environment blocks.
 
 #### Review and regression checks (2026-10-26)
 
-A review of these commits found that a restart from the governor's own step
+A review of these changes found that a restart from the governor's own step
 to 30 lifted the block of 45 at once (a 30/45 loop on a GPU that cannot take
 45), that a display slower than the rate would be retried after every load,
 that wait-free costs also chose how far to step down, and that GPU
-compatibility mode switched on in play kept coarse shading. All were fixed
-(`05a9be6`). A Redmi 12C run of the first fix at ×1 and 60 then showed the
+compatibility mode switched on in play kept coarse shading. All were fixed.
+A Redmi 12C run of the first fix at ×1 and 60 then showed the
 one remaining risk of wait-free climbing: after a load it climbed from 30 to
 60, fell to 56% speed for three seconds (frames of 61–82 ms) and stepped down
 again. Such a climb is now allowed once, after a load that forgave a late step.
 The tablet figures above were measured before these fixes.
 
-Code of `05a9be6` unless noted:
+Code with these fixes unless noted:
 
 | Platform | Check | Result |
 | --- | --- | --- |
 | Apple M1, MoltenVK | CTest | 81 of 88; the 7 failures are the loopback network checks this environment blocks (the known flaky QoL menu checks failed in some earlier runs of the same suite) |
-| Apple M1 | Barioth, 30, ×1 | median 33.36 ms, p99 36.17 ms (`8f924eb`; earlier 33.29/35.89) |
+| Apple M1 | Barioth, 30, ×1 | median 33.36 ms, p99 36.17 ms (before the fixes; earlier 33.29/35.89) |
 | Apple M1 | Barioth, 60 with the governor, ×4, 60 Hz | 60 throughout, median 16.67 ms, p99 19.30 ms; per-pixel effects (no shading rate) |
 | Windows 11, RX 5600 XT | CTest, serial | 81 of 81 |
-| Windows 11, RX 5600 XT | Barioth, 30, ×1 | median 33.27 ms, p99 45.53 ms (`8f924eb`; earlier p99 44.5–45.1) |
+| Windows 11, RX 5600 XT | Barioth, 30, ×1 | median 33.27 ms, p99 45.53 ms (before the fixes; earlier p99 44.5–45.1) |
 | Windows 11, RX 5600 XT | Barioth, 120 asked, 60 Hz display, ×4 | 60 throughout, median 16.69 ms, p99 24.19 ms; per-pixel effects (no shading rate) |
 | Redmi 12C, Mali-G52 | Barioth, 30, ×2, old and new libraries alternated | old 33.37 / 34.38 ms median (p99 37.5 / 41.4); new 33.50 / 33.39 ms (p99 37.6 / 37.6); the spread is the phone's, not the change's |
 | Redmi 12C | 60 with the governor, ×1 and ×2, 60 s windows | 60→45 for late presents in the title scene, 45→30 for want of time, no climb after; no second above 50 ms |
@@ -1134,19 +1132,19 @@ than Adreno 750 that offer the 2×2 shading rate. The tablet follows.
 
 #### The tablet on the final code, and a player's step to 30 (2026-10-26)
 
-The player's own hunt on the tablet with `8f924eb` (120, governor on) logged
+The player's own hunt on the tablet before these fixes (120, governor on) logged
 `120 -> 30: the game fell behind real time (speed 96%, spare 0.5 ms a frame,
 0.97 ms a blended present)` as a new area appeared, and 120 then waited out
 its 30 s block; the player turned the governor off. The step down asked the
 rate it landed on to save what was missing plus the 3 ms margin a faster rate
 keeps, and 120's presents cost only about 3 ms a frame, so only 30 fitted.
-`05a9be6` did the same. Since `02f7fdc` a game below 90% speed still drops at
+The fixes above did the same. Now a game below 90% speed still drops at
 once to the rate that fits (the Redmi 12C at 56% still goes from 60 to 30); a
 game a little behind, or keeping up without time to spare, steps one rate at a
 time. The benchmark fight never fell below 97% speed, so this rule is covered
 by unit tests with the logged figures, not by a device run.
 
-Code of `02f7fdc`, the same tablet, settings and preset as above:
+With this change, the same tablet, settings and preset as above:
 
 | Check | Result |
 | --- | --- |
@@ -1163,11 +1161,11 @@ slower on both halves of the alternation. Coarse effects still came out ahead
 on every figure, by less than in the first comparison (102.7 to 112.2 for the
 slowest second).
 
-### Combined commits on main (2026-10-27)
+### The merged code (2026-10-27)
 
-The commits named in this section were combined into six and rebased onto
-main `96bb1c8`; the IDs above are those of the commits that were measured.
-A review after the last device runs changed:
+Before merging, the branch was rebased onto main and its commits combined; the
+versions above are named by what they contained. A review after the last
+device runs changed:
 
 - Draws that sample a picture the renderer drew (a haze over the screen) are
   no longer shaded in 2×2 blocks: that texture has the internal resolution.
@@ -1176,18 +1174,17 @@ A review after the last device runs changed:
   into `coarse_shading.hpp`, with unit tests; the file format is unchanged.
 - Otherwise comments and documentation.
 
-Code of `d6682d6`:
+The merged code:
 
 | Platform | Check | Result |
 | --- | --- | --- |
 | Apple M1, MoltenVK | CTest | 81 of 88, the same 7 loopback checks; `mhp3rd_coarse_shading_tests` fails for each of four broken copies of the new rules |
-| Apple M1 | The governor commit alone (`7205849`; built before a comment-only change) | `mhp3rd_interpolation_tests` pass |
+| Apple M1 | The governor commit on its own, before a comment-only change | `mhp3rd_interpolation_tests` pass |
 | Windows 11, RX 5600 XT | CTest, serial | 81 of 81 |
 | Windows 11, RX 5600 XT | Barioth, 30, ×1 | median 33.27 ms, p99 45.12 ms, speed 100% |
 | Windows 11, RX 5600 XT | Barioth, 120 asked, 60 Hz display, ×4 | 60 throughout, median 16.68 ms, p99 23.26 ms; per-pixel effects (no shading rate) |
 | Redmi 12C, Mali-G52 | Barioth, 30, ×2 | median 33.48 ms, p99 37.95 ms, speed 99.7%; a 60-second window without polling: 29.05 presents a second at 97% speed, as before (28.9 at 96%), no second above 50 ms |
 | Redmi 12C | 60 with the governor, ×1 and ×2, 60 s windows | 60→45 for late presents in the title scene and 45→30 for want of time, as before; no second above 50 ms, worst frame 39.7 and 46.6 ms |
 
-The Windows and Redmi rows ran `f344e16`, the same code with these notes. The
-captures of every run show the fight drawn normally. Not run on this code: the
-Snapdragon 8 Gen 3 tablet and the Steam Deck.
+The captures of every run show the fight drawn normally. Not run on this code:
+the Snapdragon 8 Gen 3 tablet and the Steam Deck.
