@@ -60,8 +60,8 @@
     "reason": "Reviewed include, read-only follow-point and second-stick declarations and the SecondStick aggregate with its rest defaults; no executable header body is exempted. The follow point's valid, stale, nonfinite and foreign-runtime cases, the vertical hold and every second-stick state (driven, held, aiming, mouse turn, option off) are exercised in analog_camera_tests.cpp; implementation mappings keep the normal diff gate."
   },
   "profiles/mhp3rd/host/debug/game_state.hpp": {
-    "sha256": "932f726319efbccfc87c967d20ddacfd227cb91d3c1d077555d1637379038d14",
-    "reason": "Reviewed optional observed-actor parameter declaration only. Dynamic actor coordinates and loaded files, invalid roles and unchanged guest memory are verified in debug_tools_tests.cpp; no executable body is exempted."
+    "sha256": "958d0b370bbbb33fdb31c7caee12726eef14ef16d8967604be95ba014fd17009",
+    "reason": "Reviewed declarations and constant actor offsets only: the observed-actor parameter, the hunter and actor layout, actors_near, cheat_command and the held-actor functions. Dynamic actor coordinates, loaded files, scans, holds, releases, cheats, invalid input and unchanged guest memory are verified in debug_tools_tests.cpp; no executable body is exempted."
   },
   "profiles/mhp3rd/host/ui/input_script.hpp": {
     "sha256": "68d61cf3e90826eaa3ca013eb65f166436a81b4777cd9cf83c45878ef97f5e94",
