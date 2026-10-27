@@ -112,6 +112,7 @@ if [[ -n "${DEVICE_TEST_PACKAGE:-}" ]]; then
     manifest="$work/device-testing-manifest.xml"
     observation_args=()
     if [[ "${DEVICE_TEST_OBSERVATIONS:-0}" == 1 ]]; then observation_args=(--observations); fi
+    if [[ -n "${DEVICE_TEST_RTC_US:-}" ]]; then observation_args+=(--rtc-epoch-us "$DEVICE_TEST_RTC_US"); fi
     python3 "$here/../../tools/device_testing.py" android-manifest \
         --package "$DEVICE_TEST_PACKAGE" --output "$manifest" \
         --performance "${DEVICE_TEST_PERFORMANCE:-log}" \

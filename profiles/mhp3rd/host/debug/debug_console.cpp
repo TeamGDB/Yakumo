@@ -14,6 +14,7 @@
 #include "audio/audio_sink.hpp"
 #include "text/translation.hpp"
 #include "game/layered_armor.hpp"
+#include "psprecomp/runtime.hpp"
 #if defined(MHP3RD_HAS_RENDERER)
 #include "camera/free_camera.hpp"
 #include "camera/game_camera.hpp"
@@ -129,6 +130,12 @@ std::vector<std::string> run_command(Ram &ram, const std::string &line) {
     const auto arg = [&](std::size_t i) { return i < args.size() ? number(args[i]) : 0u; };
 
     if (command.empty() || command[0] == '#') return out;
+    if (command == "pcstats") {
+        if (std::getenv("PSPRECOMP_COUNT_PC") == nullptr)
+            return {"PC counters unavailable: set PSPRECOMP_COUNT_PC before startup"};
+        psprecomp::report_counted_pcs();
+        return out;
+    }
     if (command == "encounter") {
         if (args == std::vector<std::string>{"start", "barioth"} ||
             args == std::vector<std::string>{"start", "barioth-tundra"}) {
@@ -216,6 +223,8 @@ std::vector<std::string> run_command(Ram &ram, const std::string &line) {
                     ",\"gpu_valid\":" + (summary.gpu_valid ? "true" : "false") + ",\"gpu_ms\":";
                 json += summary.gpu_valid ? std::to_string(summary.gpu_avg_ms) : "null";
                 json += ",\"ge_draws\":" + std::to_string(summary.draws) +
+                    ",\"vertex_mib\":" + std::to_string(summary.vertex_mib) +
+                    ",\"index_mib\":" + std::to_string(summary.index_mib) +
                     ",\"recorded_draws\":" + std::to_string(summary.recorded_draws) +
                     ",\"render_passes\":" + std::to_string(summary.passes) +
                     ",\"target_copies\":" + std::to_string(summary.copies) +

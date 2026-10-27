@@ -1501,11 +1501,16 @@ struct VulkanRenderer::Impl {
     // mode, by a failed self-test, or when a pipeline with the constant
     // could not be made and one without it could.
     VkShaderModule plain_fragment_shader{};
+    // No specialization constant and no discard; key.alpha_test must be false.
+    // Keeping the unused test in the original plain shader can prevent tiled
+    // GPUs from removing hidden surfaces before shading.
+    VkShaderModule plain_alpha_free_fragment_shader{};
     // What create_pipeline() (also on the prewarm thread) and the self-test
     // learn about the driver; behind a pointer, as atomics and a mutex are
     // not assignable and Impl is (shutdown()).
     struct GpuHealth {
         std::atomic<bool> plain_fragment{};
+        std::atomic<bool> plain_alpha_variants{true};
         // Pipelines the driver refused and made, for the log.
         std::atomic<std::uint32_t> pipelines_failed{};
         std::atomic<std::uint32_t> pipelines_made{};
@@ -2440,6 +2445,7 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
     Impl &impl = *impl_;
     impl.config = config;
     impl.opaque_draws = std::getenv("MHP3RD_NO_OPAQUE_DRAWS") == nullptr;
+    impl.health->plain_alpha_variants = std::getenv("MHP3RD_NO_PLAIN_ALPHA_VARIANTS") == nullptr;
     const settings::Settings &player = settings::current();
     impl.requested_scale = std::min(player.internal_scale, settings::kMaxInternalScale);
     // Until the window's size is known, which Auto and Fill need.
@@ -2774,6 +2780,14 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
     if (!create_shader(kGeFragmentShader, sizeof(kGeFragmentShader), impl.fragment_shader)) return false;
     if (!create_shader(kGeFragmentShaderPlain, sizeof(kGeFragmentShaderPlain), impl.plain_fragment_shader))
         return false;
+    if (impl.health->plain_alpha_variants &&
+        !create_shader(kGeFragmentShaderPlainAlphaFree, sizeof(kGeFragmentShaderPlainAlphaFree),
+            impl.plain_alpha_free_fragment_shader)) {
+        log_line("[render] alpha-free plain shader unavailable; using the original plain shader: " + error);
+        error.clear();
+        impl.plain_alpha_free_fragment_shader = VK_NULL_HANDLE;
+        impl.health->plain_alpha_variants = false;
+    }
     impl.health->plain_fragment = impl.gpu_compat;
 
     VkDescriptorSetLayoutBinding binding{};
@@ -3063,6 +3077,15 @@ bool VulkanRenderer::initialize(const RendererConfig &config, std::string &error
             passed = impl.self_test(detail);
             if (passed)
                 log_line("[gpu-compat] the plain fragment shader passes the self-test; using it for every pipeline");
+        }
+        // The plain shader's alpha-free variant is optional: a driver that
+        // draws it wrong keeps the original plain shader for every pipeline.
+        // No game pipeline has been made yet, so none is left with it.
+        if (!passed && impl.health->plain_fragment && impl.health->plain_alpha_variants) {
+            log_line("[gpu-selftest] the alpha-free plain shader drew the test wrong (" + detail +
+                "); retrying with the original plain shader");
+            impl.health->plain_alpha_variants = false;
+            passed = impl.self_test(detail);
         }
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
         log_line(std::string("[gpu-selftest] ") + (passed ? "passed" : "FAILED") + " with the " + shader +
@@ -5245,6 +5268,9 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
     stages[1] = stages[0];
     stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
     stages[1].module = health->plain_fragment ? plain_fragment_shader : fragment_shader;
+    if (stages[1].module == plain_fragment_shader && !key.alpha_test && health->plain_alpha_variants &&
+        plain_alpha_free_fragment_shader != VK_NULL_HANDLE)
+        stages[1].module = plain_alpha_free_fragment_shader;
 
     VkVertexInputBindingDescription binding{0u, sizeof(GpuVertex), VK_VERTEX_INPUT_RATE_VERTEX};
     std::array<VkVertexInputAttributeDescription, 4> attributes{
@@ -5312,7 +5338,7 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
     specialization.pData = &alpha_test;
     // The plain shader has no constant to specialize; it is given no
     // specialization at all rather than an entry it lacks.
-    if (stages[1].module != plain_fragment_shader) stages[1].pSpecializationInfo = &specialization;
+    if (stages[1].module == fragment_shader) stages[1].pSpecializationInfo = &specialization;
 
     VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
     info.stageCount = static_cast<std::uint32_t>(stages.size());
@@ -5333,17 +5359,34 @@ VkPipeline VulkanRenderer::Impl::create_pipeline(const PipelineKey &key) const {
     // the fallback below can be seen working on any GPU.
     // =play does so only once the start-up self-test is done, as a driver
     // that fails on a pipeline first needed in play would.
+    // =plain-alpha-free rejects only the optional plain variant, to check
+    // that drivers can retain the original compatibility shader.
     static const char *const fail_text = std::getenv("MHP3RD_GPU_FAIL_PIPELINES");
     static const bool fail_in_play = fail_text != nullptr && std::strcmp(fail_text, "play") == 0;
-    const bool fail_specialized = fail_text != nullptr && (!fail_in_play || health->started.load());
+    static const bool fail_alpha_free = fail_text != nullptr && std::strcmp(fail_text, "plain-alpha-free") == 0;
+    const bool fail_specialized = fail_text != nullptr && !fail_alpha_free && (!fail_in_play || health->started.load());
     const auto create = [&](VkPipelineCache cache) {
         if (fail_specialized && stages[1].module == fragment_shader) return VK_ERROR_INITIALIZATION_FAILED;
+        if (fail_alpha_free && stages[1].module == plain_alpha_free_fragment_shader)
+            return VK_ERROR_INITIALIZATION_FAILED;
         return vkCreateGraphicsPipelines(device, cache, 1u, &info, nullptr, &pipeline);
     };
     VkResult result = create(pipeline_cache);
     if (result == VK_SUCCESS) {
         health->pipelines_made.fetch_add(1u, std::memory_order_relaxed);
         return pipeline;
+    }
+    if (stages[1].module == plain_alpha_free_fragment_shader) {
+        health->pipelines_failed.fetch_add(1u, std::memory_order_relaxed);
+        health->plain_alpha_variants = false;
+        log_line(std::string("[render] alpha-free plain pipeline refused (") + vk_result_name(result) +
+            "); using the original plain shader");
+        stages[1].module = plain_fragment_shader;
+        result = create(VK_NULL_HANDLE);
+        if (result == VK_SUCCESS) {
+            health->pipelines_made.fetch_add(1u, std::memory_order_relaxed);
+            return pipeline;
+        }
     }
     // A refused pipeline would drop every draw that needs it without a
     // word. Log it, then try again without the pipeline cache and with the
@@ -5671,9 +5714,14 @@ bool VulkanRenderer::Impl::self_test(std::string &detail) {
     bool passed = near(left, 0, 255, 0) && near(right, 0, 0, 255);
     detail = "left " + text(left) + " (want 0,255,0), right " + text(right) + " (want 0,0,255)";
     // MHP3RD_GPU_SELFTEST=fail counts the specialized shader's result as
-    // wrong, =fail-all every result, to show the fallbacks on any GPU.
+    // wrong, =fail-all every result, =fail-alpha-free the plain shader's
+    // result while its alpha-free variant draws, to show the fallbacks on
+    // any GPU.
     if (const char *simulate = std::getenv("MHP3RD_GPU_SELFTEST"); simulate != nullptr) {
-        if (std::strcmp(simulate, "fail-all") == 0 || (std::strcmp(simulate, "fail") == 0 && !health->plain_fragment)) {
+        const bool alpha_free = health->plain_fragment && health->plain_alpha_variants.load() &&
+            plain_alpha_free_fragment_shader != VK_NULL_HANDLE;
+        if (std::strcmp(simulate, "fail-all") == 0 || (std::strcmp(simulate, "fail") == 0 && !health->plain_fragment) ||
+            (std::strcmp(simulate, "fail-alpha-free") == 0 && alpha_free)) {
             passed = false;
             detail += "; failed on purpose (MHP3RD_GPU_SELFTEST=" + std::string(simulate) + ")";
         }
@@ -8966,6 +9014,10 @@ double VulkanRenderer::frame_rate_now() const noexcept {
     return impl_->governor.rate();
 }
 
+bool VulkanRenderer::skinning_replay() const noexcept {
+    return impl_ && impl_->ready && (impl_->recording ? impl_->interpolating : impl_->interpolation_wanted());
+}
+
 bool VulkanRenderer::capture_frame(const std::filesystem::path &path) {
     std::vector<std::uint8_t> pixels;
     std::uint32_t width = 0u;
@@ -9148,6 +9200,7 @@ void VulkanRenderer::shutdown() {
     vkFreeMemory(impl.device, impl.check_memory, nullptr);
     vkDestroyShaderModule(impl.device, impl.fragment_shader, nullptr);
     vkDestroyShaderModule(impl.device, impl.plain_fragment_shader, nullptr);
+    vkDestroyShaderModule(impl.device, impl.plain_alpha_free_fragment_shader, nullptr);
     for (auto &[address, target] : impl.targets) impl.destroy_target(target);
     impl.targets.clear();
     impl.destroy_target(impl.held);

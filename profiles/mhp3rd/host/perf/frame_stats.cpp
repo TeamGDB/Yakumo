@@ -59,7 +59,7 @@ Alternate &alternate() {
         if (text == nullptr) return result;
         const std::string names = std::string(",") + text + ",";
         const char *known[] = {"direct", "lookup", "reuse", "merge", "store", "decode", "alpha", "uploads", "clearload",
-            "gpudecode", "texturedecode", "opaque"};
+            "gpudecode", "texturedecode", "opaque", "sparse"};
         static_assert(sizeof(known) / sizeof(known[0]) == static_cast<std::size_t>(NewPath::Count));
         for (std::uint32_t i = 0; i < static_cast<std::uint32_t>(NewPath::Count); ++i)
             if (names.find(std::string(",") + known[i] + ",") != std::string::npos) result.paths |= 1u << i;

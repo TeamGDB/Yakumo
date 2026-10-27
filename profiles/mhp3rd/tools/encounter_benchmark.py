@@ -121,7 +121,7 @@ def collect(session, frames, start_tick, deadline):
             seconds.append({key: value for key, value in sample.items() if key in {
                 'perf_second', 'speed_percent', 'game_fps', 'presented_fps', 'guest_ms', 'render_ms',
                 'wait_ms', 'pacing_ms', 'gpu_valid', 'gpu_ms', 'ge_draws', 'recorded_draws',
-                'render_passes', 'target_copies', 'requested_rate', 'running_rate'}})
+                'render_passes', 'target_copies', 'requested_rate', 'running_rate', 'vertex_mib', 'index_mib'}})
     if len(seconds) < 2 or not history.values:
         raise checks.CheckFailed('Insufficient independent telemetry windows or frame durations')
     return {'start_tick': first['quest_ticks'], 'end_tick': sample['quest_ticks'],
@@ -152,6 +152,9 @@ def run(device, root, seconds, frames, start_tick):
         suite.execute(session, program, {}, {}, device, session.deadline)
         session.snapshot(timeout=60, until={'village_ready': True, 'online': False})
         text = session.adapter.text()
+        if f'[device-test] RTC epoch {device["rtc_epoch_us"]} us' not in text:
+            raise checks.CheckFailed('Native boot did not confirm the declared pinned RTC epoch')
+        report['rtc_verified'] = True
         if not re.search(r'Overlay corpora: 355\b', text) or not re.search(r'Functions:\s+[1-9][0-9]+', text):
             raise checks.CheckFailed('Full native AOT and all 355 overlay corpora are required')
         session.adapter.send('debug', 'encounter start barioth')
@@ -174,6 +177,9 @@ def run(device, root, seconds, frames, start_tick):
         if len(report['gpu']) != 1 or not report['gpu_compatibility']:
             raise runner.NotTested('Actual GPU/driver or resolved GPU compatibility mode is unavailable')
         report['language'] = device.get('env', {}).get('MHP3RD_LANGUAGE', '')
+        report['performance_environment'] = {key: value for key, value in device.get('env', {}).items()
+                                             if key not in ('MHP3RD_NO_SPARSE_VERTEX_DECODE',
+                                                            'MHP3RD_NO_PLAIN_ALPHA_VARIANTS')}
         report['settings_sha256'] = runner.fingerprint(session.file('data/settings.ini'))
         report['status'] = 'COLLECTED'
     except Exception as error:
@@ -194,7 +200,8 @@ def comparison_identity(report):
     return {key: report[key] for key in ('fixture_sha256', 'game_sha256', 'settings_sha256',
                                         'rtc_epoch_us', 'gpu', 'gpu_compatibility')} | {
         'target_size': report['measurement']['target_size'], 'hardware': report['hardware'],
-        'language': report['language'], 'translation_sha256': report.get('translation_sha256')}
+        'language': report['language'], 'translation_sha256': report.get('translation_sha256'),
+        'performance_environment': report.get('performance_environment', {})}
 
 
 def main(argv=None):
