@@ -460,6 +460,12 @@ void present_clock() {
         steady.flip(frame * kGameFrameUs, frame * kGameFrameUs + code);
     }
     check(steady.work_us() == 21000, "one frame in five that slow does");
+
+    PresentClock gap;
+    gap.set_presents_per_frame(3.0);
+    check(!gap.flip(0, 5000) && !gap.flip(kGameFrameUs, kGameFrameUs + 5000), "frames in a row go on");
+    check(gap.flip(20 * kGameFrameUs, 20 * kGameFrameUs + 5000), "a load's gap starts the frames over");
+    check(gap.flip(19 * kGameFrameUs, 19 * kGameFrameUs + 5000), "so does a moment out of order");
 }
 
 Second second_with(double speed, double idle_ms, double blend_ms, double plain_ms, double rate) {
@@ -474,6 +480,11 @@ Second second_with(double speed, double idle_ms, double blend_ms, double plain_m
 }
 
 void governor() {
+    RateGovernor unset;
+    unset.restart();
+    check(unset.rate() == 30.0 && !unset.update(second_with(1.0, 10.0, 2.0, 0.5, 30.0)),
+        "a governor not yet given a rate restarts safely");
+
     RateGovernor governor;
     governor.set_requested(30.0);
     check(governor.rate() == 30.0 && !governor.update(second_with(0.5, 0.0, 5.0, 0.5, 30.0)),
@@ -535,8 +546,10 @@ void governor() {
     Second busy_display = second_with(1.0, 15.0, 2.0, 0.5, 90.0);
     busy_display.presents = 60u;
     busy_display.blocked = 30u;
-    (void)display.update(busy_display);
-    check(display.update(busy_display) && display.rate() == 60.0, "presents the display cannot take step down");
+    bool display_moved = false;
+    for (int i = 1; i < RateGovernor::kLateSeconds; ++i) display_moved = display_moved || display.update(busy_display);
+    check(!display_moved && display.update(busy_display) && display.rate() == 60.0,
+        "presents the display cannot take step down once most seconds have them");
 
     // Off, the rate stays whatever happens.
     RateGovernor fixed;
@@ -563,8 +576,21 @@ void governor() {
     Second skipping = second_with(1.0, 15.0, 2.0, 0.3, 90.0);
     skipping.presents = 60u;
     skipping.skipped = 30u;
-    (void)late.update(skipping);
+    for (int i = 1; i < RateGovernor::kLateSeconds; ++i) (void)late.update(skipping);
     check(late.update(skipping) && late.rate() == 60.0, "presents that keep coming late step down one rate");
+
+    // Lenovo TB321FU at 120 in the Barioth fight: the monster's breath close
+    // to the camera makes a second or three late, then 120 fits again.
+    RateGovernor burst;
+    burst.set_requested(120.0);
+    Second breath = second_with(1.0, 10.0, 2.5, 0.8, 120.0);
+    breath.presents = 100u;
+    breath.skipped = 20u;
+    const Second calm = second_with(1.0, 10.0, 2.5, 0.8, 120.0);
+    bool burst_moved = false;
+    for (const Second &each : {breath, breath, breath, calm, calm, breath, calm, breath, breath, calm})
+        burst_moved = burst_moved || burst.update(each);
+    check(!burst_moved && burst.rate() == 120.0, "bursts of late seconds keep the rate");
 
     RateGovernor ladder;
     ladder.set_requested(144.0);
@@ -575,6 +601,147 @@ void governor() {
     slow45.set_requested(45.0);
     (void)slow45.update(second_with(0.9, 0.0, 5.0, 0.3, 45.0));
     check(slow45.update(second_with(0.9, 0.0, 5.0, 0.3, 45.0)) && slow45.rate() == 30.0, "45 steps down to 30");
+
+    // Lenovo TB321FU at 120: the title scene's long stretches of the game's
+    // code make a fifth of the presents late at full speed, with 14 ms to
+    // spare. After the load into the village, 120 fits.
+    RateGovernor title;
+    title.set_requested(120.0);
+    Second late_title = second_with(1.0, 14.0, 2.5, 0.8, 120.0);
+    late_title.presents = 96u;
+    late_title.skipped = 24u;
+    for (int i = 1; i < RateGovernor::kLateSeconds; ++i) (void)title.update(late_title);
+    check(title.update(late_title) && title.rate() == 90.0, "late presents at full speed step down one rate");
+    bool early = false;
+    for (int i = 0; i < RateGovernor::kSettleSeconds + RateGovernor::kLateSeconds - 1; ++i)
+        early = early || title.update(late_title);
+    check(!early && title.rate() == 90.0, "the first seconds of a new rate do not count against it");
+    check(title.update(late_title) && title.rate() == 60.0, "once settled, late presents count again");
+    for (int i = 0; i < 5; ++i) (void)title.update(second_with(1.0, 14.0, 2.5, 0.8, 60.0));
+    check(title.rate() == 60.0, "in the same scene, the rates left wait");
+    title.restart();
+    for (int i = 0; i < RateGovernor::kSecondsBeforeUp; ++i)
+        (void)title.update(second_with(1.0, 14.0, 2.5, 0.8, title.rate()));
+    check(title.rate() == 120.0, "after a load, rates left for late presents are tried again at once");
+    bool settled = false;
+    for (int i = 0; i < RateGovernor::kSettleSeconds + RateGovernor::kLateSeconds - 1; ++i)
+        settled = settled || title.update(late_title);
+    check(!settled && title.rate() == 120.0, "a restart's first seconds do not count either");
+
+    // A load running ahead of real time to catch up presents late too.
+    RateGovernor catching_up;
+    catching_up.set_requested(120.0);
+    Second ahead = second_with(1.5, 5.0, 1.0, 0.4, 120.0);
+    ahead.presents = 60u;
+    ahead.skipped = 60u;
+    bool moved_ahead = false;
+    for (int i = 0; i < 5; ++i) moved_ahead = moved_ahead || catching_up.update(ahead);
+    check(!moved_ahead && catching_up.rate() == 120.0, "late presents of a load catching up do not count");
+
+    // A rate the game was too slow for stays blocked after a load.
+    RateGovernor slow_scene;
+    slow_scene.set_requested(120.0);
+    (void)slow_scene.update(second_with(0.8, 0.0, 6.0, 0.4, 120.0));
+    (void)slow_scene.update(second_with(0.8, 0.0, 6.0, 0.4, 120.0));
+    check(slow_scene.rate() == 60.0, "a slow scene drops to 60");
+    slow_scene.restart();
+    for (int i = 0; i < RateGovernor::kSecondsAfterDown + 5; ++i)
+        (void)slow_scene.update(second_with(1.0, 20.0, 6.0, 0.4, slow_scene.rate()));
+    check(slow_scene.rate() == 90.0, "after a load it climbs, but not to the rate the game was too slow for");
+
+    // A rate that comes late again after a load lifted its block waits it out.
+    RateGovernor twice;
+    twice.set_requested(120.0);
+    for (int i = 0; i < RateGovernor::kLateSeconds; ++i) (void)twice.update(late_title);
+    check(twice.rate() == 90.0, "late presents leave 120");
+    twice.restart();
+    for (int i = 0; i < RateGovernor::kSecondsBeforeUp; ++i)
+        (void)twice.update(second_with(1.0, 14.0, 2.5, 0.8, twice.rate()));
+    check(twice.rate() == 120.0, "the first time, a load lets 120 be tried again");
+    for (int i = 0; i < RateGovernor::kSettleSeconds + RateGovernor::kLateSeconds; ++i) (void)twice.update(late_title);
+    check(twice.rate() == 90.0, "late again, it leaves 120 again");
+    twice.restart();
+    for (int i = 0; i < RateGovernor::kSecondsAfterDown + 5; ++i)
+        (void)twice.update(second_with(1.0, 14.0, 2.5, 0.8, twice.rate()));
+    check(twice.rate() == 90.0, "the second time, a load does not lift its block");
+
+    // A display that has no image free for the presents is no scene's doing.
+    RateGovernor slow_display;
+    slow_display.set_requested(90.0);
+    for (int i = 0; i < RateGovernor::kLateSeconds; ++i) (void)slow_display.update(busy_display);
+    check(slow_display.rate() == 60.0, "a display slower than the rate steps down");
+    slow_display.restart();
+    for (int i = 0; i < RateGovernor::kSecondsAfterDown + 5; ++i)
+        (void)slow_display.update(second_with(1.0, 15.0, 2.0, 0.5, slow_display.rate()));
+    check(slow_display.rate() == 60.0, "a load does not lift a block the display caused");
+
+    // A game falling behind is not excused by a load.
+    RateGovernor behind;
+    behind.set_requested(120.0);
+    (void)behind.update(second_with(0.8, 0.0, 6.0, 0.4, 120.0));
+    behind.restart();
+    check(behind.update(second_with(0.8, 0.0, 6.0, 0.4, 120.0)) && behind.rate() == 60.0,
+        "slow seconds count across a restart");
+
+    // Presents whose time is mostly waiting for a GPU that lowered its clock
+    // (Lenovo TB321FU at 60: 4.5 ms a present, 1.5 ms of it work). With 6 ms
+    // to spare, 90 fits the work (4.5 ms with the margin) but not the waits
+    // (7.5 ms).
+    Second waiting = second_with(1.0, 6.0, 4.5, 4.2, 60.0);
+    waiting.blend_work_ms = 1.5;
+    waiting.plain_work_ms = 0.5;
+    Second late60 = second_with(1.0, 14.0, 2.5, 0.8, 90.0);
+    late60.presents = 72u;
+    late60.skipped = 18u;
+    RateGovernor climb;
+    climb.set_requested(90.0);
+    for (int i = 0; i < RateGovernor::kLateSeconds; ++i) (void)climb.update(late60);
+    check(climb.rate() == 60.0, "a title scene's late presents leave 90");
+    for (int i = 0; i < RateGovernor::kBlockSeconds + RateGovernor::kSecondsBeforeUp; ++i) (void)climb.update(waiting);
+    check(climb.rate() == 60.0, "in the same scene, once its block is over, the waits keep 90 from being tried");
+    climb.restart();
+    for (int i = 0; i < RateGovernor::kSecondsBeforeUp; ++i) (void)climb.update(waiting);
+    check(climb.rate() == 90.0, "after the load that lifted its block, the presents' own work says 90 fits");
+
+    // A phone GPU that cannot take a faster rate (Redmi 12C at 60): the try
+    // after a load fails, and the waits keep the rate from being tried again.
+    RateGovernor phone;
+    phone.set_requested(90.0);
+    for (int i = 0; i < RateGovernor::kLateSeconds; ++i) (void)phone.update(late60);
+    phone.restart();
+    for (int i = 0; i < RateGovernor::kSecondsBeforeUp; ++i) (void)phone.update(waiting);
+    check(phone.rate() == 90.0, "one try after the load");
+    for (int i = 0; i < 2; ++i) (void)phone.update(second_with(0.56, 0.0, 10.0, 1.0, 90.0));
+    check(phone.rate() < 90.0, "the try fails: the game fell behind");
+    const double after_try = phone.rate();
+    for (int i = 0; i < 120; ++i) (void)phone.update(waiting);
+    check(phone.rate() == after_try, "without another load, the waits keep it there");
+
+    // How far to step down still counts the waits: 120 at 6 ms a present,
+    // 1.5 ms of it work, with the game at 80% lands on 60, not on 30.
+    Second slow_waiting = second_with(0.8, 0.0, 6.0, 0.4, 120.0);
+    slow_waiting.blend_work_ms = 1.5;
+    slow_waiting.plain_work_ms = 0.2;
+    RateGovernor counted;
+    counted.set_requested(120.0);
+    (void)counted.update(slow_waiting);
+    check(counted.update(slow_waiting) && counted.rate() == 60.0, "the step down counts the waits");
+
+    // A little behind (Lenovo TB321FU at 120 in a new area: 96%, 0.5 ms to
+    // spare, 0.97 ms a blended present): one rate at a time, not 30 at once.
+    RateGovernor little;
+    little.set_requested(120.0);
+    (void)little.update(second_with(0.96, 0.5, 0.97, 0.3, 120.0));
+    check(little.update(second_with(0.96, 0.5, 0.97, 0.3, 120.0)) && little.rate() == 90.0,
+        "a game a little behind steps down one rate");
+    (void)little.update(second_with(0.96, 0.5, 0.97, 0.3, 90.0));
+    check(little.update(second_with(0.96, 0.5, 0.97, 0.3, 90.0)) && little.rate() == 60.0,
+        "and one more while it stays behind");
+    RateGovernor no_spare;
+    no_spare.set_requested(120.0);
+    (void)no_spare.update(second_with(1.0, 0.2, 0.97, 0.3, 120.0));
+    check(no_spare.update(second_with(1.0, 0.2, 0.97, 0.3, 120.0)) && no_spare.rate() == 90.0,
+        "a game keeping up without time to spare steps down one rate");
 }
 
 } // namespace

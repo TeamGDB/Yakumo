@@ -58,8 +58,9 @@ public:
     void set_presents_per_frame(double presents) noexcept;
     [[nodiscard]] double presents_per_frame() const noexcept { return per_frame_; }
     // A new game frame, for the moment `time_us` of real time, flipped at
-    // `now_us`.
-    void flip(std::int64_t time_us, std::int64_t now_us) noexcept;
+    // `now_us`. True when the frames started over: a gap of a load, or a
+    // moment out of order.
+    bool flip(std::int64_t time_us, std::int64_t now_us) noexcept;
     // Forgets the frames and the grid, as after a pause.
     void reset() noexcept;
 
@@ -110,10 +111,15 @@ private:
 
 // What one second of play measured, for the governor.
 struct Second {
-    double speed{1.0};         // emulated time per real time
-    double idle_ms{};          // per game frame: the kernel waited with nothing to do
-    double blend_ms{};         // CPU time of one blended present (replay, submit, present)
-    double plain_ms{};         // CPU time of one present of a frame as it is
+    double speed{1.0}; // emulated time per real time
+    double idle_ms{};  // per game frame: the kernel waited with nothing to do
+    double blend_ms{}; // CPU time of one blended present (replay, submit, present)
+    double plain_ms{}; // CPU time of one present of a frame as it is
+    // Of those, the presents' own work: without their waits for the GPU or
+    // the display, which grow at a slower rate when the GPU lowers its clock.
+    // Negative: not measured, the times above are used.
+    double blend_work_ms{-1.0};
+    double plain_work_ms{-1.0};
     double interpolation_ms{}; // per game frame: CPU time of all presents between flips
     std::uint32_t presents{};  // presents between flips this second
     std::uint32_t skipped{};   // grid moments passed over this second
@@ -125,13 +131,31 @@ struct Second {
 // left, and presents take at least half of the time missing and more than
 // the time the kernel spent waiting, it steps down at once to a rate the
 // measured costs say fits; when presents keep coming late, or the display has
-// no image free for them, it steps down one rate. When the game has had spare time for a while, it
+// no image free for them, in most of the last few seconds, it steps down one
+// rate. When the game has had spare time for a while, it
 // goes up to the fastest rate the costs say fits. A rate that had to be left
 // is not tried again for a while.
+//
+// Late presents count only while the game runs at its own speed, and not in
+// the first seconds after the rate changed or the frames started over: a load
+// catching up, the first presents of a new rate and a title scene's long
+// stretches of the game's code are not what the rate costs in play. A burst
+// of GPU work (a monster's breath close to the camera) makes a second or
+// three late; a display slower than the rate makes every one. A rate left
+// once because its presents came late is tried again after a load or a
+// pause; one left again, or left because the display had no image free,
+// waits out its block. Whether a faster rate fits is judged by what the
+// presents cost the game, waits included, except once after such a load:
+// then by their own work, since their waits grow when a slower rate lets
+// the GPU lower its clock, and a GPU that cannot take the rate fails that
+// one try and is blocked again.
 class RateGovernor {
 public:
     // The rate the setting asks for; the governor starts there.
     void set_requested(double rate);
+    // The game's frames started over: a load, a pause or the menu. Not a
+    // change of the rate, nor the governor's own step down to 30.
+    void restart();
     // Off, the rate stays the one asked for whatever the game's speed
     // (Video > Lower the frame rate when the game falls behind); on again,
     // it starts from there.
@@ -143,34 +167,45 @@ public:
     // reason in reason().
     bool update(const Second &second);
     [[nodiscard]] const char *reason() const noexcept { return reason_; }
-    // CPU time a game frame spends presenting at `rate`, from `second`'s costs.
-    [[nodiscard]] static double cost_ms(double rate, const Second &second) noexcept;
+    // CPU time a game frame spends presenting at `rate`, from `second`'s
+    // costs; `work`: the presents' own work, without their waits.
+    [[nodiscard]] static double cost_ms(double rate, const Second &second, bool work = false) noexcept;
 
     // Tuning, public for the tests.
-    static constexpr double kSlowSpeed = 0.97;   // behind real time
-    static constexpr double kSteadySpeed = 0.99; // keeping up
-    static constexpr double kMinCostMs = 0.5;    // presents cost something worth saving
-    static constexpr double kMinIdleMs = 1.0;    // spare time a frame needs to keep its moments
-    static constexpr double kMarginMs = 3.0;     // spare time kept at a faster rate
+    static constexpr double kSlowSpeed = 0.97;     // behind real time
+    static constexpr double kFarBehindSpeed = 0.9; // behind enough to drop at once to the rate that fits
+    static constexpr double kSteadySpeed = 0.99;   // keeping up
+    static constexpr double kFastSpeed = 1.03;     // ahead: a load catching up
+    static constexpr double kMinCostMs = 0.5;      // presents cost something worth saving
+    static constexpr double kMinIdleMs = 1.0;      // spare time a frame needs to keep its moments
+    static constexpr double kMarginMs = 3.0;       // spare time kept at a faster rate
     static constexpr int kSecondsBeforeUp = 3;
     static constexpr int kSecondsAfterDown = 10;
+    static constexpr int kSettleSeconds = 2; // after a change or a restart, late presents do not count
     static constexpr int kBlockSeconds = 30;
     static constexpr int kMaxBlockSeconds = 300;
     static constexpr double kMaxSkippedShare = 0.1;
+    static constexpr int kLateWindow = 5;  // the seconds late presents are counted over
+    static constexpr int kLateSeconds = 4; // late ones among them that step down
 
 private:
-    void step_to(std::size_t index, const char *why);
+    // `late`: left because presents came late, which a restart may forgive.
+    void step_to(std::size_t index, const char *why, bool late = false);
 
     double requested_{30.0};
     bool automatic_{true};
     std::vector<double> ladder_{30.0};
     std::size_t index_{};
     int slow_seconds_{};
-    int skipping_seconds_{};
+    std::uint32_t late_seconds_{}; // the last kLateWindow seconds, newest in bit 0: presents came late
+    bool trial_{};                 // a restart lifted a block: the next climb weighs the presents' work
     int spare_seconds_{};
     int wait_up_{};
+    int settle_{};
     std::vector<int> blocked_;      // seconds before each rate may be tried again
     std::vector<int> block_length_; // how long the next block of each rate lasts
+    std::vector<bool> late_block_;  // each rate's block came from late presents
+    std::vector<int> late_steps_;   // how often each rate was left for late presents
     const char *reason_{""};
 };
 

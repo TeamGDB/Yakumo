@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <functional>
 #include <cmath>
 
@@ -86,8 +87,9 @@ std::int64_t PresentClock::delay_us() const noexcept {
     return frame_us_ - first_step_us_ + work_us_;
 }
 
-void PresentClock::flip(std::int64_t time_us, std::int64_t now_us) noexcept {
-    if (has_newer_ && (time_us <= newer_us_ || time_us - newer_us_ > kGapFrames * frame_us_)) reset();
+bool PresentClock::flip(std::int64_t time_us, std::int64_t now_us) noexcept {
+    const bool started_over = has_newer_ && (time_us <= newer_us_ || time_us - newer_us_ > kGapFrames * frame_us_);
+    if (started_over) reset();
     // The code time a present allows for: the (kWorkRank + 1)th longest of
     // the window, so that a few late frames do not keep every present late.
     const std::int64_t work = std::clamp<std::int64_t>(now_us - time_us, 0, frame_us_) + kWorkMarginUs;
@@ -112,11 +114,12 @@ void PresentClock::flip(std::int64_t time_us, std::int64_t now_us) noexcept {
     has_newer_ = true;
     if (anchored_) {
         const std::int64_t offset = ((time_us - anchor_us_) % frame_us_ + frame_us_) % frame_us_;
-        if (std::min(offset, frame_us_ - offset) <= kRealignUs) return;
+        if (std::min(offset, frame_us_ - offset) <= kRealignUs) return started_over;
     }
     anchored_ = true;
     anchor_us_ = time_us;
     next_index_ = 0;
+    return started_over;
 }
 
 std::int64_t PresentClock::moment(std::int64_t index) const noexcept {
@@ -158,8 +161,39 @@ void RateGovernor::set_requested(double rate) {
     index_ = ladder_.size() - 1u;
     blocked_.assign(ladder_.size(), 0);
     block_length_.assign(ladder_.size(), kBlockSeconds);
-    slow_seconds_ = skipping_seconds_ = spare_seconds_ = wait_up_ = 0;
+    late_block_.assign(ladder_.size(), false);
+    late_steps_.assign(ladder_.size(), 0);
+    slow_seconds_ = spare_seconds_ = wait_up_ = settle_ = 0;
+    late_seconds_ = 0u;
+    trial_ = false;
     reason_ = "";
+}
+
+void RateGovernor::restart() {
+    // What the presents of the scene before cost says little about the next
+    // one: a title scene's long stretches of code make presents late that
+    // play does not. A rate left once for that is tried again. One that
+    // came late again after such a try, one the display had no image free
+    // for, and one the game was too slow for wait out their blocks.
+    bool forgiven = false;
+    // Before the first set_requested there are no rates to lift.
+    for (std::size_t index = 0; index < late_block_.size(); ++index) {
+        // Its block may have run out already: the waits measured since can
+        // still keep it from being tried, so it is forgiven all the same.
+        if (late_block_[index] && late_steps_[index] <= 1) {
+            blocked_[index] = 0;
+            forgiven = true;
+        }
+        late_block_[index] = false;
+    }
+    if (forgiven) {
+        wait_up_ = 0;
+        trial_ = true;
+    }
+    // A game falling behind still counts: a load does not excuse it.
+    spare_seconds_ = 0;
+    late_seconds_ = 0u;
+    settle_ = kSettleSeconds;
 }
 
 void RateGovernor::set_automatic(bool automatic) {
@@ -172,37 +206,52 @@ double RateGovernor::rate() const noexcept {
     return ladder_[index_];
 }
 
-double RateGovernor::cost_ms(double rate, const Second &second) noexcept {
+double RateGovernor::cost_ms(double rate, const Second &second, bool work) noexcept {
     const double presents = presents_per_frame(rate);
     if (presents <= 1.0) return 0.0;
     const double plain = plain_presents_per_frame(rate);
-    return (presents - plain) * second.blend_ms + plain * second.plain_ms;
+    const double blend = work && second.blend_work_ms >= 0.0 ? second.blend_work_ms : second.blend_ms;
+    const double one = work && second.plain_work_ms >= 0.0 ? second.plain_work_ms : second.plain_ms;
+    return (presents - plain) * blend + plain * one;
 }
 
-void RateGovernor::step_to(std::size_t index, const char *why) {
+void RateGovernor::step_to(std::size_t index, const char *why, bool late) {
     if (index < index_) {
         // The rate left behind waits before it is tried again, longer each
         // time it fails.
         blocked_[index_] = block_length_[index_];
         block_length_[index_] = std::min(block_length_[index_] * 2, kMaxBlockSeconds);
+        late_block_[index_] = late;
+        if (late) ++late_steps_[index_];
         wait_up_ = kSecondsAfterDown;
+    } else if (index > index_) {
+        // Reached again: nothing left to forgive.
+        late_block_[index] = false;
     }
     index_ = index;
-    slow_seconds_ = skipping_seconds_ = spare_seconds_ = 0;
+    slow_seconds_ = spare_seconds_ = 0;
+    late_seconds_ = 0u;
+    settle_ = kSettleSeconds;
+    trial_ = false;
     reason_ = why;
 }
 
 bool RateGovernor::update(const Second &second) {
     for (int &seconds : blocked_) seconds = std::max(0, seconds - 1);
     wait_up_ = std::max(0, wait_up_ - 1);
+    const bool settling = settle_ > 0;
+    settle_ = std::max(0, settle_ - 1);
     if (!automatic_ || (index_ == 0u && ladder_.size() == 1u)) return false;
     const double current_cost = cost_ms(rate(), second);
 
     // Behind real time, or keeping up only by using every moment, while
-    // presents cost something: drop at once to the fastest rate whose
-    // presents fit into what the game is short of. Without spare time the
-    // game's frames come later and later after their moments, and the
-    // presents waiting for them are skipped.
+    // presents cost something: a slower rate. Without spare time the game's
+    // frames come later and later after their moments, and the presents
+    // waiting for them are skipped. Far behind, drop at once to the fastest
+    // rate whose presents fit into what the game is short of. A little
+    // behind, one rate at a time: a few seconds of heavy work, as when a new
+    // area appears, would otherwise cost the fast rates for half a minute (a
+    // tablet at 96% went from 120 straight to 30).
     // A load or a stall slows the game too, with presents that cost little:
     // they are blamed only when they take at least half of what is missing.
     const bool slow = second.speed < kSlowSpeed;
@@ -213,7 +262,8 @@ bool RateGovernor::update(const Second &second) {
         second.idle_ms < second.interpolation_ms) {
         if (++slow_seconds_ >= 2) {
             std::size_t index = index_ - 1u;
-            while (index > 0u && cost_ms(ladder_[index], second) > current_cost - missing_ms - kMarginMs) --index;
+            if (second.speed < kFarBehindSpeed)
+                while (index > 0u && cost_ms(ladder_[index], second) > current_cost - missing_ms - kMarginMs) --index;
             step_to(index, slow ? "the game fell behind real time" : "the game had no time to spare");
             return true;
         }
@@ -221,16 +271,19 @@ bool RateGovernor::update(const Second &second) {
         slow_seconds_ = 0;
     }
 
-    // Presents that come too late to be shown on time: the display or the
-    // queue cannot take this many.
+    // Presents that come too late to be shown on time, in most of the last
+    // seconds: the display, the GPU or the queue cannot take this many. Only
+    // at the game's own speed, once a new rate or scene has settled.
     const std::uint32_t due = second.presents + second.skipped + second.blocked;
-    if (index_ > 0u && due != 0u && static_cast<double>(second.skipped + second.blocked) > kMaxSkippedShare * due) {
-        if (++skipping_seconds_ >= 2) {
-            step_to(index_ - 1u, "presents were late");
-            return true;
-        }
-    } else {
-        skipping_seconds_ = 0;
+    const bool steady = second.speed >= kSlowSpeed && second.speed <= kFastSpeed;
+    const bool late = index_ > 0u && steady && !settling && due != 0u &&
+        static_cast<double>(second.skipped + second.blocked) > kMaxSkippedShare * due;
+    late_seconds_ = ((late_seconds_ << 1u) | (late ? 1u : 0u)) & ((1u << kLateWindow) - 1u);
+    if (std::popcount(late_seconds_) >= kLateSeconds) {
+        // A display with no image free is no scene's doing: no restart lifts it.
+        const bool display = second.blocked > second.skipped;
+        step_to(index_ - 1u, display ? "the display had no image free" : "presents were late", !display);
+        return true;
     }
 
     // Spare time for a faster rate's extra presents, for a few seconds: the
@@ -238,9 +291,10 @@ bool RateGovernor::update(const Second &second) {
     // waiting after it failed.
     std::size_t faster = index_;
     if (wait_up_ == 0 && second.speed >= kSteadySpeed) {
+        const double current = cost_ms(rate(), second, trial_);
         for (std::size_t index = index_ + 1u; index < ladder_.size(); ++index) {
             if (blocked_[index] != 0) break;
-            if (second.idle_ms < cost_ms(ladder_[index], second) - current_cost + kMarginMs) break;
+            if (second.idle_ms < cost_ms(ladder_[index], second, trial_) - current + kMarginMs) break;
             faster = index;
         }
     }
