@@ -26,6 +26,19 @@ RuntimePostImportHook g_post_import_hook = nullptr;
 std::int32_t g_runtime_thread_uid = -1;
 std::array<char, 64> g_runtime_thread_name{};
 std::uint32_t g_runtime_dispatch_pc = 0u;
+// The context the dispatched function runs in, while it runs: the write
+// watch names its ra and sp, which say who stored when the dispatch PC only
+// names the outermost function.
+const AllegrexContext *g_runtime_dispatch_cpu = nullptr;
+struct DispatchContext {
+    const AllegrexContext *previous;
+    explicit DispatchContext(const AllegrexContext &cpu) noexcept : previous(g_runtime_dispatch_cpu) {
+        g_runtime_dispatch_cpu = &cpu;
+    }
+    ~DispatchContext() { g_runtime_dispatch_cpu = previous; }
+    DispatchContext(const DispatchContext &) = delete;
+    DispatchContext &operator=(const DispatchContext &) = delete;
+};
 RuntimeHeartbeatHook g_heartbeat_hook = nullptr;
 std::uint64_t g_heartbeat_interval = 0u;
 RuntimeStarvationHook g_starvation_hook = nullptr;
@@ -140,6 +153,9 @@ const char *runtime_thread_name() noexcept {
 }
 std::uint32_t runtime_dispatch_pc() noexcept {
     return g_runtime_dispatch_pc;
+}
+std::uint32_t runtime_dispatch_register(unsigned index) noexcept {
+    return g_runtime_dispatch_cpu != nullptr && index < 32u ? g_runtime_dispatch_cpu->gpr[index] : 0u;
 }
 RuntimeExecutionContextToken capture_runtime_execution_context() noexcept {
     return RuntimeExecutionContextToken{g_runtime_thread_uid, g_runtime_thread_switch_generation_fast};
@@ -617,6 +633,7 @@ void Runtime::run(std::uint32_t entry, std::uint64_t max_dispatches) {
                 count_pc(before);
                 if (g_pre_dispatch_hook != nullptr) g_pre_dispatch_hook(*this, cpu_, before, dispatch_thread_uid);
                 try {
+                    const DispatchContext dispatching(cpu_);
                     function(*this, cpu_);
                 } catch (const Error &e) {
                     const FunctionEntry *function_entry = lookup_entry(before);
@@ -699,6 +716,7 @@ void Runtime::run(std::uint32_t entry, std::uint64_t max_dispatches) {
                 count_pc(before);
                 if (g_pre_dispatch_hook != nullptr) g_pre_dispatch_hook(*this, cpu_, before, dispatch_thread_uid);
                 try {
+                    const DispatchContext dispatching(cpu_);
                     function(*this, cpu_);
                 } catch (const Error &e) {
                     const FunctionEntry *function_entry = lookup_entry(before);
@@ -981,6 +999,7 @@ void Runtime::run(std::uint32_t entry, std::uint64_t max_dispatches) {
                           << " sp=" << hex32(cpu_.gpr[29]) << " ra=" << hex32(cpu_.gpr[31]) << "\n";
             }
             try {
+                const DispatchContext dispatching(cpu_);
                 function(*this, cpu_);
             } catch (const Error &e) {
                 if (trace_on_error) {

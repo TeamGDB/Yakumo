@@ -188,6 +188,13 @@ what it sees. A teleport keeps the hunter's speed, so it lands where it was
 heading; `hold` writes positions of objects found by a heuristic, so use it on
 copied saves only.
 
+`PSPRECOMP_WATCH_WRITE=ADDRESS` (with `PSPRECOMP_WATCH_WRITE_SIZE`) prints
+every guest store to those bytes as `[watch-write] ... pc=... ra=... sp=...
+old=... new=...` on stderr. `pc` is where the runtime last dispatched, often
+only the outermost function; `ra` and `sp` are the storing function's
+registers, so `ra` names the call the store came from. It slows every store,
+and only a run that starts with it set can watch.
+
 ### Fast Barioth encounter
 
 In an isolated developer session with **both** `MHP3RD_DEBUG_MENU=1` and

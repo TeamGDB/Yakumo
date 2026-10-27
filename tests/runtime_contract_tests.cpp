@@ -73,6 +73,13 @@ void fault(psprecomp::Runtime &, psprecomp::AllegrexContext &) {
     throw psprecomp::Error("synthetic guest memory fault");
 }
 void stay(psprecomp::Runtime &, psprecomp::AllegrexContext &) {}
+// A store from inside a dispatched function, with a caller and a stack.
+void watched_store(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &cpu) {
+    cpu.gpr[31] = 0x08812340u;
+    cpu.gpr[29] = 0x09FF0000u;
+    runtime.memory().aot_store8(base, 0x5A);
+    runtime.stop("watched store done");
+}
 void entry(
     psprecomp::Runtime &, psprecomp::AllegrexContext &cpu, std::uint16_t, psprecomp::GuestMemory::AotFastView &memory) {
     cpu.gpr[2] = memory.aot_load32(scratch);
@@ -1157,6 +1164,23 @@ void guest_memory_contracts(bool armed) {
                 diagnostics.str().find("op=store16") != std::string::npos &&
                 diagnostics.str().find("op=store32") != std::string::npos,
             "Armed write watch must observe all AOT store widths");
+        check(diagnostics.str().find(" ra=0x00000000 sp=0x00000000 ") != std::string::npos,
+            "Outside a dispatched function the write watch names no guest registers");
+        std::ostringstream inside;
+        auto *saved = std::cerr.rdbuf(inside.rdbuf());
+        {
+            psprecomp::Runtime dispatching;
+            dispatching.register_function(base + 0x100u, &watched_store, "public_watched_store");
+            dispatching.run(base + 0x100u, 2);
+        }
+        memory.aot_store8(base, 0x12);
+        std::cerr.rdbuf(saved);
+        const std::string hits = inside.str();
+        check(hits.find(" ra=0x08812340 sp=0x09FF0000 ") != std::string::npos,
+            "Inside a dispatched function the write watch names its ra and sp");
+        const auto after = hits.rfind(" ra=0x00000000 sp=0x00000000 ");
+        check(after != std::string::npos && after > hits.find(" ra=0x08812340 "),
+            "The registers are forgotten once that function returns");
     } else {
         check(diagnostics.str().find("not armed at start-up") != std::string::npos,
             "Unarmed write watch must explain why observation cannot be enabled");
