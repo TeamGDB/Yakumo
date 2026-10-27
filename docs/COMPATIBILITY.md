@@ -1182,6 +1182,12 @@ Code of `d6682d6`:
 | --- | --- | --- |
 | Apple M1, MoltenVK | CTest | 81 of 88, the same 7 loopback checks; `mhp3rd_coarse_shading_tests` fails for each of four broken copies of the new rules |
 | Apple M1 | The governor commit alone (`7205849`; built before a comment-only change) | `mhp3rd_interpolation_tests` pass |
+| Windows 11, RX 5600 XT | CTest, serial | 81 of 81 |
+| Windows 11, RX 5600 XT | Barioth, 30, ×1 | median 33.27 ms, p99 45.12 ms, speed 100% |
+| Windows 11, RX 5600 XT | Barioth, 120 asked, 60 Hz display, ×4 | 60 throughout, median 16.68 ms, p99 23.26 ms; per-pixel effects (no shading rate) |
+| Redmi 12C, Mali-G52 | Barioth, 30, ×2 | median 33.48 ms, p99 37.95 ms, speed 99.7%; a 60-second window without polling: 29.05 presents a second at 97% speed, as before (28.9 at 96%), no second above 50 ms |
+| Redmi 12C | 60 with the governor, ×1 and ×2, 60 s windows | 60→45 for late presents in the title scene and 45→30 for want of time, as before; no second above 50 ms, worst frame 39.7 and 46.6 ms |
 
-Not run on this code: Windows, the Redmi 12C, the Snapdragon 8 Gen 3 tablet
-and the Steam Deck.
+The Windows and Redmi rows ran `f344e16`, the same code with these notes. The
+captures of every run show the fight drawn normally. Not run on this code: the
+Snapdragon 8 Gen 3 tablet and the Steam Deck.
