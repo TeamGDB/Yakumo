@@ -258,6 +258,50 @@ void test_signature_mismatch() {
     check(f.snapshot() == before && !game_camera_driving(), "refused code is never written to");
 }
 
+void set_environment(const char *name, const char *value) {
+#if defined(_WIN32)
+    _putenv_s(name, value != nullptr ? value : "");
+#else
+    if (value != nullptr)
+        setenv(name, value, 1);
+    else
+        unsetenv(name);
+#endif
+}
+
+// Issue #225: climbing a wall (camera mode 1, then 3 at its top) left the
+// second stick to the game, whose vertical push stepped the follow camera's
+// height preset; back in the follow camera the stick tilts and cannot step it
+// back, so the camera stayed closer to the hunter.
+void test_stock_modes_hold_vertical() {
+    Fixture f;
+    auto &m = f.runtime.memory();
+    m.store8(camera_address + 0x76u, 1u);
+    f.frame(0.0f, 0.0f);
+    check(!game_camera_holds_vertical(), "with Analog camera off the stock stick is untouched");
+    f.enable();
+    for (const std::uint8_t mode : {1u, 3u}) {
+        m.store8(camera_address + 0x76u, mode);
+        f.frame(0.0f, 0.0f);
+        check(game_camera_holds_vertical() && !game_camera_driving(),
+            "a mode left to the game keeps the vertical push from it, and only that");
+    }
+    f.flip(0.0f, 0.0f);
+    check(game_camera_holds_vertical(), "until the next camera update");
+    f.flip(0.0f, 0.0f);
+    check(!game_camera_holds_vertical(), "with the camera update gone the stick is the game's again");
+    m.store8(camera_address + 0x76u, 0u);
+    f.frame(0.0f, 0.0f);
+    check(!game_camera_holds_vertical() && game_camera_driving(), "the follow camera is the driver's");
+    m.store8(camera_address + 0x76u, 1u);
+    set_environment("MHP3RD_STOCK_STICK_PRESETS", "1");
+    f.frame(0.0f, 0.0f);
+    check(!game_camera_holds_vertical(), "MHP3RD_STOCK_STICK_PRESETS=1 passes the vertical push as before");
+    set_environment("MHP3RD_STOCK_STICK_PRESETS", nullptr);
+    f.frame(0.0f, 0.0f);
+    check(game_camera_holds_vertical(), "and without it the push is held again");
+}
+
 void test_hook_waits_for_the_option() {
     Fixture f;
     f.flip(0.0f, 0.0f);
@@ -691,6 +735,7 @@ int main() {
     test_vertical_filter();
     test_signature_mismatch();
     test_hook_waits_for_the_option();
+    test_stock_modes_hold_vertical();
     test_frame_rate_independence();
     test_motion_source();
     test_aiming_sizes_the_games_steps();

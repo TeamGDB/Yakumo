@@ -657,6 +657,10 @@ void register_display_ctrl(HleRegistrar &hle) {
             analog_y = pad.analog_y;
             right_x = pad.right_x;
             right_y = pad.right_y;
+            // In the camera modes left to the game the stick may still turn
+            // its camera, but a vertical push would step the follow camera's
+            // height preset for good (#225).
+            if (camera::game_camera_holds_vertical()) right_y = 0x80u;
             // Keep the game's digital commands neutral while the analog
             // camera consumes these axes: otherwise the game's one-shot
             // vertical command fires from the same push and glides the camera

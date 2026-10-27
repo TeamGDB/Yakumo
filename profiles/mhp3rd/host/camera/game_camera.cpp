@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <string_view>
 
 namespace mhp3rd::camera {
 
@@ -198,8 +199,18 @@ struct State {
     std::uint16_t anticipated_heading{};
     int anticipated_pitch{};
     int anticipated_pitch_value{};
+    // The last camera update was in a mode left to the game, at this frame.
+    bool stock_mode{};
+    std::uint64_t stock_update{};
 };
 State state;
+
+// MHP3RD_STOCK_STICK_PRESETS=1 lets the second stick's vertical push reach
+// the game in the modes left to it, as before. Read each time, for tests.
+bool stock_stick_presets() {
+    const char *value = std::getenv("MHP3RD_STOCK_STICK_PRESETS");
+    return value != nullptr && value[0] != '\0' && std::string_view(value) != "0";
+}
 
 bool option_on() {
     const auto &s = settings::current();
@@ -681,6 +692,8 @@ void adjust_camera(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &ctx)
     if (!memory.raw_pointer(address, 0x188u) || !memory.raw_pointer(stack, 0x190u) ||
         !memory.raw_pointer(ctx.gpr[5], 12u))
         return;
+    state.stock_mode = memory.load8(address + kMode) != kFollowMode;
+    state.stock_update = state.frame;
     switch (memory.load8(address + kMode)) {
     case kFollowMode:
         // Aiming a bow or a bowgun, or looking through a bowgun's scope: the
@@ -765,6 +778,10 @@ void game_camera_frame(psprecomp::Runtime &runtime) {
 
 bool game_camera_driving() {
     return (driving_allowed() || (state.hooked && lock_on_status().locked)) && state.available;
+}
+
+bool game_camera_holds_vertical() {
+    return driving_allowed() && state.stock_mode && state.frame - state.stock_update <= 1u && !stock_stick_presets();
 }
 
 std::optional<std::array<float, 3>> game_camera_follow_point(const psprecomp::GuestMemory &memory) {
