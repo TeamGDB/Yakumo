@@ -59,7 +59,9 @@ A profile owns its generated AOT corpus, address-specific lowering, HLE behavior
 NPJB-40001 executable analysis, actor-table write traces and bounded copied-save
 quest runs. Initial-area choice, the twenty-slot actor manager, spawn-record
 offsets, Barioth's model accessor/PMO header and hunter transform fields are
-observed format/address facts. The preset retains original quest/resource/AI
+observed format/address facts. Bounded normal quest abandonment also traced
+the game's Barioth/base actor destructors and verified village cleanup without
+save writes. The preset retains original quest/resource/AI
 lifecycle; no third-party spawn/cheat implementation or game-derived corpus is
 included. Public tests construct independent synthetic RAM and model headers.
 
