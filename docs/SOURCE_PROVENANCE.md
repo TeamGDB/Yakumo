@@ -53,6 +53,16 @@ A profile owns its generated AOT corpus, address-specific lowering, HLE behavior
 
 `profiles/mhp3rd/host/camera/` was written from this project's own NPJB-40001 executable analysis and run-time traces. The camera caller, structure offsets, 16-bit yaw format and height-filter coefficient are observed facts. Continuous pitch uses an independently written spherical-orbit calculation. No third-party camera-mod code is included or adapted.
 
+## Developer encounters
+
+`host/debug/encounter.*` was independently written from this project's private
+NPJB-40001 executable analysis, actor-table write traces and bounded copied-save
+quest runs. Initial-area choice, the twenty-slot actor manager, spawn-record
+offsets, Barioth's model accessor/PMO header and hunter transform fields are
+observed format/address facts. The preset retains original quest/resource/AI
+lifecycle; no third-party spawn/cheat implementation or game-derived corpus is
+included. Public tests construct independent synthetic RAM and model headers.
+
 ## Third-party components
 
 Third-party source, binary dependencies, shader code and notices stay beside the profile that needs them. Their original copyright and license notices must be preserved.

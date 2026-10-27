@@ -6472,8 +6472,23 @@ int run_contracts(int scripts) {
             "readbacks report actual kernel clocks and photo state rather than command acknowledgement");
         result = debug::run_command(ram, "observe 43 perf");
         expect(result[0].find("\"frame_ms\":[") != std::string::npos &&
-                result[0].find("\"speed_percent\":") != std::string::npos,
+                result[0].find("\"speed_percent\":") != std::string::npos &&
+                result[0].find("\"frame_sequence\":" + std::to_string(perf::history_sequence())) != std::string::npos,
             "explicit performance readback includes measured frame history and guest speed");
+        const auto &measured = perf::last_second();
+        for (const auto &[name, value] :
+            std::initializer_list<std::pair<const char *, double>>{{"guest_ms", measured.guest_ms},
+                {"render_ms", measured.render_ms}, {"wait_ms", measured.wait_ms}, {"pacing_ms", measured.pacing_ms},
+                {"ge_draws", measured.draws}, {"recorded_draws", measured.recorded_draws},
+                {"render_passes", measured.passes}, {"target_copies", measured.copies},
+                {"requested_rate", measured.requested_rate}, {"running_rate", measured.frame_rate}})
+            expect(result[0].find(std::string("\"") + name + "\":" + std::to_string(value)) != std::string::npos,
+                "performance observation preserves the actual component timing and workload counters");
+        expect(result[0].find(std::string("\"gpu_valid\":") + (measured.gpu_valid ? "true" : "false")) !=
+                    std::string::npos &&
+                result[0].find(std::string("\"gpu_ms\":") +
+                    (measured.gpu_valid ? std::to_string(measured.gpu_avg_ms) : "null")) != std::string::npos,
+            "unavailable GPU timestamps remain unknown instead of reporting a zero-cost GPU");
         clear_environment("MHP3RD_DEVICE_TEST");
     }
 #endif

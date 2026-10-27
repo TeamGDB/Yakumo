@@ -78,6 +78,11 @@ void set_held_cheats(const HeldCheats &cheats);
 // Queues a start of the quest (quest_start.hpp); logs what happened.
 void request_quest_start(std::uint16_t id);
 
+// Finite developer encounter setup; requires explicit device-test mode too.
+void request_encounter_start();
+void request_encounter_cancel();
+[[nodiscard]] std::string encounter_status();
+
 // Logs a "[debug] ..." line.
 void log(const std::string &line);
 // The last lines logged, oldest first, for the Debug page.

@@ -465,6 +465,8 @@ void test_quest_start() {
 
 } // namespace
 
+int encounter_tests();
+
 int main() {
     test_text();
     test_observation();
@@ -474,6 +476,7 @@ int main() {
     test_quest();
     test_quest_lists();
     test_quest_start();
+    failures += encounter_tests();
     if (failures != 0) {
         std::cerr << failures << " check(s) failed\n";
         return 1;

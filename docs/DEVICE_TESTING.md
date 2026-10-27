@@ -286,6 +286,59 @@ Check [current quotas/pricing](https://firebase.google.com/docs/test-lab/usage-q
 before use. A configured quota is not a spending cap. Use private project notes
 in `LOCAL_TESTING.md`; no project ID or credentials belong in public examples.
 
+## Barioth encounter performance
+
+The developer-only preset removes manual travel from a narrow original Tundra
+fight. Configure the existing local or ADB device entry with `build: "dev"`,
+`observations: true`, a pinned `rtc_epoch_us`, the exact source commit/artifact,
+all 355 compatible overlays and copied game/save/settings fixtures. Supply a
+finite `suite_fixtures.load-character` program as in the automatic suite. Run
+the command on the SSH host for remote native testing; this command does not
+reserve cloud devices.
+
+```sh
+python3 profiles/mhp3rd/tools/encounter_benchmark.py \
+  --config device-testing.local.json --device mac --repeat 3
+# Compare a tools-only baseline entry with the optimized artifact entry:
+python3 profiles/mhp3rd/tools/encounter_benchmark.py \
+  --config device-testing.local.json --baseline mac-baseline --device mac --repeat 3
+```
+
+Each owned session defaults to a hard 180-second cap, including preparation and
+cleanup. Use the same copied settings for both artifacts: frame-rate target and
+governor, resolution/internal scale, GPU compatibility, texture-pack selection,
+language, audio and controls. Pin RTC and input; never compare an interpreter
+run to native AOT or silently change quality. The default warmup ends at original
+quest tick 89550 (15 emulated seconds into quest 507), then measures 300 original
+game ticks (10 emulated seconds). `--frames`, `--start-tick` and `--seconds`
+select other finite intervals. A setup that misses the chosen interval fails.
+Baseline/candidate order reverses on alternating repetitions.
+
+The original quest initializes Barioth and its model before relocating the
+hunter; all normal AI and attacks stay active. Readiness checks the real
+actor/model, original map, population, landed coordinates and follow camera.
+The collector refuses unknown/changed actor/model/process/resolution, ad hoc,
+photo mode, cheats or accelerated loading/timing. It retains unique presented
+frame times, median/p95/p99, actual quest/vblank intervals, per-second guest,
+render, GPU, wait/pacing contributions and game/presentation rates. GPU time is
+unknown when timestamps are unavailable. A ring overrun fails instead of
+silently dropping slow observations; overlapping histories are not duplicated.
+
+Private `encounter-report.json` files and the aggregate `benchmark-report.json`
+record source/artifact, fixtures/settings, GPU/driver, resolved compatibility
+mode, RTC and captures. Cross-run hardware, input data/settings, resolution or
+mode differences invalidate the comparison. Reports say **COLLECTED**, with
+capture review **PENDING**: inspect the ready and final game frames for the
+actual Barioth, terrain/effects and rendering correctness before publishing
+scrubbed aggregate numbers. A frustum test cannot certify occlusion or graphical
+correctness. Keep reports, captures, paths, raw logs and game data ignored/local.
+
+`barioth-encounter` is also available through the existing reviewed-scenario
+runner for a bounded setup smoke (`fixtures.load-character` there). This does
+not expand QUICK release certification or certify a complete hunt. Original
+small monsters remain; arbitrary spawning, selective despawning and an arena
+are not supported. See [the native preset contract](DEBUG_MENU.md#fast-barioth-encounter).
+
 ## Add a regression
 
 Add a small JSON file under `profiles/mhp3rd/tests/scenarios/`. Its contract is:
