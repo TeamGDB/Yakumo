@@ -30,8 +30,10 @@ NAME = re.compile(r'[a-z0-9][a-z0-9_-]{0,63}\Z')
 ENV_KEYS = {'MHP3RD_LANGUAGE', 'MHP3RD_TRACE_TEXT', 'MHP3RD_NO_RENDER',
             'MHP3RD_NO_AUDIO', 'MHP3RD_FONT', 'MHP3RD_GPU_COMPAT',
             'MHP3RD_TEXT_NO_QUEST_DIRECT', 'MHP3RD_TEXT_SEARCH_UNLIMITED', 'MHP3RD_NO_SPARSE_VERTEX_DECODE',
+            'MHP3RD_NO_PLAIN_ALPHA_VARIANTS',
             'MHP3RD_PERF_ALTERNATE'}
 EVIDENCE_LIMIT = 64 * 1024 * 1024
+PERFORMANCE_MODES = ('log', 'settings', 'alternate-alpha', 'alternate-sparse')
 EVIDENCE_FILES = {'report.json', 'run.log', 'vulkan.json', 'logcat.log'}
 ACTIVITY = 'io.github.teamgdb.yakumo.YakumoActivity'
 
@@ -163,8 +165,11 @@ def validate_device(value):
         raise ValueError('Gameplay reserve must be 0..1800 seconds within the session')
     if set(value.get('env', {})) - ENV_KEYS:
         raise ValueError('Unsupported environment override; isolation controls cannot be replaced')
-    if value.get('performance', 'log') not in ('log', 'settings'):
-        raise ValueError('Performance must be log or settings')
+    performance = value.get('performance', 'log')
+    if performance not in PERFORMANCE_MODES:
+        raise ValueError('Unknown performance mode')
+    if performance.startswith('alternate-') and (value['adapter'] != 'adb' or not value.get('observations') or value['build'] != 'dev'):
+        raise ValueError('Alternating APK diagnostics require developer ADB observations')
     for key in ('adb', 'android', 'python', 'args'):
         if key in value and (not isinstance(value[key], list) or
                 (key != 'args' and not value[key]) or any(not isinstance(item, str) or '\0' in item for item in value[key])):
@@ -510,6 +515,7 @@ class Adb:
         self.pid = None
         self.log_process = None
         self.log_file = None
+        self._log_cache = b''
 
     def adb(self, *args, data=None, check=True):
         return command(self.prefix + list(args), self.deadline, data=data, check=check)
@@ -712,6 +718,7 @@ class Adb:
     def launch(self):
         if self.pids():
             raise NotTested('Dedicated package started after preparation; refusing to interfere')
+        self._log_cache = b''
         self.log_file = (self.root / 'logcat.log').open('wb')
         self.log_process = subprocess.Popen(self.prefix + ['logcat', '-T', '1'],
                                             stdout=self.log_file, stderr=subprocess.STDOUT)
@@ -743,7 +750,23 @@ class Adb:
         self.watchdog_pid = watchdog_pid
 
     def text(self):
-        text = self.app('cat files/yakumo.log', check=False).decode(errors='replace')
+        # Transfer only new bytes: repeatedly downloading the entire combat log
+        # makes polling progressively slower over remote ADB. Preserve partial UTF-8
+        # sequences in the byte cache, and reset on launch or observed truncation.
+        offset = len(self._log_cache)
+        command = (f'offset={offset}; size=0; '
+                   'if [ -f files/yakumo.log ]; then size=$(wc -c < files/yakumo.log); fi; '
+                   '[ "$size" -ge "$offset" ] || offset=0; '
+                   'printf "%s\\n" "$offset"; '
+                   '[ "$size" -eq 0 ] || tail -c +$((offset + 1)) files/yakumo.log')
+        header, separator, payload = self.app(command).partition(b'\n')
+        if not separator or header not in (b'0', str(offset).encode()):
+            raise RuntimeError('Invalid Android log offset response')
+        previous = self._log_cache if header != b'0' else b''
+        if len(previous) + len(payload) > EVIDENCE_LIMIT:
+            raise ValueError('Android log exceeds evidence limit')
+        self._log_cache = previous + payload
+        text = self._log_cache.decode(errors='replace')
         (self.root / 'run.log').write_text(text)
         return text
 
@@ -829,17 +852,23 @@ def verify_artifact(device, actual):
 def android_contract(package, performance='log', observations=False, rtc_epoch_us=None):
     if not valid_package(package):
         raise ValueError('Test package must end in .devicetest')
-    if performance not in ('log', 'settings'):
-        raise ValueError('Performance must be log or settings')
+    if performance not in PERFORMANCE_MODES:
+        raise ValueError('Unknown performance mode')
     root = '/data/data/' + package + '/files/device-testing'
+    # Captures are taken on request. Like native runs, packages turn off the
+    # periodic capture: writing a frame every two seconds stalls the game.
     contract = {'package': package, 'env': {'MHP3RD_GAME_DIR': root + '/data',
             'MHP3RD_DATA_DIR': root + '/data', 'MHP3RD_INPUT_LIVE': root + '/input-live.txt',
             'MHP3RD_DEBUG_COMMANDS': root + '/debug.txt', 'MHP3RD_DEBUG_MENU': '1',
-            'MHP3RD_SCREENSHOT_DIR': root + '/shots', 'MHP3RD_PERF': 'log'}}
+            'MHP3RD_SCREENSHOT_DIR': root + '/shots', 'MHP3RD_SCREENSHOT_EVERY': '0', 'MHP3RD_PERF': 'log'}}
     if performance == 'settings':
         contract['env'].pop('MHP3RD_PERF')
     if observations:
         contract['env'].update(MHP3RD_DEVICE_TEST='1', MHP3RD_TRACE_CAMERA='1')
+    if performance.startswith('alternate-'):
+        if not observations:
+            raise ValueError('Alternating APK diagnostics require explicit observations')
+        contract['env']['MHP3RD_PERF_ALTERNATE'] = performance.removeprefix('alternate-')
     if rtc_epoch_us is not None:
         if not observations or type(rtc_epoch_us) is not int or not 946684800000000 <= rtc_epoch_us <= 4102444800000000:
             raise ValueError('Pinned APK RTC requires explicit observations and a year from 2000 to 2100')
@@ -1532,7 +1561,7 @@ def main(argv=None):
     part.add_argument('--package', required=True)
     part.add_argument('--output', required=True)
     part.add_argument('--contract', required=True)
-    part.add_argument('--performance', choices=('log', 'settings'), default='log')
+    part.add_argument('--performance', choices=PERFORMANCE_MODES, default='log')
     part.add_argument('--observations', action='store_true', help='Enable developer-only structured readbacks')
     part.add_argument('--rtc-epoch-us', type=int, help='Pin developer test RTC; must match the device configuration')
     args = parser.parse_args(argv)

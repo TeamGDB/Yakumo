@@ -168,6 +168,9 @@ class DeviceTests(unittest.TestCase):
         self.assertNotIn('SDL_ENV.MHP3RD_PERF', output.read_text())
         self.assertEqual(contract, dt.android_contract(package, 'settings'))
         self.assertEqual(dt.android_contract(package)['env']['MHP3RD_PERF'], 'log')
+        # Periodic captures stall a measured game; requested captures still work.
+        self.assertEqual(contract['env']['MHP3RD_SCREENSHOT_EVERY'], '0')
+        self.assertIn('android:name="SDL_ENV.MHP3RD_SCREENSHOT_EVERY" android:value="0"', output.read_text())
         for invalid in ('compact', None):
             with self.assertRaises(ValueError):
                 dt.android_contract(package, invalid)
@@ -475,6 +478,30 @@ class DeviceTests(unittest.TestCase):
                 self.assertEqual(code, 2 if verdict == 'PASS' else 1)
                 self.assertEqual(dt.read_json(evidence / 'report.json')['automatic']['verdict'], verdict)
 
+    def test_alternating_apk_contract_is_explicit_and_observation_only(self):
+        package = 'org.example.yakumo.devicetest'
+        for path in ('alpha', 'sparse'):
+            performance = 'alternate-' + path
+            contract = dt.android_contract(package, performance, True)
+            self.assertEqual(contract['env']['MHP3RD_PERF'], 'log')
+            self.assertEqual(contract['env']['MHP3RD_PERF_ALTERNATE'], path)
+            with self.assertRaisesRegex(ValueError, 'observations'):
+                dt.android_contract(package, performance)
+            device = {**self.device, 'adapter': 'adb', 'package': package,
+                      'serial': 'synthetic-usb', 'apk': 'fixture.apk', 'observations': True,
+                      'performance': performance}
+            self.assertEqual(dt.validate_device(device)['performance'], performance)
+            for change in ({'adapter': 'local'}, {'build': 'release'}, {'observations': False}):
+                with self.assertRaises(ValueError):
+                    dt.validate_device({**device, **change})
+            output = self.root / (path + '.xml')
+            generated = dt.android_manifest(package, output, performance, True)
+            self.assertEqual(contract, generated)
+            self.assertIn('SDL_ENV.MHP3RD_PERF_ALTERNATE', output.read_text())
+        for value in ('alternate-unknown', '', None):
+            with self.assertRaises(ValueError):
+                dt.android_contract(package, value, True)
+
     def make_adb(self):
         if os.name == 'nt':
             self.skipTest('Synthetic ADB transport uses POSIX shell; real Windows supervisor is tested separately')
@@ -558,6 +585,52 @@ elif args[0] == 'logcat':
         device = {**self.device, 'adapter': 'adb', 'package': package, 'serial': 'synthetic-usb',
                   'apk': str(apk), 'adb': [sys.executable, str(adb)]}
         return device
+
+    def test_adb_log_reads_append_utf8_truncate_and_reset_on_launch(self):
+        device = self.make_adb()
+        adapter = dt.Adb(device, self.run_dir, time.monotonic() + 20)
+        log = self.adb_root / 'files/yakumo.log'
+        with patch.dict(os.environ, {'FAKE_ADB_ROOT': str(self.adb_root)}):
+            self.assertEqual(adapter.text(), '')  # Not created yet.
+            log.write_bytes(b'first\n\xe2')
+            self.assertEqual(adapter.text(), 'first\n\ufffd')
+            with log.open('ab') as stream:
+                stream.write(b'\x82\xac\nsecond\n')
+            with patch.object(adapter, 'app', wraps=adapter.app) as calls:
+                self.assertEqual(adapter.text(), 'first\n\u20ac\nsecond\n')
+                self.assertIn('offset=7;', calls.call_args.args[0])
+            self.assertEqual(adapter.text(), 'first\n\u20ac\nsecond\n')
+            self.assertEqual((self.run_dir / 'run.log').read_text(), 'first\n\u20ac\nsecond\n')
+            log.write_bytes(b'new\n')
+            self.assertEqual(adapter.text(), 'new\n')
+            log.unlink()
+            self.assertEqual(adapter.text(), '')
+            adapter._log_cache = b'previous process'
+            try:
+                adapter.launch()
+                self.assertEqual(adapter._log_cache, b'')
+                self.assertTrue(adapter.text().startswith('Functions: 12345'))
+            finally:
+                adapter.close()
+
+    def test_adb_log_rejects_bad_offsets_and_caps_cumulative_evidence(self):
+        device = self.make_adb()
+        adapter = dt.Adb(device, self.run_dir, time.monotonic() + 20)
+        adapter._log_cache = b'1234'
+        for response in (b'', b'4', b'2\nbody', b'004\nbody', b'garbage\nbody'):
+            with self.subTest(response=response), patch.object(adapter, 'app', return_value=response):
+                with self.assertRaisesRegex(RuntimeError, 'log offset'):
+                    adapter.text()
+                self.assertEqual(adapter._log_cache, b'1234')
+        with patch.object(dt, 'EVIDENCE_LIMIT', 5):
+            with patch.object(adapter, 'app', return_value=b'4\n5'):
+                self.assertEqual(adapter.text(), '12345')
+            with patch.object(adapter, 'app', return_value=b'5\n6'):
+                with self.assertRaisesRegex(ValueError, 'evidence limit'):
+                    adapter.text()
+                self.assertEqual(adapter._log_cache, b'12345')
+            with patch.object(adapter, 'app', return_value=b'0\nfresh'):
+                self.assertEqual(adapter.text(), 'fresh')
 
     def test_adb_binary_upload_and_controls_survive_windows_eof_bytes(self):
         device = self.make_adb()

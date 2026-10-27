@@ -15,6 +15,14 @@ import device_checks as checks
 import device_suite as suite
 import device_testing as runner
 
+# Polling ends warmup and measurement at the first observation past each
+# declared tick, one round trip late. Remote ADB round trips on a busy phone
+# have taken over two emulated seconds, so a tenth of the interval is allowed,
+# at least those two seconds. A later observation would compare visibly
+# different windows, so the run is refused instead.
+def tick_overshoot_limit(frames):
+    return max(60, frames // 10)
+
 
 class Frames:
     """Consume only new presents, including full ring wraps; reject lost data."""
@@ -40,6 +48,11 @@ class Frames:
             raise checks.CheckFailed('Unknown/nonpositive frame duration')
         self.values.extend(new)
         self.sequence = sequence
+
+
+def timing_kind(device):
+    alternating = device.get('performance', 'log').startswith('alternate-') or device.get('env', {}).get('MHP3RD_PERF_ALTERNATE')
+    return 'alternating-diagnostic' if alternating else 'fixed'
 
 
 def encounter_records(text):
@@ -97,6 +110,7 @@ def collect(session, frames, start_tick, deadline):
         raise checks.CheckFailed('Barioth is outside the camera frustum before warmup')
     sample = session.snapshot(performance=True)
     identity = live(sample, ready)
+    state = ready
     if sample['quest_ticks'] <= start_tick:
         raise checks.CheckFailed('Setup missed the declared measurement start tick')
     # Warmup ends at a fixed original quest tick, not a different AI age on
@@ -105,7 +119,10 @@ def collect(session, frames, start_tick, deadline):
         runner.remaining(deadline)
         time.sleep(.1)
         sample = session.snapshot(performance=True)
-        live(sample, encounter(session), identity)
+        state = encounter(session)
+        live(sample, state, identity)
+    if state.get('in_view') is not True:
+        raise checks.CheckFailed('Barioth left the camera frustum during warmup')
     first = sample
     history = Frames(first)
     seconds, seen = [], set()
@@ -122,6 +139,10 @@ def collect(session, frames, start_tick, deadline):
                 'perf_second', 'speed_percent', 'game_fps', 'presented_fps', 'guest_ms', 'render_ms',
                 'wait_ms', 'pacing_ms', 'gpu_valid', 'gpu_ms', 'ge_draws', 'recorded_draws',
                 'render_passes', 'target_copies', 'requested_rate', 'running_rate', 'vertex_mib', 'index_mib'}})
+    overshoot = max(start_tick - first['quest_ticks'], start_tick - frames - sample['quest_ticks'])
+    if overshoot > tick_overshoot_limit(frames):
+        raise checks.CheckFailed(f'Observation polling overshot the declared measurement interval by {overshoot} '
+                                 f'ticks (limit {tick_overshoot_limit(frames)})')
     if len(seconds) < 2 or not history.values:
         raise checks.CheckFailed('Insufficient independent telemetry windows or frame durations')
     return {'start_tick': first['quest_ticks'], 'end_tick': sample['quest_ticks'],
@@ -133,6 +154,7 @@ def collect(session, frames, start_tick, deadline):
 
 
 def run(device, root, seconds, frames, start_tick):
+    runner.validate_device(device)
     if device['adapter'] not in ('local', 'adb'):
         raise runner.NotTested('Use a local/ADB device; invoke this command on the SSH host for remote native testing')
     if device['build'] != 'dev' or not device.get('observations') or 'rtc_epoch_us' not in device:
@@ -142,6 +164,7 @@ def run(device, root, seconds, frames, start_tick):
         raise runner.NotTested('Missing finite load-character navigation fixture')
     suite.validate_program(program, fixture=True)
     report = {'schema': 1, 'source_commit': device['commit'], 'status': 'FAIL',
+              'timing_kind': timing_kind(device),
               'configuration_sha256': runner.object_hash(device), 'rtc_epoch_us': device['rtc_epoch_us'],
               'preset': 'barioth-tundra', 'capture_review': 'PENDING', 'error': ''}
     session = suite.Session(device, root, time.monotonic() + seconds)
@@ -180,6 +203,8 @@ def run(device, root, seconds, frames, start_tick):
         report['performance_environment'] = {key: value for key, value in device.get('env', {}).items()
                                              if key not in ('MHP3RD_NO_SPARSE_VERTEX_DECODE',
                                                             'MHP3RD_NO_PLAIN_ALPHA_VARIANTS')}
+        if device.get('performance', 'log').startswith('alternate-'):
+            report['performance_environment']['MHP3RD_PERF_ALTERNATE'] = device['performance'].removeprefix('alternate-')
         report['settings_sha256'] = runner.fingerprint(session.file('data/settings.ini'))
         report['status'] = 'COLLECTED'
     except Exception as error:
@@ -218,11 +243,14 @@ def main(argv=None):
     if not 1 <= args.seconds <= 900 or not 30 <= args.frames <= 1800 or not args.frames < args.start_tick < 89900:
         parser.error('Invalid bounded session, measurement interval or warmup tick')
     devices = [args.baseline, args.device] if args.baseline else [args.device]
+    kind = timing_kind(runner.load_device(args.config, args.device))
+    if args.baseline and any(timing_kind(runner.load_device(args.config, name)) != 'fixed' for name in devices):
+        raise ValueError('Alternating diagnostics must be analyzed separately, without a baseline entry')
     results = []
     ensemble = runner.output_directory(args.output_parent)
     print(ensemble, flush=True)
     identity = None
-    summary = {'status': 'FAIL', 'runs': results, 'capture_review': 'PENDING'}
+    summary = {'status': 'FAIL', 'runs': results, 'capture_review': 'PENDING', 'timing_kind': kind}
     try:
         for repetition in range(args.repeat):
             for name in devices if repetition % 2 == 0 else reversed(devices):

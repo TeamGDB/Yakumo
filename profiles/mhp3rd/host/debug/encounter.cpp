@@ -276,13 +276,19 @@ Action Controller::tick(game::Ram &ram, std::uint64_t now_ms, bool writes_allowe
         return Action::None;
     }
     view_ = next;
+    // tick() can run more than once per guest frame (the UI and paused menus
+    // draw between flips): only a frame that advanced the quest clock counts.
+    const bool new_frame = next.ticks != counted_ticks_;
     if (phase_ == Phase::Loading) {
         if (next.ticks >= 90000u || next.target[1] < 450.0f || next.target[1] > 550.0f ||
             std::abs(next.target[1] - previous_height_) > 0.2f) {
             previous_height_ = next.target[1];
+            counted_ticks_ = next.ticks;
             stable_frames_ = 0u;
             reason_ = "waiting for Barioth to land and the quest clock to advance";
-        } else if (++stable_frames_ >= 3u) {
+        } else if (new_frame) {
+            counted_ticks_ = next.ticks;
+            if (++stable_frames_ < 3u) return Action::None;
             if (!relocate(ram, next)) {
                 fail("Barioth is outside the verified frozen-lake landing");
             } else {
@@ -296,6 +302,8 @@ Action Controller::tick(game::Ram &ram, std::uint64_t now_ms, bool writes_allowe
         }
     } else if (phase_ == Phase::Camera && next.in_view && next.ticks < first_ticks_ &&
         std::hypot(next.target[0] - next.hunter[0], next.target[2] - next.hunter[2]) < 1800.0f) {
+        if (!new_frame) return Action::None;
+        counted_ticks_ = next.ticks;
         if (++stable_frames_ >= 3u) {
             phase_ = Phase::Ready;
             reason_.clear();

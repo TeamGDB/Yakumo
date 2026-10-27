@@ -78,6 +78,19 @@ psprecomp::Runtime::RecompiledFunction initial_area_original() {
 #endif
 }
 
+#define MHP3RD_ENCOUNTER_NAME_(unit) #unit
+#define MHP3RD_ENCOUNTER_NAME(unit) MHP3RD_ENCOUNTER_NAME_(unit)
+
+// The generated registry's own name: only a unit name lets direct calls chain
+// into the restored entry again.
+const char *initial_area_name() {
+#if defined(MHP3RD_ENCOUNTER_HELPER_UNIT)
+    return MHP3RD_ENCOUNTER_NAME(MHP3RD_ENCOUNTER_HELPER_UNIT);
+#else
+    return "";
+#endif
+}
+
 bool encounter_writes_allowed() {
     const auto &held = state().held;
     return blocked_reason().empty() && !mods::serving() && !held.health && !held.stamina && !held.timer &&
@@ -188,11 +201,13 @@ void frame(psprecomp::Runtime &runtime) {
 #endif
     const auto after = s.encounter.phase();
     if (before != after) log(s.encounter.status());
+    // The wrapper only completes the game's initial-area call. Once the area
+    // is chosen, or the setup ends, the game's own entry runs it again.
+    if (s.encounter_hook && after != encounter::Phase::Village && after != encounter::Phase::Departing) {
+        runtime.register_function(encounter::kInitialAreaChoice, initial_area_original(), initial_area_name());
+        s.encounter_hook = false;
+    }
     if (after == encounter::Phase::Idle || after == encounter::Phase::Finished || after == encounter::Phase::Failed) {
-        if (s.encounter_hook) {
-            runtime.register_function(encounter::kInitialAreaChoice, initial_area_original(), "encounter_original");
-            s.encounter_hook = false;
-        }
 #if defined(MHP3RD_HAS_RENDERER)
         if (s.encounter_focus) camera::lock_on_release("encounter ended");
 #endif
