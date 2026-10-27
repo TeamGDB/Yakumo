@@ -467,6 +467,107 @@ void test_quest_start() {
 
 int encounter_tests();
 
+// The test tools: the hunter's state, a teleport, the actors around it and
+// holding them away from a test.
+void put(Ram &ram, std::uint32_t at, float x, float y, float z) {
+    const float xyz[3] = {x, y, z};
+    for (const std::uint32_t offset : {game::kActorWorldPosition, game::kActorPosition})
+        for (std::uint32_t i = 0; i < 3u; ++i) ram.store32(at + offset + i * 4u, std::bit_cast<std::uint32_t>(xyz[i]));
+}
+float position(const Ram &ram, std::uint32_t at, std::uint32_t axis, std::uint32_t offset = game::kActorPosition) {
+    return std::bit_cast<float>(ram.load32(at + offset + axis * 4u));
+}
+
+void test_test_tools() {
+    BufferRam ram(kBase, kSize);
+    std::vector<std::string> out;
+    const auto run = [&](const std::string &command, const std::vector<std::string> &args) {
+        out.clear();
+        check(game_command(ram, command, args, out), "a test tool command is known");
+        return out.empty() ? std::string() : out.back();
+    };
+    check(run("where", {}) == "not on a quest", "the hunter is not read outside a quest");
+    load_overlay(ram, "game_task.ovl");
+
+    const std::uint32_t h = game::kHunter;
+    put(ram, h, 1500.0f, 500.0f, 1800.0f);
+    ram.store32(h + game::kActorPreviousPosition + 4u, std::bit_cast<std::uint32_t>(510.0f));
+    ram.store32(h + game::kHunterGround, std::bit_cast<std::uint32_t>(14.5f));
+    ram.store16(h + game::kHunterFacing, 0x4000u);
+    ram.store8(h + game::kActorArea, 7u);
+    ram.store8(h + game::kHunterAction, 0u);
+    ram.store8(h + game::kHunterAction + 1u, 11u);
+    ram.store8(h + game::kHunterAction + 2u, 34u);
+    ram.store8(h + game::kHunterAirborne, 2u);
+    ram.store16(game::kHealth, 150u);
+    check(run("where", {}) ==
+            "hunter at 1500.0 500.0 1800.0, previous height 510.0, ground 14.5, facing 0x00004000, area 7, action "
+            "0:11:34, airborne 2, health 150",
+        "where shows position, ground, facing, area, action and the airborne mark");
+
+    check(run("tp", {"1"}) == "usage: tp X Y Z [FACING]", "a teleport needs three coordinates");
+    check(run("tp", {"100", "200.5", "-300", "0x8000"}) == "hunter moved to 100.0 200.5 -300.0", "teleport");
+    bool moved = true;
+    for (const std::uint32_t offset : {game::kActorWorldPosition, game::kActorPosition, game::kActorPreviousPosition})
+        moved = moved && position(ram, h, 0, offset) == 100.0f && position(ram, h, 1, offset) == 200.5f &&
+            position(ram, h, 2, offset) == -300.0f;
+    check(moved, "world, physics and previous position move together");
+    check(ram.load16(h + game::kHunterFacing) == 0x8000u && ram.load16(h + game::kHunterFacingCopy) == 0x8000u,
+        "the facing and its copy turn together");
+
+    // A small monster beside the hunter, one in another area, and an object
+    // whose vtable is not code.
+    const std::uint32_t vtable = 0x0A100000u;
+    for (std::uint32_t i = 0; i < 4u; ++i) ram.store32(vtable + i * 4u, 0x0A100100u + i * 4u);
+    const std::uint32_t near = 0x0A200000u, elsewhere = 0x0A201000u, data = 0x0A202000u;
+    for (const std::uint32_t a : {near, elsewhere, data}) {
+        ram.store32(a, a == data ? 0x12345678u : vtable);
+        put(ram, a, 110.0f, 200.0f, -300.0f);
+        ram.store8(a + game::kActorArea, a == elsewhere ? 3u : 7u);
+        ram.store8(a + game::kMonsterKind, 13u);
+        ram.store16(a + game::kMonsterHealth, 105u);
+    }
+    check(run("actors", {}) == "1 actors" && out.size() == 2u &&
+            out[0] == "actor 0x0A200000 vtable 0x0A100000 kind 13 at 110.0 200.0 -300.0, 10.0 away, health 105",
+        "actors lists the monster in the hunter's area only");
+    check(run("actors", {"5"}) == "0 actors", "and only within the radius");
+
+    check(run("hold", {"all", "1000"}) == "usage: hold all RADIUS X Y Z | hold ADDRESS X Y Z", "hold needs a place");
+    check(run("hold", {"0x0A202000", "1", "2", "3"}).rfind("0 more held", 0) == 0, "only actors can be held");
+    check(run("hold", {"all", "1000", "-2700", "14.5", "-600"}) == "1 more held, 1 in all, at -2700.0 14.5 -600.0",
+        "hold all");
+    check(position(ram, near, 0, game::kActorPreviousPosition) == -2700.0f && position(ram, near, 2) == -600.0f,
+        "a held actor is moved at once");
+    put(ram, near, 120.0f, 200.0f, -300.0f);
+    held_actors_frame(ram);
+    check(position(ram, near, 0) == -2700.0f && position(ram, near, 1, game::kActorWorldPosition) == 14.5f,
+        "and put back at every frame");
+    ram.store32(near, 0x0A100004u);
+    put(ram, near, 120.0f, 200.0f, -300.0f);
+    held_actors_frame(ram);
+    check(held_actor_count() == 0u && position(ram, near, 0) == 120.0f, "an actor whose vtable changed is let go");
+
+    ram.store32(near, vtable);
+    check(run("hold", {"0x0A200000", "1", "2", "3"}).rfind("1 more held, 1 in all", 0) == 0, "hold one actor");
+    check(run("release", {}) == "released 1 actors" && held_actor_count() == 0u, "release");
+    run("hold", {"all", "1000", "1", "2", "3"});
+    load_overlay(ram, "lobby_task.ovl");
+    held_actors_frame(ram);
+    check(held_actor_count() == 0u, "the end of the quest lets every actor go");
+
+    HeldCheats cheats{};
+    check(cheat_command({"health", "on"}, cheats) && cheats.health, "cheat health on");
+    check(cheat_command({"onehit", "on"}, cheats) && cheats.one_hit && cheat_command({"onehit", "off"}, cheats) &&
+            !cheats.one_hit,
+        "cheat onehit on and off");
+    check(cheat_command({"stamina", "on"}, cheats) && cheat_command({"timer", "on"}, cheats) && cheats.stamina &&
+            cheats.timer,
+        "cheat stamina and timer");
+    check(!cheat_command({"wings", "on"}, cheats) && !cheat_command({"health"}, cheats) &&
+            !cheat_command({"health", "yes"}, cheats) && cheats.health,
+        "anything else changes nothing");
+}
+
 int main() {
     test_text();
     test_observation();
@@ -476,6 +577,7 @@ int main() {
     test_quest();
     test_quest_lists();
     test_quest_start();
+    test_test_tools();
     failures += encounter_tests();
     if (failures != 0) {
         std::cerr << failures << " check(s) failed\n";

@@ -151,6 +151,12 @@ echo "quest list hall 8" >> cmd.txt  # the Guild Hall's 8-star quests
 | `encounter cancel` | Cancel pending setup and release its camera lock; the ordinary quest continues |
 | `pcstats` | Print actual `[count-pc]` hits for up to eight comma-separated guest addresses armed through `PSPRECOMP_COUNT_PC` before startup; read-only lifecycle/profiling evidence |
 | `monsterhp N` | Every large monster's health to N (at least 1) |
+| `cheat health\|stamina\|timer\|onehit on\|off` | Switch one of the Debug page's held cheats (*Infinite health*, *Infinite stamina*, *Freeze the quest timer*, *Monsters at 1 health*) from the command file |
+| `where` | On a quest: the local hunter's position, previous height, the ground under it, its facing, area, action (main:sub:phase bytes at `+0x18C`) and airborne mark (`+0x218`: 2 while it climbs or is in the air), and its health |
+| `tp X Y Z [FACING]` | On a quest: move the local hunter there, world, physics and previous position together, and optionally turn it (65536ths of a turn: 0 faces +z, `0x4000` +x) |
+| `actors [RADIUS]` | On a quest: objects shaped like the hunter or a monster in the hunter's area (a vtable of code pointers, world and physics positions that agree), within RADIUS on the ground plane: address, vtable, kind, position, distance and health. Small monsters are found too; the monster table holds only some. A heuristic scan of user memory |
+| `hold all RADIUS X Y Z`, `hold ADDRESS X Y Z` | Keep those actors at X Y Z, put back at every flip, so nothing interrupts a test. An actor whose vtable changes, the end of the quest or ad hoc play lets go |
+| `release` | Let every held actor go |
 | `find8`/`find16`/`find32 V [LO HI]` | Every place in user memory holding V; narrowed with `next V`, `changed`, `unchanged`, `delta D`; `list` shows them |
 | `findbytes HEX` | Every place holding that byte string |
 | `peek ADDR [N]` | N bytes (default 64) as hex |
@@ -161,6 +167,26 @@ The writing commands are refused during ad hoc play like the page's.
 `quest start` answers `started quest ...` or `not started, <why>: ...`; a
 script waits for the quest's `[overlay] installed game_task` line (or polls
 `quest`) before it goes on.
+
+### Reproducing a bug in one place
+
+The quest commands put a test where it is needed and keep the quest from
+interrupting it, as they did for [#225](https://github.com/TeamGDB/Yakumo/issues/225)
+(an ice wall in the Tundra):
+
+```bash
+echo "encounter start barioth" >> cmd.txt              # the Tundra, beside Barioth
+echo "cheat health on" >> cmd.txt                      # no fainting, no cart
+echo "hold all 100000 -2700 14.6 -600" >> cmd.txt      # every monster, small ones too, kept in a corner
+echo "tp 1591 20 -440 0" >> cmd.txt                    # at the foot of the wall, facing it
+echo "where" >> cmd.txt                                # position, action, airborne mark
+```
+
+Live pad steps (`MHP3RD_INPUT_LIVE`, `profiles/mhp3rd/host/ui/input_script.hpp`)
+then drive the hunter, and `MHP3RD_SCREENSHOT_DIR` with a `shot` step captures
+what it sees. A teleport keeps the hunter's speed, so it lands where it was
+heading; `hold` writes positions of objects found by a heuristic, so use it on
+copied saves only.
 
 ### Fast Barioth encounter
 

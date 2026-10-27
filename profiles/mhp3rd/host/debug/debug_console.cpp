@@ -357,8 +357,17 @@ std::vector<std::string> run_command(Ram &ram, const std::string &line) {
             out.push_back(quests::start(ram, *q));
         }
     } else if (command != "state" && command != "item" && command != "table" && command != "quest" &&
-        !blocked_reason().empty()) {
+        command != "where" && command != "actors" && !blocked_reason().empty()) {
         out.push_back("refused (" + blocked_reason() + "): " + line);
+    } else if (command == "cheat") {
+        // cheat health|stamina|timer|onehit on|off: the Debug page's held cheats.
+        HeldCheats cheats = held_cheats();
+        if (cheat_command(args, cheats)) {
+            set_held_cheats(cheats);
+            out.push_back("cheat " + args[0] + " " + args[1]);
+        } else {
+            out.push_back("usage: cheat health|stamina|timer|onehit on|off");
+        }
     } else if (!game_command(ram, command, args, out)) {
         out.push_back("unknown command: " + command);
     }
