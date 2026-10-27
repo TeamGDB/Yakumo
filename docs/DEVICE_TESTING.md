@@ -205,13 +205,19 @@ in that package's private harness directory and refuses a currently running
 package. It never clears or replaces the original player app.
 
 The device object uses `apk`, `package`, explicit `serial`, `game_dir`, `saves`
-and optional `settings`. The packer contract has fixed diagnostic environment:
-translation/mod variants are not yet supported by this adapter and stay
+and optional `settings`. The packer contract has fixed diagnostic environment.
+Like native runs, it turns off the periodic frame capture
+(`MHP3RD_SCREENSHOT_EVERY=0`); scenarios capture on request. Packages made before
+this change wrote a frame every two seconds; at ×2 on the Redmi 12C each such
+second held a 72–97 ms frame, so their frame-time peaks are not game measurements.
+Translation/mod variants are not yet supported by this adapter and stay
 NOT TESTED. Use local translation scenarios or normal manual APK checks instead.
 No APK modification is used to certify a final release artifact.
 
 ADB startup/cleanup has a PID-guarded device watchdog and explicit host cleanup.
-Logs come from the app's actual `files/yakumo.log`; logcat and Vulkan diagnostics
+Logs come from the app's actual `files/yakumo.log`; polling transfers only new
+bytes, preserving partial UTF-8 and resetting on launch or observed truncation.
+The complete cached log remains bounded by the evidence limit. Logcat and Vulkan diagnostics
 are retained separately. Different physical GPUs require separate rows: emulator
 or old PowerVR results do not establish support for every Dimensity/PowerVR GPU.
 
@@ -312,10 +318,34 @@ run to native AOT or silently change quality. The default warmup ends at origina
 quest tick 89550 (15 emulated seconds into quest 507), then measures 300 original
 game ticks (10 emulated seconds). `--frames`, `--start-tick` and `--seconds`
 select other finite intervals. A setup that misses the chosen interval fails.
-Baseline/candidate order reverses on alternating repetitions.
+Polling ends warmup and measurement at the first observation past each tick;
+a run that passes either boundary by more than a tenth of the measured ticks,
+and at least 60 (two emulated seconds, for example after a remote ADB stall),
+is refused rather than compared over an unequal window. Remote ADB round trips
+to a busy phone have taken more than two emulated seconds. Baseline/candidate
+order reverses on alternating repetitions.
+
+For intermittent attacks such as Barioth's takeoff, use a longer finite window
+so whole-fight averages do not hide frame-time spikes:
+
+```sh
+python3 profiles/mhp3rd/tools/encounter_benchmark.py \
+  --config device-testing.local.json --baseline phone-baseline --device phone \
+  --repeat 3 --frames 1800 --seconds 600
+```
+
+This retains individual present durations over 60 emulated seconds, alongside
+the per-second contributions. Associate a suspected attack with separately
+reviewed captures; endpoint screenshots alone cannot identify the attack behind
+a spike. Record video or frequent captures in a separate diagnostic run, since
+readback/encoding can change the measured workload.
 
 The original quest initializes Barioth and its model before relocating the
-hunter; all normal AI and attacks stay active. Readiness checks the real
+hunter; all normal AI and attacks stay active. The setup wraps the game's
+initial-area function only until the area is chosen. Like any host hook, that
+leaves the function's generated unit on the general dispatcher for the rest of
+the session, so absolute timings can differ slightly from a session without
+the preset; baseline and candidate runs share this. Readiness checks the real
 actor/model, original map, population, landed coordinates and follow camera.
 The collector refuses unknown/changed actor/model/process/resolution, ad hoc,
 photo mode, cheats or accelerated loading/timing. It retains unique presented
@@ -457,3 +487,21 @@ unblock a release. Record exceptions and relevant hardware evidence in release
 notes/[COMPATIBILITY.md](COMPATIBILITY.md). Review/redact evidence before any
 public upload: captures/logs/configuration can contain copyrighted or personal
 information and are never uploaded automatically.
+
+For continuous Android diagnostics, pack a dedicated developer APK with
+`DEVICE_TEST_OBSERVATIONS=1` and `DEVICE_TEST_PERFORMANCE=alternate-alpha` or
+`alternate-sparse`, and set the device entry's `performance` to the same value.
+The runner verifies the exact generated contract before installation. These
+modes use the existing one-second `MHP3RD_PERF_ALTERNATE` switch: `alpha`
+compares tested and test-free pipelines (including the plain compatibility
+shader variants), while `sparse` compares CPU vertex gathering. The native
+libraries are identical to the corresponding fixed-mode APK.
+
+Run the encounter command with that single device entry and a finite interval,
+for example `--repeat 2 --frames 900 --seconds 600`. Reports label the result
+`alternating-diagnostic`; a `--baseline` entry is rejected before starting any
+game. Analyze the native `alt on`/`alt off` telemetry windows within the declared
+measurement interval separately. Mixed-mode present percentiles do not establish
+a fixed-path FPS/p95/p99 improvement, and a frame crossing a mode transition
+can include GPU work from the previous mode. Normal player/release APK contracts
+and APKs without developer observations cannot enable these diagnostics.

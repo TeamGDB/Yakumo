@@ -54,6 +54,7 @@ private:
     std::uint64_t deadline_{};
     std::uint64_t stable_since_{};
     std::uint32_t first_ticks_{};
+    std::uint32_t counted_ticks_{}; // quest clock of the last counted stable frame
     unsigned stable_frames_{};
     float previous_height_{};
 };

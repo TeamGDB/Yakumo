@@ -47,10 +47,11 @@ while True:
  for line in text[offset:].splitlines():
   if line=='encounter start barioth':phase='quest'
   if line.startswith('encounter '):
-   print('[debug] encounter '+json.dumps(ready),flush=True)
+   observed={**ready,'in_view':not(mode=='invisible' and ticks<=89890)}
+   print('[debug] encounter '+json.dumps(observed),flush=True)
   if line.startswith('observe '):
    request=int(line.split()[1]);second+=1;sequence+=5
-   if phase=='quest':ticks-=10
+   if phase=='quest':ticks-=80 if mode=='slow' and ticks==89900 else 10
    result={'schema':1,'request':request,'task':{'demo':'demo_task.ovl','village':'lobby_task.ovl','quest':'game_task.ovl'}[phase],
     'village_ready':phase=='village','on_quest':phase=='quest','map':'P_m04a07d.ovl','accepted_id':507,'active_id':507,
     'online':mode=='online' and phase=='quest','quest_cheats':False,'photo':False,'fast_forward':False,'fast_loading':False,
@@ -87,6 +88,10 @@ class EncounterBenchmarkTests(unittest.TestCase):
             with self.assertRaises(bench.checks.CheckFailed):
                 bench.encounter_records('[debug] encounter ' + json.dumps({**state(), **update}) + '\n')
 
+    def test_overshoot_limit_scales_with_the_interval(self):
+        self.assertEqual([bench.tick_overshoot_limit(frames) for frames in (30, 300, 609, 610, 900, 1800)],
+                         [60, 60, 60, 61, 90, 180])
+
     def test_outcome_guards(self):
         expected = bench.live(sample(), state())
         for update in ({'online': True}, {'photo': True}, {'quest_cheats': True}, {'fast_forward': True},
@@ -113,7 +118,7 @@ class EncounterBenchmarkTests(unittest.TestCase):
         self.assertGreater(session.adapter.reads,2)
 
     def test_owned_synthetic_session_and_failure_cleanup(self):
-        for mode in ('', 'online', 'rtc'):
+        for mode in ('', 'online', 'rtc', 'invisible', 'slow'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
                 base = Path(temporary)
                 (base/'game').mkdir(); (base/'saves').mkdir(); (base/'evidence').mkdir()
@@ -147,11 +152,16 @@ class EncounterBenchmarkTests(unittest.TestCase):
                         self.assertTrue(all(row['gpu_ms'] is None for row in report['measurement']['seconds']))
                 report = json.loads((base/'evidence/encounter-report.json').read_text())
                 self.assertEqual(report['status'], 'FAIL' if mode else 'COLLECTED')
+                if mode == 'slow':
+                    self.assertIn('overshot the declared measurement interval by 70 ticks (limit 60)', report['error'])
                 self.assertFalse(sessions[0].started)
                 self.assertIsNotNone(sessions[0].adapter.process.poll())
                 self.assertEqual((base/'saves/fixture').read_bytes(), b'original fixture stays unchanged')
 
     def test_configuration_and_finite_cli(self):
+        self.assertEqual(bench.timing_kind({'performance': 'alternate-alpha'}), 'alternating-diagnostic')
+        self.assertEqual(bench.timing_kind({'env': {'MHP3RD_PERF_ALTERNATE': 'sparse'}}), 'alternating-diagnostic')
+        self.assertEqual(bench.timing_kind({}), 'fixed')
         for device in ({'adapter': 'streaming'}, {'adapter': 'local', 'build': 'release'},
                        {'adapter': 'adb', 'build': 'dev', 'observations': True, 'rtc_epoch_us': 1}):
             with self.assertRaises((ValueError, bench.runner.NotTested)):
@@ -173,6 +183,14 @@ class EncounterBenchmarkTests(unittest.TestCase):
                 results=bench.main(['--config',str(config),'--device','b','--baseline','a','--repeat','2','--output-parent',temporary])
             self.assertEqual(order,['0-a','0-b','1-b','1-a'])
             self.assertEqual(len(results),4)
+            config.write_text(json.dumps({'devices': {'a': device, 'b': {**device,
+                'env': {'MHP3RD_PERF_ALTERNATE': 'alpha'}}}}))
+            with mock.patch.object(bench, 'run') as run:
+                with self.assertRaisesRegex(ValueError, 'separately'):
+                    bench.main(['--config', str(config), '--device', 'b', '--baseline', 'a',
+                                '--output-parent', temporary])
+                run.assert_not_called()
+            config.write_text(json.dumps({'devices': {'a': device, 'b': device}}))
             count=0
             def mismatch(*_):
                 nonlocal count

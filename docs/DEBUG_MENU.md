@@ -177,11 +177,13 @@ Setup validates the active/accepted quest IDs, executable signature, original
 spawn record and empty twenty-slot actor manager before changing the initial
 area. The real quest creates Barioth and loads `em005m0.ovl`. Once its vtable's
 model accessor resolves a complete PMO 1.02 model, its health/area/coordinates
-are valid, its landing has settled and the quest clock advances, the hunter is
-relocated to the verified flat lake near it. World, physics and previous
+are valid and its height stays put over three guest frames that advance the
+quest clock, the hunter is relocated to the verified flat lake near it. Repeated
+views of one frame (the interface drawing twice, a paused menu) do not count. World, physics and previous
 positions are updated together at a guest frame boundary. The ordinary follow
-camera locks on; three subsequent in-frustum observations and an advancing
-clock precede `"phase":"ready"`. AI, attacks, monster health and game timing
+camera locks on; three subsequent in-frustum guest frames, each advancing the
+clock, precede `"phase":"ready"`. The wrapper is removed again once the area is
+chosen. AI, attacks, monster health and game timing
 remain the game's own. Inspect the resulting capture: a projected point alone
 does not establish unoccluded pixels.
 

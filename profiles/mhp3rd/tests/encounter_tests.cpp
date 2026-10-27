@@ -122,8 +122,16 @@ struct Fixture {
         initialize();
         check(encounter::inspect(ram).valid(), "independent actor, overlay and model fixture is ready");
         control.tick(ram, 3000u, true);
+        // The UI and paused menus can reach tick() several times per flip.
+        for (unsigned i = 0; i < 4u; ++i) control.tick(ram, 3010u + i, true);
+        check(control.phase() == encounter::Phase::Loading, "repeated views of one guest frame cannot settle landing");
+        ram.store32(p3rd::kQuestTimeLeft, 89869u);
         control.tick(ram, 3033u, true);
+        ram.store32(p3rd::kQuestTimeLeft, 89868u);
         control.tick(ram, 3066u, true);
+        control.tick(ram, 3067u, true);
+        check(control.phase() == encounter::Phase::Loading, "landing needs three advancing guest frames");
+        ram.store32(p3rd::kQuestTimeLeft, 89867u);
         check(control.tick(ram, 3099u, true) == encounter::Action::Focus,
             "settled target relocates once and requests focus");
         check(control.phase() == encounter::Phase::Camera, "camera validation precedes readiness");
@@ -140,8 +148,15 @@ struct Fixture {
         relocate();
         control.tick(ram, 3132u, true);
         check(control.phase() == encounter::Phase::Camera, "unchanged quest clock cannot satisfy camera readiness");
-        ram.store32(p3rd::kQuestTimeLeft, 89869u);
-        for (unsigned i = 0; i < 3u; ++i) control.tick(ram, 3165u + i * 33u, true);
+        ram.store32(p3rd::kQuestTimeLeft, 89866u);
+        for (unsigned i = 0; i < 3u; ++i) control.tick(ram, 3165u + i, true);
+        check(control.phase() == encounter::Phase::Camera, "repeated views of one guest frame cannot satisfy camera");
+        std::uint64_t now = 3198u;
+        for (std::uint32_t clock : {89865u, 89864u}) {
+            ram.store32(p3rd::kQuestTimeLeft, clock);
+            control.tick(ram, now, true);
+            now += 33u;
+        }
         check(control.phase() == encounter::Phase::Ready, "visible target and advancing quest clock complete setup");
     }
 };
@@ -305,7 +320,10 @@ void failures_and_reset() {
         Fixture f;
         f.initialize();
         f.position(actor + 0x80u, 0, 500, 0);
-        for (unsigned i = 0; i < 5u; ++i) f.control.tick(f.ram, 3000u + i * 33u, true);
+        for (unsigned i = 0; i < 5u; ++i) {
+            f.ram.store32(p3rd::kQuestTimeLeft, 89870u - i);
+            f.control.tick(f.ram, 3000u + i * 33u, true);
+        }
         check(f.control.phase() == encounter::Phase::Failed, "unsupported terrain/landing is never guessed");
     }
     {
