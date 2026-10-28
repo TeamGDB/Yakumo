@@ -506,6 +506,8 @@ void test_test_tools() {
         "where shows position, ground, facing, area, action and the airborne mark");
 
     check(run("tp", {"1"}) == "usage: tp X Y Z [FACING]", "a teleport needs three coordinates");
+    check(run("tp", {"1", "up", "3"}) == "usage: tp X Y Z [FACING]" && position(ram, h, 0) == 1500.0f,
+        "and numbers: a word does not move the hunter to 0");
     check(run("tp", {"100", "200.5", "-300", "0x8000"}) == "hunter moved to 100.0 200.5 -300.0", "teleport");
     bool moved = true;
     for (const std::uint32_t offset : {game::kActorWorldPosition, game::kActorPosition, game::kActorPreviousPosition})
@@ -527,13 +529,22 @@ void test_test_tools() {
         ram.store8(a + game::kMonsterKind, 13u);
         ram.store16(a + game::kMonsterHealth, 105u);
     }
-    check(run("actors", {}) == "1 actors" && out.size() == 2u &&
+    check(run("actors", {}) == "1 actor" && out.size() == 2u &&
             out[0] == "actor 0x0A200000 vtable 0x0A100000 kind 13 at 110.0 200.0 -300.0, 10.0 away, health 105",
         "actors lists the monster in the hunter's area only");
     check(run("actors", {"5"}) == "0 actors", "and only within the radius");
+    check(run("actors", {"far"}) == "usage: actors [RADIUS]" && out.size() == 1u, "a radius is a number");
+    // The scan stops where an actor's health would no longer be in memory.
+    const std::uint32_t last = kBase + static_cast<std::uint32_t>(kSize) - 0x200u;
+    ram.store32(last, vtable);
+    put(ram, last, 110.0f, 200.0f, -300.0f);
+    ram.store8(last + game::kActorArea, 7u);
+    check(run("actors", {}) == "1 actor", "an actor too close to the end of memory is not read");
 
     check(run("hold", {"all", "1000"}) == "usage: hold all RADIUS X Y Z | hold ADDRESS X Y Z", "hold needs a place");
     check(run("hold", {"0x0A202000", "1", "2", "3"}).rfind("0 more held", 0) == 0, "only actors can be held");
+    check(run("hold", {"all", "1000", "-2700", "low", "-600"}) == "usage: hold all RADIUS X Y Z | hold ADDRESS X Y Z",
+        "a place is numbers");
     check(run("hold", {"all", "1000", "-2700", "14.5", "-600"}) == "1 more held, 1 in all, at -2700.0 14.5 -600.0",
         "hold all");
     check(position(ram, near, 0, game::kActorPreviousPosition) == -2700.0f && position(ram, near, 2) == -600.0f,
@@ -542,6 +553,15 @@ void test_test_tools() {
     held_actors_frame(ram);
     check(position(ram, near, 0) == -2700.0f && position(ram, near, 1, game::kActorWorldPosition) == 14.5f,
         "and put back at every frame");
+    check(run("hold", {"all", "100000", "-2000", "14.5", "-600"}) == "0 more held, 1 in all, at -2000.0 14.5 -600.0" &&
+            position(ram, near, 0) == -2000.0f,
+        "holding it again moves it, once");
+    ram.store8(h + game::kActorArea, 8u);
+    put(ram, near, 120.0f, 200.0f, -300.0f);
+    held_actors_frame(ram);
+    check(held_actor_count() == 0u && position(ram, near, 0) == 120.0f, "a change of area lets every actor go");
+    ram.store8(h + game::kActorArea, 7u);
+    run("hold", {"all", "1000", "-2700", "14.5", "-600"});
     ram.store32(near, 0x0A100004u);
     put(ram, near, 120.0f, 200.0f, -300.0f);
     held_actors_frame(ram);
@@ -549,7 +569,7 @@ void test_test_tools() {
 
     ram.store32(near, vtable);
     check(run("hold", {"0x0A200000", "1", "2", "3"}).rfind("1 more held, 1 in all", 0) == 0, "hold one actor");
-    check(run("release", {}) == "released 1 actors" && held_actor_count() == 0u, "release");
+    check(run("release", {}) == "released 1 actor" && held_actor_count() == 0u, "release");
     run("hold", {"all", "1000", "1", "2", "3"});
     load_overlay(ram, "lobby_task.ovl");
     held_actors_frame(ram);

@@ -6463,6 +6463,14 @@ int run_contracts(int scripts) {
         auto pc_result = debug::run_command(ram, "pcstats");
         expect(pc_result.size() == 1u && pc_result[0].find("before startup") != std::string::npos,
             "unarmed PC profiling remains explicitly unavailable instead of an empty success claim");
+        auto cheat_result = debug::run_command(ram, "cheat health on");
+        expect(cheat_result.size() == 1u && cheat_result[0] == "cheat health on" && debug::held_cheats().health,
+            "the command file switches a held cheat");
+        cheat_result = debug::run_command(ram, "cheat wings on");
+        expect(cheat_result.size() == 1u && cheat_result[0].rfind("usage: cheat", 0) == 0u,
+            "an unknown cheat answers with its usage");
+        debug::run_command(ram, "cheat health off");
+        expect(!debug::held_cheats().health, "and switches it off again");
         const auto untouched = ram.load32(0x09FAC8D4u);
         auto encounter_result = debug::run_command(ram, "encounter status");
         expect(encounter_result.size() == 1u && encounter_result[0].find("\"phase\":\"idle\"") != std::string::npos,

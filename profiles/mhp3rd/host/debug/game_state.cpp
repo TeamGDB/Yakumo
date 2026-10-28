@@ -246,9 +246,14 @@ std::string hex32(std::uint32_t value) {
 bool code_pointer(std::uint32_t value) {
     return value >= 0x08804000u && value < 0x0A400000u && (value & 3u) == 0u;
 }
+// The bytes of an actor the tools read: up to a monster's health.
+constexpr std::uint32_t kActorExtent = p3rd::kMonsterHealth + 2u;
+std::string count(std::size_t n, const char *thing) {
+    return std::to_string(n) + " " + thing + (n == 1u ? "" : "s");
+}
 bool actor_like(const Ram &ram, std::uint32_t at) {
     using namespace p3rd;
-    if (!ram.contains(at, 0x100u)) return false;
+    if (!ram.contains(at, kActorExtent)) return false;
     const std::uint32_t vtable = ram.load32(at);
     if (!code_pointer(vtable) || !ram.contains(vtable, 16u)) return false;
     for (std::uint32_t i = 0; i < 4u; ++i)
@@ -272,6 +277,8 @@ struct HeldActor {
     std::uint32_t address{};
     std::uint32_t vtable{};
     std::array<float, 3> where{};
+    // The hunter's area when it was held: another area's actors are not it.
+    std::uint8_t area{};
 };
 std::vector<HeldActor> &held_actors() {
     static std::vector<HeldActor> held;
@@ -285,7 +292,7 @@ std::vector<std::uint32_t> actors_near(const Ram &ram, float radius) {
     const float x = load_float(ram, kHunter + kActorPosition);
     const float z = load_float(ram, kHunter + kActorPosition + 8u);
     const std::uint8_t area = ram.load8(kHunter + kActorArea);
-    for (std::uint32_t at = 0x09000000u; ram.contains(at, 0x100u); at += 16u) {
+    for (std::uint32_t at = 0x09000000u; ram.contains(at, kActorExtent); at += 16u) {
         if (at == kHunter || ram.load8(at + kActorArea) != area || !actor_like(ram, at)) continue;
         if (std::hypot(load_float(ram, at + kActorPosition) - x, load_float(ram, at + kActorPosition + 8u) - z) <=
             radius)
@@ -317,8 +324,10 @@ void held_actors_frame(Ram &ram) {
         held.clear();
         return;
     }
-    std::erase_if(held,
-        [&](const HeldActor &h) { return !ram.contains(h.address, 0x100u) || ram.load32(h.address) != h.vtable; });
+    const std::uint8_t area = ram.load8(p3rd::kHunter + p3rd::kActorArea);
+    std::erase_if(held, [&](const HeldActor &h) {
+        return !ram.contains(h.address, kActorExtent) || ram.load32(h.address) != h.vtable || h.area != area;
+    });
     for (const HeldActor &h : held) place(ram, h.address, h.where);
 }
 
@@ -578,7 +587,15 @@ bool game_command(Ram &ram, const std::string &command, const std::vector<std::s
         if (!on_quest(ram)) out.push_back("not on a quest");
         for (const std::string &line : quest_lines(ram)) out.push_back(line);
     } else if (command == "where" || command == "tp" || command == "actors" || command == "hold") {
-        const auto real = [&](std::size_t i) { return std::strtof(args[i].c_str(), nullptr); };
+        // Coordinates and radii: a word that is not a finite number spoils
+        // the command rather than turning into 0.
+        bool numbers{true};
+        const auto real = [&](std::size_t i) {
+            char *end = nullptr;
+            const float value = std::strtof(args[i].c_str(), &end);
+            if (end == args[i].c_str() || *end != '\0' || !std::isfinite(value)) numbers = false;
+            return value;
+        };
         if (!on_quest(ram)) {
             out.push_back("not on a quest");
         } else if (command == "where") {
@@ -595,21 +612,26 @@ bool game_command(Ram &ram, const std::string &command, const std::vector<std::s
                 std::to_string(static_cast<std::int16_t>(ram.load16(kHealth))));
         } else if (command == "tp") {
             // tp X Y Z [FACING]
-            if (args.size() < 3u) {
+            const std::array<float, 3> where =
+                args.size() < 3u ? std::array<float, 3>{} : std::array<float, 3>{real(0), real(1), real(2)};
+            if (args.size() < 3u || !numbers) {
                 out.push_back("usage: tp X Y Z [FACING]");
             } else {
-                place(ram, kHunter, {real(0), real(1), real(2)});
+                place(ram, kHunter, where);
                 if (args.size() > 3u) {
                     ram.store16(kHunter + kHunterFacing, static_cast<std::uint16_t>(arg(3)));
                     ram.store16(kHunter + kHunterFacingCopy, static_cast<std::uint16_t>(arg(3)));
                 }
-                out.push_back("hunter moved to " + decimal(real(0)) + " " + decimal(real(1)) + " " + decimal(real(2)));
+                out.push_back(
+                    "hunter moved to " + decimal(where[0]) + " " + decimal(where[1]) + " " + decimal(where[2]));
             }
         } else if (command == "actors") {
             // actors [RADIUS]
             const float x = load_float(ram, kHunter + kActorPosition);
             const float z = load_float(ram, kHunter + kActorPosition + 8u);
-            const auto found = actors_near(ram, args.empty() ? 100000.0f : real(0));
+            const float radius = args.empty() ? 100000.0f : real(0);
+            const auto found = numbers ? actors_near(ram, radius) : std::vector<std::uint32_t>{};
+            if (!numbers) out.push_back("usage: actors [RADIUS]");
             for (const std::uint32_t a : found)
                 out.push_back("actor " + hex32(a) + " vtable " + hex32(ram.load32(a)) + " kind " +
                     std::to_string(ram.load8(a + kMonsterKind)) + " at " +
@@ -619,26 +641,44 @@ bool game_command(Ram &ram, const std::string &command, const std::vector<std::s
                     decimal(std::hypot(
                         load_float(ram, a + kActorPosition) - x, load_float(ram, a + kActorPosition + 8u) - z)) +
                     " away, health " + std::to_string(static_cast<std::int16_t>(ram.load16(a + kMonsterHealth))));
-            out.push_back(std::to_string(found.size()) + " actors");
-        } else if (args.size() < 4u || (args[0] == "all" && args.size() < 5u)) {
-            out.push_back("usage: hold all RADIUS X Y Z | hold ADDRESS X Y Z");
+            if (numbers) out.push_back(count(found.size(), "actor"));
         } else {
             // hold all RADIUS X Y Z | hold ADDRESS X Y Z
-            const bool all = args[0] == "all";
+            const bool all = !args.empty() && args[0] == "all";
             const std::size_t first = all ? 2u : 1u;
-            const std::array<float, 3> where{real(first), real(first + 1u), real(first + 2u)};
-            std::vector<std::uint32_t> targets;
-            if (all)
-                targets = actors_near(ram, real(1));
-            else if (actor_like(ram, arg(0)))
-                targets.push_back(arg(0));
-            for (const std::uint32_t t : targets) held_actors().push_back({t, ram.load32(t), where});
-            held_actors_frame(ram);
-            out.push_back(std::to_string(targets.size()) + " more held, " + std::to_string(held_actor_count()) +
-                " in all, at " + decimal(where[0]) + " " + decimal(where[1]) + " " + decimal(where[2]));
+            const bool shaped = args.size() == first + 3u;
+            const std::array<float, 3> where =
+                shaped ? std::array<float, 3>{real(first), real(first + 1u), real(first + 2u)} : std::array<float, 3>{};
+            const float radius = shaped && all ? real(1) : 0.0f;
+            if (!shaped || !numbers) {
+                out.push_back("usage: hold all RADIUS X Y Z | hold ADDRESS X Y Z");
+            } else {
+                std::vector<std::uint32_t> targets;
+                if (all)
+                    targets = actors_near(ram, radius);
+                else if (actor_like(ram, arg(0)))
+                    targets.push_back(arg(0));
+                // Holding an actor again moves where it is kept.
+                std::size_t added = 0u;
+                const std::uint8_t area = ram.load8(kHunter + kActorArea);
+                for (const std::uint32_t t : targets) {
+                    auto &held = held_actors();
+                    const auto known =
+                        std::find_if(held.begin(), held.end(), [t](const HeldActor &h) { return h.address == t; });
+                    if (known != held.end()) {
+                        *known = {t, ram.load32(t), where, area};
+                    } else {
+                        held.push_back({t, ram.load32(t), where, area});
+                        ++added;
+                    }
+                }
+                held_actors_frame(ram);
+                out.push_back(std::to_string(added) + " more held, " + std::to_string(held_actor_count()) +
+                    " in all, at " + decimal(where[0]) + " " + decimal(where[1]) + " " + decimal(where[2]));
+            }
         }
     } else if (command == "release") {
-        out.push_back("released " + std::to_string(held_actor_count()) + " actors");
+        out.push_back("released " + count(held_actor_count(), "actor"));
         release_held_actors();
     } else if (command == "monsterhp") {
         // monsterhp N: every monster's health to N (at least 1).

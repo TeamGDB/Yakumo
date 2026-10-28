@@ -155,7 +155,7 @@ echo "quest list hall 8" >> cmd.txt  # the Guild Hall's 8-star quests
 | `where` | On a quest: the local hunter's position, previous height, the ground under it, its facing, area, action (main:sub:phase bytes at `+0x18C`) and airborne mark (`+0x218`: 2 while it climbs or is in the air), and its health |
 | `tp X Y Z [FACING]` | On a quest: move the local hunter there, world, physics and previous position together, and optionally turn it (65536ths of a turn: 0 faces +z, `0x4000` +x) |
 | `actors [RADIUS]` | On a quest: objects shaped like the hunter or a monster in the hunter's area (a vtable of code pointers, world and physics positions that agree), within RADIUS on the ground plane: address, vtable, kind, position, distance and health. Small monsters are found too; the monster table holds only some. A heuristic scan of user memory |
-| `hold all RADIUS X Y Z`, `hold ADDRESS X Y Z` | Keep those actors at X Y Z, put back at every flip, so nothing interrupts a test. An actor whose vtable changes, the end of the quest or ad hoc play lets go |
+| `hold all RADIUS X Y Z`, `hold ADDRESS X Y Z` | Keep those actors at X Y Z, put back at every flip, so nothing interrupts a test; holding one again moves it. An actor whose vtable changes, a change of area, the end of the quest or ad hoc play lets go |
 | `release` | Let every held actor go |
 | `find8`/`find16`/`find32 V [LO HI]` | Every place in user memory holding V; narrowed with `next V`, `changed`, `unchanged`, `delta D`; `list` shows them |
 | `findbytes HEX` | Every place holding that byte string |
@@ -174,13 +174,23 @@ The quest commands put a test where it is needed and keep the quest from
 interrupting it, as they did for [#225](https://github.com/TeamGDB/Yakumo/issues/225)
 (an ice wall in the Tundra):
 
+The game runs with `MHP3RD_DEBUG_MENU=1`, `MHP3RD_DEVICE_TEST=1` (for the
+encounter) and `MHP3RD_DEBUG_COMMANDS=cmd.txt`, on copied saves, and waits in
+the village:
+
 ```bash
 echo "encounter start barioth" >> cmd.txt              # the Tundra, beside Barioth
+echo "encounter status" >> cmd.txt                     # again, until it reports "phase":"ready"
 echo "cheat health on" >> cmd.txt                      # no fainting, no cart
 echo "hold all 100000 -2700 14.6 -600" >> cmd.txt      # every monster, small ones too, kept in a corner
 echo "tp 1591 20 -440 0" >> cmd.txt                    # at the foot of the wall, facing it
 echo "where" >> cmd.txt                                # position, action, airborne mark
 ```
+
+Every complete line in the file runs at the next flip, so the first two go in
+on their own and the rest only once the encounter is ready: the encounter
+starts a frame after it is asked for, refuses to while a quest cheat is held,
+and until the quest is under way `hold` and `tp` answer `not on a quest`.
 
 Live pad steps (`MHP3RD_INPUT_LIVE`, `profiles/mhp3rd/host/ui/input_script.hpp`)
 then drive the hunter, and `MHP3RD_SCREENSHOT_DIR` with a `shot` step captures
