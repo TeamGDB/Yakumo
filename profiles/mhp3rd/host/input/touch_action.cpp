@@ -39,14 +39,10 @@ ActionLayout make_default() {
     const auto set = [&](Element e, Anchor anchor, float x, float y, float size, std::uint16_t buttons) {
         l.at(e) = {anchor, x, y, size, buttons, true};
     };
-    // The left thumb: the stick low, the pouch above it at the edge, D-pad
-    // Up and Down beside it.
     set(Element::Stick, Anchor::Left, 0.30f, 0.72f, 0.13f, 0u);
     set(Element::Item, Anchor::Left, 0.12f, 0.47f, 0.05f, kL);
     set(Element::DpadUp, Anchor::Left, 0.54f, 0.66f, 0.042f, kUp);
     set(Element::DpadDown, Anchor::Left, 0.54f, 0.82f, 0.042f, kDown);
-    // The right thumb: the attack large in the middle of a cluster, high
-    // enough to leave the game's item bar in the bottom right corner clear.
     set(Element::Attack, Anchor::Right, 0.33f, 0.60f, 0.09f, kTriangle);
     set(Element::Secondary, Anchor::Right, 0.40f, 0.36f, 0.055f, kCircle);
     set(Element::Combo, Anchor::Right, 0.54f, 0.47f, 0.055f, static_cast<std::uint16_t>(kTriangle | kCircle));
@@ -54,11 +50,9 @@ ActionLayout make_default() {
     set(Element::Use, Anchor::Right, 0.70f, 0.74f, 0.04f, kSquare);
     set(Element::Guard, Anchor::Right, 0.13f, 0.44f, 0.055f, kR);
     set(Element::Special, Anchor::Right, 0.13f, 0.64f, 0.055f, kR);
-    // Small, at the right edge near the top.
     set(Element::Pause, Anchor::Right, 0.055f, 0.08f, 0.035f, 0u);
     set(Element::Start, Anchor::Right, 0.055f, 0.18f, 0.035f, kStart);
     set(Element::Select, Anchor::Right, 0.055f, 0.28f, 0.035f, kSelect);
-    // Above the middle, clear of both thumbs' elements.
     set(Element::Swipe, Anchor::Centre, 0.0f, 0.30f, 0.09f, 0u);
     set(Element::R3, Anchor::Right, 0.075f, 0.925f, 0.04f, 0u);
     set(Element::DPad, Anchor::Left, 0.30f, 0.42f, 0.11f, 0u);
@@ -71,7 +65,6 @@ bool is_button(Element e) {
     return e != Element::Stick && e != Element::Swipe && e != Element::DPad;
 }
 
-// The right thumb's buttons, which a thumb may slide across.
 bool in_cluster(Element e) {
     switch (e) {
     case Element::Attack:
@@ -89,12 +82,9 @@ bool in_cluster(Element e) {
 
 const char *anchor_name(Anchor a) {
     switch (a) {
-    case Anchor::Left:
-        return "left";
-    case Anchor::Centre:
-        return "centre";
-    case Anchor::Right:
-        return "right";
+    case Anchor::Left: return "left";
+    case Anchor::Centre: return "centre";
+    case Anchor::Right: return "right";
     }
     return "left";
 }
@@ -160,14 +150,10 @@ bool parse(std::string_view text, Placement &out) {
     Placement p;
     int shown = 1;
     if (!(in >> anchor >> p.x >> p.y >> p.size >> buttons >> shown)) return false;
-    if (anchor == "left")
-        p.anchor = Anchor::Left;
-    else if (anchor == "centre")
-        p.anchor = Anchor::Centre;
-    else if (anchor == "right")
-        p.anchor = Anchor::Right;
-    else
-        return false;
+    if (anchor == "left") p.anchor = Anchor::Left;
+    else if (anchor == "centre") p.anchor = Anchor::Centre;
+    else if (anchor == "right") p.anchor = Anchor::Right;
+    else return false;
     char *end = nullptr;
     const unsigned long bits = std::strtoul(buttons.c_str(), &end, 0);
     if (end == buttons.c_str() || *end != '\0' || bits > 0xFFFFu) return false;
@@ -194,15 +180,9 @@ Placed place(const Placement &p, Element element, const Area &area, float scale)
     const float unit = area.height;
     Placed placed;
     switch (p.anchor) {
-    case Anchor::Left:
-        placed.centre.x = area.left + p.x * unit;
-        break;
-    case Anchor::Centre:
-        placed.centre.x = area.left + area.width * 0.5f + p.x * unit;
-        break;
-    case Anchor::Right:
-        placed.centre.x = area.left + area.width - p.x * unit;
-        break;
+    case Anchor::Left: placed.centre.x = area.left + p.x * unit; break;
+    case Anchor::Centre: placed.centre.x = area.left + area.width * 0.5f + p.x * unit; break;
+    case Anchor::Right: placed.centre.x = area.left + area.width - p.x * unit; break;
     }
     placed.centre.y = area.top + p.y * unit;
     placed.radius = p.size * std::clamp(scale, 0.5f, 2.0f) * unit;
@@ -215,20 +195,12 @@ Placement move_to(const Placement &placement, Element element, Point centre, con
     const float unit = area.height;
     centre.x = std::clamp(centre.x, area.left, area.left + area.width);
     centre.y = std::clamp(centre.y, area.top, area.top + area.height);
-    if (element == Element::Swipe)
-        p.anchor = Anchor::Centre;
-    else
-        p.anchor = centre.x < area.left + area.width * 0.5f ? Anchor::Left : Anchor::Right;
+    if (element == Element::Swipe) p.anchor = Anchor::Centre;
+    else p.anchor = centre.x < area.left + area.width * 0.5f ? Anchor::Left : Anchor::Right;
     switch (p.anchor) {
-    case Anchor::Left:
-        p.x = (centre.x - area.left) / unit;
-        break;
-    case Anchor::Centre:
-        p.x = (centre.x - area.left - area.width * 0.5f) / unit;
-        break;
-    case Anchor::Right:
-        p.x = (area.left + area.width - centre.x) / unit;
-        break;
+    case Anchor::Left: p.x = (centre.x - area.left) / unit; break;
+    case Anchor::Centre: p.x = (centre.x - area.left - area.width * 0.5f) / unit; break;
+    case Anchor::Right: p.x = (area.left + area.width - centre.x) / unit; break;
     }
     p.y = (centre.y - area.top) / unit;
     return p;
@@ -253,13 +225,9 @@ std::optional<Element> ActionControls::button_at(Point at, bool cluster_only) co
         const auto e = static_cast<Element>(i);
         if (!is_button(e) || !layout_.elements[i].shown || (cluster_only && !in_cluster(e))) continue;
         const Placed &p = placed_[i];
-        // A little slack: a thumb is wider than its aim.
         const float distance = std::hypot(at.x - p.centre.x, at.y - p.centre.y) / std::max(p.radius, 1.0f);
         if (distance > 1.2f) continue;
-        if (!best || distance < best_distance) {
-            best = e;
-            best_distance = distance;
-        }
+        if (!best || distance < best_distance) { best = e; best_distance = distance; }
     }
     return best;
 }
@@ -278,7 +246,6 @@ ActionControls::Finger *ActionControls::find(std::uint64_t id) {
 
 void ActionControls::swipe(int direction, std::uint64_t ms) {
     swipe_until_[direction > 0 ? 1 : 0] = ms + kSwipePressMs;
-    // The other way ends at once, so a swipe back is not both at once.
     swipe_until_[direction > 0 ? 0 : 1] = 0u;
     ++haptics_;
 }
@@ -287,10 +254,7 @@ void ActionControls::finger_down(std::uint64_t id, Point at, std::uint64_t ms) {
     if (find(id) != nullptr) finger_up(id, ms);
     Finger *slot = nullptr;
     for (Finger &finger : fingers_)
-        if (!finger.used) {
-            slot = &finger;
-            break;
-        }
+        if (!finger.used) { slot = &finger; break; }
     if (slot == nullptr) return;
     *slot = Finger{};
     slot->id = id;
@@ -302,6 +266,7 @@ void ActionControls::finger_down(std::uint64_t id, Point at, std::uint64_t ms) {
         slot->role = Role::Button;
         slot->element = *button;
         slot->over = true;
+        slot->attack_drag = (*button == Element::Attack);
         if (*button == Element::Pause) menu_tapped_ = true;
         if (*button == Element::DpadToggle) {
             dpad_toggled_ = !dpad_toggled_;
@@ -313,8 +278,7 @@ void ActionControls::finger_down(std::uint64_t id, Point at, std::uint64_t ms) {
         }
         ++haptics_;
     } else if (layout_.at(Element::DPad).shown &&
-        std::hypot(at.x - placed(Element::DPad).centre.x, at.y - placed(Element::DPad).centre.y) <=
-            placed(Element::DPad).radius * 1.15f) {
+        std::hypot(at.x - placed(Element::DPad).centre.x, at.y - placed(Element::DPad).centre.y) <= placed(Element::DPad).radius * 1.15f) {
         slot->role = Role::DPad;
         if (dpad_held() != 0u) ++haptics_;
     } else if (layout_.at(Element::Stick).shown && !stick_finger_ &&
@@ -345,6 +309,10 @@ void ActionControls::finger_move(std::uint64_t id, Point at, std::uint64_t ms) {
         stick_thumb_ = at;
         break;
     case Role::Button:
+        if (finger->element == Element::Attack && finger->attack_drag) {
+            finger->over = true;
+            break;
+        }
         if (in_cluster(finger->element)) {
             if (const std::optional<Element> button = button_at(at, true)) {
                 if (*button != finger->element || !finger->over) ++haptics_;
@@ -367,7 +335,6 @@ void ActionControls::finger_move(std::uint64_t id, Point at, std::uint64_t ms) {
         const float dy = at.y - finger->start.y;
         const float reach = kSwipeDistance * unit;
         if (finger->swiped) {
-            // Each further length of swipe, either way, presses again.
             if (std::fabs(dx) >= reach && std::fabs(dx) > std::fabs(dy)) {
                 swipe(dx > 0.0f ? 1 : -1, ms);
                 finger->start = at;
@@ -380,7 +347,6 @@ void ActionControls::finger_move(std::uint64_t id, Point at, std::uint64_t ms) {
             finger->swiped = true;
             finger->start = at;
         } else if (!quick || std::fabs(dy) >= reach) {
-            // Not a swipe: the camera, with the motion made so far.
             finger->role = Role::Camera;
             camera_drag_.x += dx;
             camera_drag_.y += dy;
@@ -416,8 +382,13 @@ void ActionControls::release_all() {
 
 std::uint16_t ActionControls::buttons(std::uint64_t ms) const {
     std::uint16_t buttons = dpad_held();
-    for (const Finger &finger : fingers_)
-        if (finger.used && finger.role == Role::Button && finger.over) buttons |= layout_.at(finger.element).buttons;
+    for (const Finger &finger : fingers_) {
+        if (!finger.used || finger.role != Role::Button || !finger.over) continue;
+        if (finger.element == Element::Attack && finger.attack_drag)
+            buttons |= attack_drag_buttons(finger);
+        else
+            buttons |= layout_.at(finger.element).buttons;
+    }
     if (ms < swipe_until_[0]) buttons |= kLeft;
     if (ms < swipe_until_[1]) buttons |= kRight;
     return buttons;
@@ -475,6 +446,22 @@ int ActionControls::swipe_shown(std::uint64_t ms) const {
     if (ms < swipe_until_[0]) return -1;
     if (ms < swipe_until_[1]) return 1;
     return 0;
+}
+
+std::uint16_t ActionControls::attack_drag_buttons(const Finger &finger) const {
+    const Placed &atk = placed(Element::Attack);
+    const float dx = finger.last.x - atk.centre.x;
+    const float dy = finger.last.y - atk.centre.y;
+    const float dist = std::hypot(dx, dy);
+    if (dist < atk.radius * 0.35f) return kTriangle;
+    if (std::fabs(dy) > std::fabs(dx) * 1.2f) {
+        return dy < 0.0f ? kCircle : static_cast<std::uint16_t>(kTriangle | kCircle);
+    }
+    if (std::fabs(dx) > std::fabs(dy) * 1.2f) {
+        const std::uint16_t dir = dx < 0.0f ? kLeft : kRight;
+        return static_cast<std::uint16_t>(dir | kTriangle | kCircle);
+    }
+    return kTriangle;
 }
 
 } // namespace mhp3rd::input::touch
