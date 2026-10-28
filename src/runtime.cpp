@@ -26,9 +26,9 @@ RuntimePostImportHook g_post_import_hook = nullptr;
 std::int32_t g_runtime_thread_uid = -1;
 std::array<char, 64> g_runtime_thread_name{};
 std::uint32_t g_runtime_dispatch_pc = 0u;
-// The context the dispatched function runs in, while it runs: the write
-// watch names its ra and sp, which say who stored when the dispatch PC only
-// names the outermost function.
+// The context a dispatched function or the interpreter runs in, while it
+// runs: the write watch names its ra and sp, which say who stored when the
+// dispatch PC only names the outermost function.
 const AllegrexContext *g_runtime_dispatch_cpu = nullptr;
 struct DispatchContext {
     const AllegrexContext *previous;
@@ -230,6 +230,7 @@ bool Runtime::run_interpreter_fallback(AllegrexContext &ctx) {
     if (!interpreter_fallback_enabled()) return false;
     // Each entry is bounded, so a long interpreted stretch still returns to the
     // dispatcher often enough for the starvation hook to preempt the thread.
+    const DispatchContext dispatching(ctx);
     return interpret_allegrex(*this, ctx) != InterpreterExit::Unreachable;
 }
 

@@ -202,8 +202,10 @@ copied saves only.
 every guest store to those bytes as `[watch-write] ... pc=... ra=... sp=...
 old=... new=...` on stderr. `pc` is where the runtime last dispatched, often
 only the outermost function; `ra` and `sp` are the storing function's
-registers, so `ra` names the call the store came from. It slows every store,
-and only a run that starts with it set can watch.
+registers, generated or interpreted, so `ra` names the call the store came
+from. A store from an HLE function shows the registers the guest called it
+with, and one made outside any guest call shows both as 0. It slows every
+store, and only a run that starts with it set can watch.
 
 ### Fast Barioth encounter
 
