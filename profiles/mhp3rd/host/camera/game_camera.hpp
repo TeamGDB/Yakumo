@@ -89,8 +89,19 @@ void game_camera_anticipate_aim(psprecomp::Runtime &runtime);
 // a camera mode without a driver) the game's own turn is one speed, on or
 // off, and the mouse can only switch it: -1 or +1 while the mouse moves left
 // or right fast enough this frame, 0 otherwise. Vertical motion has nowhere
-// to go there: the game's second stick up and down are recentring commands.
+// to go there: the game's second stick up and down step its height presets.
 [[nodiscard]] int game_camera_mouse_stock_turn();
+
+// The second stick (pad bytes 10 and 11, 0x80 at rest) as the game is to read
+// it this sample, from the stick the player holds: kept from the game while
+// the port drives the camera, stretched while a weapon aims, without its
+// vertical push in the modes left to the game, and switched on by the mouse
+// for the game's own turn while the stick is idle.
+struct SecondStick {
+    std::uint8_t x{0x80u};
+    std::uint8_t y{0x80u};
+};
+[[nodiscard]] SecondStick game_camera_second_stick(SecondStick held);
 
 // Full-deflection speed for the current camera: Aim speed while a bow or a
 // bowgun aims, Camera speed otherwise.

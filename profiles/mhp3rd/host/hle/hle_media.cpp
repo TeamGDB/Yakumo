@@ -655,46 +655,9 @@ void register_display_ctrl(HleRegistrar &hle) {
             fast_loading::note_buttons(buttons != 0u);
             analog_x = pad.analog_x;
             analog_y = pad.analog_y;
-            right_x = pad.right_x;
-            right_y = pad.right_y;
-            // In the camera modes left to the game the stick may still turn
-            // its camera, but a vertical push would step the follow camera's
-            // height preset for good (#225).
-            if (camera::game_camera_holds_vertical()) right_y = 0x80u;
-            // Keep the game's digital commands neutral while the analog
-            // camera consumes these axes: otherwise the game's one-shot
-            // vertical command fires from the same push and glides the camera
-            // against what the port is doing. The physical D-pad stays available.
-            if (camera::game_camera_driving()) {
-                right_x = 0x80u;
-                right_y = 0x80u;
-            } else if (camera::game_camera_aim_boost()) {
-                // Past the dead zone, any push reaches the game at full
-                // length in the same direction, so its aim steps and the
-                // driver decides how far. With the stick idle, the mouse's
-                // direction stands in for it.
-                int dx = static_cast<int>(right_x) - 0x80;
-                int dy = static_cast<int>(right_y) - 0x80;
-                if (dx == 0 && dy == 0) {
-                    if (const auto mouse = camera::game_camera_mouse_aim()) {
-                        dx = static_cast<int>(std::lround(mouse->x * 127.0f));
-                        dy = static_cast<int>(std::lround(mouse->y * 127.0f));
-                    }
-                }
-                const float length = std::sqrt(static_cast<float>(dx * dx + dy * dy));
-                if (length > 0.0f) {
-                    right_x = static_cast<std::uint8_t>(
-                        std::clamp(0x80 + static_cast<int>(std::lround(dx * 127.0f / length)), 0, 255));
-                    right_y = static_cast<std::uint8_t>(
-                        std::clamp(0x80 + static_cast<int>(std::lround(dy * 127.0f / length)), 0, 255));
-                }
-            } else if (right_x == 0x80u && right_y == 0x80u &&
-                settings::current().right_stick == settings::RightStick::Camera) {
-                // The game's own camera: the mouse switches its turn on while
-                // it moves sideways. Not in the D-pad mode, where the same
-                // bits move cursors in the game's menus.
-                if (const int turn = camera::game_camera_mouse_stock_turn()) right_x = turn > 0 ? 0xFFu : 0x01u;
-            }
+            const camera::SecondStick stick = camera::game_camera_second_stick({pad.right_x, pad.right_y});
+            right_x = stick.x;
+            right_y = stick.y;
         }
 #endif
 #if defined(MHP3RD_HAS_RENDERER)
