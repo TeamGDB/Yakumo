@@ -959,6 +959,10 @@ endif()
 # Recompiled overlay corpora, produced by tools/add_overlay.py. Each directory
 # under overlays/ holds one corpus and becomes one shared module that the host
 # loads at run time, so a new overlay never relinks the executable.
+# Nightly builds reuse cached overlay libraries and do not see changes to this
+# file: changing how overlays compile or link needs a cache refresh (see
+# docs/NIGHTLY_BUILDS.md), and scripts/ci/test_nightly.py pins the settings
+# here and above that decide whether a cached overlay still loads.
 set(MHP3RD_OVERLAY_DIR "${CMAKE_BINARY_DIR}/bin/overlays")
 
 function(mhp3rd_add_overlay meta_path)

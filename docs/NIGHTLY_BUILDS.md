@@ -238,7 +238,19 @@ frozen release source. Extraction accepts only the platform's native overlay
 modules, never game data or generated source. The seed's source and current
 source must have the same compatibility fingerprint over runtime headers,
 profile/overlay ABI declarations, the overlay entry point, generator/parser
-sources, overlay/wrapper and DATA.BIN tools, CMake configuration and SDK pins.
+sources, overlay/wrapper and DATA.BIN tools, the root CMake configuration and
+SDK pins.
+
+The profile's `CMakeLists.txt` is outside the fingerprint. Nearly every change
+to it adds host sources, tests or shaders, and each one used to reject every
+seed. The settings in it that decide whether a cached overlay still finds the
+host's symbols (the exported host target and its name, the overlay link mode,
+the Linux release C++ runtime options) are pinned by `test_nightly.py` instead.
+A deliberate change to how overlays compile or link there needs a cache
+refresh, which the fingerprint does not enforce. The host only reports an
+overlay that fails to load and runs that code interpreted, so a stale cache
+shows up as a slow build, not a crash.
+
 Source fingerprints normalize CRLF to LF so Windows checkouts match immutable
 Git snapshots; other content changes and added inputs still invalidate reuse.
 Each restored file has a full SHA-256 in `overlay-files.json`, alongside the
