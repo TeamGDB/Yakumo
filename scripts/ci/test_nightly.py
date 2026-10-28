@@ -405,7 +405,7 @@ class AbiTests(unittest.TestCase):
             save()
             self.assertNotEqual(first, nightly.abi_fingerprint(root))
             previous = nightly.abi_fingerprint(root)
-            for relative in ['profiles/mhp3rd/host/overlay_module.hpp',
+            for relative in ['CMakeLists.txt', 'profiles/mhp3rd/host/overlay_module.hpp',
                              'profiles/mhp3rd/host/overlay_module.cpp.in', 'tools/codegen_main.cpp',
                              'src/decoder.cpp', 'src/elf32.cpp', 'src/program_analysis.cpp',
                              'profiles/mhp3rd/tools/add_overlay.py', 'profiles/mhp3rd/tools/wrap_overlay.py',
@@ -423,7 +423,39 @@ class AbiTests(unittest.TestCase):
             (root / 'src/runtime.cpp').write_text('public synthetic host implementation')
             save()
             self.assertEqual(previous, nightly.abi_fingerprint(root))
+            # So do the host sources, tests and shaders that nearly every change
+            # to the profile's CMakeLists.txt adds.
+            profile = root / 'profiles/mhp3rd/CMakeLists.txt'
+            profile.write_text('public synthetic host sources v1')
+            save()
+            self.assertEqual(previous, nightly.abi_fingerprint(root))
+            profile.write_text('public synthetic host sources v2')
+            self.assertEqual(previous, nightly.abi_fingerprint(root))
             self.assertEqual(first, nightly.abi_fingerprint(root, frozen))
+
+    def test_cmake_keeps_the_link_contract_cached_overlays_rely_on(self):
+        # The profile's CMakeLists.txt is outside the fingerprint, so a cached
+        # overlay would not notice these changing. Each one decides whether it
+        # still finds the host's symbols; changing one needs a cache refresh.
+        self.assertNotIn('profiles/mhp3rd/CMakeLists.txt', nightly.ABI_PATHS)
+        contract = {
+            'CMakeLists.txt': ['add_library(psprecomp_core OBJECT'],
+            'profiles/mhp3rd/CMakeLists.txt': [
+                'add_library(Yakumo SHARED ${MHP3RD_PROGRAM_SOURCES}', 'OUTPUT_NAME main',
+                'add_executable(Yakumo ${MHP3RD_PROGRAM_SOURCES})', 'ENABLE_EXPORTS TRUE',
+                'WINDOWS_EXPORT_ALL_SYMBOLS TRUE)',
+                'set(MHP3RD_RELEASE_LINK_OPTIONS -static-libstdc++ "LINKER:--exclude-libs,libstdc++.a:libsupc++.a")',
+                'add_library(${target} MODULE ${sources} "${entry_point}")',
+                'target_link_libraries(${target} PRIVATE Yakumo)',
+                'target_link_options(${target} PRIVATE "LINKER:-z,undefs")',
+                'target_compile_definitions(${target} PRIVATE PSPRECOMP_IMPORT_HOST_SYMBOLS=1)',
+                'target_link_options(${target} PRIVATE ${MHP3RD_RELEASE_LINK_OPTIONS})',
+                'CXX_VISIBILITY_PRESET hidden'],
+        }
+        for relative, lines in contract.items():
+            present = [line.strip() for line in (nightly.ROOT / relative).read_text().splitlines()]
+            for line in lines:
+                self.assertTrue(any(x.startswith(line) for x in present), f'{relative}: {line}')
 
 
 class DownloadTests(unittest.TestCase):

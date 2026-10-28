@@ -37,7 +37,11 @@ TOOLCHAINS = {'linux-x86_64': 'steamrt-sniper-gcc14', 'macos-arm64': 'libcxx1-ma
 # license requires review, never accepting arbitrary UTF-8 as a license file.
 SDL_LICENSE_SHA = '1c040b8271b37e5076359f8fd54240e371114112924d2df81ef87c7d6a1dfdfd'
 FFMPEG_LICENSE_SHA = '246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30'
-ABI_PATHS = ['include/psprecomp', 'CMakeLists.txt', 'profiles/mhp3rd/CMakeLists.txt',
+# The profile's CMakeLists.txt is left out on purpose: nearly every change to it
+# adds host sources, tests or shaders that never reach an overlay. The settings
+# there that decide whether a cached overlay still loads are pinned by a test in
+# test_nightly.py instead; changing how overlays compile needs a cache refresh.
+ABI_PATHS = ['include/psprecomp', 'CMakeLists.txt',
              'profiles/mhp3rd/host/mhp3rd_profile.hpp', 'profiles/mhp3rd/host/overlay_module.hpp',
              'profiles/mhp3rd/host/overlay_module.cpp.in', 'tools/codegen_main.cpp',
              'src/decoder.cpp', 'src/elf32.cpp', 'src/program_analysis.cpp',
