@@ -258,6 +258,108 @@ void test_signature_mismatch() {
     check(f.snapshot() == before && !game_camera_driving(), "refused code is never written to");
 }
 
+void set_environment(const char *name, const char *value) {
+#if defined(_WIN32)
+    _putenv_s(name, value != nullptr ? value : "");
+#else
+    if (value != nullptr)
+        setenv(name, value, 1);
+    else
+        unsetenv(name);
+#endif
+}
+
+// Issue #225: climbing a wall (camera mode 1, then 3 at its top) left the
+// second stick to the game, whose vertical push stepped the follow camera's
+// height preset; back in the follow camera the stick tilts and cannot step it
+// back, so the camera stayed closer to the hunter.
+void test_stock_modes_hold_vertical() {
+    set_environment("MHP3RD_STOCK_STICK_PRESETS", nullptr);
+    Fixture f;
+    auto &m = f.runtime.memory();
+    m.store8(camera_address + 0x76u, 1u);
+    f.frame(0.0f, 0.0f);
+    check(!game_camera_holds_vertical(), "with Analog camera off the stock stick is untouched");
+    f.enable();
+    for (const std::uint8_t mode : {1u, 3u}) {
+        m.store8(camera_address + 0x76u, mode);
+        f.frame(0.0f, 0.0f);
+        check(game_camera_holds_vertical() && !game_camera_driving(),
+            "a mode left to the game keeps the vertical push from it, and only that");
+    }
+    f.flip(0.0f, 0.0f);
+    check(game_camera_holds_vertical(), "until the next camera update");
+    f.flip(0.0f, 0.0f);
+    check(!game_camera_holds_vertical(), "with the camera update gone the stick is the game's again");
+    m.store8(camera_address + 0x76u, 0u);
+    f.frame(0.0f, 0.0f);
+    check(!game_camera_holds_vertical() && game_camera_driving(), "the follow camera is the driver's");
+    m.store8(camera_address + 0x76u, 1u);
+    set_environment("MHP3RD_STOCK_STICK_PRESETS", "1");
+    f.frame(0.0f, 0.0f);
+    check(!game_camera_holds_vertical(), "MHP3RD_STOCK_STICK_PRESETS=1 passes the vertical push as before");
+    set_environment("MHP3RD_STOCK_STICK_PRESETS", "0");
+    f.frame(0.0f, 0.0f);
+    check(game_camera_holds_vertical(), "only 1 turns the old behaviour back on");
+    set_environment("MHP3RD_STOCK_STICK_PRESETS", nullptr);
+    f.frame(0.0f, 0.0f);
+    check(game_camera_holds_vertical(), "and without it the push is held again");
+}
+
+bool shows(SecondStick stick, std::uint8_t x, std::uint8_t y) {
+    return stick.x == x && stick.y == y;
+}
+
+// What the pad read passes the game as the second stick, in each state.
+void test_second_stick() {
+    set_environment("MHP3RD_STOCK_STICK_PRESETS", nullptr);
+    constexpr SecondStick pushed{0x20u, 0xE0u};
+    Fixture f;
+    auto &m = f.runtime.memory();
+    f.frame(0.0f, 0.0f);
+    check(shows(game_camera_second_stick(pushed), 0x20u, 0xE0u), "with Analog camera off the stick passes unchanged");
+    f.enable();
+    f.frame(0.0f, 0.0f);
+    check(shows(game_camera_second_stick(pushed), 0x80u, 0x80u),
+        "the driven follow camera keeps the stick from the game");
+    m.store8(camera_address + 0x76u, 3u);
+    f.frame(0.0f, 0.0f);
+    check(shows(game_camera_second_stick(pushed), 0x20u, 0x80u), "a mode left to the game gets the turn, not the push");
+    set_environment("MHP3RD_STOCK_STICK_PRESETS", "1");
+    check(shows(game_camera_second_stick(pushed), 0x20u, 0xE0u), "MHP3RD_STOCK_STICK_PRESETS=1 passes both");
+    set_environment("MHP3RD_STOCK_STICK_PRESETS", nullptr);
+    f.flip(0.0f, 0.0f);
+    f.flip(0.0f, 0.0f);
+    check(shows(game_camera_second_stick(pushed), 0x20u, 0xE0u), "with no camera update the stick is the game's");
+
+    // A weapon aims in the follow camera: any push goes at full length.
+    constexpr std::uint32_t hunter = 0x08904000u;
+    f.ctx.gpr[21] = hunter;
+    m.store8(camera_address + 0x76u, 0u);
+    m.store8(camera_address + 0x91u, 0u);
+    f.frame(0.0f, 0.0f);
+    check(game_camera_aim_boost(), "the aim is the game's");
+    check(shows(game_camera_second_stick({0x90u, 0x80u}), 0xFFu, 0x80u), "a small push right is stretched");
+    check(shows(game_camera_second_stick({0x80u, 0x60u}), 0x80u, 0x01u), "a small push up is stretched");
+    check(shows(game_camera_second_stick({}), 0x80u, 0x80u), "an idle stick and mouse show nothing");
+    f.flip(0.0f, 0.0f);
+    add_motion(Source::Mouse, 3.0f, 0.0f);
+    check(shows(game_camera_second_stick({}), 0xFFu, 0x80u), "the mouse's direction stands in for an idle stick");
+    f.update();
+
+    // The game's own camera: the mouse switches its turn on, the stick idle.
+    m.store8(camera_address + 0x91u, 0xFFu);
+    mhp3rd::settings::current().analog_camera = false;
+    f.frame(0.0f, 0.0f);
+    f.flip(0.0f, 0.0f);
+    add_motion(Source::Mouse, 2.0f, 0.0f);
+    check(shows(game_camera_second_stick({}), 0xFFu, 0x80u), "the mouse turns the game's camera");
+    check(shows(game_camera_second_stick({0x80u, 0x10u}), 0x80u, 0x10u), "not while the stick is pushed");
+    mhp3rd::settings::current().right_stick = mhp3rd::settings::RightStick::DPad;
+    check(shows(game_camera_second_stick({}), 0x80u, 0x80u), "nor with the stick set to the D-pad");
+    f.update();
+}
+
 void test_hook_waits_for_the_option() {
     Fixture f;
     f.flip(0.0f, 0.0f);
@@ -691,6 +793,8 @@ int main() {
     test_vertical_filter();
     test_signature_mismatch();
     test_hook_waits_for_the_option();
+    test_stock_modes_hold_vertical();
+    test_second_stick();
     test_frame_rate_independence();
     test_motion_source();
     test_aiming_sizes_the_games_steps();

@@ -16,6 +16,7 @@ namespace psprecomp {
 std::int32_t runtime_thread_uid() noexcept;
 const char *runtime_thread_name() noexcept;
 std::uint32_t runtime_dispatch_pc() noexcept;
+std::uint32_t runtime_dispatch_register(unsigned index) noexcept;
 
 namespace {
 struct WriteWatch {
@@ -60,7 +61,8 @@ void log_write_watch(std::uint32_t address, std::size_t length, const char *oper
     std::uint64_t new_value) {
     if (!overlaps_watch(address, length)) return;
     std::cerr << "[watch-write] uid=" << runtime_thread_uid() << " name=" << runtime_thread_name()
-              << " pc=" << hex32(runtime_dispatch_pc()) << " op=" << operation << " address=" << hex32(address)
+              << " pc=" << hex32(runtime_dispatch_pc()) << " ra=" << hex32(runtime_dispatch_register(31u))
+              << " sp=" << hex32(runtime_dispatch_register(29u)) << " op=" << operation << " address=" << hex32(address)
               << " size=" << length << " old=0x" << std::hex << old_value << " new=0x" << new_value << std::dec << "\n";
 }
 } // namespace

@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <string_view>
 
 namespace mhp3rd::camera {
 
@@ -198,8 +199,18 @@ struct State {
     std::uint16_t anticipated_heading{};
     int anticipated_pitch{};
     int anticipated_pitch_value{};
+    // The last camera update was in a mode left to the game, at this frame.
+    bool stock_mode{};
+    std::uint64_t stock_update{};
 };
 State state;
+
+// MHP3RD_STOCK_STICK_PRESETS=1 lets the second stick's vertical push reach
+// the game in the modes left to it, as before. Read each time, for tests.
+bool stock_stick_presets() {
+    const char *value = std::getenv("MHP3RD_STOCK_STICK_PRESETS");
+    return value != nullptr && std::string_view(value) == "1";
+}
 
 bool option_on() {
     const auto &s = settings::current();
@@ -681,6 +692,8 @@ void adjust_camera(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &ctx)
     if (!memory.raw_pointer(address, 0x188u) || !memory.raw_pointer(stack, 0x190u) ||
         !memory.raw_pointer(ctx.gpr[5], 12u))
         return;
+    state.stock_mode = memory.load8(address + kMode) != kFollowMode;
+    state.stock_update = state.frame;
     switch (memory.load8(address + kMode)) {
     case kFollowMode:
         // Aiming a bow or a bowgun, or looking through a bowgun's scope: the
@@ -767,6 +780,10 @@ bool game_camera_driving() {
     return (driving_allowed() || (state.hooked && lock_on_status().locked)) && state.available;
 }
 
+bool game_camera_holds_vertical() {
+    return driving_allowed() && state.stock_mode && state.frame - state.stock_update <= 1u && !stock_stick_presets();
+}
+
 std::optional<std::array<float, 3>> game_camera_follow_point(const psprecomp::GuestMemory &memory) {
     if (state.memory != &memory || !state.prepared || !state.available || state.frame - state.last_update > 1u ||
         memory.raw_pointer(state.address, 0x1Cu) == nullptr)
@@ -838,6 +855,44 @@ int game_camera_mouse_stock_turn() {
     const float yaw = peek_pointer().yaw_degrees;
     if (!(std::fabs(yaw) >= kMouseStockTurn)) return 0;
     return yaw > 0.0f ? 1 : -1;
+}
+
+SecondStick game_camera_second_stick(SecondStick held) {
+    // Keep the game's digital commands neutral while the analog camera
+    // consumes these axes: otherwise the game's one-shot vertical command
+    // fires from the same push and glides the camera against what the port is
+    // doing. The physical D-pad stays available.
+    if (game_camera_driving()) return {};
+    if (game_camera_aim_boost()) {
+        // Past the dead zone, any push reaches the game at full length in the
+        // same direction, so its aim steps and the driver decides how far.
+        // With the stick idle, the mouse's direction stands in for it.
+        int dx = static_cast<int>(held.x) - 0x80;
+        int dy = static_cast<int>(held.y) - 0x80;
+        if (dx == 0 && dy == 0) {
+            if (const auto mouse = game_camera_mouse_aim()) {
+                dx = static_cast<int>(std::lround(mouse->x * 127.0f));
+                dy = static_cast<int>(std::lround(mouse->y * 127.0f));
+            }
+        }
+        const float length = std::sqrt(static_cast<float>(dx * dx + dy * dy));
+        if (length <= 0.0f) return held;
+        return {
+            static_cast<std::uint8_t>(std::clamp(0x80 + static_cast<int>(std::lround(dx * 127.0f / length)), 0, 255)),
+            static_cast<std::uint8_t>(std::clamp(0x80 + static_cast<int>(std::lround(dy * 127.0f / length)), 0, 255))};
+    }
+    SecondStick shown = held;
+    // In the camera modes left to the game the stick may still turn its
+    // camera, but a vertical push would step the follow camera's height
+    // preset for good (#225).
+    if (game_camera_holds_vertical()) shown.y = 0x80u;
+    if (held.x == 0x80u && held.y == 0x80u && settings::current().right_stick == settings::RightStick::Camera) {
+        // The game's own camera: the mouse switches its turn on while it
+        // moves sideways. Not in the D-pad mode, where the same bits move
+        // cursors in the game's menus.
+        if (const int turn = game_camera_mouse_stock_turn()) shown.x = turn > 0 ? 0xFFu : 0x01u;
+    }
+    return shown;
 }
 
 float game_camera_degrees_per_second() {

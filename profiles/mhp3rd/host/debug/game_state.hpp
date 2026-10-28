@@ -14,6 +14,7 @@
 
 #include "game/game_data.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -153,6 +154,32 @@ struct Monster {
 [[nodiscard]] std::vector<Monster> monsters(const Ram &ram);
 [[nodiscard]] std::string monster_name(const Ram &ram, std::uint8_t kind);
 
+// The local hunter on a quest, and what the test tools read and move in it.
+// The hunter and the monsters share these: the position, three floats with y
+// up, is kept as the world translation, the physics position and the previous
+// physics position (a teleport sets all three, or the next physics step
+// sweeps across from the old one), and the area at +0xD6.
+inline constexpr std::uint32_t kHunter = 0x096498D0u;
+inline constexpr std::uint32_t kActorWorldPosition = 0x40u;
+inline constexpr std::uint32_t kActorPosition = 0x80u;
+inline constexpr std::uint32_t kActorPreviousPosition = 0x90u;
+inline constexpr std::uint32_t kActorArea = 0xD6u;
+// The hunter's facing in 65536ths of a turn (0 along +z, 0x4000 along +x),
+// which the game copies to +0x74 every frame; the ground height under it; its
+// action as main, sub and phase bytes; and its airborne mark (2 while it
+// climbs or is in the air).
+inline constexpr std::uint32_t kHunterFacing = 0x188u;
+inline constexpr std::uint32_t kHunterFacingCopy = 0x74u;
+inline constexpr std::uint32_t kHunterGround = 0xD8u;
+inline constexpr std::uint32_t kHunterAction = 0x18Cu;
+inline constexpr std::uint32_t kHunterAirborne = 0x218u;
+
+// Objects shaped like the hunter or a monster in the hunter's area, small
+// monsters included (the monster table holds only some): a vtable of code
+// pointers, and world and physics positions that agree, within RADIUS of the
+// hunter on the ground plane. A scan of user memory, for test tools only.
+[[nodiscard]] std::vector<std::uint32_t> actors_near(const Ram &ram, float radius);
+
 // Money -------------------------------------------------------------------------
 
 [[nodiscard]] std::uint32_t money(const Ram &ram);
@@ -168,6 +195,15 @@ struct HeldCheats;
 
 // Keeps the held cheats applied, once a frame.
 void held_cheats_frame(Ram &ram, const HeldCheats &cheats);
+// "cheat health|stamina|timer|onehit on|off": that cheat, in CHEATS. False,
+// leaving them as they are, for anything else.
+bool cheat_command(const std::vector<std::string> &args, HeldCheats &cheats);
+
+// Actors the hold command keeps in place: put back once a frame, dropped when
+// an actor's vtable changes or the quest ends.
+void held_actors_frame(Ram &ram);
+void release_held_actors();
+[[nodiscard]] std::size_t held_actor_count();
 
 // The quest in progress, as lines for the Debug page; empty outside a quest.
 [[nodiscard]] std::vector<std::string> quest_lines(const Ram &ram);
