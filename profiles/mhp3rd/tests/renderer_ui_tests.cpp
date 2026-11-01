@@ -9,6 +9,8 @@
 #include "game/game_data.hpp"
 #include "game/guest_ram.hpp"
 #include "game/audio_settings.hpp"
+#include "game/weapon_state.hpp"
+#include "game/control_context.hpp"
 #include "game/layered_armor.hpp"
 #include "ui/layered_armor_screen.hpp"
 #include "ui/font_menu.hpp"
@@ -73,6 +75,21 @@
 
 namespace {
 using namespace mhp3rd;
+void touch_context(game::control_context::Scene scene, bool interface_open = false) {
+    game::BufferRam ram(0x08800000u, 0x03800000u);
+    if (scene != game::control_context::Scene::Unknown) {
+        constexpr auto slot = 0x0A05E600u;
+        ram.store32(slot, 0x336F574Du);
+        ram.store32(slot + 8u, slot);
+        const std::string_view name = scene == game::control_context::Scene::Hub ? "lobby_task.ovl" : "game_task.ovl";
+        for (std::size_t i = 0; i < name.size(); ++i) ram.store8(slot + 32u + static_cast<std::uint32_t>(i), name[i]);
+        ram.store32(0x0A25DD28u, 0x0A25DD2Cu);
+        ram.store32(0x0A25DD2Cu, interface_open ? 12u : 0u);
+        ram.store32(0x09FF53B0u, 0x09FF53B4u);
+        ram.store8(0x09FF53B8u, interface_open ? 1u : 0u);
+    }
+    game::control_context::refresh(ram);
+}
 int failures{};
 void expect(bool ok, const char *what) {
     if (!ok) {
@@ -99,6 +116,16 @@ class ScriptedUiMouse {
 public:
     explicit ScriptedUiMouse(SDL_Window *window) : window_(window), relative_(SDL_GetWindowRelativeMouseMode(window)) {}
     ~ScriptedUiMouse() { SDL_SetWindowRelativeMouseMode(window_, relative_); }
+    void move(ImVec2 at) {
+        // A previous touch scenario can leave NextMouseSource as TouchScreen.
+        // Tag before enqueueing: changing it in prepare_frame is too late.
+        ImGui::GetIO().AddMouseSourceEvent(ImGuiMouseSource_Mouse);
+        ImGui::GetIO().AddMousePosEvent(at.x, at.y);
+    }
+    void button(bool down) {
+        ImGui::GetIO().AddMouseSourceEvent(ImGuiMouseSource_Mouse);
+        ImGui::GetIO().AddMouseButtonEvent(0, down);
+    }
     void prepare_frame() {
         // Suppress the backend's global-cursor fallback while supplying exact synthetic mouse coordinates.
         expect(SDL_SetWindowRelativeMouseMode(window_, true), "synthetic UI mouse uses relative SDL mode");
@@ -107,6 +134,44 @@ public:
 private:
     SDL_Window *window_;
     bool relative_;
+};
+
+// A developer can keep using the physical mouse during the detached touch suite.
+// SDL still processes real synthetic events; only unrelated physical pointer events
+// are filtered, otherwise they replace the exact touch position before NewFrame.
+class IsolatedTouchPointer {
+public:
+    IsolatedTouchPointer() {
+        SDL_GetEventFilter(&previous_, &userdata_);
+        SDL_SetEventFilter(filter, this);
+    }
+    ~IsolatedTouchPointer() { SDL_SetEventFilter(previous_, userdata_); }
+
+private:
+    static bool SDLCALL filter(void *userdata, SDL_Event *event) {
+        auto &self = *static_cast<IsolatedTouchPointer *>(userdata);
+        SDL_MouseID which{};
+        bool pointer = true;
+        switch (event->type) {
+        case SDL_EVENT_MOUSE_MOTION:
+            which = event->motion.which;
+            break;
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+            which = event->button.which;
+            break;
+        case SDL_EVENT_MOUSE_WHEEL:
+            which = event->wheel.which;
+            break;
+        default:
+            pointer = false;
+            break;
+        }
+        if (pointer && which != SDL_TOUCH_MOUSEID && which != gpu::kScriptedMouse) return false;
+        return !self.previous_ || self.previous_(self.userdata_, event);
+    }
+    SDL_EventFilter previous_{};
+    void *userdata_{};
 };
 
 class UiTextLog {
@@ -2533,11 +2598,17 @@ void mods_screen_contracts(
     frame(false, true);
     frame(false, true);
     frame();
-    ImGui::GetIO().AddMousePosEvent(click.x, click.y);
-    ImGui::GetIO().AddMouseButtonEvent(0, true);
+    // Reproduce a touch scenario's remaining source deterministically. The
+    // next synthetic mouse click must still press/release in its two frames.
+    ImGui::GetIO().AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
+    mouse.move(click);
+    mouse.button(true);
     frame();
-    ImGui::GetIO().AddMouseButtonEvent(0, false);
+    expect(ImGui::GetIO().MouseSource == ImGuiMouseSource_Mouse && ImGui::GetIO().MouseClicked[0],
+        "synthetic mod mouse press is not deferred by a previous touch source");
+    mouse.button(false);
     frame();
+    expect(ImGui::GetIO().MouseReleased[0], "synthetic mod mouse release is processed in its own frame");
     expect(ui::mods_screen_open(), "selecting installed mod opens real details screen");
     frame();
     frame();
@@ -3297,7 +3368,7 @@ void hud_gamepad_contracts(gpu::VulkanRenderer &renderer) {
     player = saved;
     layer.set_interactive(false);
 }
-void touch_editor_contracts(gpu::VulkanRenderer &renderer) {
+void touch_editor_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::path &sandbox) {
     auto &player = settings::current();
     const auto saved_layout = player.touch_action;
     const auto saved_opacity = player.touch_opacity;
@@ -3517,6 +3588,83 @@ void touch_editor_contracts(gpu::VulkanRenderer &renderer) {
     expect(player.touch_psp == input::touch::default_psp_layout(), "PSP reset restores its own whole layout");
     activate("Done");
     expect(!ui::touch_editor_open(), "Done closes the PSP editor");
+    const auto saved_adaptive = player.touch_adaptive;
+    const auto saved_hub = player.touch_adaptive_hub;
+    const auto saved_interface = player.touch_adaptive_interface;
+    touch_context(game::control_context::Scene::Quest);
+    player.touch_layout = settings::TouchLayout::Adaptive;
+    player.touch_adaptive = input::touch::default_adaptive_layout();
+    ui::open_touch_editor();
+    frame();
+    frame();
+    const auto preview_layout = player.touch_adaptive;
+    const auto live_profile = renderer.adaptive_touch_controls().weapon_profile();
+    for (int weapon = 0; weapon < 12; ++weapon) {
+        activate("##Weapon Preview", ImGuiKey_RightArrow);
+        expect(player.touch_adaptive == preview_layout &&
+                renderer.adaptive_touch_controls().weapon_profile() == live_profile,
+            "weapon preview never changes equipped weapon or saved placements");
+    }
+    const auto adaptive_attack =
+        renderer.adaptive_touch_controls().placed(input::touch::AdaptiveElement::Attack).centre;
+    ImGui::GetIO().AddMousePosEvent(adaptive_attack.x, adaptive_attack.y);
+    frame();
+    ImGui::GetIO().AddMouseButtonEvent(0, true);
+    frame();
+    ImGui::GetIO().AddMouseButtonEvent(0, false);
+    frame();
+    auto *adaptive_panel = ImGui::FindWindowByName("##touch_editor");
+    const float panel_x = adaptive_panel->Pos.x;
+    const float saved_alpha = ImGui::GetStyle().Alpha;
+    ImGui::GetIO().AddMousePosEvent(adaptive_attack.x, adaptive_attack.y);
+    frame();
+    ImGui::GetIO().AddMouseButtonEvent(0, true);
+    frame();
+    const auto editor_area = renderer.adaptive_touch_controls().area();
+    ImGui::GetIO().AddMousePosEvent(editor_area.left + editor_area.width * .3f, adaptive_attack.y);
+    frame();
+    frame();
+    renderer.capture_window(sandbox / "adaptive-editor-drag.bmp");
+    frame();
+    frame();
+    expect(adaptive_panel->Pos.x == panel_x && (adaptive_panel->Flags & ImGuiWindowFlags_NoInputs) != 0,
+        "dragging across the centre keeps the translucent editor panel fixed and non-interactive");
+    expect(ImGui::GetStyle().Alpha == saved_alpha, "drag opacity does not leak into other UI windows");
+    ImGui::GetIO().AddMouseButtonEvent(0, false);
+    frame();
+    frame();
+    expect((adaptive_panel->Flags & ImGuiWindowFlags_NoInputs) == 0 &&
+            player.touch_adaptive.at(input::touch::AdaptiveElement::Attack) !=
+                preview_layout.at(input::touch::AdaptiveElement::Attack),
+        "release restores the options panel and keeps the dragged placement");
+    renderer.capture_window(sandbox / "adaptive-editor-selected.bmp");
+    frame();
+    frame();
+    const auto adaptive_size = player.touch_adaptive.at(input::touch::AdaptiveElement::Attack).size;
+    activate("Size", ImGuiKey_RightArrow);
+    expect(player.touch_adaptive.at(input::touch::AdaptiveElement::Attack).size > adaptive_size &&
+            player.touch_action == input::touch::default_action_layout(),
+        "Adaptive editor modifies only its own placements");
+    activate("Choose another");
+    activate("Reset the whole layout");
+    expect(player.touch_adaptive == input::touch::default_adaptive_layout(),
+        "Adaptive reset restores its own factory layout");
+    activate("Layout", ImGuiKey_RightArrow);
+    const bool hub_floating = player.touch_adaptive_hub.floating_stick;
+    activate("Floating Stick");
+    expect(player.touch_adaptive_hub.floating_stick != hub_floating && player.touch_adaptive.floating_stick,
+        "Village editor changes its own movement setting without changing Quest");
+    activate("Layout", ImGuiKey_RightArrow);
+    activate("Reset the whole layout");
+    expect(player.touch_adaptive_interface ==
+                input::touch::default_adaptive_layout(input::touch::AdaptiveMode::Interface) &&
+            player.touch_adaptive_hub.floating_stick != hub_floating,
+        "interface reset leaves edited village layout alone");
+    activate("Done");
+    player.touch_adaptive = saved_adaptive;
+    player.touch_adaptive_hub = saved_hub;
+    player.touch_adaptive_interface = saved_interface;
+    touch_context(game::control_context::Scene::Unknown);
     player.touch_psp = saved_psp;
     player.touch_dpad = saved_dpad;
     player.touch_layout = saved_touch_mode;
@@ -3542,24 +3690,27 @@ void touch_event_contracts(gpu::VulkanRenderer &renderer) {
     renderer.pump_events();
     int width{}, height{};
     expect(SDL_GetWindowSize(renderer.window(), &width, &height), "touch fixture reads real SDL window dimensions");
-    auto finger = [&](SDL_EventType type, std::uint64_t id, input::touch::Point at) {
+    auto finger = [&](SDL_EventType type, std::uint64_t id, input::touch::Point at, bool pump = true,
+                      std::uint64_t timestamp = 0) {
         SDL_Event event{};
         event.type = type;
         event.tfinger.windowID = SDL_GetWindowID(renderer.window());
         event.tfinger.touchID = 1;
         event.tfinger.fingerID = id;
-        event.tfinger.timestamp = SDL_GetTicksNS();
+        event.tfinger.timestamp = timestamp ? timestamp : SDL_GetTicksNS();
         event.tfinger.x = at.x / static_cast<float>(width);
         event.tfinger.y = at.y / static_cast<float>(height);
         event.tfinger.pressure = 1;
         expect(SDL_PushEvent(&event), "synthetic normalized SDL finger event queues");
-        renderer.pump_events();
+        if (pump) renderer.pump_events();
     };
     auto draw_overlay = [&] {
         auto &layer = ui::Layer::get();
         layer.begin_frame();
         if (player.touch_layout == settings::TouchLayout::Psp)
             ui::draw_touch_controls(renderer.touch_controls(), 0.6f);
+        else if (player.touch_layout == settings::TouchLayout::Adaptive)
+            ui::draw_adaptive_controls(renderer.adaptive_touch_controls(), .6f, SDL_GetTicks());
         else
             ui::draw_action_controls(renderer.action_touch_controls(), 0.6f, SDL_GetTicks());
         layer.end_frame();
@@ -3766,6 +3917,470 @@ void touch_event_contracts(gpu::VulkanRenderer &renderer) {
     keyboard.key.down = false;
     SDL_PushEvent(&keyboard);
     renderer.pump_events();
+    touch_context(game::control_context::Scene::Quest);
+    player.touch_layout = settings::TouchLayout::Adaptive;
+    player.touch_adaptive = input::touch::default_adaptive_layout();
+    game::BufferRam equipment(0x08800000u, 0x03800000u);
+    equipment.store16(game::kCharacter, 0xFF34);
+    equipment.store8(game::kCharacter + game::kCharacterWeapon, 1);
+    equipment.store8(game::kCharacter + game::kCharacterWeapon + 1, 12);
+    equipment.store16(game::kCharacter + game::kCharacterWeapon + 2, 7);
+    game::weapon::refresh(equipment);
+    const auto adaptive_at = renderer.adaptive_touch_controls().placed(input::touch::AdaptiveElement::Attack).centre;
+    expect(renderer.adaptive_touch_controls().attack_profile() == input::touch::AttackProfile::LongSword,
+        "Adaptive selects Long Sword gestures from real equipment state");
+    draw_overlay();
+    for (const input::touch::Point delta : {input::touch::Point{0, -80}, {0, 80}, {-80, 0}, {80, 0}}) {
+        // This is a quick swipe, regardless of a slow event pump on the host.
+        // Queue its timestamped events together; separate pumps can accidentally
+        // turn the test into a >110 ms hold and correctly select the primary hit.
+        const auto swipe_start = SDL_GetTicksNS() - SDL_MS_TO_NS(2);
+        finger(SDL_EVENT_FINGER_DOWN, 80, adaptive_at, false, swipe_start);
+        finger(SDL_EVENT_FINGER_MOTION, 80, {adaptive_at.x + delta.x, adaptive_at.y + delta.y}, true,
+            swipe_start + SDL_MS_TO_NS(1));
+        const auto buttons = delta.y < 0 ? 0x2000u : 0x3000u;
+        expect((renderer.pad().buttons & 0x3000u) == buttons && (renderer.pad().buttons & 0xF0u) == 0,
+            "Adaptive SDL gesture forwards its chosen attack without D-pad camera commands");
+        if (delta.x != 0)
+            expect(delta.x < 0 ? renderer.pad().analog_x < 0x80 : renderer.pad().analog_x > 0x80,
+                "lateral Adaptive gesture reaches the game's analog pad");
+        draw_overlay();
+        finger(SDL_EVENT_FINGER_CANCELED, 80, adaptive_at);
+        expect((renderer.pad().buttons & 0x3000u) == 0, "SDL cancellation never creates an Adaptive release tap");
+    }
+    // Publish a synthetic local quest actor through the actual weapon reader.
+    equipment.store32(0x0A05E600u, 0x336F574Du);
+    equipment.store32(0x0A05E608u, 0x0A05E600u);
+    const char quest_name[] = "game_task.ovl";
+    for (unsigned i = 0; i < sizeof(quest_name); ++i) equipment.store8(0x0A05E620u + i, quest_name[i]);
+    equipment.store32(0x088B6B68u, 0x8C420008u);
+    equipment.store32(0x088E49C8u, 0x30420008u);
+    equipment.store32(0x09FBE794u, 0x09000000u);
+    equipment.store32(0x09000008u, 0x09100000u);
+    equipment.store32(0x09100000u, 0x09200000u);
+    equipment.store32(0x092000A8u, 0x088A58DCu);
+    game::weapon::refresh(equipment);
+    renderer.pump_events();
+    expect(renderer.adaptive_touch_controls().weapon_posture() == input::touch::WeaponPosture::Sheathed,
+        "renderer receives the local actor's sheathed state");
+    draw_overlay();
+    finger(SDL_EVENT_FINGER_DOWN, 80, adaptive_at);
+    expect((renderer.pad().buttons & 0x1000u) != 0, "sheathed SDL press draws without gesture delay");
+    equipment.store32(0x0910027Cu, 8u);
+    game::weapon::refresh(equipment);
+    renderer.pump_events();
+    expect(renderer.pad().buttons == 0 &&
+            renderer.adaptive_touch_controls().attack_profile() == input::touch::AttackProfile::LongSword,
+        "actual posture publication releases draw contact and restores gesture profile");
+    draw_overlay();
+    finger(SDL_EVENT_FINGER_UP, 80, adaptive_at);
+    equipment.store32(0x0A05E600u, 0u);
+    game::weapon::refresh(equipment);
+    renderer.pump_events();
+    expect(renderer.adaptive_touch_controls().weapon_posture() == input::touch::WeaponPosture::Unknown,
+        "renderer does not retain posture after the quest task unloads");
+    finger(SDL_EVENT_FINGER_DOWN, 80, adaptive_at);
+    equipment.store16(game::kCharacter + game::kCharacterWeapon + 2, 8);
+    game::weapon::refresh(equipment);
+    renderer.pump_events();
+    expect(
+        !renderer.adaptive_touch_controls().held(input::touch::AdaptiveElement::Attack) && renderer.pad().buttons == 0,
+        "changing weapon ID within a class releases captured Adaptive input");
+    for (const auto &[kind, profile] : {std::pair{5, input::touch::AttackProfile::GreatSword},
+             std::pair{6, input::touch::AttackProfile::SwordAndShield},
+             std::pair{7, input::touch::AttackProfile::Hammer},
+             std::pair{16, input::touch::AttackProfile::DualBlades}}) {
+        equipment.store8(game::kCharacter + game::kCharacterWeapon + 1, kind);
+        game::weapon::refresh(equipment);
+        finger(SDL_EVENT_FINGER_DOWN, 180, adaptive_at);
+        expect(renderer.adaptive_touch_controls().attack_profile() == profile && renderer.pad().buttons == 0,
+            "SDL uses the real equipment class without pre-firing a new weapon attack");
+        finger(SDL_EVENT_FINGER_MOTION, 180, {adaptive_at.x + 100, adaptive_at.y});
+        expect(renderer.pad().buttons == (kind == 6 ? 0x0001 : 0x2000),
+            "weapon right flick reaches native Select spin for SnS and Circle for the other profiles through SDL");
+        finger(SDL_EVENT_FINGER_CANCELED, 180, adaptive_at);
+        if (kind == 5) {
+            finger(SDL_EVENT_FINGER_DOWN, 180, adaptive_at);
+            finger(SDL_EVENT_FINGER_MOTION, 180, {adaptive_at.x - 100, adaptive_at.y});
+            expect(renderer.pad().buttons == 1, "GS left flick reaches native kick through SDL");
+            finger(SDL_EVENT_FINGER_CANCELED, 180, adaptive_at);
+            finger(SDL_EVENT_FINGER_DOWN, 180, adaptive_at);
+            finger(SDL_EVENT_FINGER_MOTION, 180, {adaptive_at.x, adaptive_at.y - 100});
+            expect(renderer.pad().buttons == 0x1000, "GS upward flick starts native charge through SDL");
+            finger(SDL_EVENT_FINGER_UP, 180, adaptive_at);
+            expect(renderer.pad().buttons == 0, "SDL GS charge release has no trailing pulse");
+            const auto guard = renderer.adaptive_touch_controls().placed(input::touch::AdaptiveElement::Special).centre;
+            finger(SDL_EVENT_FINGER_DOWN, 185, guard);
+            finger(SDL_EVENT_FINGER_MOTION, 185, {guard.x - 100, guard.y - 100});
+            expect(renderer.pad().buttons == 0x200, "SDL GS guard survives finger drift");
+            finger(SDL_EVENT_FINGER_UP, 185, guard);
+            expect(renderer.pad().buttons == 0, "SDL GS guard releases immediately");
+        }
+        if (kind == 7 || kind == 16) {
+            finger(SDL_EVENT_FINGER_DOWN, 180, adaptive_at);
+            finger(SDL_EVENT_FINGER_MOTION, 180, {adaptive_at.x, adaptive_at.y + 100});
+            expect(
+                renderer.pad().buttons == 0, "unused Hammer/DB downward gesture does not reach the game as an attack");
+            finger(SDL_EVENT_FINGER_UP, 180, adaptive_at);
+            expect(renderer.pad().buttons == 0, "blocked downward gesture has no release attack through SDL");
+            const auto secondary =
+                renderer.adaptive_touch_controls().placed(input::touch::AdaptiveElement::Special).centre;
+            finger(SDL_EVENT_FINGER_DOWN, 185, secondary);
+            finger(SDL_EVENT_FINGER_MOTION, 185, {secondary.x - 100, secondary.y - 100});
+            expect(renderer.pad().buttons == 0x200, "SDL charge/mode button keeps native R while its finger drifts");
+            finger(SDL_EVENT_FINGER_UP, 185, secondary);
+            expect(renderer.pad().buttons == (kind == 7 ? 0 : 0x200),
+                "SDL Hammer release is immediate and a Dual Blades mode tap remains sampleable");
+            SDL_Delay(90);
+            renderer.pump_events();
+            expect(renderer.pad().buttons == 0, "secondary input cannot remain held after its release interval");
+        }
+        if (kind == 6) {
+            const auto movement = renderer.adaptive_touch_controls().placed(input::touch::AdaptiveElement::Stick);
+            finger(SDL_EVENT_FINGER_DOWN, 181, movement.centre);
+            finger(SDL_EVENT_FINGER_MOTION, 181, {movement.centre.x, movement.centre.y - movement.radius});
+            expect(renderer.pad().analog_y < 128, "SDL movement is active before a horizontal sword attack");
+            finger(SDL_EVENT_FINGER_DOWN, 180, adaptive_at);
+            finger(SDL_EVENT_FINGER_MOTION, 180, {adaptive_at.x, adaptive_at.y + 100});
+            expect(renderer.pad().buttons == 0x2000 && renderer.pad().analog_x == 128 && renderer.pad().analog_y == 128,
+                "SnS down flick reaches the game as Circle with neutral touch movement through SDL");
+            finger(SDL_EVENT_FINGER_CANCELED, 180, adaptive_at);
+            expect(renderer.pad().buttons == 0 && renderer.pad().analog_y < 128,
+                "canceling the SDL sword gesture restores the held movement contact");
+            finger(SDL_EVENT_FINGER_CANCELED, 181, movement.centre);
+            equipment.store32(0x0A05E600u, 0x336F574Du);
+            game::weapon::refresh(equipment);
+            renderer.pump_events();
+            const auto item = renderer.adaptive_touch_controls().placed(input::touch::AdaptiveElement::ItemBar).centre;
+            expect(renderer.adaptive_touch_controls().weapon_posture() == input::touch::WeaponPosture::Drawn &&
+                    renderer.adaptive_touch_controls().visible(input::touch::AdaptiveElement::Interact),
+                "the real SnS posture reader exposes a separate sheath action");
+            const auto shield = renderer.adaptive_touch_controls().placed(input::touch::AdaptiveElement::Special);
+            finger(SDL_EVENT_FINGER_DOWN, 184, shield.centre);
+            finger(SDL_EVENT_FINGER_MOTION, 184, {shield.centre.x, shield.centre.y - shield.radius * 1.5f});
+            expect(renderer.pad().buttons == 0x0200,
+                "upward shield swipe retains guard and does not inject X through SDL");
+            finger(SDL_EVENT_FINGER_CANCELED, 184, shield.centre);
+            finger(SDL_EVENT_FINGER_DOWN, 182, item);
+            finger(SDL_EVENT_FINGER_UP, 182, item);
+            for (unsigned i = 0; i < 3; ++i) {
+                renderer.sample_pad();
+                expect(renderer.pad().buttons == 0x8200, "SDL SnS item tap supplies native R plus Square to the game");
+            }
+            renderer.sample_pad();
+            expect(renderer.pad().buttons == 0, "SDL item use releases its injected guard");
+            const auto sheathe =
+                renderer.adaptive_touch_controls().placed(input::touch::AdaptiveElement::Interact).centre;
+            finger(SDL_EVENT_FINGER_DOWN, 183, sheathe);
+            expect(renderer.pad().buttons == 0x8000, "SDL separate sheath action sends plain Square");
+            finger(SDL_EVENT_FINGER_UP, 183, sheathe);
+            equipment.store32(0x0A05E600u, 0u);
+            game::weapon::refresh(equipment);
+            renderer.pump_events();
+        }
+        draw_overlay();
+    }
+    equipment.store32(0x0A05E600u, 0x336F574Du);
+    for (const auto kind : {5, 6, 7, 12, 15, 16}) {
+        equipment.store8(game::kCharacter + game::kCharacterWeapon + 1, kind);
+        game::weapon::refresh(equipment);
+        renderer.pump_events();
+        expect(renderer.adaptive_touch_controls().weapon_posture() == input::touch::WeaponPosture::Drawn &&
+                renderer.adaptive_touch_controls().visible(input::touch::AdaptiveElement::Interact),
+            "every implemented weapon exposes a separate sheath through the real posture reader");
+        const auto sheath = renderer.adaptive_touch_controls().placed(input::touch::AdaptiveElement::Interact).centre;
+        finger(SDL_EVENT_FINGER_DOWN, 186, sheath);
+        expect(renderer.pad().buttons == 0x8000,
+            "dedicated sheath reaches the game as plain Square for all six supported weapons");
+        finger(SDL_EVENT_FINGER_UP, 186, sheath);
+        expect(renderer.pad().buttons == 0, "dedicated sheath releases through SDL without a queued item action");
+    }
+    for (const auto &[kind, profile] : {std::pair{15, input::touch::AttackProfile::Bow}}) {
+        equipment.store8(game::kCharacter + game::kCharacterWeapon + 1, kind);
+        game::weapon::refresh(equipment);
+        renderer.pump_events();
+        expect(renderer.adaptive_touch_controls().attack_profile() == profile,
+            "Bow selects its supported Adaptive profile");
+        finger(SDL_EVENT_FINGER_DOWN, 187, adaptive_at);
+        finger(SDL_EVENT_FINGER_UP, 187, adaptive_at);
+        expect(renderer.pad().buttons == (kind == 11 || kind == 9 ? 0x2000 : 0x1000),
+            "SDL primary tap reaches native shot or melee/charge request");
+        SDL_Delay(90);
+        renderer.pump_events();
+        expect(renderer.pad().buttons == 0, "new primary pulse releases through SDL");
+        if (kind == 15) {
+            using E = input::touch::AdaptiveElement;
+            const auto aim = renderer.adaptive_touch_controls().placed(E::Special).centre;
+            finger(SDL_EVENT_FINGER_DOWN, 190, aim);
+            finger(SDL_EVENT_FINGER_UP, 190, aim);
+            expect(renderer.adaptive_touch_controls().bow_aiming() && renderer.pad().buttons == 0x200,
+                "SDL aim toggle latches R without starting charge");
+            const auto left = renderer.adaptive_touch_controls().placed(E::LeftFire).centre;
+            finger(SDL_EVENT_FINGER_DOWN, 191, left);
+            renderer.sample_pad();
+            expect(renderer.pad().buttons == 0x1200, "editable left duplicate charges the native Bow");
+            (void)renderer.take_touch_motion();
+            const auto a = renderer.adaptive_touch_controls().area();
+            const input::touch::Point free{a.left + a.width * .55f, a.top + a.height * .25f};
+            finger(SDL_EVENT_FINGER_DOWN, 192, free);
+            finger(SDL_EVENT_FINGER_MOTION, 192, {free.x + a.height * .08f, free.y + a.height * .05f});
+            const auto drag = renderer.take_touch_motion();
+            expect(drag.x > 0 && drag.y > 0 && renderer.pad().buttons == 0x1200,
+                "free right-hand camera drag survives while the left fire button charges");
+            finger(SDL_EVENT_FINGER_UP, 192, free);
+            finger(SDL_EVENT_FINGER_UP, 191, left);
+            expect(renderer.pad().buttons == 0x200, "SDL release fires while keeping aim active");
+            finger(SDL_EVENT_FINGER_DOWN, 191, left);
+            renderer.sample_pad();
+            renderer.set_game_input(false);
+            renderer.set_game_input(true);
+            for (unsigned n = 0; n < 3; ++n) {
+                renderer.sample_pad();
+                expect(renderer.pad().buttons == 0x5200, "menu resume preserves cancel-before-release ordering");
+            }
+            renderer.sample_pad();
+            expect(renderer.pad().buttons == 0 && !renderer.adaptive_touch_controls().bow_aiming(),
+                "menu recovery cannot leave charge or aim held");
+            finger(SDL_EVENT_FINGER_UP, 191, left);
+            finger(SDL_EVENT_FINGER_DOWN, 193, adaptive_at);
+            finger(SDL_EVENT_FINGER_MOTION, 193, {adaptive_at.x, adaptive_at.y + 80});
+            expect(renderer.pad().buttons == 0x2000, "Bow melee is still reachable after exiting aim");
+            finger(SDL_EVENT_FINGER_CANCELED, 193, adaptive_at);
+        }
+        if (kind == 11 || kind == 9 || kind == 15) {
+            const auto ammo =
+                renderer.adaptive_touch_controls().placed(input::touch::AdaptiveElement::Alternate).centre;
+            expect(renderer.adaptive_touch_controls().visible(input::touch::AdaptiveElement::Alternate),
+                "ranged ammo surface is visible through renderer");
+            finger(SDL_EVENT_FINGER_DOWN, 188, ammo);
+            finger(SDL_EVENT_FINGER_MOTION, 188, {ammo.x + 80, ammo.y});
+            finger(SDL_EVENT_FINGER_UP, 188, ammo);
+            for (unsigned n = 0; n < 10; ++n) {
+                renderer.sample_pad();
+                expect(renderer.pad().buttons == 0x100, "SDL ammunition waits native L preparation");
+            }
+            for (unsigned n = 0; n < 3; ++n) {
+                renderer.sample_pad();
+                expect(renderer.pad().buttons == 0x4100, "SDL ammunition advances exactly one native next entry");
+            }
+            renderer.sample_pad();
+            expect(renderer.pad().buttons == 0, "SDL ammo gesture releases without firing or rolling");
+        }
+    }
+    {
+        ScriptedUiMouse notice_mouse(renderer.window());
+        const auto notice_frame = [&] {
+            notice_mouse.prepare_frame();
+            ui::draw_over_game();
+            renderer.present_ui(true);
+        };
+        for (const auto kind : {17, 8, 14, 13, 11, 9}) {
+            // Equipment can change in the village or its native equipment menu.
+            touch_context(game::control_context::Scene::Hub, kind == 8 || kind == 13 || kind == 9);
+            equipment.store8(game::kCharacter + game::kCharacterWeapon + 1, kind);
+            game::weapon::refresh(equipment);
+            renderer.pump_events();
+            expect(!renderer.adaptive_touch_controls().quest_unavailable(),
+                "equipping a deferred weapon retains village and equipment-menu touch layouts");
+            notice_frame();
+            notice_frame();
+            auto *window = ImGui::FindWindowByName("##adaptive_weapon_notice");
+            expect(window && window->Active, "equipping a deferred weapon warns before entering a quest");
+            if (window && window->Active) {
+                const bool gold = std::any_of(window->DrawList->VtxBuffer.begin(), window->DrawList->VtxBuffer.end(),
+                    [](const ImDrawVert &vertex) {
+                        return vertex.col == ui::colors::kAccent || vertex.col == ui::colors::kAccentBright;
+                    });
+                expect(gold, "the actual Close button uses Yakumo gold instead of the default blue");
+                const ImVec2 close_at{window->Pos.x + window->Size.x * .5f,
+                    window->DC.CursorPosPrevLine.y + ui::Layer::get().font_size() * 1.1f};
+                notice_mouse.move(close_at);
+                notice_frame();
+                if (kind == 17) {
+                    renderer.capture_window(std::filesystem::temp_directory_path() / "adaptive-weapon-notice.bmp");
+                    notice_frame();
+                }
+                notice_mouse.button(true);
+                notice_frame();
+                notice_mouse.button(false);
+                notice_frame();
+                const int last = window->LastFrameActive;
+                notice_frame();
+                notice_frame();
+                expect(window->LastFrameActive == last,
+                    "the actual Close button dismisses the equipment notice without reopening");
+                equipment.store16(game::kCharacter + game::kCharacterWeapon + 2, 8);
+                game::weapon::refresh(equipment);
+                renderer.pump_events();
+                notice_frame();
+                expect(window->LastFrameActive == last, "same-class equipment changes do not spam the warning");
+                // Missing equipment while loading must not re-arm a dismissed class.
+                equipment.store8(game::kCharacter + game::kCharacterWeapon + 1, 10);
+                game::weapon::refresh(equipment);
+                renderer.pump_events();
+                notice_frame();
+                equipment.store8(game::kCharacter + game::kCharacterWeapon + 1, kind);
+                game::weapon::refresh(equipment);
+                renderer.pump_events();
+                notice_frame();
+                expect(window->LastFrameActive == last,
+                    "temporary equipment unavailability cannot repeat the same warning");
+            }
+            const int dismissed = window ? window->LastFrameActive : -1;
+            touch_context(game::control_context::Scene::Hub);
+            renderer.pump_events();
+            notice_frame();
+            expect(renderer.adaptive_touch_controls().visible(input::touch::AdaptiveElement::Stick),
+                "closing the equipment notice restores village movement");
+            touch_context(game::control_context::Scene::Quest);
+            renderer.pump_events();
+            const auto &controls = renderer.adaptive_touch_controls();
+            expect(controls.quest_unavailable(), "deferred equipment disables Adaptive Quest input");
+            for (std::size_t i = 0; i < input::touch::kAdaptiveElements; ++i)
+                expect(!controls.visible(static_cast<input::touch::AdaptiveElement>(i)),
+                    "deferred Quest equipment has no visible touch elements");
+            finger(SDL_EVENT_FINGER_DOWN, 194, adaptive_at);
+            finger(SDL_EVENT_FINGER_UP, 194, adaptive_at);
+            expect(renderer.pad().buttons == 0, "invisible deferred controls cannot send attacks");
+            notice_frame();
+            notice_frame();
+            expect(!window || window->LastFrameActive == dismissed,
+                "entering a quest cannot repeat an already dismissed equipment warning");
+            touch_context(game::control_context::Scene::Quest, true);
+            renderer.pump_events();
+            notice_frame();
+            expect(!renderer.adaptive_touch_controls().quest_unavailable() &&
+                    renderer.adaptive_touch_controls().visible(input::touch::AdaptiveElement::DPad),
+                "unsupported weapons keep usable touch navigation in native quest interfaces");
+            touch_context(game::control_context::Scene::Quest);
+            renderer.pump_events();
+        }
+        equipment.store8(game::kCharacter + game::kCharacterWeapon + 1, 12);
+        game::weapon::refresh(equipment);
+        renderer.pump_events();
+        notice_frame();
+        expect(!renderer.adaptive_touch_controls().quest_unavailable() &&
+                renderer.adaptive_touch_controls().visible(input::touch::AdaptiveElement::Attack),
+            "returning to Long Sword restores the supported layout");
+    }
+    equipment.store32(0x0A05E600u, 0u);
+    equipment.store8(game::kCharacter + game::kCharacterWeapon + 1, 10);
+    game::weapon::refresh(equipment);
+    finger(SDL_EVENT_FINGER_DOWN, 81, adaptive_at);
+    expect(renderer.adaptive_touch_controls().attack_profile() == input::touch::AttackProfile::Off &&
+            (renderer.pad().buttons & 0x1000) != 0,
+        "unsupported classes retain immediate ordinary button controls");
+    finger(SDL_EVENT_FINGER_UP, 81, adaptive_at);
+
+    // Publish synthetic live action-table facts through the real reader/renderer.
+    equipment.store32(0x0A05E600u, 0x336F574Du); // The previous case deliberately unloaded this task.
+    equipment.store8(game::kCharacter + game::kCharacterWeapon + 1, 12);
+    equipment.store8(0x09100062u, 7u);
+    equipment.store32(0x09100220u, 0u);
+    equipment.store32(0x088E49C8u, 0x30420008u);
+    equipment.store32(0x09200044u, 0x088A687Cu);
+    equipment.store32(0x088A687Cu, 0x24820F80u);
+    equipment.store32(0x0A10790Cu, 0x8C620304u);
+    equipment.store32(0x0A10A3CCu, 0x8C8214A8u);
+    equipment.store32(0x09FF53B0u, 0x09500000u);
+    equipment.store32(0x091014A8u, 0x09400000u);
+    equipment.store32(0x09100F84u, std::bit_cast<std::uint32_t>(0.f));
+    equipment.store32(0x09100F8Cu, std::bit_cast<std::uint32_t>(2.f));
+    equipment.store32(0x09100F94u, std::bit_cast<std::uint32_t>(100.f));
+    constexpr unsigned requests[] = {0, 2, 1};
+    for (unsigned i = 0; i < 3; ++i) {
+        const auto row = 0x09400000u + i * 22u;
+        equipment.store16(row, 4u);
+        equipment.store16(row + 6u, 25u);
+        equipment.store16(row + 8u, static_cast<std::uint16_t>(requests[i]));
+    }
+    equipment.store16(0x09400000u + 3u * 22u, 0xFFu);
+    game::weapon::refresh(equipment);
+    renderer.pump_events();
+    expect(renderer.adaptive_touch_controls().available() == 0x1Cu,
+        "real reader publishes only idle strike/thrust/fade choices to renderer");
+    finger(SDL_EVENT_FINGER_DOWN, 181, adaptive_at);
+    finger(SDL_EVENT_FINGER_MOTION, 181, {adaptive_at.x - 80, adaptive_at.y});
+    expect(renderer.pad().buttons == 0 && renderer.pad().analog_x == 0x80,
+        "SDL idle side gesture is blocked without a fallback strike or analog override");
+    finger(SDL_EVENT_FINGER_UP, 181, adaptive_at);
+    finger(SDL_EVENT_FINGER_DOWN, 182, adaptive_at);
+    finger(SDL_EVENT_FINGER_MOTION, 182, {adaptive_at.x, adaptive_at.y - 80});
+    expect(renderer.pad().buttons == 0x2000, "available SDL thrust retains original Circle input");
+    finger(SDL_EVENT_FINGER_CANCELED, 182, adaptive_at);
+    equipment.store32(0x0A10A3CCu, 0u);
+    equipment.store16(game::kCharacter, 0);
+    game::weapon::refresh(equipment);
+    const auto adaptive_toggle =
+        renderer.adaptive_touch_controls().placed(input::touch::AdaptiveElement::DpadToggle).centre;
+    finger(SDL_EVENT_FINGER_DOWN, 82, adaptive_toggle);
+    finger(SDL_EVENT_FINGER_UP, 82, adaptive_toggle);
+    expect(!player.touch_adaptive.at(input::touch::AdaptiveElement::DPad).shown &&
+            !player.touch_action.at(input::touch::Element::DPad).shown,
+        "Adaptive D-pad toggle persists independently from Action");
+    // Real SDL item gestures must reach pad reads, not just the pure model.
+    using E = input::touch::AdaptiveElement;
+    const auto item_at = renderer.adaptive_touch_controls().placed(E::ItemBar).centre;
+    const auto step = renderer.adaptive_touch_controls().area().height * .07f;
+    for (int side : {-1, 1}) {
+        finger(SDL_EVENT_FINGER_DOWN, 83, item_at);
+        finger(SDL_EVENT_FINGER_MOTION, 83, {item_at.x + side * step, item_at.y});
+        finger(SDL_EVENT_FINGER_UP, 83, {item_at.x + side * step, item_at.y});
+    }
+    for (unsigned read = 0; read < 10; ++read) {
+        renderer.sample_pad();
+        expect(renderer.pad().buttons == 0x100, "SDL item swipe sends L alone for actual game preparation");
+        if (read < 9)
+            for (unsigned poll = 0; poll < 3; ++poll) {
+                renderer.pump_events();
+                expect(renderer.pad().buttons == 0x100, "extra renderer polls do not advance item preparation");
+            }
+    }
+    for (auto expected : {0x8100u, 0x2100u}) {
+        for (unsigned read = 0; read < 3; ++read) {
+            renderer.sample_pad();
+            expect(renderer.pad().buttons == expected, "queued SDL swipe selects with L plus one face button");
+        }
+        renderer.sample_pad();
+        expect((renderer.pad().buttons & 0xA000) == 0, "SDL item selection releases before the next queued press");
+    }
+    renderer.sample_pad();
+    expect(renderer.pad().buttons == 0, "SDL quick swipes finish without an item-use pulse or held L");
+    finger(SDL_EVENT_FINGER_DOWN, 84, item_at);
+    finger(SDL_EVENT_FINGER_MOTION, 84, {item_at.x + step, item_at.y});
+    renderer.set_game_input(false);
+    renderer.set_game_input(true);
+    for (unsigned read = 0; read < 15; ++read) renderer.sample_pad();
+    expect(renderer.pad().buttons == 0, "opening the menu cancels queued Adaptive item input");
+    finger(SDL_EVENT_FINGER_DOWN, 90, renderer.adaptive_touch_controls().placed(E::Special).centre);
+    touch_context(game::control_context::Scene::Hub);
+    renderer.sample_pad();
+    expect(renderer.pad().buttons == 0 && renderer.adaptive_touch_controls().mode() == input::touch::AdaptiveMode::Hub,
+        "automatic context transition releases held input before exposing hub buttons");
+    const auto commands = renderer.adaptive_touch_controls().placed(E::Pause).centre;
+    finger(SDL_EVENT_FINGER_DOWN, 1001, commands);
+    finger(SDL_EVENT_FINGER_UP, 1001, commands);
+    const auto interface_toggle = renderer.adaptive_touch_controls().placed(E::InterfaceToggle).centre;
+    finger(SDL_EVENT_FINGER_DOWN, 91, interface_toggle);
+    finger(SDL_EVENT_FINGER_UP, 91, interface_toggle);
+    expect(renderer.adaptive_touch_controls().mode() == input::touch::AdaptiveMode::Interface,
+        "manual interface button overrides hub detection");
+    finger(SDL_EVENT_FINGER_DOWN, 1002, commands);
+    finger(SDL_EVENT_FINGER_UP, 1002, commands);
+    const auto second_toggle = renderer.adaptive_touch_controls().placed(E::InterfaceToggle).centre;
+    finger(SDL_EVENT_FINGER_DOWN, 92, second_toggle);
+    finger(SDL_EVENT_FINGER_UP, 92, second_toggle);
+    expect(renderer.adaptive_touch_controls().mode() == input::touch::AdaptiveMode::Hub,
+        "second interface tap returns to automatic detection");
+    touch_context(game::control_context::Scene::Quest, true);
+    renderer.sample_pad();
+    expect(renderer.adaptive_touch_controls().mode() == input::touch::AdaptiveMode::Interface &&
+            renderer.adaptive_touch_controls().attack_profile() == input::touch::AttackProfile::Off,
+        "quest menus take priority over equipped weapon gestures");
+    touch_context(game::control_context::Scene::Unknown);
+    renderer.sample_pad();
+    expect(renderer.adaptive_touch_controls().mode() == input::touch::AdaptiveMode::Interface,
+        "before loading a character, interface controls remain available");
     player = saved;
     settings::save();
 }
@@ -5206,6 +5821,10 @@ void menu_contracts(gpu::VulkanRenderer &renderer, psprecomp::Runtime &runtime, 
     toggle_setting("Haptic Feedback", &settings::Settings::touch_haptics);
     change_video("Layout", ImGuiKey_LeftArrow);
     expect(settings::current().touch_layout == original_layout, "touch layout round trip restores PSP controls");
+    change_video("Layout", ImGuiKey_LeftArrow);
+    expect(settings::current().touch_layout == settings::TouchLayout::Adaptive, "left from PSP selects Adaptive");
+    change_video("Layout", ImGuiKey_RightArrow);
+    expect(settings::current().touch_layout == original_layout, "right from Adaptive wraps back to PSP");
     const auto before_control_reset = settings::current();
     settings::current().dead_zone = 0.4f;
     settings::current().trigger = 0.9f;
@@ -6346,11 +6965,18 @@ int run_contracts(int scripts) {
         return failures ? 1 : 0;
     }
     if (scripts == 7) {
+        IsolatedTouchPointer isolate_pointer;
+        for (const auto kind :
+            {SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_EVENT_MOUSE_BUTTON_UP, SDL_EVENT_MOUSE_WHEEL}) {
+            SDL_Event physical{};
+            physical.type = kind;
+            expect(!SDL_PushEvent(&physical), "physical pointer cannot replace scripted touch coordinates");
+        }
         render_contracts(renderer);
         touch_menu_footer_contracts(renderer, sandbox);
         hud_editor_contracts(renderer);
         hud_gamepad_contracts(renderer);
-        touch_editor_contracts(renderer);
+        touch_editor_contracts(renderer, sandbox);
         touch_event_contracts(renderer);
         auto &player = settings::current();
         player.touch_layout = settings::TouchLayout::Psp;
@@ -6392,6 +7018,383 @@ int run_contracts(int scripts) {
         ui::touch_editor_frame(true);
         layer.end_frame();
         renderer.present_ui(true);
+        touch_context(game::control_context::Scene::Quest);
+        player.touch_layout = settings::TouchLayout::Adaptive;
+        player.touch_adaptive = input::touch::default_adaptive_layout();
+        game::BufferRam identity(game::kCharacter, game::kCharacterWeapon + game::kEquipmentRecord);
+        identity.store16(game::kCharacter, 0xFF34);
+        identity.store8(game::kCharacter + game::kCharacterWeapon, 1);
+        identity.store8(game::kCharacter + game::kCharacterWeapon + 1, 12);
+        identity.store16(game::kCharacter + game::kCharacterWeapon + 2, 1);
+        game::weapon::refresh(identity);
+        layer.set_interactive(false);
+        renderer.capture_window(sandbox / "adaptive-controls.bmp");
+        for (int frame = 0; frame < 3; ++frame) {
+            layer.begin_frame();
+            ui::draw_adaptive_controls(renderer.adaptive_touch_controls(), 0.7f, SDL_GetTicks());
+            layer.end_frame();
+            renderer.present_ui(true);
+        }
+        expect(std::filesystem::exists(sandbox / "adaptive-controls.bmp"), "Adaptive Long Sword selector is captured");
+        // Public visual reference sheet: the selector drawn by the real UI backend.
+        renderer.capture_window(sandbox / "adaptive-attack-pad.bmp");
+        for (int frame = 0; frame < 3; ++frame) {
+            layer.begin_frame();
+            auto *list = ImGui::GetBackgroundDrawList();
+            const auto size = ImGui::GetIO().DisplaySize;
+            const float radius = std::min(size.x / 8.f, size.y / 5.5f);
+            using Direction = input::touch::AttackDirection;
+            const Direction directions[] = {Direction::Pending, Direction::Primary, Direction::Up, Direction::Left,
+                Direction::Down, Direction::Right};
+            const char *labels[] = {"Idle", "Hold", "Up", "Left", "Down", "Right"};
+            for (int i = 0; i < 6; ++i) {
+                const input::touch::Point centre{size.x * ((i % 3 + .5f) / 3.f), size.y * ((i / 3 + .5f) / 2.f)};
+                auto thumb = centre;
+                if (directions[i] == Direction::Up) thumb.y -= radius * .28f;
+                if (directions[i] == Direction::Down) thumb.y += radius * .28f;
+                if (directions[i] == Direction::Left) thumb.x -= radius * .28f;
+                if (directions[i] == Direction::Right) thumb.x += radius * .28f;
+                ui::ElementLook look;
+                look.opacity = .9f;
+                look.held = i != 0;
+                ui::draw_adaptive_element(
+                    list, input::touch::AdaptiveElement::Attack, {centre, radius, radius}, thumb, look, directions[i]);
+                list->AddText({centre.x - 12.f, centre.y + radius * 1.3f}, IM_COL32(235, 225, 205, 255), labels[i]);
+            }
+            bool finite = true;
+            for (const auto &vertex : list->VtxBuffer)
+                finite &= std::isfinite(vertex.pos.x) && std::isfinite(vertex.pos.y);
+            expect(finite, "attack pad directions produce finite draw geometry");
+            layer.end_frame();
+            renderer.present_ui(true);
+        }
+        expect(std::filesystem::exists(sandbox / "adaptive-attack-pad.bmp"), "attack pad visual reference captured");
+        renderer.capture_window(sandbox / "adaptive-selector-surfaces.bmp");
+        for (int frame = 0; frame < 3; ++frame) {
+            layer.begin_frame();
+            auto *list = ImGui::GetBackgroundDrawList();
+            const auto size = ImGui::GetIO().DisplaySize;
+            using E = input::touch::AdaptiveElement;
+            using P = input::touch::AttackProfile;
+            using D = input::touch::AttackDirection;
+            using M = input::touch::AdaptiveMode;
+            using W = input::touch::WeaponPosture;
+            const E elements[] = {E::Attack, E::Attack, E::Special, E::Special, E::Attack, E::Special};
+            const P profiles[] = {P::LongSword, P::LongSword, P::SwordAndShield, P::SwordAndShield, P::Off, P::Off};
+            const D directions[] = {D::None, D::Up, D::None, D::Left, D::None, D::None};
+            const char *labels[] = {
+                "Attack / Idle", "Attack / Up", "Guard / Idle", "Guard / Left", "Fallback", "Fallback R"};
+            const float radius = std::min(size.x / 9.f, size.y / 7.f);
+            for (int i = 0; i < 6; ++i) {
+                const input::touch::Point c{size.x * ((i % 3 + .5f) / 3.f), size.y * ((i / 3 + .5f) / 2.f)};
+                const input::touch::Point thumb{c.x, c.y - (i == 1 ? radius * .22f : 0.f)};
+                ui::ElementLook look;
+                look.opacity = 1;
+                look.held = i == 1 || i == 3;
+                ui::draw_adaptive_element(list, elements[i], {c, radius, radius}, thumb, look, directions[i], M::Quest,
+                    W::Drawn, profiles[i]);
+                list->AddText({c.x - radius, c.y + radius * 1.45f}, IM_COL32(235, 225, 205, 255), labels[i]);
+            }
+            // Unsupported weapon controls must match the same ordinary PSP keys
+            // used by interfaces, rather than silently borrowing Long Sword art.
+            for (E e : {E::Attack, E::Special}) {
+                const input::touch::Point c{size.x * .5f, size.y * .5f};
+                ui::ElementLook look;
+                look.opacity = 1;
+                const int begin = list->VtxBuffer.Size;
+                ui::draw_adaptive_element(list, e, {c, radius, radius}, c, look, D::None, M::Quest, W::Drawn, P::Off);
+                const int middle = list->VtxBuffer.Size;
+                ui::draw_adaptive_element(
+                    list, e, {c, radius, radius}, c, look, D::None, M::Interface, W::Unknown, P::Off);
+                const int end = list->VtxBuffer.Size;
+                bool same = middle - begin == end - middle;
+                for (int i = 0; same && i < middle - begin; ++i) {
+                    const auto &a = list->VtxBuffer[begin + i];
+                    const auto &b = list->VtxBuffer[middle + i];
+                    same = std::abs(a.pos.x - b.pos.x) < .01f && std::abs(a.pos.y - b.pos.y) < .01f && a.col == b.col;
+                }
+                expect(same, "unsupported weapon art matches ordinary PSP Triangle/R");
+                // Keep the comparison out of the visual sheet.
+                for (int i = begin; i < end; ++i) list->VtxBuffer[i].pos = {-1000, -1000};
+            }
+            layer.end_frame();
+            renderer.present_ui(true);
+        }
+        expect(std::filesystem::exists(sandbox / "adaptive-selector-surfaces.bmp"),
+            "attack/guard/fallback sheet captured");
+
+        renderer.capture_window(sandbox / "adaptive-combo-arrows.bmp");
+        for (int frame = 0; frame < 3; ++frame) {
+            layer.begin_frame();
+            auto *list = ImGui::GetBackgroundDrawList();
+            const auto size = ImGui::GetIO().DisplaySize;
+            const char *labels[] = {"Idle", "Combo Window", "Recovery", "Unknown"};
+            const std::optional<std::uint8_t> masks[] = {0x1Cu, 0x7Cu, 0u, std::nullopt};
+            const float radius = std::min(size.x / 10.f, size.y / 7.f);
+            int counts[4]{};
+            for (int i = 0; i < 4; ++i) {
+                // Same origin for reliable draw-geometry comparison, translated afterward.
+                const input::touch::Point c{size.x * .25f, size.y * .25f};
+                const float x = size.x * (i % 2) * .5f, y = size.y * (i / 2) * .5f;
+                ui::ElementLook look;
+                look.opacity = 1;
+                look.available = masks[i];
+                const int first = list->VtxBuffer.Size;
+                look.opacity = .35f; // Low global opacity must not hide the direction hints.
+                ui::draw_adaptive_element(list, input::touch::AdaptiveElement::Attack, {c, radius, radius}, c, look,
+                    i == 1 ? input::touch::AttackDirection::Right : input::touch::AttackDirection::None,
+                    input::touch::AdaptiveMode::Quest, input::touch::WeaponPosture::Drawn,
+                    input::touch::AttackProfile::LongSword);
+                counts[i] = list->VtxBuffer.Size - first;
+                bool north = false, south = false, west = false, east = false;
+                bool bright = false, outline = false, gold = false;
+                for (int v = first; v < list->VtxBuffer.Size; ++v) {
+                    const auto &vertex = list->VtxBuffer[v];
+                    const float dx = vertex.pos.x - c.x, dy = vertex.pos.y - c.y;
+                    if (std::max(std::abs(dx), std::abs(dy)) > radius * 1.05f) {
+                        north |= dy < -radius;
+                        south |= dy > radius;
+                        west |= dx < -radius;
+                        east |= dx > radius;
+                        const auto rgb = vertex.col & ~IM_COL32_A_MASK;
+                        const auto alpha = (vertex.col & IM_COL32_A_MASK) >> IM_COL32_A_SHIFT;
+                        bright |= rgb == (IM_COL32(241, 237, 216, 255) & ~IM_COL32_A_MASK) && alpha >= 210;
+                        gold |= rgb == (IM_COL32(255, 211, 138, 255) & ~IM_COL32_A_MASK) && alpha >= 210;
+                        outline |= rgb == (IM_COL32(8, 14, 17, 255) & ~IM_COL32_A_MASK) && alpha >= 210;
+                    }
+                    list->VtxBuffer[v].pos.x += x;
+                    list->VtxBuffer[v].pos.y += y;
+                }
+                expect(north == (i < 2) && south == (i < 2) && west == (i == 1) && east == (i == 1),
+                    "only available direction chevrons extend outside the stick circle");
+                expect(bright == (i < 2) && outline == (i < 2) && gold == (i == 1),
+                    "external hints retain a dark outline, readable light strokes and selected gold at low opacity");
+                list->AddText({c.x + x - radius, c.y + y + radius * 1.45f}, IM_COL32(235, 225, 205, 255), labels[i]);
+            }
+            expect(counts[1] > counts[0] && counts[0] > counts[2] && counts[2] == counts[3],
+                "combo/idle add four/two direction hints; busy and unknown add none");
+            layer.end_frame();
+            renderer.present_ui(true);
+        }
+        expect(std::filesystem::exists(sandbox / "adaptive-combo-arrows.bmp"), "live-choice arrow reference captured");
+        renderer.capture_window(sandbox / "adaptive-bow-toggle.bmp");
+        for (int frame = 0; frame < 3; ++frame) {
+            layer.begin_frame();
+            auto *list = ImGui::GetBackgroundDrawList();
+            const auto size = ImGui::GetIO().DisplaySize;
+            list->AddRectFilled({0, 0}, size, IM_COL32(35, 44, 43, 255));
+            const char *names[] = {
+                "Normal: Melee + Arc", "Aim: Hold / Release", "Left Fire Duplicate", "Tap: Aim On / Off"};
+            const float r = std::min(size.x / 9.f, size.y / 6.f);
+            using E = input::touch::AdaptiveElement;
+            const E elements[] = {E::Attack, E::Attack, E::LeftFire, E::Special};
+            for (unsigned i = 0; i < 4; ++i) {
+                const input::touch::Point c{size.x * ((i % 2) + .5f) / 2.f, size.y * ((i / 2) + .5f) / 2.f};
+                ui::ElementLook look;
+                look.opacity = 1;
+                look.bow_aiming = i != 0;
+                look.held = i == 3;
+                ui::draw_adaptive_element(list, elements[i], {c, i == 2 ? r * .65f : r, i == 2 ? r * .65f : r}, c, look,
+                    input::touch::AttackDirection::None, input::touch::AdaptiveMode::Quest,
+                    input::touch::WeaponPosture::Drawn, input::touch::AttackProfile::Bow);
+                const auto text = ImGui::CalcTextSize(names[i]);
+                list->AddText(
+                    {c.x - text.x * .5f, std::min(c.y + r * 1.2f, size.y - text.y - 4)}, IM_COL32_WHITE, names[i]);
+            }
+            layer.end_frame();
+            renderer.present_ui(true);
+        }
+        expect(
+            std::filesystem::exists(sandbox / "adaptive-bow-toggle.bmp"), "Bow toggle and both fire surfaces captured");
+        renderer.capture_window(sandbox / "adaptive-dpad-cross.bmp");
+        for (int frame = 0; frame < 3; ++frame) {
+            layer.begin_frame();
+            auto *list = ImGui::GetBackgroundDrawList();
+            const auto size = ImGui::GetIO().DisplaySize;
+            // Neutral reference background makes the continuous silhouette and opacity readable.
+            list->AddRectFilled({0, 0}, size, IM_COL32(35, 44, 43, 255));
+            const std::uint16_t states[] = {0, 0x10, 0x30, 0x80};
+            const char *labels[] = {"Idle", "Up", "Diagonal", "Low Opacity"};
+            const float r = std::min(size.x / 9.f, size.y / 6.f);
+            for (unsigned i = 0; i < 4; ++i) {
+                const input::touch::Point c{size.x * ((i % 2) + .5f) / 2.f, size.y * ((i / 2) + .5f) / 2.f};
+                ui::ElementLook look;
+                look.opacity = i == 3 ? .35f : 1.f;
+                look.directions = states[i];
+                ui::draw_adaptive_element(list, input::touch::AdaptiveElement::DPad, {c, r, r}, c, look);
+                const auto extent = ImGui::CalcTextSize(labels[i]);
+                list->AddText(
+                    {c.x - extent.x * .5f, std::min(c.y + r * 1.2f, size.y - extent.y - 4)}, IM_COL32_WHITE, labels[i]);
+            }
+            layer.end_frame();
+            renderer.present_ui(true);
+        }
+        expect(std::filesystem::exists(sandbox / "adaptive-dpad-cross.bmp"),
+            "continuous Adaptive D-pad reference captured");
+        renderer.capture_window(sandbox / "adaptive-three-weapons.bmp");
+        for (int frame = 0; frame < 3; ++frame) {
+            layer.begin_frame();
+            auto *list = ImGui::GetBackgroundDrawList();
+            const auto size = ImGui::GetIO().DisplaySize;
+            using E = input::touch::AdaptiveElement;
+            using P = input::touch::AttackProfile;
+            const P profiles[] = {P::Hammer, P::DualBlades, P::GreatSword, P::Hammer, P::DualBlades, P::GreatSword};
+            const char *labels[] = {"Hammer", "Dual Blades", "Great Sword", "Hold / Release Charge",
+                "Demon Mode Toggle", "Hold / Release Guard"};
+            const float r = std::min(size.x / 12.f, size.y / 7.f);
+            for (int i = 0; i < 6; ++i) {
+                const input::touch::Point c{size.x * ((i % 3) + .5f) / 3.f, size.y * ((i / 3) + .5f) / 2.f};
+                ui::ElementLook look;
+                look.opacity = 1;
+                look.held = i == 3 || i == 5;
+                const int begin = list->VtxBuffer.Size;
+                ui::draw_adaptive_element(list, i < 3 ? E::Attack : E::Special, {c, r, r}, c, look,
+                    input::touch::AttackDirection::None, input::touch::AdaptiveMode::Quest,
+                    input::touch::WeaponPosture::Drawn, profiles[i]);
+                bool up = false, down = false, left = false, right = false;
+                for (int v = begin; v < list->VtxBuffer.Size; ++v) {
+                    const auto pos = list->VtxBuffer[v].pos;
+                    up |= pos.y < c.y - r * 1.05f;
+                    down |= pos.y > c.y + r * 1.05f;
+                    left |= pos.x < c.x - r * 1.05f;
+                    right |= pos.x > c.x + r * 1.05f;
+                }
+                expect(up == (i == 1 || i == 2) && down == (i == 2) && left == (i == 1 || i == 2) && right == (i < 3),
+                    "GS/Hammer/DB gesture legends match supported routes; charge and mode buttons advertise no flicks");
+                const auto extent = ImGui::CalcTextSize(labels[i]);
+                list->AddText({c.x - extent.x * .5f, c.y + r * 1.45f}, IM_COL32_WHITE, labels[i]);
+            }
+            layer.end_frame();
+            renderer.present_ui(true);
+        }
+        expect(
+            std::filesystem::exists(sandbox / "adaptive-three-weapons.bmp"), "GS/Hammer/DB control reference captured");
+        renderer.capture_window(sandbox / "adaptive-item-actions.bmp");
+        for (int frame = 0; frame < 3; ++frame) {
+            layer.begin_frame();
+            auto *list = ImGui::GetBackgroundDrawList();
+            using Posture = input::touch::WeaponPosture;
+            const auto size = ImGui::GetIO().DisplaySize;
+            const Posture postures[] = {Posture::Sheathed, Posture::Drawn, Posture::Unknown, Posture::Drawn};
+            const char *labels[] = {"Use Item", "Sheathe", "Unknown / Fallback", "SnS: Use Item While Drawn"};
+            std::vector<ImVec2> geometry[4];
+            for (int i = 0; i < 4; ++i) {
+                // Compare identical pixel origins: concave tessellation and text
+                // clipping can differ when the same glyph starts on another subpixel.
+                const input::touch::Point centre{size.x * .5f, size.y / 8.f};
+                const float row_offset = size.y * i / 4.f;
+                const float r = std::min(size.y / 18.f, size.x / 12.f);
+                ui::ElementLook look;
+                look.opacity = 1;
+                const int begin = list->VtxBuffer.Size;
+                ui::draw_adaptive_element(list, input::touch::AdaptiveElement::ItemBar,
+                    {centre, r, r * input::touch::kItemBarAspect}, centre, look, input::touch::AttackDirection::None,
+                    input::touch::AdaptiveMode::Quest, postures[i],
+                    i == 3 ? input::touch::AttackProfile::SwordAndShield : input::touch::AttackProfile::LongSword);
+                for (int v = begin; v < list->VtxBuffer.Size; ++v) {
+                    const auto point = list->VtxBuffer[v].pos;
+                    geometry[i].push_back({point.x - centre.x, point.y - centre.y});
+                    list->VtxBuffer[v].pos.y += row_offset;
+                }
+                list->AddText({centre.x - r * 3, centre.y + row_offset + r * 1.3f}, IM_COL32_WHITE, labels[i]);
+            }
+            const auto same_shape = [](const auto &a, const auto &b) {
+                if (a.size() != b.size()) return false;
+                for (std::size_t i = 0; i < a.size(); ++i)
+                    if (std::abs(a[i].x - b[i].x) > .01f || std::abs(a[i].y - b[i].y) > .01f) return false;
+                return true;
+            };
+            expect(!same_shape(geometry[0], geometry[1]), "drawn item fallback visibly indicates sheathing");
+            expect(same_shape(geometry[0], geometry[2]), "unknown posture preserves the ordinary item fallback");
+            expect(same_shape(geometry[0], geometry[3]), "drawn SnS item strip retains the use-item icon");
+            layer.end_frame();
+            renderer.present_ui(true);
+        }
+        expect(std::filesystem::exists(sandbox / "adaptive-item-actions.bmp"), "item posture actions captured");
+        input::touch::AdaptiveControls village;
+        const auto village_size = ImGui::GetIO().DisplaySize;
+        village.set_mode(input::touch::AdaptiveMode::Hub);
+        village.set_layout(input::touch::default_adaptive_layout(input::touch::AdaptiveMode::Hub),
+            {0, 0, village_size.x, village_size.y}, 1);
+        renderer.capture_window(sandbox / "adaptive-village.bmp");
+        for (int frame = 0; frame < 3; ++frame) {
+            layer.begin_frame();
+            ui::draw_adaptive_controls(village, 1, 0);
+            layer.end_frame();
+            renderer.present_ui(true);
+        }
+        expect(!village.visible(input::touch::AdaptiveElement::Evade), "village capture omits the X button");
+        input::touch::AdaptiveControls sheathed_controls;
+        sheathed_controls.set_layout(
+            input::touch::default_adaptive_layout(), {0, 0, village_size.x, village_size.y}, 1);
+        sheathed_controls.set_weapon_posture(input::touch::WeaponPosture::Sheathed);
+        renderer.capture_window(sandbox / "adaptive-sheathed.bmp");
+        for (int frame = 0; frame < 3; ++frame) {
+            layer.begin_frame();
+            ui::draw_adaptive_controls(sheathed_controls, 1, 0);
+            layer.end_frame();
+            renderer.present_ui(true);
+        }
+        expect(sheathed_controls.visible(input::touch::AdaptiveElement::Evade) &&
+                sheathed_controls.visible(input::touch::AdaptiveElement::Special),
+            "sheathed layout capture keeps sprint and evade separate");
+        input::touch::AdaptiveControls commands;
+        const auto window_size = ImGui::GetIO().DisplaySize;
+        commands.set_layout(input::touch::default_adaptive_layout(), {0, 0, window_size.x, window_size.y}, 1);
+        commands.finger_down(1, commands.placed(input::touch::AdaptiveElement::Pause).centre, 0);
+        renderer.capture_window(sandbox / "adaptive-commands.bmp");
+        for (int frame = 0; frame < 3; ++frame) {
+            layer.begin_frame();
+            ui::draw_adaptive_controls(commands, 1, 0);
+            layer.end_frame();
+            renderer.present_ui(true);
+        }
+        expect(std::filesystem::exists(sandbox / "adaptive-commands.bmp"),
+            "compact utility panel captured with readable labels");
+        renderer.capture_window(sandbox / "adaptive-weapon-icons.bmp");
+        for (int frame = 0; frame < 3; ++frame) {
+            layer.begin_frame();
+            auto *list = ImGui::GetBackgroundDrawList();
+            const auto size = ImGui::GetIO().DisplaySize;
+            using P = input::touch::AttackProfile;
+            using E = input::touch::AdaptiveElement;
+            const P profiles[] = {P::LongSword, P::GreatSword, P::SwordAndShield, P::DualBlades, P::Hammer};
+            const E elements[] = {E::Attack, E::Special, E::Evade, E::Alternate, E::Interact};
+            for (unsigned row = 0; row < 5; ++row) {
+                for (unsigned col = 0; col < 5; ++col) {
+                    const input::touch::Point c{size.x * (col + .5f) / 5.f, size.y * (row + .5f) / 5.f};
+                    const float r = std::min(size.x / 13.f, size.y / 13.f);
+                    ui::ElementLook look;
+                    look.opacity = 1;
+                    const int before = list->VtxBuffer.Size;
+                    ui::draw_adaptive_element(list, elements[col], {c, r, r}, c, look,
+                        input::touch::AttackDirection::None, input::touch::AdaptiveMode::Quest,
+                        input::touch::WeaponPosture::Drawn, profiles[row]);
+                    expect(list->VtxBuffer.Size > before, "every weapon/action icon produces visible geometry");
+                }
+            }
+            for (const auto &v : list->VtxBuffer)
+                expect(std::isfinite(v.pos.x) && std::isfinite(v.pos.y), "baked icons have finite coordinates");
+            layer.end_frame();
+            renderer.present_ui(true);
+        }
+        expect(std::filesystem::exists(sandbox / "adaptive-weapon-icons.bmp"), "weapon icon runtime sheet captured");
+        layer.set_interactive(true);
+        ui::open_touch_editor();
+        renderer.capture_window(sandbox / "adaptive-editor.bmp");
+        for (int frame = 0; frame < 3; ++frame) {
+            layer.begin_frame();
+            ui::touch_editor_frame(false);
+            layer.end_frame();
+            renderer.present_ui(true);
+        }
+        expect(std::filesystem::exists(sandbox / "adaptive-editor.bmp"), "Adaptive editor has its own layout capture");
+        layer.begin_frame();
+        ui::touch_editor_frame(true);
+        layer.end_frame();
+        renderer.present_ui(true);
+        identity.store16(game::kCharacter, 0);
+        game::weapon::refresh(identity);
         renderer.shutdown();
         std::cout << "Touch controls captures: " << sandbox.string() << '\n';
         std::cout << (failures ? "FAIL" : "PASS") << ": touch UI (" << failures << " failures)\n";
@@ -6451,7 +7454,7 @@ int run_contracts(int scripts) {
     bindings_editor_contracts(renderer);
     hud_editor_contracts(renderer);
     hud_gamepad_contracts(renderer);
-    touch_editor_contracts(renderer);
+    touch_editor_contracts(renderer, sandbox);
     touch_event_contracts(renderer);
     scripted_mouse_contracts(renderer);
     virtual_gamepad_contracts(renderer);

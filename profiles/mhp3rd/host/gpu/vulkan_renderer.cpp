@@ -23,6 +23,8 @@
 #include "perf/frame_stats.hpp"
 #include "perf/perf_overlay.hpp"
 #include "input/gamepad_devices.hpp"
+#include "game/weapon_state.hpp"
+#include "game/control_context.hpp"
 #include "input/bindings.hpp"
 #include "input/chords.hpp"
 #include "audio/audio_sink.hpp"
@@ -1080,6 +1082,9 @@ struct VulkanRenderer::Impl {
     // Touch screen: the on-screen controls, in window coordinates.
     input::touch::Controls touch;
     input::touch::ActionControls action_touch;
+    input::touch::AdaptiveControls adaptive_touch;
+    std::optional<game::weapon::Equipped> touch_weapon;
+    bool adaptive_interface_forced{};
     input::touch::Insets touch_insets{};
     settings::TouchLayout touch_mode{settings::TouchLayout::Psp};
     bool touch_visible{};
@@ -1100,10 +1105,115 @@ struct VulkanRenderer::Impl {
         if (touch_mode != player.touch_layout) {
             touch.release_all();
             action_touch.release_all();
+            adaptive_touch.release_all();
             touch_resolver.reset();
             lock_on_touch_tap = {};
             touch_mode = player.touch_layout;
         }
+        const bool adaptive = player.touch_layout == settings::TouchLayout::Adaptive;
+        using AdaptiveMode = input::touch::AdaptiveMode;
+        const auto context = game::control_context::current();
+        static const bool automatic_context = [] {
+            const char *value = std::getenv("MHP3RD_ADAPTIVE_CONTEXT");
+            return !value || std::string_view(value) != "0";
+        }();
+        const auto next_mode = adaptive_interface_forced         ? AdaptiveMode::Interface
+            : !automatic_context                                 ? AdaptiveMode::Quest
+            : context.interface_open                             ? AdaptiveMode::Interface
+            : context.scene == game::control_context::Scene::Hub ? AdaptiveMode::Hub
+                                                                 : AdaptiveMode::Quest;
+        if (adaptive_touch.mode() != next_mode) {
+            adaptive_touch.set_mode(next_mode);
+            touch_resolver.reset();
+            lock_on_touch_tap = {};
+        }
+        static const bool automatic_posture = [] {
+            const char *value = std::getenv("MHP3RD_ADAPTIVE_POSTURE");
+            return !value || std::string_view(value) != "0";
+        }();
+        using Posture = input::touch::WeaponPosture;
+        const auto posture = game::weapon::current_posture();
+        adaptive_touch.set_weapon_posture(!adaptive || !automatic_posture ? Posture::Unknown
+                : posture == game::weapon::Posture::Sheathed              ? Posture::Sheathed
+                : posture == game::weapon::Posture::Drawn                 ? Posture::Drawn
+                                                                          : Posture::Unknown);
+        const auto equipped = game::weapon::current();
+        if (adaptive && equipped != touch_weapon) {
+            adaptive_touch.release_all();
+            touch_resolver.reset();
+            lock_on_touch_tap = {};
+        }
+        touch_weapon = equipped;
+        static const bool compact_adaptive = [] {
+            const char *value = std::getenv("MHP3RD_ADAPTIVE_COMPACT");
+            return !value || std::string_view(value) != "0";
+        }();
+        adaptive_touch.set_compact(compact_adaptive);
+        static const bool bow_toggle = [] {
+            const char *value = std::getenv("MHP3RD_ADAPTIVE_BOW_TOGGLE");
+            return !value || std::string_view(value) != "0";
+        }();
+        adaptive_touch.set_bow_toggle(bow_toggle);
+        auto profile = input::touch::AttackProfile::Off;
+        if (adaptive && equipped) {
+            using W = game::weapon::Type;
+            using P = input::touch::AttackProfile;
+            switch (equipped->type) {
+            case W::LongSword:
+                profile = P::LongSword;
+                break;
+            case W::GreatSword:
+                profile = P::GreatSword;
+                break;
+            case W::SwordAndShield:
+                profile = P::SwordAndShield;
+                break;
+            case W::DualBlades:
+                profile = P::DualBlades;
+                break;
+            case W::Hammer:
+                profile = P::Hammer;
+                break;
+            case W::HuntingHorn:
+                profile = P::HuntingHorn;
+                break;
+            case W::Lance:
+                profile = P::Lance;
+                break;
+            case W::Gunlance:
+                profile = P::Gunlance;
+                break;
+            case W::SwitchAxe:
+                profile = P::SwitchAxe;
+                break;
+            case W::LightBowgun:
+                profile = P::LightBowgun;
+                break;
+            case W::HeavyBowgun:
+                profile = P::HeavyBowgun;
+                break;
+            case W::Bow:
+                profile = P::Bow;
+                break;
+            default:
+                break;
+            }
+        }
+        adaptive_touch.set_attack_profile(profile);
+        static const bool combo_hints = [] {
+            const char *value = std::getenv("MHP3RD_ADAPTIVE_COMBOS");
+            return !value || std::string_view(value) != "0";
+        }();
+        std::optional<std::uint8_t> choices;
+        if (adaptive && combo_hints && profile == input::touch::AttackProfile::LongSword) {
+            if (const auto next = game::weapon::current_actions()) {
+                using D = input::touch::AttackDirection;
+                choices = static_cast<std::uint8_t>((next->strike << static_cast<unsigned>(D::Primary)) |
+                    (next->thrust << static_cast<unsigned>(D::Up)) | (next->fade << static_cast<unsigned>(D::Down)) |
+                    (next->left << static_cast<unsigned>(D::Left)) | (next->right << static_cast<unsigned>(D::Right)));
+            }
+        }
+        adaptive_touch.set_available(choices);
         const float size = player.touch_size;
         const bool dpad = player.touch_dpad;
         const TouchLayoutKey key{width, height, content_rect, size, dpad};
@@ -1139,14 +1249,38 @@ struct VulkanRenderer::Impl {
         }
         touch.set_layout(input::touch::make_layout(
             static_cast<float>(width), static_cast<float>(height), touch_insets, size, dpad, player.touch_psp));
-        // The action layout follows its editor as well; placing it is cheap.
-        action_touch.set_layout(player.touch_action,
-            input::touch::safe_area(static_cast<float>(width), static_cast<float>(height), touch_insets), size);
+        const auto area = input::touch::safe_area(static_cast<float>(width), static_cast<float>(height), touch_insets);
+        action_touch.set_layout(player.touch_action, area, size);
+        adaptive_touch.set_layout(settings::adaptive_layout(player, adaptive_touch.mode()), area, size);
+        std::optional<input::touch::Area> items;
+        if (adaptive_touch.mode() == AdaptiveMode::Quest && hud::available() && hud::quest_visible() &&
+            !hud::active() && swapchain_extent.width && swapchain_extent.height) {
+            const auto rect = game_blit_rect();
+            const float sx = static_cast<float>(width) / swapchain_extent.width,
+                        sy = static_cast<float>(height) / swapchain_extent.height;
+            const hud::Rect picture{rect.offset.x * sx, rect.offset.y * sy, (rect.offset.x + rect.extent.width) * sx,
+                (rect.offset.y + rect.extent.height) * sy};
+            float fit_x = 1, fit_y = 1;
+            if (player.aspect == settings::Aspect::Fill) {
+                const float x = target_extent.width / 480.f, y = target_extent.height / 272.f;
+                fit_x = std::min(x, y) / std::max(x, 1.f);
+                fit_y = std::min(x, y) / std::max(y, 1.f);
+            }
+            const auto r = hud::screen_bounds(
+                hud::layout_enabled() ? player.hud : hud::Layout{}, hud::Part::Items, picture, fit_x, fit_y);
+            if (r.right > r.left && r.bottom > r.top)
+                items = input::touch::Area{r.left, r.top, r.right - r.left, r.bottom - r.top};
+        }
+        adaptive_touch.set_item_area(items);
     }
     [[nodiscard]] static bool action_layout() {
         return settings::current().touch_layout == settings::TouchLayout::Action;
     }
+    [[nodiscard]] static bool adaptive_layout() {
+        return settings::current().touch_layout == settings::TouchLayout::Adaptive;
+    }
     [[nodiscard]] bool touch_r3_held() const {
+        if (adaptive_layout()) return adaptive_touch.held(input::touch::AdaptiveElement::R3);
         return action_layout() ? action_touch.held(input::touch::Element::R3) : touch.held(input::touch::Control::R3);
     }
     void handle_touch(const SDL_Event &event) {
@@ -1161,6 +1295,7 @@ struct VulkanRenderer::Impl {
                 touch_visible = false;
                 touch.release_all();
                 action_touch.release_all();
+                adaptive_touch.release_all();
                 lock_on_touch_tap = {};
             }
             return;
@@ -1168,6 +1303,7 @@ struct VulkanRenderer::Impl {
         if (!settings::current().touch_controls || !game_input) {
             touch.release_all();
             action_touch.release_all();
+            adaptive_touch.release_all();
             lock_on_touch_tap = {};
             return;
         }
@@ -1181,7 +1317,28 @@ struct VulkanRenderer::Impl {
         if (event.type == SDL_EVENT_FINGER_DOWN) touch_visible = true;
         input::touch::Point drag;
         const bool r3_before = touch_r3_held();
-        if (action_layout()) {
+        if (adaptive_layout()) {
+            const auto ms = SDL_NS_TO_MS(event.tfinger.timestamp);
+            if (event.type == SDL_EVENT_FINGER_DOWN)
+                adaptive_touch.finger_down(id, at, ms);
+            else if (event.type == SDL_EVENT_FINGER_MOTION)
+                adaptive_touch.finger_move(id, at, ms);
+            else
+                adaptive_touch.finger_up(id, ms, event.type == SDL_EVENT_FINGER_CANCELED);
+            if (adaptive_touch.take_dpad_toggle()) {
+                settings::adaptive_layout(settings::current(), adaptive_touch.mode())
+                    .at(input::touch::AdaptiveElement::DPad)
+                    .shown = adaptive_touch.layout().at(input::touch::AdaptiveElement::DPad).shown;
+                settings::save();
+                update_touch_layout();
+            }
+            if (adaptive_touch.take_interface_toggle()) {
+                adaptive_interface_forced = !adaptive_interface_forced;
+                adaptive_touch.release_all();
+                update_touch_layout();
+            }
+            drag = adaptive_touch.take_camera_drag();
+        } else if (action_layout()) {
             // Event time, so a swipe's speed is the finger's, not the frame's.
             const std::uint64_t ms = SDL_NS_TO_MS(event.tfinger.timestamp);
             if (event.type == SDL_EVENT_FINGER_DOWN)
@@ -1215,7 +1372,9 @@ struct VulkanRenderer::Impl {
         if (event.type == SDL_EVENT_FINGER_CANCELED ||
             (event.type == SDL_EVENT_FINGER_MOTION && r3_before && !touch_r3_held()))
             lock_on_touch_tap = {};
-        const int haptics = action_layout() ? action_touch.take_haptics() : touch.take_haptics();
+        const int haptics = adaptive_layout() ? adaptive_touch.take_haptics()
+            : action_layout()                 ? action_touch.take_haptics()
+                                              : touch.take_haptics();
         if (haptics > 0 && settings::current().touch_haptics) {
 #if defined(MHP3RD_ANDROID_APP)
             android::haptic_tick();
@@ -6171,6 +6330,7 @@ void VulkanRenderer::sample_pad() {
 
 void VulkanRenderer::Impl::sample_pad(bool focused) {
     Impl *const impl_ = this;
+    if (touch_visible) update_touch_layout();
     // The bindings are matched on every sample, the menu's time included,
     // so a chord's timing is its own and the port's binds work anywhere.
     resolve_bindings(focused);
@@ -6212,16 +6372,25 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
     // So do the on-screen controls.
     if (impl_->touch_visible) {
         const bool action = Impl::action_layout();
-        pad.buttons |= action ? impl_->action_touch.buttons(SDL_GetTicks()) : impl_->touch.buttons();
-        const input::touch::Point stick = action ? impl_->action_touch.stick() : impl_->touch.stick();
+        pad.buttons |= Impl::adaptive_layout() ? impl_->adaptive_touch.buttons(SDL_GetTicks())
+            : action                           ? impl_->action_touch.buttons(SDL_GetTicks())
+                                               : impl_->touch.buttons();
+        const input::touch::Point stick = Impl::adaptive_layout() ? impl_->adaptive_touch.stick(SDL_GetTicks())
+            : action                                              ? impl_->action_touch.stick()
+                                                                  : impl_->touch.stick();
         analog_x += static_cast<int>(std::lround(stick.x * 127.0f));
         analog_y += static_cast<int>(std::lround(stick.y * 127.0f));
     }
 
     // With MHP3RD_PAD_AT_FLIP the game reads what the last pump sampled.
     static const bool at_flip = std::getenv("MHP3RD_PAD_AT_FLIP") != nullptr;
-    pad.buttons = impl_->lead_in.apply(pad.buttons, impl_->lead_request, impl_->game_read || at_flip);
+    const bool advance = impl_->game_read || at_flip;
+    pad.buttons = impl_->lead_in.apply(pad.buttons, impl_->lead_request, advance);
+    if (impl_->touch_visible && Impl::adaptive_layout())
+        pad.buttons |= impl_->adaptive_touch.sample_item_buttons(advance);
 
+    const auto bow_fire = Impl::adaptive_layout() ? impl_->adaptive_touch.sample_fire_buttons(advance) : 0u;
+    pad.buttons |= bow_fire;
     pad.analog_x = static_cast<std::uint8_t>(std::clamp(0x80 + analog_x, 0, 255));
     pad.analog_y = static_cast<std::uint8_t>(std::clamp(0x80 + analog_y, 0, 255));
 
@@ -6243,6 +6412,8 @@ void VulkanRenderer::Impl::sample_pad(bool focused) {
     }
     impl_->suppressed_buttons &= pad.buttons;
     pad.buttons &= ~impl_->suppressed_buttons;
+    // Resume filtering must not turn an already observed charge into a bare release.
+    if (bow_fire == 0x5200u) pad.buttons |= bow_fire;
     if (pad_tuning().trace &&
         (pad.buttons != impl_->pad.buttons || pad.analog_x != impl_->pad.analog_x ||
             pad.analog_y != impl_->pad.analog_y || pad.right_x != impl_->pad.right_x ||
@@ -6276,12 +6447,18 @@ bool VulkanRenderer::take_touch_menu() noexcept {
     // Both, so a tap on either layout's button is never left for later.
     const bool psp = impl_->touch.take_menu();
     const bool action = impl_->action_touch.take_menu();
-    return psp || action;
+    const bool adaptive = impl_->adaptive_touch.take_menu();
+    return psp || action || adaptive;
 }
 
 const input::touch::ActionControls &VulkanRenderer::action_touch_controls() const {
     impl_->update_touch_layout();
     return impl_->action_touch;
+}
+
+const input::touch::AdaptiveControls &VulkanRenderer::adaptive_touch_controls() const {
+    impl_->update_touch_layout();
+    return impl_->adaptive_touch;
 }
 
 MouseMotion VulkanRenderer::take_mouse_motion() noexcept {
@@ -6315,6 +6492,7 @@ void VulkanRenderer::set_game_input(bool enabled) {
     if (!enabled) {
         impl_->touch.release_all();
         impl_->action_touch.release_all();
+        impl_->adaptive_touch.release_all();
         impl_->lock_on_touch_tap = {};
         impl_->touch_resolver.reset();
         impl_->touch_mapped = {};

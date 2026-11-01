@@ -124,6 +124,7 @@ public:
     // The action layout's controls (#174), which take the fingers instead
     // while settings choose that layout.
     [[nodiscard]] const input::touch::ActionControls &action_touch_controls() const;
+    [[nodiscard]] const input::touch::AdaptiveControls &adaptive_touch_controls() const;
     // A camera drag on the touch screen since the last take, as a fraction of
     // the screen's height.
     [[nodiscard]] MouseMotion take_touch_motion() noexcept;

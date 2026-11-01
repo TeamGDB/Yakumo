@@ -379,6 +379,173 @@ The Action layout's **D-PAD** toggle shows or hides its full D-pad during play. 
 
 **Editing the PSP layout.** *Edit the PSP Layout…* opens the same editor for the PSP controls. Move, resize, rebind, hide or reset individual elements; the menu button stays available. *Floating Stick* keeps the original stick under the left thumb, or switches to a fixed stick at the edited position. *Add Combination* adds one of up to eight extra buttons, initially R + ○. *Presses* cycles common combinations; *Choose Buttons…* selects any PSP buttons to hold together. Release the screen button to release its combination; these are simultaneous presses, not timed sequences or automatic repetition. Hidden combinations remain selectable in the editor and keep their settings and slots; *Remove Combination* frees a slot. The panel can sit at the top, bottom, left or right to keep controls accessible. PSP settings use `input.touch_psp.<element>` and `input.touch_psp.floating_stick`, independently of the Action layout. Resetting one layout preserves the other. Positions stay relative to the screen's safe area. The Size percentage scales each element's factory radius on the current display, including tablets and cutouts; changing 100% to 105% increases the radius by 5% without switching sizing units. A tap selects an element; only a drag past the interface's movement threshold changes its position. The previous factory R3 position moves to the bottom-right corner once; custom positions are preserved, with `input.touch_psp.version=1` marking the updated layout.
 
+### Adaptive touch layout
+
+Choose **Controls → Touch Screen → Layout → Adaptive**, or set
+`MHP3RD_TOUCH_LAYOUT=adaptive`. **Edit the Adaptive Layout…** uses the same
+move/resize/rebind/hide editor, with independent `input.touch_adaptive.<element>`
+settings. PSP and Action layouts keep their own arrangements.
+
+Adaptive switches between three contexts:
+
+- **Village**: movement, camera, NPC interaction, sprint and the game menu.
+  The unused X/evade button is hidden, including in older saved layouts; Square
+  keeps its binding and uses the interaction-hand icon.
+- **Quest**: weapon controls, item gestures, evade, camera and lock-on.
+- **Interfaces**: D-pad, the four ordinary PSP face buttons, L/R, Start and
+  Select. This also covers the title and character-selection screens. Combat,
+  item swipes and camera drags are disabled while navigating interfaces.
+
+The editor's **Layout** row selects **Quest**, **Village** or **Interfaces**.
+Each keeps its own positions, sizes, bindings and visibility, under
+`input.touch_adaptive`, `input.touch_adaptive_hub` and
+`input.touch_adaptive_interface`. Open the three-dot **Commands** button and choose **Interface / Auto** to force
+interface controls or return to automatic selection. Changing context releases
+held touch input and queued item gestures. D-pad navigation remains available
+in Interfaces regardless of the gameplay D-pad toggle. The initial detector uses Windows snapshots of Start, the home chest, the
+quest counter, Smithy crafting and a quest supply box. Automatic switching in
+live play, other interactions and Android still need manual verification. `MHP3RD_ADAPTIVE_CONTEXT=0` disables automatic switching
+for comparison with the previous quest-only arrangement.
+
+In quests, the live weapon posture also changes the controls: while sheathed,
+the main attack button sends its ordinary binding immediately rather than waiting
+for an attack gesture; the sprint, interaction and item-use icons are shown.
+With a supported weapon drawn, its attack selector returns. A posture transition cancels
+old action contacts so a held sprint/draw cannot turn into an unintended attack,
+but preserves movement, camera, evade and item-selection contacts. Interface
+buttons are unaffected. Unknown posture retains the previous behavior.
+`MHP3RD_ADAPTIVE_POSTURE=0` disables this change for comparison. The state reader
+was checked with Long Sword on Windows; the new touch behavior and Android still
+need manual testing.
+
+Adaptive is a separate mobile arrangement, not a copy of Action: a floating
+movement stick on the left, a compact action arc on the right, a switchable
+D-pad, camera drags in free space and R3 in the bottom-right corner. The editor
+can also make the movement stick fixed. The three layouts have independent
+placements; selecting Adaptive never moves the player's saved HUD.
+The Quest editor's **Weapon Preview** shows the six supported weapon layouts and their
+input guides without changing equipped gear. Selected controls show their touch
+margin. During a drag the panel stays still, becomes translucent and lets the
+pointer pass through; release restores the options. The switchable D-pad is a
+single cross with highlighted directions, including diagonals.
+
+
+In a quest, **tap the visible item HUD to use an item**, or **swipe left/right
+across it to select** (L + Square / L + Circle). This surface follows the item
+block's position and scale in **QoL → HUD Settings** and the current picture
+aspect/letterboxing. Explicit action buttons take priority where they overlap.
+Vertical motion becomes camera movement; swipes, canceled gestures and long
+holds do not use an item on release. If the HUD is hidden or absent, a small
+editable item strip provides the same gestures. In the touch editor, select
+**Items / HUD → Edit HUD Layout...** to adjust the game block; its size is not
+controlled by the fallback strip's size. Moving/hiding the HUD cancels only the
+captured item gesture, not other held controls. Item swipes use the same
+L preparation as [Item left and right](#item-left-and-right), counted only on
+actual game pad reads. Quick swipes are queued in order (up to sixteen), with a
+button release between steps; they are not lost when the finger lifts or the
+render frame is late. Each contact selects at most one item, even if it moves farther or reverses.
+Lift and touch again for another selection. Keeping a recognized swipe held
+keeps the bar open. Taps use the item only after L
+has been released. Opening the menu or switching input/layout cancels pending
+gestures. This uses normal PSP input, not a direct item-selection hook.
+
+Adaptive Quest layouts support **Long Sword, Great Sword, Sword and Shield,
+Dual Blades, Hammer and Bow**. Hunting Horn, Lance, Gunlance, Switch Axe, Light
+Bowgun and Heavy Bowgun are deferred: equipping one immediately shows a warning,
+including in the village or equipment menu, with a gold **Close** button matching
+Yakumo's menu. Its Adaptive Quest controls are hidden; village and native-menu
+touch controls remain available. Choose a supported weapon or switch to PSP or
+Action in Controls. A dismissed warning does not repeat for the same class or
+when entering a quest.
+
+The local hunter's real equipped class and ID are refreshed once per original
+game flip. Missing equipment and custom bindings retain their ordinary fallback.
+Original SVG icons are baked into built-in geometry; no files need installing.
+
+Sprint and evade are separate quest buttons, even with the weapon sheathed.
+Hold sprint to run; press evade separately when needed. Holding both sends R + X.
+Swiping on sprint cannot trigger evade. Existing placement and visibility choices
+are preserved. A quick tap in free camera space recenters the view; a drag rotates
+it. Item, movement and button contacts are not camera taps. The camera shortcut
+is disabled by the `MHP3RD_ADAPTIVE_COMPACT=0` comparison switch.
+
+Attack-direction hints are outlined chevrons outside the stick circle; the selected
+direction is slightly larger and gold. They do not expand the touch target.
+For **Long Sword**, directional arrows now follow the local hunter's actual
+transition table and its animation/input-buffer window. Idle has no side arrows;
+eligible combo windows add the legal fade directions. Recovery suppresses the
+main selector. An unavailable flick cannot become an ordinary strike. Unknown
+states keep their input fallback. The other new profiles show fixed gesture legends,
+not predictions of charge level, Demon mode or a currently legal combo window.
+Set `MHP3RD_ADAPTIVE_COMBOS=0` to compare with unrestricted gestures. The separate
+weapon special action is unchanged.
+
+For a drawn **Bow**, tap the scope button to enter/leave aim. Drag free screen
+space to aim. In this mode the main selector becomes a charge/fire button and a
+smaller **Left Fire Button** appears on the left: hold either to charge, release
+to shoot. Both share one charge. Outside aim, the previous main-selector melee
+and arc gestures remain available. The left duplicate can be moved, resized or
+hidden in the Quest editor with Weapon Preview set to Bow. This is a testable
+candidate; cancellation and native animation timing still need device checks.
+
+The compact arrangement groups **Yakumo**, **Game Menu**, **Select**, **Camera**
+and **Interface / Auto** under the three-dot Commands button. Opening it releases
+gameplay contacts; an outside tap dismisses it without reaching gameplay. In
+quests all six supported weapon layouts show a dedicated sheath button while
+the weapon is drawn. Item-HUD taps still send Square (use item when sheathed,
+sheathe when drawn). With a confirmed drawn Sword and
+Shield, an item tap instead sends native R + Square to use it without sheathing.
+The separate sheath button sends ordinary Square for all six supported weapons.
+Its position, binding and visibility remain editable under Interact / Sheathe.
+No automatic item use is queued after sheathing. The editable item strip remains
+available if HUD is hidden. It shows a sheathing symbol for other drawn weapons
+and an item symbol for SnS, sheathed weapons or unknown posture. Hiding the
+item surface in the editor restores the separate Square control if it is enabled,
+so the compact arrangement does not remove both routes. Commands commit when
+released over their button; canceled or dragged-away touches send nothing.
+Saved positions/bindings remain intact. `MHP3RD_ADAPTIVE_COMPACT=0` restores the
+previous separate controls for comparison. Interfaces retain D-pad, L/R and face
+buttons; Confirm is green and Cancel red.
+
+| Profile | Main selector | Secondary action |
+| --- | --- | --- |
+| Long Sword | Tap/hold Triangle; up Circle; down Triangle + Circle; left/right Triangle + Circle with analog direction | Hold R for Spirit attack |
+| Great Sword | Tap/hold Triangle; up Triangle charge; right Circle; down Triangle + Circle; left Select (kick) | Immediate captured R guard; lift releases guard |
+| Sword and Shield | Tap/hold Triangle; up Triangle + Circle; right Select (spin); down Circle with neutral touch movement; left Circle with ordinary movement | Immediate R guard; left/right R + Circle; down R + Triangle; up keeps guarding. Shield target is 35% larger; evade remains separate |
+| Dual Blades | Tap/hold Triangle; up Triangle + Circle; sides Circle (left also supplies left analog); down unassigned | Immediate R mode button with a short release pulse for quick taps |
+| Hammer | Tap/hold Triangle; right Circle; other flicks unassigned | Hold to charge with R, lift to release immediately; finger drift keeps the charge held |
+
+| Bow | Outside aim: hold/release Triangle, late right arc, down melee. In aim: hold/release to fire, also duplicated on the left | Tap to enter/leave aim; drag free screen space to aim |
+
+These are experimental P3rd button mappings, not a claim that the iOS gesture
+bindings carry over unchanged. The game still controls legal combos and charge
+levels. Great Sword charge stops immediately when its contact is lifted. Sword
+and Shield guard flicks remain selectable after holding guard. Automated tests
+check input outputs, ownership and release; new profiles still need real weapon/gameplay testing on Windows and Android.
+
+Long Sword selector details:
+
+| Attack selector gesture | PSP input |
+| --- | --- |
+| Tap, or hold without dragging | Triangle |
+| Drag up | Circle |
+| Drag down | Triangle + Circle |
+| Drag left / right | Triangle + Circle with left / right analog input |
+
+The separate **R** button remains available for spirit attacks. Gesture distance
+starts at the finger-down point, so an off-centre press does not accidentally
+select a direction. Direction is chosen once per contact; lift and touch again
+to choose another action. A stationary hold selects Triangle after 110 ms, and
+cannot change into another gesture afterward. Short released taps/flicks remain
+available for 85 ms so the original 30 Hz game can sample them. Canceled touches,
+menu entry, input takeover, layout changes and equipment changes clear captured
+input. Only one finger owns the attack selector. Side gestures use analog input,
+not camera D-pad commands; other fingers can still operate movement and camera.
+
+These are initial weapon profiles; complete context-sensitive combo hints
+and interaction prompts are still being developed. Actual animation transitions, touch hardware and multiplayer
+need gameplay verification.
+
 ## On-screen keyboard
 
 When the game asks for text (the hunter's name at character creation), Yakumo opens its own keyboard over the game. It works with a gamepad alone, and a physical keyboard types into it at the same time; the mouse can click its keys.
@@ -474,8 +641,10 @@ The Android app starts from other defaults where a phone differs, with the same 
 | Controls | Mouse Sensitivity | `input.mouse_sensitivity` | `MHP3RD_MOUSE_SENSITIVITY` | Degrees of camera turn per count of mouse motion, 0.01 to 0.99; default 0.10 |
 | Controls | Invert Mouse Horizontally / Vertically | `input.invert_mouse_x`, `input.invert_mouse_y` | | For the mouse camera and aim |
 | Controls | On-Screen Controls | `input.touch_controls` | | On (default): a touch screen shows the on-screen controls once it is touched |
-| Controls | Layout | `input.touch_layout` | `MHP3RD_TOUCH_LAYOUT` | `psp` (PSP buttons, the default) or `action`; see [Touch screen](#touch-screen) |
+| Controls | Layout | `input.touch_layout` | `MHP3RD_TOUCH_LAYOUT` | `psp` (PSP buttons, the default), `action` or `adaptive`; see [Touch screen](#touch-screen) |
 | Controls | Edit the Action Layout… | `input.touch_action.<element>` | | Where each element of the Action layout is, what it presses and whether it is shown |
+| Controls | Adaptive Floating Stick | `input.touch_adaptive.floating_stick` | | Floating under the left thumb, or fixed at its edited position |
+| Controls | Edit the Adaptive Layout… | `input.touch_adaptive.<element>` | | Independent Adaptive placements, button bindings and visibility |
 | Controls | Edit the PSP Layout… | `input.touch_psp.<element>` | | PSP button, D-pad and stick positions, sizes and visibility, plus up to eight extra combination buttons |
 | PSP Layout Editor | Floating Stick | `input.touch_psp.floating_stick` | | On (default): the stick appears under the left thumb; off: it stays at its edited position |
 | Controls / Touch Layout Editor | Haptic Feedback | `input.touch_haptics` | | On (default): a short vibration for a button, D-pad direction change or Action swipe in either layout |
@@ -1130,7 +1299,12 @@ The renderer then leaves out the HUD packets' draws, and nothing else: their oth
 | `MHP3RD_PAD_DEADZONE` | `0.15` | Left-stick dead zone, as a fraction of travel (menu: Stick Dead Zone) |
 | `MHP3RD_PAD_TRIGGER` | `0.25` | How far LT/RT travel before they press anything (menu: Trigger Point) |
 | `MHP3RD_CHORD_WINDOW` | `50` | Milliseconds an input that begins a longer chord waits for the rest, 0 to 200; `0` or `off` acts at once (menu: Chord Window) |
-| `MHP3RD_TOUCH_LAYOUT` | unset | The touch layout for this run: `psp` or `action` (menu: Layout) |
+| `MHP3RD_ADAPTIVE_CONTEXT` | `1` | `0` disables automatic Adaptive context switching for comparison; the UI button remains available |
+| `MHP3RD_TOUCH_AIM_CARDINAL` | `1` | `0` restores full-diagonal touch aim requests for comparison with the axis-priority fix |
+| `MHP3RD_ADAPTIVE_BOW_TOGGLE` | `1` | `0` restores held-R aim instead of the Bow aim toggle and left fire duplicate |
+| `MHP3RD_ADAPTIVE_COMPACT` | `1` | `0` restores the previous separate Adaptive utility buttons and Square control |
+| `MHP3RD_ADAPTIVE_POSTURE` | `1` | `0` disables Adaptive drawn/sheathed actions and icons for comparison |
+| `MHP3RD_TOUCH_LAYOUT` | unset | The touch layout for this run: `psp`, `action` or `adaptive` (menu: Layout) |
 | `MHP3RD_CONTROL_PRESET` | unset | The control preset for this run: `default`, `modern`, `left_handed`, `classic`, or the name of one of the player's (menu: Preset). `MHP3RD_PAD_TRIGGERS`, which chose a trigger profile, is retired: its profiles are presets now |
 | `MHP3RD_ANALOG_CAMERA` | on | Proportional yaw and continuous tilt in the ordinary quest camera, the tilt limited to −60°…70° before collision correction. Stick deflection controls speed; release holds the angle. The physical D-pad and recentre return control to the game. Uses the camera update directly, without memory searches or renderer tracing. Off restores stock input and stops camera writes immediately (menu: Analog Camera) |
 | `MHP3RD_LOCK_ON` | on | `0` makes the [Lock on](#lock-on) bind do nothing (menu: Lock-On) |
@@ -1456,3 +1630,10 @@ analysis/     Analyzer output and extracted overlays (ignored)
 generated/    Recompiled executable (ignored)
 overlays/     One directory per recompiled overlay (ignored)
 ```
+
+
+`MHP3RD_TRACE_AIM=log` writes bounded aim diagnostics into the ordinary log
+(up to 18,000 records). It records pointer deltas, observed aim changes and
+anticipation corrections, without guest memory dumps. A file path retains the
+existing trace-to-file behavior. Android users can export the ordinary log from
+System > Save the Log. This switch does not change input or aiming behavior.

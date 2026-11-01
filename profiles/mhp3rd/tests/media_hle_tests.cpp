@@ -1,4 +1,7 @@
 #include "hle/hle_common.hpp"
+#include "game/game_data.hpp"
+#include "game/equipment_models.hpp"
+#include "game/weapon_state.hpp"
 #include "audio/atrac_decoder.hpp"
 #include "movie/avc_decoder.hpp"
 
@@ -171,6 +174,24 @@ void audio_display_contracts(Fixture &f) {
     check(f.call("sceDisplay", "sceDisplaySetMode", {0, 480, 272}) == 0 &&
             f.call("sceDisplay", "sceDisplaySetFrameBuf", {0x04000000, 512, 3, 1}) == 0,
         "Headless frame presentation must complete");
+    namespace weapon = mhp3rd::game::weapon;
+    using namespace mhp3rd::game;
+    check(!weapon::current(), "An empty game flip must not invent weapon equipment");
+    memory.store16(kCharacter, 0xFF34u);
+    memory.store8(kCharacter + kCharacterWeapon, 1u);
+    memory.store8(kCharacter + kCharacterWeapon + 1u, 5u);
+    memory.store16(kCharacter + kCharacterWeapon + 2u, 7u);
+    check(f.call("sceDisplay", "sceDisplaySetFrameBuf", {0x04000000, 512, 3, 1}) == 0 &&
+            weapon::current() == weapon::Equipped{weapon::Type::GreatSword, 7u},
+        "A real display flip publishes the equipped weapon snapshot");
+    memory.store8(kCharacter + kCharacterWeapon + 1u, 15u);
+    memory.store16(kCharacter + kCharacterWeapon + 2u, 12u);
+    check(f.call("sceDisplay", "sceDisplaySetFrameBuf", {0x04000000, 512, 3, 1}) == 0 &&
+            weapon::current() == weapon::Equipped{weapon::Type::Bow, 12u},
+        "The next game flip refreshes changed equipment without a renderer");
+    memory.store16(kCharacter, 0u);
+    check(f.call("sceDisplay", "sceDisplaySetFrameBuf", {0x04000000, 512, 3, 1}) == 0 && !weapon::current(),
+        "Character unload clears the shared snapshot on a display flip");
     check(f.call("sceCtrl", "sceCtrlSetSamplingCycle", {100}) == 0 &&
             f.call("sceCtrl", "sceCtrlSetSamplingCycle", {0}) == 100,
         "Controller sampling cycle returns previous setting");

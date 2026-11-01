@@ -17,6 +17,17 @@
 #include <vector>
 
 namespace mhp3rd::settings {
+input::touch::AdaptiveLayout &adaptive_layout(Settings &s, input::touch::AdaptiveMode mode) {
+    return mode == input::touch::AdaptiveMode::Hub      ? s.touch_adaptive_hub
+        : mode == input::touch::AdaptiveMode::Interface ? s.touch_adaptive_interface
+                                                        : s.touch_adaptive;
+}
+const input::touch::AdaptiveLayout &adaptive_layout(const Settings &s, input::touch::AdaptiveMode mode) {
+    return mode == input::touch::AdaptiveMode::Hub      ? s.touch_adaptive_hub
+        : mode == input::touch::AdaptiveMode::Interface ? s.touch_adaptive_interface
+                                                        : s.touch_adaptive;
+}
+
 namespace {
 
 // One setting: its key in settings.ini, the variable that overrides it, and
@@ -117,7 +128,8 @@ const Names<PerfDisplay> kPerfDisplays{
         {PerfDisplay::Log, "log"}, {PerfDisplay::Compact, "compact"}, {PerfDisplay::CompactAndLog, "compact+log"}}};
 const Names<RightStick> kRightSticks{
     {{RightStick::Camera, "camera"}, {RightStick::DPad, "dpad"}, {RightStick::Off, "off"}}};
-const Names<TouchLayout> kTouchLayouts{{{TouchLayout::Psp, "psp"}, {TouchLayout::Action, "action"}}};
+const Names<TouchLayout> kTouchLayouts{
+    {{TouchLayout::Psp, "psp"}, {TouchLayout::Action, "action"}, {TouchLayout::Adaptive, "adaptive"}}};
 const Names<fast_forward::Mode> kFastForwardModes{
     {{fast_forward::Mode::Hold, "hold"}, {fast_forward::Mode::Toggle, "toggle"}, {fast_forward::Mode::Off, "off"}}};
 const Names<NameEntry> kNameEntries{{{NameEntry::Keyboard, "keyboard"}, {NameEntry::Fixed, "fixed"}}};
@@ -439,6 +451,9 @@ const std::vector<Field> &fields() {
             }},
         BOOL_FIELD("input.touch_controls", touch_controls),
         BOOL_FIELD("input.touch_psp.floating_stick", touch_psp.floating_stick),
+        BOOL_FIELD("input.touch_adaptive.floating_stick", touch_adaptive.floating_stick),
+        BOOL_FIELD("input.touch_adaptive_hub.floating_stick", touch_adaptive_hub.floating_stick),
+        BOOL_FIELD("input.touch_adaptive_interface.floating_stick", touch_adaptive_interface.floating_stick),
         BOOL_FIELD("input.touch_dpad", touch_dpad),
         {"input.touch_opacity", nullptr,
             [](Settings &s, const std::string &t) {
@@ -460,7 +475,7 @@ const std::vector<Field> &fields() {
             [](const Settings &s) { return kTouchLayouts.format(s.touch_layout); },
             [](Settings &s, const char *t) {
                 if (!kTouchLayouts.parse(t, s.touch_layout))
-                    std::cerr << "[settings] MHP3RD_TOUCH_LAYOUT: psp or action\n";
+                    std::cerr << "[settings] MHP3RD_TOUCH_LAYOUT: psp, action or adaptive\n";
             }},
         BOOL_FIELD("input.touch_haptics", touch_haptics),
         BOOL_FIELD("input.background_gamepad", background_gamepad),
@@ -591,8 +606,8 @@ const std::vector<Field> &fields() {
 const std::vector<Field> &all_fields() {
     static const std::vector<Field> table = [] {
         // Field keys are C strings; these hold them for the program's life.
-        static std::vector<std::string> keys(
-            input::kActions * 2u + input::touch::kElements + input::touch::kPspElements);
+        static std::vector<std::string> keys(input::kActions * 2u + input::touch::kElements +
+            input::touch::kPspElements + 3u * input::touch::kAdaptiveElements);
         std::vector<Field> list = fields();
         for (std::size_t i = 0; i < input::kActions; ++i) {
             keys[i] = std::string(kBindPrefix) + input::info(static_cast<input::Action>(i)).key;
@@ -631,6 +646,25 @@ const std::vector<Field> &all_fields() {
                         static_cast<input::touch::PspElement>(i), t, s.touch_psp.elements[i]);
                 },
                 [i](const Settings &s) { return input::touch::format(s.touch_psp.elements[i]); }, nullptr});
+        }
+        for (unsigned mode = 0; mode < 3; ++mode) {
+            const auto context = static_cast<input::touch::AdaptiveMode>(mode);
+            const char *prefix = mode == 0 ? "input.touch_adaptive."
+                : mode == 1                ? "input.touch_adaptive_hub."
+                                           : "input.touch_adaptive_interface.";
+            for (std::size_t i = 0; i < input::touch::kAdaptiveElements; ++i) {
+                auto &key = keys[input::kActions * 2u + input::touch::kElements + input::touch::kPspElements +
+                    mode * input::touch::kAdaptiveElements + i];
+                key = std::string(prefix) + input::touch::info(static_cast<input::touch::AdaptiveElement>(i)).key;
+                list.push_back(Field{key.c_str(), nullptr,
+                    [i, context](Settings &s, const std::string &text) {
+                        return input::touch::parse_adaptive_placement(static_cast<input::touch::AdaptiveElement>(i),
+                            text, adaptive_layout(s, context).elements[i]);
+                    },
+                    [i, context](
+                        const Settings &s) { return input::touch::format(adaptive_layout(s, context).elements[i]); },
+                    nullptr});
+            }
         }
         return list;
     }();
@@ -858,6 +892,7 @@ void write_entries(const Settings &values, Entries &entries) {
     for (const Field &field : all_fields()) entries[field.key] = field.format(values);
     entries[kVersionKey] = std::to_string(kVersion);
     entries["input.touch_psp.version"] = "1";
+    entries["input.touch_adaptive.version"] = "2";
     write_combos(values.controls.combos, std::string(kComboPrefix), entries);
     write_user_presets(values.user_presets, entries);
     entries.erase(kRetiredTypeNameKey);
@@ -886,6 +921,13 @@ void read_entries(Settings &values, const Entries &entries) {
         auto &r3 = values.touch_psp.at(input::touch::PspElement::R3);
         const input::touch::Placement previous{input::touch::Anchor::Right, 0.6f, 0.19f, 0.04f, 0u, true};
         if (r3 == previous) r3 = input::touch::default_psp_layout().at(input::touch::PspElement::R3);
+    }
+    // Replace only the earlier Action-based prototype, preserving its D-pad preference.
+    const auto adaptive_version = entries.find("input.touch_adaptive.version");
+    if (adaptive_version == entries.end() || adaptive_version->second != "2") {
+        const bool dpad_shown = values.touch_adaptive.at(input::touch::AdaptiveElement::DPad).shown;
+        values.touch_adaptive = input::touch::default_adaptive_layout();
+        values.touch_adaptive.at(input::touch::AdaptiveElement::DPad).shown = dpad_shown;
     }
     settle_controls(values, entries);
 }

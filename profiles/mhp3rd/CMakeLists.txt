@@ -156,6 +156,7 @@ if(MHP3RD_RENDERER)
             host/ui/touch_editor.cpp
             host/ui/hud_editor.cpp
             host/ui/touch_overlay.cpp
+            host/ui/touch_adaptive.cpp
             host/ui/texture_pack_screen.cpp
             host/ui/translation_screen.cpp
             host/ui/widgets.cpp
@@ -213,7 +214,9 @@ set(MHP3RD_HOST_SOURCES
     host/input/chords.cpp
     host/input/presets.cpp
     host/input/gamepad_mapping.cpp
-    host/input/touch_action.cpp
+    host/input/adaptive_attack.cpp
+    host/input/touch_adaptive.cpp
+    host/input/touch_geometry.cpp host/input/touch_action.cpp
     host/input/touch_controls.cpp
     host/gpu/texture_pack.cpp
     host/gpu/texture_pack_import.cpp
@@ -273,6 +276,8 @@ set(MHP3RD_HOST_SOURCES
     host/game/guest_ram.cpp
     host/game/game_data.cpp
     host/game/equipment_models.cpp
+    host/game/weapon_state.cpp
+    host/game/control_context.cpp
     host/game/layered_armor.cpp
     host/game/layered_armor_hook.cpp
     third_party/tiny_aes/aes.c
@@ -468,7 +473,9 @@ add_executable(mhp3rd_camera_tests
     host/input/bindings.cpp
     host/input/chords.cpp
     host/input/presets.cpp
-    host/input/touch_action.cpp
+    host/input/adaptive_attack.cpp
+    host/input/touch_adaptive.cpp
+    host/input/touch_geometry.cpp host/input/touch_action.cpp
     host/input/touch_controls.cpp
     host/platform/utf8_path.cpp)
 target_include_directories(mhp3rd_camera_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
@@ -487,7 +494,9 @@ add_executable(mhp3rd_lock_on_tests
     host/input/bindings.cpp
     host/input/chords.cpp
     host/input/presets.cpp
-    host/input/touch_action.cpp
+    host/input/adaptive_attack.cpp
+    host/input/touch_adaptive.cpp
+    host/input/touch_geometry.cpp host/input/touch_action.cpp
     host/input/touch_controls.cpp
     host/platform/utf8_path.cpp)
 target_include_directories(mhp3rd_lock_on_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
@@ -506,7 +515,9 @@ add_executable(mhp3rd_free_camera_tests
     host/input/bindings.cpp
     host/input/chords.cpp
     host/input/presets.cpp
-    host/input/touch_action.cpp
+    host/input/adaptive_attack.cpp
+    host/input/touch_adaptive.cpp
+    host/input/touch_geometry.cpp host/input/touch_action.cpp
     host/input/touch_controls.cpp
     host/app_paths.cpp
     host/platform/utf8_path.cpp)
@@ -546,7 +557,9 @@ add_executable(mhp3rd_settings_tests
     host/input/bindings.cpp
     host/input/chords.cpp
     host/input/presets.cpp
-    host/input/touch_action.cpp
+    host/input/adaptive_attack.cpp
+    host/input/touch_adaptive.cpp
+    host/input/touch_geometry.cpp host/input/touch_action.cpp
     host/input/touch_controls.cpp
     host/platform/utf8_path.cpp)
 target_include_directories(mhp3rd_settings_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
@@ -691,7 +704,9 @@ endif()
 # The on-screen touch controls: layout, fingers and the stick's maths.
 add_executable(mhp3rd_touch_tests
     tests/touch_controls_tests.cpp
-    host/input/touch_action.cpp
+    host/input/adaptive_attack.cpp
+    host/input/touch_adaptive.cpp
+    host/input/touch_geometry.cpp host/input/touch_action.cpp
     host/input/touch_controls.cpp)
 target_include_directories(mhp3rd_touch_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
 set_target_properties(mhp3rd_touch_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
@@ -770,6 +785,41 @@ target_include_directories(mhp3rd_equipment_models_tests PRIVATE "${MHP3RD_PROFI
 set_target_properties(mhp3rd_equipment_models_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 if(PSPRECOMP_BUILD_TESTS)
     add_test(NAME mhp3rd_equipment_models_tests COMMAND mhp3rd_equipment_models_tests)
+endif()
+
+# Shared equipped weapon identity and frame snapshot, with public synthetic records.
+add_executable(mhp3rd_weapon_state_tests
+    tests/weapon_state_tests.cpp
+    host/game/game_data.cpp
+    host/game/equipment_models.cpp
+    host/game/weapon_state.cpp
+    host/game/control_context.cpp)
+target_include_directories(mhp3rd_weapon_state_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+set_target_properties(mhp3rd_weapon_state_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_weapon_state_tests COMMAND mhp3rd_weapon_state_tests)
+endif()
+
+add_executable(mhp3rd_control_context_tests tests/control_context_tests.cpp host/game/control_context.cpp)
+target_include_directories(mhp3rd_control_context_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+set_target_properties(mhp3rd_control_context_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_control_context_tests COMMAND mhp3rd_control_context_tests)
+endif()
+
+# Independent Adaptive touch gesture ownership/timing, without a renderer or game.
+add_executable(mhp3rd_adaptive_attack_tests tests/adaptive_attack_tests.cpp
+    host/input/adaptive_attack.cpp host/input/touch_adaptive.cpp host/input/touch_geometry.cpp host/input/touch_controls.cpp)
+target_include_directories(mhp3rd_adaptive_attack_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+set_target_properties(mhp3rd_adaptive_attack_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_adaptive_attack_tests COMMAND mhp3rd_adaptive_attack_tests)
+    if(Python3_Interpreter_FOUND AND NOT ANDROID)
+        add_custom_target(mhp3rd_touch_icon_assets_tests)
+        add_test(NAME mhp3rd_touch_icon_assets_tests
+            COMMAND "${Python3_EXECUTABLE}" "${MHP3RD_PROFILE_DIR}/tests/touch_icon_tests.py")
+        set_tests_properties(mhp3rd_touch_icon_assets_tests PROPERTIES TIMEOUT 30)
+    endif()
 endif()
 
 # Original game sound options and live music gain on synthetic guest memory.
@@ -908,7 +958,9 @@ add_executable(mhp3rd_path_tests
     host/input/bindings.cpp
     host/input/chords.cpp
     host/input/presets.cpp
-    host/input/touch_action.cpp
+    host/input/adaptive_attack.cpp
+    host/input/touch_adaptive.cpp
+    host/input/touch_geometry.cpp host/input/touch_action.cpp
     host/input/touch_controls.cpp
     host/install/user_data.cpp
     host/kernel/iso_image.cpp

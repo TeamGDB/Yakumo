@@ -1059,18 +1059,24 @@ void Menu::controls() {
             }
             return options;
         };
-        const bool action = s.touch_layout == settings::TouchLayout::Action;
-        if (choice_row("Layout", action ? "Action" : "PSP buttons",
+        const bool action = s.touch_layout != settings::TouchLayout::Psp;
+        const bool adaptive = s.touch_layout == settings::TouchLayout::Adaptive;
+        static constexpr const char *layouts[] = {"PSP buttons", "Action", "Adaptive"};
+        if (const int delta = choice_row("Layout", layouts[static_cast<int>(s.touch_layout)],
                 off(options_for("input.touch_layout",
                     "PSP buttons: a stick where the left thumb lands, the face buttons on the "
                     "right, L and R at the top corners, R3 and a D-pad toggle. Action: large buttons named for what "
                     "they do (attack, evade, guard, the combined attack), a fixed stick, the "
                     "item pouch, and swipes for the item bar; every element can be moved, "
-                    "resized and rebound.")))) {
-            s.touch_layout = action ? settings::TouchLayout::Psp : settings::TouchLayout::Action;
+                    "resized and rebound. Adaptive: a floating stick, compact commands, weapon-specific flick "
+                    "attacks for Long Sword, Great Sword, Sword and Shield, Dual Blades and Hammer, and touch "
+                    "interaction with the movable item HUD. Unsupported weapons use ordinary buttons.")))) {
+            s.touch_layout = static_cast<settings::TouchLayout>((static_cast<int>(s.touch_layout) + delta + 3) % 3);
             settings::save();
         }
-        if (button_row(action ? "Edit the Action Layout…" : "Edit the PSP Layout…",
+        if (button_row(adaptive ? "Edit the Adaptive Layout…"
+                    : action    ? "Edit the Action Layout…"
+                                : "Edit the PSP Layout…",
                 off({false, {},
                     "Move, resize, rebind and hide the selected layout's elements, over "
                     "the game. Kept on this device."})))
@@ -2211,6 +2217,73 @@ std::string take_screenshot() {
     return where;
 }
 
+namespace {
+struct AdaptiveWeaponNotice {
+    std::optional<input::touch::AttackProfile> seen;
+    bool open{}, owns_input{};
+};
+AdaptiveWeaponNotice &adaptive_weapon_notice() {
+    static AdaptiveWeaponNotice notice;
+    return notice;
+}
+void update_adaptive_weapon_notice(bool menu) {
+    auto &notice = adaptive_weapon_notice();
+    auto &layer = Layer::get();
+    const auto &player = settings::current();
+    const bool adaptive = player.touch_controls && player.touch_layout == settings::TouchLayout::Adaptive;
+    const auto &controls = layer.renderer().adaptive_touch_controls();
+    const auto profile = controls.weapon_profile();
+    if (!adaptive || input::touch::weapon_profile(profile)) {
+        notice.seen.reset();
+        notice.open = false;
+    } else if (profile == input::touch::AttackProfile::Off) {
+        // Equipment can disappear briefly while loading. Keep a dismissed class
+        // remembered so a scene transition cannot turn into another warning.
+        notice.open = false;
+    } else if (notice.seen != profile) {
+        notice.seen = profile;
+        notice.open = true;
+    }
+    const bool interactive = notice.open && !menu;
+    if (interactive && !notice.owns_input) {
+        layer.renderer().set_game_input(false);
+        layer.set_interactive(true);
+        notice.owns_input = true;
+    } else if (!interactive && notice.owns_input) {
+        if (!menu) {
+            layer.set_interactive(false);
+            layer.renderer().set_game_input(true);
+        }
+        notice.owns_input = false;
+    }
+}
+void draw_adaptive_weapon_notice() {
+    auto &notice = adaptive_weapon_notice();
+    auto &layer = Layer::get();
+    const auto &io = ImGui::GetIO();
+    ImGui::SetNextWindowPos({io.DisplaySize.x * .5f, io.DisplaySize.y * .5f}, ImGuiCond_Always, {.5f, .5f});
+    ImGui::SetNextWindowSize({std::min(io.DisplaySize.x * .9f, layer.font_size() * 25.f), 0}, ImGuiCond_Always);
+    ImGui::SetNextWindowFocus();
+    ImGui::Begin("##adaptive_weapon_notice", nullptr,
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::TextUnformatted("Adaptive Controls");
+    ImGui::Separator();
+    ImGui::PushTextWrapPos();
+    ImGui::Text("Adaptive does not support %s yet. Touch controls for this weapon are hidden during quests.",
+        adaptive_profile_name(*notice.seen));
+    ImGui::TextUnformatted("Choose a supported weapon, or switch to the PSP or Action touch layout in Controls.");
+    ImGui::PopTextWrapPos();
+    if (big_button("Close", ImGui::GetContentRegionAvail().x, true) || layer.take_back()) notice.open = false;
+    ImGui::SetItemDefaultFocus();
+    ImGui::End();
+    if (!notice.open) {
+        notice.owns_input = false;
+        layer.set_interactive(false);
+        layer.renderer().set_game_input(true);
+    }
+}
+} // namespace
+
 void draw_over_game() {
     Layer &layer = Layer::get();
     if (!layer.attached()) return;
@@ -2228,6 +2301,8 @@ void draw_over_game() {
         activation && std::getenv("MHP3RD_NO_GPU_COMPAT_NOTICE") == nullptr)
         gpu_compat_notice() = {activation, Clock::now() + kGpuCompatNoticeTime};
     const bool compat_noted = gpu_compat_notice().activation && Clock::now() < gpu_compat_notice().until;
+    update_adaptive_weapon_notice(menu.has_value());
+    const bool adaptive_notice = !menu && adaptive_weapon_notice().open;
     const double hint_left = menu || settings::current().menu_hint_seen ? -1.0 : hint_seconds_left();
     const bool overlay = network_overlay();
     const bool touch = !menu && layer.renderer().touch_controls_visible();
@@ -2240,7 +2315,7 @@ void draw_over_game() {
     const double hud_note = menu || layer.renderer().window_capture_pending() ? 0.0 : gpu::hud::note_seconds_left();
     const std::optional<std::array<float, 2>> marker = menu ? std::nullopt : lock_on_marker_at();
     if (hint_left <= 0.0 && !overlay && !menu && !touch && gpu_problem.empty() && !flying && !fast && !noted &&
-        !compat_noted && hud_note <= 0.0 && !marker)
+        !compat_noted && !adaptive_notice && hud_note <= 0.0 && !marker)
         return;
     layer.begin_frame();
     if (marker) draw_lock_on_marker(*marker);
@@ -2249,7 +2324,9 @@ void draw_over_game() {
     if (flying) draw_free_camera_indicator(free_camera);
     if (touch) {
         const settings::Settings &player = settings::current();
-        if (player.touch_layout == settings::TouchLayout::Action)
+        if (player.touch_layout == settings::TouchLayout::Adaptive)
+            draw_adaptive_controls(layer.renderer().adaptive_touch_controls(), player.touch_opacity, SDL_GetTicks());
+        else if (player.touch_layout == settings::TouchLayout::Action)
             draw_action_controls(layer.renderer().action_touch_controls(), player.touch_opacity, SDL_GetTicks());
         else
             draw_touch_controls(layer.renderer().touch_controls(), player.touch_opacity);
@@ -2259,6 +2336,7 @@ void draw_over_game() {
     if (overlay) draw_network_overlay();
     if (fast) draw_fast_forward();
     if (hud_note > 0.0) draw_hud_note(hud_note, flying);
+    if (adaptive_notice) draw_adaptive_weapon_notice();
     if (menu && !menu->frame()) {
         const bool quit = menu->quit() || layer.window_closed();
         menu.reset();
@@ -2296,6 +2374,10 @@ bool take_quit_request() {
 bool menu_requested() {
     Layer &layer = Layer::get();
     if (!layer.attached() || text_input_open()) return false;
+    if (adaptive_weapon_notice().open) {
+        if (layer.take_menu_toggle() || layer.take_back()) adaptive_weapon_notice().open = false;
+        return false;
+    }
     // The on-screen menu button, then Esc or L3+R3.
     const bool touched = layer.renderer().take_touch_menu();
     return layer.take_menu_toggle() || touched;

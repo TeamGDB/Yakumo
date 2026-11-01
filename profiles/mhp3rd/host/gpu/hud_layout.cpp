@@ -80,6 +80,15 @@ Rect bounds(const Layout &layout, Part part, float fit_x, float fit_y) {
     t.point(r.right, r.bottom);
     return r;
 }
+Rect screen_bounds(const Layout &layout, Part part, const Rect &picture, float fit_x, float fit_y) {
+    if (!std::isfinite(picture.left) || !std::isfinite(picture.top) || !std::isfinite(picture.right) ||
+        !std::isfinite(picture.bottom) || picture.right <= picture.left || picture.bottom <= picture.top)
+        return {};
+    const auto r = bounds(layout, part, fit_x, fit_y);
+    const float w = (picture.right - picture.left) / 480.f, h = (picture.bottom - picture.top) / 272.f;
+    return {picture.left + std::clamp(r.left, 0.f, 480.f) * w, picture.top + std::clamp(r.top, 0.f, 272.f) * h,
+        picture.left + std::clamp(r.right, 0.f, 480.f) * w, picture.top + std::clamp(r.bottom, 0.f, 272.f) * h};
+}
 void move_to(Layout &layout, Part part, float left, float top, float fit_x, float fit_y) {
     if (part == Part::None || part == Part::Other || !std::isfinite(left) || !std::isfinite(top)) return;
     Layout centred = layout;

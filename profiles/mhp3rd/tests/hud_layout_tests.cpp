@@ -17,6 +17,26 @@ void check(bool condition, const char *message) {
 bool near(float a, float b) {
     return std::fabs(a - b) < 0.001f;
 }
+void test_screen_bounds() {
+    const Rect picture{100, 50, 1060, 594};
+    auto b = screen_bounds({}, Part::Items, picture);
+    check(near(b.left, 708) && near(b.top, 386) && near(b.right, 1060) && near(b.bottom, 594),
+        "default item hit rectangle follows a letterboxed picture");
+    Layout l;
+    l.blocks[2] = {.5f, -.2f, -.1f};
+    b = screen_bounds(l, Part::Items, picture);
+    check(near(b.left, 692) && near(b.top, 435.6f) && near(b.right, 868) && near(b.bottom, 539.6f),
+        "HUD item screen rectangle follows independent scale and both offsets");
+    b = screen_bounds({}, Part::Items, picture, .5f, 1.f);
+    check(near(b.left, 644) && near(b.right, 820), "Fill preserves the renderer's horizontal UI fitting");
+    l.blocks[2] = {2.f, 0, 0};
+    b = screen_bounds(l, Part::Items, picture);
+    check(b.left >= picture.left && b.top >= picture.top && b.right <= picture.right && b.bottom <= picture.bottom,
+        "oversized HUD hot zones remain inside the picture");
+    const auto bad = screen_bounds({}, Part::Items, {0, 0, std::numeric_limits<float>::quiet_NaN(), 10});
+    check(bad.left == 0 && bad.right == 0, "invalid picture geometry cannot create a hit target");
+    check(screen_bounds({}, Part::Items, {0, 0, 0, 10}).bottom == 0, "empty picture has no hot zone");
+}
 void test_layout() {
     for (float fit_x : {0.5f, 0.9f, 1.0f})
         for (float fit_y : {0.6f, 1.0f})
@@ -187,6 +207,7 @@ void test_origins() {
 
 int main() {
     test_layout();
+    test_screen_bounds();
     test_movement();
     test_packets();
     test_origins();

@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <string_view>
 
 namespace mhp3rd::camera {
 
@@ -176,6 +177,7 @@ struct State {
     // after the one its direction was last shown to the game (0: never).
     float mouse_yaw{};
     float mouse_pitch{};
+    bool touch_aim{};
     unsigned mouse_yaw_waits{};
     unsigned mouse_pitch_waits{};
     std::uint64_t mouse_shown{};
@@ -234,6 +236,7 @@ void release() {
     state.pitch_owned = false;
     state.yaw_remainder = 0.0f;
     state.aiming = false;
+    state.touch_aim = false;
     state.aim_yaw_remainder = 0.0f;
     state.aim_pitch_remainder = 0.0f;
     state.mouse_yaw = 0.0f;
@@ -443,9 +446,16 @@ bool scoped(const psprecomp::GuestMemory &memory, std::uint32_t hunter) {
 // MHP3RD_TRACE_AIM=path.csv: one line per aiming camera update with what the
 // game stepped and what the driver made of it, and one per direction the
 // mouse showed the game. For telling the game's steps from the driver's.
-std::ofstream *aim_trace() {
+std::ostream *aim_trace() {
     static const std::filesystem::path path = environment_path("MHP3RD_TRACE_AIM");
     if (path.empty()) return nullptr;
+    if (path == "log") {
+        // Bounded diagnostics for devices where the ordinary log is exportable.
+        static unsigned records = 0;
+        if (records++ >= 18000u) return nullptr;
+        std::cout << "[aim] ";
+        return &std::cout;
+    }
     static std::ofstream out(path);
     return &out;
 }
@@ -484,12 +494,26 @@ int sign_of(float value) {
 // axis is also one whose step can be told in advance.
 std::optional<std::pair<int, int>> mouse_direction() {
     if (!game_camera_aim_boost()) return std::nullopt;
-    const Turn pending = peek_pointer();
+    const Turn touch = peek(Source::Touch);
+    const Turn mouse = peek(Source::Mouse);
+    static const bool touch_cardinal = [] {
+        const char *value = std::getenv("MHP3RD_TOUCH_AIM_CARDINAL");
+        return !value || std::string_view(value) != "0";
+    }();
+    if (touch.yaw_held || touch.pitch_held) state.touch_aim = touch_cardinal;
+    if (mouse.yaw_held || mouse.pitch_held) state.touch_aim = false;
+    const Turn pending = combine(mouse, touch);
     const float yaw = state.mouse_yaw + pending.yaw_degrees;
     const float pitch = state.mouse_pitch + pending.pitch_degrees;
     const int x = std::fabs(yaw) >= kMouseAimThreshold ? sign_of(yaw) : 0;
     const int y = std::fabs(pitch) >= kMouseAimThreshold ? sign_of(pitch) : 0;
     if (x == 0 && y == 0) return std::nullopt;
+    // The Bow gives a vertical command priority over a horizontal one. Expanding
+    // even tiny finger noise into a full diagonal therefore stalls yaw until it
+    // catches up in a jump. Request the larger outstanding axis alone; the other
+    // retains its degrees for a later update. Prediction uses this same request.
+    if (state.touch_aim && x != 0 && y != 0)
+        return std::fabs(yaw) >= std::fabs(pitch) ? std::pair{x, 0} : std::pair{0, y};
     return std::pair{x, y};
 }
 
@@ -557,6 +581,15 @@ void drive_aim(psprecomp::GuestMemory &memory, const psprecomp::AllegrexContext 
     state.address = address;
     const int anticipated_yaw = state.anticipated_yaw;
     const int anticipated_pitch = state.anticipated_pitch;
+    if (std::ostream *out = aim_trace(); out && memory.raw_pointer(hunter, kHunterExtent)) {
+        const Turn touch = peek(Source::Touch);
+        const Turn mouse = peek(Source::Mouse);
+        *out << state.frame << ",before-settle,heading=" << memory.load16(hunter + kHunterHeading)
+             << ",previous=" << state.aim_heading << ",pitch=" << load_pitch(memory, hunter, kPitchFields[0]) << ':'
+             << load_pitch(memory, hunter, kPitchFields[1]) << ':' << load_pitch(memory, hunter, kPitchFields[2])
+             << ",touch=" << touch.yaw_degrees << ':' << touch.pitch_degrees << ",mouse=" << mouse.yaw_degrees << ':'
+             << mouse.pitch_degrees << '\n';
+    }
     settle_anticipation(memory);
     if (!driving_allowed() || memory.raw_pointer(hunter, kHunterExtent) == nullptr) {
         release();
@@ -607,7 +640,7 @@ void drive_aim(psprecomp::GuestMemory &memory, const psprecomp::AllegrexContext 
         const int step = static_cast<int>(state.aim_yaw_remainder);
         state.aim_yaw_remainder -= static_cast<float>(step);
         store_heading(memory, hunter, static_cast<std::uint16_t>(state.aim_heading + (game_yaw > 0 ? step : -step)));
-    } else if (game_yaw == 0) {
+    } else if (game_yaw == 0 && !state.touch_aim) {
         state.aim_yaw_remainder = 0.0f;
     }
 
@@ -637,12 +670,12 @@ void drive_aim(psprecomp::GuestMemory &memory, const psprecomp::AllegrexContext 
         if (next == field.limit || next == -field.limit) state.aim_pitch_remainder = 0.0f;
         store_pitch(memory, hunter, field, next);
     }
-    if (!pitch_stepped) state.aim_pitch_remainder = 0.0f;
+    if (!pitch_stepped && !state.touch_aim) state.aim_pitch_remainder = 0.0f;
     // Only a step that answered this frame's direction says how the game
     // answers a direction.
     if (shown_now && !turn.yaw_held && !turn.pitch_held)
         learn_steps(scope, std::abs(game_yaw) <= kLargestYawStep ? game_yaw : 0, game_pitch_seen, pitch_field_seen);
-    if (std::ofstream *out = aim_trace()) {
+    if (std::ostream *out = aim_trace()) {
         const int applied = static_cast<std::int16_t>(
             static_cast<std::uint16_t>(memory.load16(hunter + kHunterHeading) - state.aim_heading));
         *out << state.frame << ",update,scope=" << scope << ",stick=" << turn.yaw_degrees << ':' << turn.pitch_degrees
@@ -667,8 +700,16 @@ void drive_aim(psprecomp::GuestMemory &memory, const psprecomp::AllegrexContext 
             waits = 0u;
         }
     };
-    wait(state.mouse_yaw, state.mouse_yaw_waits, yaw_spent);
-    wait(state.mouse_pitch, state.mouse_pitch_waits, pitch_spent);
+    // Deferring one axis to serve the other is not a rejected game request.
+    // Count blocked requests, not deferrals, or shallow diagonals lose motion.
+    if (!state.touch_aim || !mouse_shown || state.shown_x != 0) {
+        if (state.mouse_yaw_waits >= kMouseAimWaits && !yaw_spent) state.aim_yaw_remainder = 0.0f;
+        wait(state.mouse_yaw, state.mouse_yaw_waits, yaw_spent);
+    }
+    if (!state.touch_aim || !mouse_shown || state.shown_y != 0) {
+        if (state.mouse_pitch_waits >= kMouseAimWaits && !pitch_spent) state.aim_pitch_remainder = 0.0f;
+        wait(state.mouse_pitch, state.mouse_pitch_waits, pitch_spent);
+    }
     remember_aim(memory, hunter);
 }
 
@@ -785,7 +826,7 @@ std::optional<StickDirection> game_camera_mouse_aim() {
     const auto direction = mouse_direction();
     if (!direction) return std::nullopt;
     const auto [x, y] = *direction;
-    if (std::ofstream *out = aim_trace(); out != nullptr && state.mouse_shown != state.frame + 1u)
+    if (std::ostream *out = aim_trace(); out != nullptr && state.mouse_shown != state.frame + 1u)
         *out << state.frame << ",show," << x << ':' << y << '\n';
     state.mouse_shown = state.frame + 1u;
     state.shown_x = x;
