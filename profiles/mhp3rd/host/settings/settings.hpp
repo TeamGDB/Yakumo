@@ -5,6 +5,7 @@
 #include "input/chords.hpp"
 #include "input/presets.hpp"
 #include "input/touch_action.hpp"
+#include "input/touch_adaptive.hpp"
 #include "input/touch_psp.hpp"
 #include "kernel/fast_forward.hpp"
 
@@ -40,7 +41,7 @@ enum class UiTextures { Off, Sharp, Mmpx };
 enum class RightStick { Camera, DPad, Off };
 // The on-screen controls' layout: the PSP's buttons (touch_controls.hpp), or
 // the action-style one (touch_action.hpp).
-enum class TouchLayout { Psp, Action };
+enum class TouchLayout { Psp, Action, Adaptive };
 // What answers the game when it asks for text such as the hunter's name.
 enum class NameEntry { Keyboard, Fixed };
 // Presents per second. The game makes 30 frames a second; the faster rates
@@ -139,8 +140,13 @@ struct Settings {
     float touch_size{1.0f};           // 0.6-1.6 of the default size
     float touch_camera_speed{180.0f}; // degrees the camera turns for a drag across the screen's height
     TouchLayout touch_layout{TouchLayout::Psp};
-    // Both layouts are kept on this device, with shared touch feedback.
+    // Each layout is kept independently on this device, with shared touch feedback.
     input::touch::ActionLayout touch_action{input::touch::default_action_layout()};
+    input::touch::AdaptiveLayout touch_adaptive{input::touch::default_adaptive_layout()};
+    input::touch::AdaptiveLayout touch_adaptive_hub{
+        input::touch::default_adaptive_layout(input::touch::AdaptiveMode::Hub)};
+    input::touch::AdaptiveLayout touch_adaptive_interface{
+        input::touch::default_adaptive_layout(input::touch::AdaptiveMode::Interface)};
     input::touch::PspLayout touch_psp{input::touch::default_psp_layout()};
     bool touch_haptics{true};
     NameEntry name_entry{NameEntry::Keyboard}; // on-screen keyboard, or the name below at once
@@ -186,6 +192,10 @@ struct Settings {
     float free_camera_speed{400.0f}; // game units a second, before the fast and slow modifiers
     bool free_camera_hide_hud{true}; // hide the game's HUD while it flies (gpu/game_hud.hpp)
 };
+
+[[nodiscard]] input::touch::AdaptiveLayout &adaptive_layout(Settings &settings, input::touch::AdaptiveMode mode);
+[[nodiscard]] const input::touch::AdaptiveLayout &adaptive_layout(
+    const Settings &settings, input::touch::AdaptiveMode mode);
 
 inline constexpr std::int32_t kLayeredReal = -1;
 inline constexpr std::int32_t kMaxLayeredPiece = 0xFFFF;

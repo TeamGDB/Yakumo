@@ -44,7 +44,11 @@ std::string read_text(const Ram &ram, std::uint32_t address) {
     return text;
 }
 
-bool character_loaded(const Ram &ram) { return !hunter_name(ram).empty(); }
+bool character_loaded(const Ram &ram) {
+    // The same presence check as hunter_name(), without building a UTF-8 name
+    // on each equipment poll. Keep its complete-name range guard.
+    return ram.contains(kHunterName, kHunterNameUnits * 2u) && ram.load16(kHunterName) != 0u;
+}
 
 std::string hunter_name(const Ram &ram) {
     std::string name;

@@ -12,7 +12,13 @@
   supplies separate real-game evidence. Public tests contain no game models,
   archives, saves or performance pass/fail thresholds.
 
+- **Adaptive touch input** (`mhp3rd_adaptive_attack_tests`, settings and renderer/touch UI suites) uses synthetic contacts and actual SDL fingers to check delayed primary selection, four directions, latched gestures, short-tap sampling, one-finger ownership, cancellation, invalid coordinates/timestamps, analog-only lateral output, independent settings/editor resets, layout cycling, weapon-change release and unsupported-weapon fallback. Separate Adaptive arrangement tests cover floating/fixed movement, D-pad hiding without movement loss, item tap/swipe/vertical-camera ownership, FIFO item selection through L + Square/Circle with a quest-rule edge-counting oracle, L preparation counted only on actual game reads, short and repeated taps, rapid swipe reversals/repeats, queue overflow/drain/wrap, release-before-use, kept-open selection without another preparation, pending-input cancellation, independent movement/R input, SDL-to-pad integration, overlapping-button priority, hidden-HUD fallback, moved-HUD cancellation, bounded contacts and short/long/canceled item releases. HUD geometry tests verify window-space mapping, letterboxing, Fill, scaling, offsets and clipping. No game data is used. Visual cap tests check neutral/off-centre starts, recognition feedback, all four directions, latched-direction consistency after reversal, pulse expiry and cancellation without changing PSP input. The touch UI suite captures a six-state selector reference sheet. First gameplay target is Long Sword: check attacks after drawing/sheathing, combos, scene changes, physical touch, menus and multiplayer. Check sideways fade slashes after an attack and the backward fade slash from idle; do not treat combo restrictions as failed gestures. On a physical device also move/scale the item HUD, test tap/swipe input at its new position, hide/show it, switch aspect ratios and verify the fallback and overlapping attack buttons. Synthetic tests do not certify the real quest HUD linkage or touch hardware. Long Sword main-selector availability has bounded transition/window and unknown-state coverage; other weapons retain ordinary fallback. Separate sprint/evade tests cover independent contacts, release, drift, posture changes and custom bindings. Sword and Shield tests cover Select spin, neutral-touch Circle during held movement and its release pulse, cancellation and movement restoration. Drawn SnS item taps and the separate sheath control are checked through the actual SDL pad path, including cancellation, pulse expiry, posture/weapon changes, custom bindings and one-item swipe behavior. Rendered geometry distinguishes the item symbol from sheathing. Shield tests cover larger hit targets, editor geometry, custom scaling, posture/context changes and upward motion retaining guard. Arrow geometry verifies external placement, unavailable-direction suppression, outline contrast and gold selection at low opacity. GS tests cover native kick, upward charge release before the hold threshold, captured guard, independent analog and guarded main input through SDL. Hammer/DB tests also cover unassigned gesture cancellation, captured charge drift and immediate release, sampleable mode taps, separate evade, native movement preservation, state-change cancellation and fixed gesture legends through real SDL/rendering. The six supported profiles have synthetic input coverage; new gameplay still requires device validation. Six deferred classes are checked for hidden Quest controls, rejected gestures, stale-input cancellation and retained village/interface navigation. UI tests exercise their warning and actual Close button. Ranged tests cover actual-read-counted L preparation, one-ammo-per-swipe, cancellation, coating taps, exclusion of attack/evade during selection, aim-camera ownership, moved-HUD independence, posture changes and custom bindings. SDL verifies supported equipment, Bow coating requests and deferred-class warnings; the shared equipment reader still recognizes all twelve identities. Drawer commands are tested for commit-on-release, cancellation and dragging away; hiding the item surface must leave Square reachable. Renderer captures distinguish item use from sheathing on the fallback strip.
+
+- **Equipped weapon state** (`mhp3rd_weapon_state_tests`, `mhp3rd_equipment_models_tests` and `mhp3rd_media_hle_tests`) checks all twelve storage kinds, equipment ID/class changes, unavailable and reloaded characters, exact/truncated memory ranges, read-only behavior and publication through original display flips. No game data is used. Actual weapon changes at the item box, scene transitions, multiplayer and Android gameplay remain manual checks; the separate validated quest-actor posture reader supplies drawn/sheathed state, and validated Long Sword follow-up windows.
+
 - **GPU compatibility notification** (`mhp3rd_gpu_compat_notice_*`) uses the real SDL/Vulkan/ImGui renderer with public triangles. Cases cover explicit On, healthy Auto, Off, automatic fallback after a failed startup self-test or pipeline and after a refused pipeline in play, plain-shader retry under Off, and notification opt-out. Tests inspect rendered text and geometry, input/focus flags, single consumption and expiry; startup notifications are included in diagnostic window captures. The main menu suite verifies the restart marker, performance warning, active-mode description and unchanged runtime mode when editing the saved choice. No game data is needed.
+
+- **Renderer/UI mouse isolation** (`mhp3rd_renderer_ui_tests`) explicitly seeds a previous touch source before clicking a real installed-mod row. Synthetic mouse movement/buttons are tagged before enqueueing, so ImGui's touch-event trickling cannot defer their press/release beyond the two-frame contract. The test asserts the observed press/release and the actual details screen, then imports and replaces public synthetic mod files through the real UI.
 
 - **Editable PSP touch controls** (`mhp3rd_touch_tests`, `mhp3rd_settings_tests` and `mhp3rd_touch_ui_tests`) use synthetic placements and SDL fingers to check safe-area coordinates, relative size percentages across screen shapes/insets, click-versus-drag preservation, visibility, independent PSP/Action settings, combination insertion/removal and capacity, simultaneous button ownership, D-pad toggling and release, virtual R3 button/movement/camera bindings in Camera/D-Pad/Off modes and cancellation, and floating/fixed sticks. The UI mode also exercises both editors and retains a synthetic window capture in the printed temporary directory. These public tests require no game data. Actual Android touch hardware, haptics and gameplay remain separate manual checks.
 
@@ -576,3 +582,120 @@ and rejection of the optional alpha-free pipeline. The refused case must log
 its fallback to the original plain shader. Public shader-tool tests inspect
 SPIR-V instructions: the alpha-free variant contains neither `OpKill` nor
 specialization constants, while the tested plain variant retains `OpKill`.
+
+### Adaptive context controls
+
+`mhp3rd_control_context_tests` covers validated task headers, missing/malformed
+pointers, hub/quest interface states, return to gameplay and snapshot refresh
+using synthetic RAM. Adaptive gesture tests cover one item selection per contact,
+mode transitions, queued-input cancellation and ordinary interface buttons.
+Settings and real renderer/UI tests exercise independent context layouts,
+manual interface override and editor profile selection.
+
+On a device, check title/character selection, village walking, NPC conversations,
+Start, home storage, quest counter and Smithy, then quest Start and supplies.
+Close each menu and verify the gameplay controls return with no held input.
+Check a long item swipe and reversal selects only one item; lift for another.
+Resize/reposition controls in each context and restart to check persistence.
+Android touch, haptics and unrecorded game dialogs need manual verification.
+
+
+### Adaptive icon and compact-control checks
+
+Run `python3 profiles/mhp3rd/tests/touch_icon_tests.py` to validate both public
+SVG manifests, deterministic runtime geometry, semantic colors and rejected
+unsupported geometry. `mhp3rd_adaptive_attack_tests` exercises the six supported weapon
+profiles, charge/guard release, independent guard ownership, cancellation,
+compact command dismissal, utility pulses and portrait bounds. Renderer touch
+checks publish equipment through real SDL input and retain an in-backend weapon
+icon capture under `--touch-controls`. Manual scenarios still need real weapons:
+try Great Sword hold/release; Sword and Shield guard, guarded attacks and item
+use; Dual Blades normal/demon attacks; Hammer charge/release; transitions through
+menus and areas; saved custom layouts and hidden/moved item HUD. Android
+multi-touch, readability, haptics and multiplayer need target-device checks.
+
+### Adaptive compact movement regression
+
+`mhp3rd_adaptive_attack_tests` covers separate immediate sprint and evade,
+release/cancellation, secondary ownership, posture changes, custom/hidden controls,
+free-space camera tap timing, out-and-back drags, item-to-camera gestures and the
+compact comparison switch. `mhp3rd_touch_ui_tests` captures the sheathed layout.
+On a phone, verify moving + sprint + separate evade, immediate draw,
+sheathing, and camera drag/tap in both village and quest. Synthetic Windows tests do
+not establish Android ergonomics or the game's animation acceptance timing.
+
+### Adaptive comfort and editor regression
+
+The adaptive input suite checks bounded padding for small controls, visible-button
+priority over a neighbour's padding, a single free-space camera owner, independent
+movement/attack contacts, reacquisition after release and item/aim camera arbitration.
+Touch UI checks cycle the six supported weapon previews without changing equipment or
+saved placements. They drag a control across the screen centre, verify that the
+panel stays fixed and ignores pointer input, and restore interactivity on release.
+Captures cover the single-piece D-pad (idle, held, diagonal and low opacity),
+weapon preview, selected-control help and the translucent drag panel.
+
+On a phone, check the smallest utility buttons, diagonal D-pad motion, two-thumb
+movement and combat, camera drags with a second finger, and editing underneath
+the panel. The synthetic suite does not validate physical comfort or Android
+multitouch delivery.
+
+### Long Sword transition availability
+
+Weapon-state tests construct original synthetic tables (not copied game rows)
+to check request-to-action mapping, current-frame prediction, inclusive buffer
+boundaries, duration-relative timing, actor overrides, suspension, busy states,
+malformed pointers/sentinels, invalid animation values and unknown predicates.
+Gesture tests check silent blocked flicks, no lateral override or fallback strike,
+window closure, release pulses, unknown fallback and unchanged other profiles.
+The real touch/UI suite publishes synthetic actor state through the weapon reader,
+checks SDL-to-pad gating, and captures Idle/Combo/Recovery/Unknown arrow states.
+
+On a device, test Long Sword idle then strike/thrust/back/side fades, recovery,
+evade, sheathe/draw, area changes and menus. Compare with
+`MHP3RD_ADAPTIVE_COMBOS=0`. Late input at both window edges and multiplayer remain
+manual requirements. Private frame recordings/replay stay outside Git.
+
+
+## Adaptive Bow aim toggle
+
+The adaptive input suite covers scope tap/drag cancellation, latched aim without
+charging, the main/left shared fire owner, short taps counted by guest reads,
+independent camera drags, cancel-before-release ordering, context/posture resets,
+custom bindings and the held-R comparison switch. The SDL renderer suite checks
+left-fire plus free-camera input, menu recovery and retained outside-aim melee.
+The native pointer-aim fixture runs for both mouse and touch sources.
+`adaptive-bow-toggle.bmp` captures the ordinary selector, aimed fire surfaces and
+active scope control with synthetic backgrounds.
+
+On Android, draw a Bow in a quest and tap the scope button. Drag free space on
+the right while holding the left fire button; aim must move on both axes. Release
+to shoot, then repeat using the main fire button. A second fire contact must not
+release the first contact's charge. Tap the scope again to exit, and check melee
+and arc gestures outside aim. Check charge cancellation, stamina exhaustion,
+Evade, sheathing, host-menu entry, scene changes and item/coating selection.
+Move/resize/hide the left duplicate in the Quest editor using the Bow preview.
+These native gameplay/physical multitouch checks remain manual; passing public
+synthetic tests does not certify their behavior. Compare with
+`MHP3RD_ADAPTIVE_BOW_TOGGLE=0` when diagnosing a regression.
+
+
+The camera suite also models native Bow vertical priority when both axes are
+requested. It checks that noisy horizontal touch motion is applied each update
+without a later catch-up jump, prediction matches the actual cardinal request,
+equal-axis and shallow diagonals retain both distances, motion stops/reverses, game
+animation gates remain authoritative, and a real mouse regains its prior path.
+The regression failed on the previous direction conversion before the fix.
+On a device, compare horizontal sweeps with slight vertical drift, vertical
+sweeps, diagonals and charging; the automatic test does not certify touch feel.
+
+
+Deferred-weapon regression: equip Hunting Horn, Lance, Gunlance, Switch Axe,
+Light Bowgun and Heavy Bowgun with Adaptive selected. The warning must appear
+immediately when equipping each class in the village or equipment menu, before
+entering a quest. Its Close button must match Yakumo's gold menu buttons. Close
+it; same-class changes, loading gaps and entering a quest must not repeat it.
+In a quest, all touch controls must disappear. Verify village movement/NPC
+interaction and quest menus remain usable. Return to a supported weapon and
+check that movement/attacks restore without old held input. Verify PSP/Action
+and physical keyboard/gamepad control separately on the target device.

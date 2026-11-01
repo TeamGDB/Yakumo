@@ -68,6 +68,54 @@ when it enters the village.
 | `+0x38` (24 bytes) | The carried weapon: u8 used, u8 kind, u16 id, then weapon data | Its kind and id matched the Equipment screen's weapon |
 | `+0x50` (5 × 12 bytes) | The worn armor: chest, arms, waist, legs, head, each laid out like an equipment box record (u8 used, u8 kind, u16 id, ...) | The ids matched the worn set's names in the name tables; the game's own checks read the ids at `+0x52`, `+0x5E`, `+0x6A`, `+0x76`, `+0x82` |
 
+### Shared equipped weapon state
+
+`host/game/weapon_state.hpp` exposes the local hunter's actual equipped weapon
+as an optional `Type` and equipment `id`. `weapon::read(ram)` reuses the traced
+`carried_weapon` record above. `weapon::refresh(ram)` updates the shared snapshot
+once per original game flip, before host input and menu processing; interpolated
+presents do not trigger additional guest-memory polls. `weapon::current()` returns
+a value for consumers on that same game thread. It reports changes in class, ID
+or availability, including removal of a previously available weapon.
+
+All twelve weapon classes use equipment-record kinds, not actor animation
+indices. No loaded character, an unmapped/truncated record, an unused entry, an
+unknown kind or ID zero gives no identity. Consumers must handle that state
+rather than select a weapon by default. The equipment identity does not identify
+the current attack, a Smithy preview or a cosmetic model;
+it does not modify equipment, stats, saves or settings. It provides the shared
+identity for adaptive controls and future weapon appearance overrides. The
+existing `model_file` lookup remains separate.
+
+`mhp3rd_weapon_state_tests` checks all classes, same-class ID changes,
+unavailable/reloaded characters, mapped boundaries and unchanged guest memory.
+The media/HLE suite verifies publication at actual display-flip boundaries.
+These synthetic contracts do not replace an in-game equipment-change test.
+
+### Live weapon posture
+
+`weapon::read_posture(ram)` and `current_posture()` expose `Unknown`, `Sheathed`
+and `Drawn` independently of equipment identity. The snapshot refreshes at the
+same original-game flip. Outside a validated quest task, with no character,
+invalid pointers, an unexpected executable or ambiguous local actors, it is
+`Unknown`; an old actor address is never cached across scenes.
+
+The ordinary camera obtains an actor through the manager pointer at
+`0x09FBE794`. Its lookup at `0x088B6B30` addresses six pointer slots at manager
+`+8`. The reader bounds that table and validates the local hunter's record index
+(`+0x60`, zero) and model-file virtual function (`vtable +0xA8`, `0x088A58DC`),
+rejecting preview objects and remote hunters. The camera tests actor `+0x27C`
+bit `0x8` at `0x088E49C8`. Five private Windows Long Sword snapshots confirmed
+clear/set/clear after sheathing/drawing/sheathing, clear after walking sheathed,
+and set after walking and attacking with the weapon drawn. Other weapon classes
+and Android still require manual validation. No game bytes or snapshots belong
+in the repository.
+
+The reader only reads memory. It does not drive guest functions, alter attack
+rules, infer state from a host button press or scan all RAM. Synthetic tests
+cover invalid/missing tables and actors, remote/ambiguous actors, slot boundaries,
+unrelated flags, publication and scene unload.
+
 ### Armor data
 
 One table per part in the executable, 40 bytes per armor id; the first two u16
@@ -157,3 +205,21 @@ bowguns and bows may use more files than one.
   saved). A hunter created male was not tried.
 - Armor pieces that share a model share a file: a mod aimed at one shows on
   all of them. The slot's description says "and N more" when that is so.
+
+## Read-only Long Sword continuation state
+
+Adaptive's availability reader validates the local quest actor and the original
+transition/animation accessors, then inspects the live transition pointer at
+actor `+0x14A8`. The table has at most 48 records of 22 bytes with a `0xFF`
+terminator. Main weapon-input routes use category 4 and request predicate 25;
+shared requests and utility/conditional-special routes are not treated as main
+attacks. Request IDs are interpreted for Long Sword only.
+
+The animation object is embedded at actor `+0xF80`; its frame/step/duration are
+at `+4`, `+0xC`, `+0x14`. Table start/end/buffer fields at `+16/+18/+20` can be
+overridden by actor `+0x14AC/+0x14B0/+0x14AE`. Negative bounds are relative to
+animation duration; unknown timing sentinels and extra conditions are rejected.
+Actor action class `+0x220` distinguishes the observed idle/attack classes from
+transitions such as evade, and `+0x1475` suspends table dispatch when positive.
+These are NPJB-40001 facts from private static inspection and bounded runtime
+recordings. No guest transition table or executable corpus is included here.

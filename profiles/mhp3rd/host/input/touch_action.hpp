@@ -1,6 +1,7 @@
 #pragma once
 
 #include "input/touch_controls.hpp"
+#include "input/touch_geometry.hpp"
 
 #include <array>
 #include <cstddef>
@@ -43,21 +44,6 @@ enum class Element : std::uint8_t {
 };
 inline constexpr std::size_t kElements = static_cast<std::size_t>(Element::Count);
 
-// Which edge of the safe area an element keeps its distance from, so the
-// layout fits screens of any width: the left thumb's elements to the left
-// edge, the right thumb's to the right one, the swipe area to the middle.
-enum class Anchor : std::uint8_t { Left, Centre, Right };
-
-struct Placement {
-    Anchor anchor{Anchor::Left};
-    float x{};               // the centre from the anchor (right: leftwards), in heights of the safe area
-    float y{};               // the centre from the safe area's top, in heights of the safe area
-    float size{};            // the radius in heights of the safe area; the swipe area's half height
-    std::uint16_t buttons{}; // SceCtrlButtons pressed; ignored for the stick, Pause, R3 and swipe area
-    bool shown{true};
-    friend bool operator==(const Placement &, const Placement &) = default;
-};
-
 struct ActionLayout {
     std::array<Placement, kElements> elements{};
     friend bool operator==(const ActionLayout &, const ActionLayout &) = default;
@@ -77,8 +63,6 @@ struct ElementInfo {
 [[nodiscard]] bool rebindable(Element element);
 // The swipe area is a rounded rectangle this many times as wide as high.
 inline constexpr float kSwipeAspect = 3.2f;
-inline constexpr float kMinElementSize = 0.02f;
-inline constexpr float kMaxElementSize = 0.25f;
 
 // What a touch button can press: one PSP button or two in the same frame.
 struct ButtonChoice {
@@ -89,24 +73,6 @@ struct ButtonChoice {
 // "△", "△ + ○", "D-pad Up"; the bits in hexadecimal for anything else.
 [[nodiscard]] std::string buttons_label(std::uint16_t buttons);
 
-// settings.ini's spelling of a placement: "right 0.355 0.780 0.085 0x1000 1".
-[[nodiscard]] std::string format(const Placement &placement);
-bool parse(std::string_view text, Placement &placement);
-
-// An element in window pixels, for a layout on a screen.
-struct Placed {
-    Point centre;
-    float radius{};     // for the swipe area, its half height
-    float half_width{}; // for the swipe area; the radius for the others
-};
-struct Area {
-    float left{};
-    float top{};
-    float width{};
-    float height{};
-};
-// The safe area of a width x height screen, clear of `insets`.
-[[nodiscard]] Area safe_area(float width, float height, Insets insets);
 // `scale` multiplies every element's size (the on-screen controls' size).
 [[nodiscard]] Placed place(const Placement &placement, Element element, const Area &area, float scale);
 // The reverse, for the editor: the placement that puts the element's centre

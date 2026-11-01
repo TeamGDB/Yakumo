@@ -388,7 +388,51 @@ void test_performance_modes() {
             "invalid performance modes retain the default");
 }
 
+void test_adaptive_settings() {
+    using namespace mhp3rd::input::touch;
+    for (const auto &[name, mode] : std::initializer_list<std::pair<const char *, TouchLayout>>{
+             {"psp", TouchLayout::Psp}, {"action", TouchLayout::Action}, {"adaptive", TouchLayout::Adaptive}}) {
+        const auto value = from_entries({{"input.touch_layout", name}});
+        check(value.touch_layout == mode && from_entries(to_entries(value)).touch_layout == mode,
+            "all three touch modes round trip with distinct names");
+    }
+    auto edited = from_entries({});
+    edited.touch_layout = TouchLayout::Adaptive;
+    edited.touch_adaptive.at(AdaptiveElement::Attack).x = 0.45f;
+    edited.touch_adaptive.at(AdaptiveElement::Attack).buttons = 0x8000;
+    edited.touch_adaptive.at(AdaptiveElement::DPad).shown = true;
+    edited.touch_adaptive_hub.at(AdaptiveElement::Alternate).x = .30f;
+    edited.touch_adaptive_hub.floating_stick = false;
+    edited.touch_adaptive_interface.at(AdaptiveElement::LeftShoulder).size = .07f;
+    const auto again = from_entries(to_entries(edited));
+    check(again.touch_adaptive_hub == edited.touch_adaptive_hub &&
+            again.touch_adaptive_interface == edited.touch_adaptive_interface,
+        "Village and Interface layouts persist independently of the Quest layout");
+    check(again.touch_adaptive == edited.touch_adaptive && again.touch_action == default_action_layout() &&
+            again.touch_psp == default_psp_layout(),
+        "Adaptive positions/bindings/visibility persist independently");
+    const auto migrated = from_entries({{"input.touch_adaptive.attack", "left 0.5 0.5 0.1 0x8000 1"},
+        {"input.touch_adaptive.dpad", "left 0.2 0.4 0.09 0x0000 0"}});
+    check(
+        migrated.touch_adaptive.at(AdaptiveElement::Attack) == default_adaptive_layout().at(AdaptiveElement::Attack) &&
+            !migrated.touch_adaptive.at(AdaptiveElement::DPad).shown,
+        "prototype migration replaces Action positions while preserving D-pad visibility");
+    edited.touch_adaptive.floating_stick = false;
+    check(!from_entries(to_entries(edited)).touch_adaptive.floating_stick,
+        "fixed movement choice persists independently");
+    const auto bad = from_entries({{"input.touch_adaptive.version", "2"}, {"input.touch_layout", "unknown"},
+        {"input.touch_adaptive.attack", "bad"}, {"input.touch_adaptive.r3", "right 0.075 0.925 0.04 0x2000 1"},
+        {"input.touch_adaptive.pause", "right 0.055 0.08 0.035 0x2000 0"}});
+    check(bad.touch_layout == TouchLayout::Psp &&
+            bad.touch_adaptive.at(AdaptiveElement::Attack) == default_adaptive_layout().at(AdaptiveElement::Attack) &&
+            bad.touch_adaptive.at(AdaptiveElement::R3).buttons == 0 &&
+            bad.touch_adaptive.at(AdaptiveElement::Pause).shown &&
+            bad.touch_adaptive.at(AdaptiveElement::Pause).buttons == 0,
+        "invalid Adaptive settings preserve defaults and cannot remove menu access");
+}
+
 int main() {
+    test_adaptive_settings();
     {
         using namespace mhp3rd::gpu::hud;
         check(from_entries({}).hud == Layout{} && defaults_for(Platform::Android).hud == Layout{},

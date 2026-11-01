@@ -10,6 +10,8 @@
 #include "overlays.hpp"
 #include "game/guest_ram.hpp"
 #include "game/audio_settings.hpp"
+#include "game/weapon_state.hpp"
+#include "game/control_context.hpp"
 #include "game/layered_armor.hpp"
 #include "platform/utf8_path.hpp"
 
@@ -227,6 +229,15 @@ void feed_mouse(gpu::VulkanRenderer &renderer) {
         const float scale = camera::game_camera_degrees_per_second() / std::max(s.camera_speed, 1.0f);
         const float degrees = s.touch_camera_speed * scale;
         camera::add_motion(camera::Source::Touch, drag.x * degrees, drag.y * degrees);
+        static const bool trace_touch = [] {
+            const char *value = std::getenv("MHP3RD_TRACE_AIM");
+            return value && std::string(value) == "log";
+        }();
+        static unsigned trace_records = 0;
+        if (trace_touch && trace_records++ < 3600u)
+            std::cout << "[aim-touch] drag=" << drag.x << ':' << drag.y << ",degrees=" << drag.x * degrees << ':'
+                      << drag.y * degrees << ",aim=" << camera::game_camera_aim_boost()
+                      << ",follow=" << camera::game_camera_driving() << '\n';
     }
     const gpu::MouseMotion motion = renderer.take_mouse_motion();
     if (motion.x == 0.0f && motion.y == 0.0f) return;
@@ -455,6 +466,10 @@ void present_frame(Runtime &rt) {
     revalidate_overlays(rt);
     // The menu, drawn below, reads the game's memory between frames.
     game::attach(rt);
+    // Equipment identity follows original game frames, not extra interpolated
+    // presents. Shared by adaptive controls and future appearance features.
+    game::weapon::refresh(game::GuestRam(rt.memory()));
+    game::control_context::refresh(game::GuestRam(rt.memory()));
     game::sound::trace(game::GuestRam(rt.memory()));
     // Layered armor puts its wrappers in place here, between two frames.
     game::layered::frame(rt);

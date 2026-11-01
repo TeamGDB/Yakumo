@@ -1,0 +1,37 @@
+{
+  "pack": 2,
+  "revision": 3,
+  "format": "SVG",
+  "viewBox": "0 0 64 64",
+  "color": "#F1EDD8",
+  "glyphs": [
+    "great-sword",
+    "great-sword-charge",
+    "great-sword-sweep",
+    "great-sword-guard",
+    "sword-and-shield",
+    "sword-attack",
+    "shield-guard",
+    "guard-attack",
+    "dual-blades",
+    "demon-mode",
+    "blade-dance",
+    "dual-blades-spin",
+    "hammer",
+    "hammer-charge",
+    "hammer-upswing",
+    "hammer-spin",
+    "bow",
+    "coating"
+  ],
+  "frames": [
+    "button",
+    "button-pressed"
+  ],
+  "sheets": [
+    "icon-sheet",
+    "control-clusters"
+  ],
+  "status": "Integrated locally as baked vector geometry; device gameplay validation pending",
+  "origin": "Independently drawn; no traced or extracted game artwork"
+}

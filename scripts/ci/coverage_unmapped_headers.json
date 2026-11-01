@@ -4,8 +4,8 @@
     "reason": "AudioSink method declarations have no standalone LLVM line map. Their out-of-line implementations and actual SDL output-gain behavior are covered by renderer/audio regression tests and remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/settings/settings.hpp": {
-    "sha256": "471751e697b99c0a1892a932c1cdcbdc0e95dff1a6430ac315406453ed5a58fc",
-    "reason": "Reviewed declarations and aggregate defaults, including local quest HUD placements; no handwritten function body is exempted. HUD settings defaults, round trips and invalid scale/offset values are tested. Out-of-line implementations remain subject to the normal diff gate."
+    "sha256": "4902e701e162cad90d1ff0fcfe06ae1bda70ac10a37bdda4d8402d97d5de5eff",
+    "reason": "Reviewed settings declarations and aggregate defaults, including independent PSP/Action/Adaptive arrangements; no handwritten function body is exempted. Three-mode selection, independent layout persistence, invalid inputs and resets are tested; out-of-line implementations retain the normal diff gate."
   },
   "profiles/mhp3rd/host/perf/perf_overlay.hpp": {
     "sha256": "48d8fd2b2912a0231e0d8293bf0f9027a091235c0bae95d68845a6d4a058bc79",
@@ -44,8 +44,8 @@
     "reason": "Reviewed comments and function declarations only; the change documents the shared PSP and Action editor. No executable body is exempted. Editor implementations and renderer/UI regression tests remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/ui/touch_overlay.hpp": {
-    "sha256": "23488df2e5985e35f0977e71e9bf32f3c920d6928a6cf915ecbf6fb82f1eafe5",
-    "reason": "Reviewed aggregate direction-mask field only; no executable body is exempted. Action and PSP D-pad drawing is exercised by renderer/touch UI tests and remains subject to the normal diff gate."
+    "sha256": "ae5d6037cd35c2767930c3d9273196f19564105cedc0caeb71ed9d6da90f87e8",
+    "reason": "Reviewed aggregate direction-mask field only; no executable body is exempted. Action and PSP D-pad drawing is exercised by renderer/touch UI tests and remains subject to the normal diff gate. Live Long Sword availability, bounded transition parsing, window boundaries, cancellation, unknown fallback and real SDL/arrow rendering have synthetic regressions."
   },
   "profiles/mhp3rd/host/ui/layered_armor_screen.hpp": {
     "sha256": "c154c41c563ca09adbb76ecfe0376247dcf7c2867af6100b1b5a51602573ef96",
@@ -68,8 +68,8 @@
     "reason": "Reviewed documentation-only additions for physical scancodes and owned window lifecycle commands. Parsing, input/release behavior and rejection cases are tested in the out-of-line implementation; no executable header body changed."
   },
   "profiles/mhp3rd/host/gpu/vulkan_renderer.hpp": {
-    "sha256": "4d6163f32aab8886a868df562555192786ff1a2770f6e4873b1ded975a80d908",
-    "reason": "Reviewed activation-consumer and full-skinning-span policy declarations/comments only; no executable header body changed. Renderer/UI regressions cover compatibility activation, one-shot consumption, expiry, interpolation and ordinary presentation; GE fixtures retain previously unreferenced vertices for temporal replay. Out-of-line implementations remain subject to the normal diff gate."
+    "sha256": "3fb867ff525906ada2d7523484f7f3e91c6a241cf1510fb7386221616148cc24",
+    "reason": "Reviewed activation-consumer and full-skinning-span policy declarations/comments only; no executable header body changed. Renderer/UI regressions cover compatibility activation, one-shot consumption, expiry, interpolation and ordinary presentation; GE fixtures retain previously unreferenced vertices for temporal replay. Out-of-line implementations remain subject to the normal diff gate. Adaptive touch accessors are declarations only; touch/render input behavior remains covered by the out-of-line regression suites."
   },
   "profiles/mhp3rd/host/gpu/texture_pack_import.hpp": {
     "sha256": "238e36ba2e5b2ce197d432c60bf80cde774e28d3f4eb8bcb3eb80412eab41b5a",
@@ -88,7 +88,7 @@
     "reason": "Reviewed function declarations and comments only; no executable body is exempted. Quest block ownership and deferred packet/queue tags have synthetic regressions, and real-game tracing/manual HUD verification remains a separate device scenario. Implementations remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/gpu/hud_layout.hpp": {
-    "sha256": "076c80b37ea3012c0af2c86e433d2383f17c865b85f3cbaa51425df9502ea9bb",
+    "sha256": "9e68ebba616a5b59ecbd062997f694a7e8015f23095162c6b16f98c8dd1f05c8",
     "reason": "Reviewed types, constants, function declarations and defaulted comparison operators; no handwritten function body is exempted. Independent block geometry, movement speed/diagonals, clipping, bounds and settings persistence are tested in out-of-line implementations subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/gpu/hud_packets.hpp": {
@@ -122,5 +122,29 @@
   "profiles/mhp3rd/host/debug/debug_tools.hpp": {
     "sha256": "1dc65fe7bb951f1f690bc887da60147c4ba795c49726faba837dc2a0b8d430af",
     "reason": "Reviewed encounter command/status function declarations only; no new executable body is exempted. Native console refusal/status contracts, synthetic encounter lifecycle tests and out-of-line implementations remain subject to the normal changed-line coverage gate. Existing HeldCheats fields/defaulted comparison are unchanged."
+  },
+  "profiles/mhp3rd/host/game/weapon_state.hpp": {
+    "sha256": "9f910cf6e39769f3e55e44ea0b1da0e56ac0bd9bce544f7f94b54764d114299f",
+    "reason": "Reviewed weapon enum, aggregate declarations and compiler-defaulted equality only; no handwritten function body is exempted. All twelve kinds, type/ID changes, unavailable state and copied snapshot comparisons are exercised by weapon-state and real display-HLE tests. Out-of-line implementations retain the normal diff gate. Live Long Sword availability, bounded transition parsing, window boundaries, cancellation, unknown fallback and real SDL/arrow rendering have synthetic regressions."
+  },
+  "profiles/mhp3rd/host/input/adaptive_attack.hpp": {
+    "sha256": "8142b4918e2dfd58f3c4d6e769471576aa164882162a57c0554924ee9c835190",
+    "reason": "Reviewed enums, aggregate fields and method declarations only; no handwritten executable header body is exempted. Gesture timing, ownership, outputs, boundary and cancellation contracts are tested in out-of-line implementations subject to the normal diff gate. Live Long Sword availability, bounded transition parsing, window boundaries, cancellation, unknown fallback and real SDL/arrow rendering have synthetic regressions."
+  },
+  "profiles/mhp3rd/host/input/touch_adaptive.hpp": {
+    "sha256": "453aa00f6906dba792cb8256d1e48746ed3e16eaa3b065d5e8666a7dae64ad16",
+    "reason": "Reviewed independent layout aggregates, bounded FIFO state and method declarations only; no handwritten executable body is exempted. Ownership, gesture FIFO ordering, L preparation, repeat/reversal edges, cancellation, linked item geometry and resets are tested in out-of-line implementations subject to the normal diff gate. Live Long Sword availability, bounded transition parsing, window boundaries, cancellation, unknown fallback and real SDL/arrow rendering have synthetic regressions."
+  },
+  "profiles/mhp3rd/host/input/touch_geometry.hpp": {
+    "sha256": "ea94c51495fe24fbb7e904c4e500a51fb2b29a444c40c8de66922a86101f2ad0",
+    "reason": "Reviewed shared placement/area aggregates, constants and function declarations only; no handwritten executable body is exempted. Original Action/PSP geometry and independent Adaptive geometry use tested out-of-line implementations subject to the normal diff gate."
+  },
+  "profiles/mhp3rd/host/game/control_context.hpp": {
+    "sha256": "9a7b1c8070f75a661089a8b56758e775562019dfc5ea19ddbe9ef123c53c396b",
+    "reason": "Reviewed declarations, enums and aggregate defaults only; read-only context parsing and refresh implementations remain subject to the normal diff gate and synthetic guest-memory regressions."
+  },
+  "profiles/mhp3rd/host/ui/touch_icons_data.hpp": {
+    "sha256": "a12ca7e4f0cb76bdf67348bc6a8cb1693eddf56e9ef949694c970c0f42519e64",
+    "reason": "Reviewed generated declarations and constexpr geometry tables baked only from the original public SVG icon manifests; no executable function body is exempted. Deterministic regeneration and input validation are checked by the public asset suite; drawing code remains subject to the normal diff gate and renderer tests."
   }
 }

@@ -24,7 +24,7 @@ jobs:
         include:
           - os: ubuntu-24.04
             generator: Ninja
-          - os: macos-14
+          - os: macos-15
             generator: Ninja
           - os: windows-2022
             generator: Visual Studio 17 2022

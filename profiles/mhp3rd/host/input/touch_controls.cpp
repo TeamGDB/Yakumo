@@ -97,7 +97,7 @@ const PspLayout &default_psp_layout() {
                 Placement p;
                 p.size = c.radius / area.height;
                 p.buttons = i < kControls ? base.buttons[i] : 0u;
-                result.elements[i] = move_to(p, Element::Stick, c.centre, area);
+                result.elements[i] = move_to(p, c.centre, area);
             }
             Placement stable;
             if (parse(format(result.elements[i]), stable)) result.elements[i] = stable;
@@ -166,11 +166,11 @@ Layout make_layout(float width, float height, Insets insets, float size, bool dp
         // Unedited elements retain the PSP layout's size-dependent spacing.
         const Placement &normal = default_psp_layout().elements[i];
         if (p.anchor != normal.anchor || p.x != normal.x || p.y != normal.y) {
-            const Placed placed = place(p, Element::Stick, area, size);
+            const Placed placed = place(p, area, size);
             circle.centre = placed.centre;
         }
         if (is_combo(e)) {
-            const Placed placed = place(p, Element::Stick, area, size);
+            const Placed placed = place(p, area, size);
             circle = {placed.centre, placed.radius};
         } else {
             // The editor's percentage scales the actual factory radius, including

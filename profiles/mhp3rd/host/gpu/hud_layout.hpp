@@ -41,6 +41,9 @@ struct Transform {
 // preserve the original top-left, top-right and bottom-right corners.
 [[nodiscard]] Transform transform(const Layout &layout, Part part, float fit_x = 1.0f, float fit_y = 1.0f);
 [[nodiscard]] Rect bounds(const Layout &layout, Part part, float fit_x = 1.0f, float fit_y = 1.0f);
+// Map a block to a window-space picture rectangle, clipping off-screen edges.
+[[nodiscard]] Rect screen_bounds(
+    const Layout &layout, Part part, const Rect &picture, float fit_x = 1.0f, float fit_y = 1.0f);
 // Move a block's top-left here, keeping it on screen. Oversized blocks can
 // be panned across the picture.
 void move_to(Layout &layout, Part part, float left, float top, float fit_x = 1.0f, float fit_y = 1.0f);

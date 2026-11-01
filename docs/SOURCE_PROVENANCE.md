@@ -65,6 +65,24 @@ save writes. The preset retains original quest/resource/AI
 lifecycle; no third-party spawn/cheat implementation or game-derived corpus is
 included. Public tests construct independent synthetic RAM and model headers.
 
+## Adaptive touch controls
+
+Original attack-stick prototype by [@xiubanxian](https://github.com/xiubanxian)
+in [PR #342](https://github.com/TeamGDB/Yakumo/pull/342). The Adaptive gesture
+state machine, ownership, timing, renderer integration and regression tests are
+independently implemented. No source from the prototype is copied into this
+implementation. The public behavior of MHFU's touch UI informs the interaction
+concept (weapon-specific flick actions and direct item tap/swipe interaction), as
+described in the [developer article](https://hexadrive.jp/hexablog/game/1487/) and
+[firsthand playtest](https://www.4gamer.net/games/255/G025550/20140430106/).
+No Capcom implementation or game artwork is included.
+
+The SVG studies in `docs/images/adaptive-controls/` and
+`docs/images/adaptive-weapons/` are independently drawn from
+basic vector geometry. Public MHFU screenshots inform silhouette readability
+and control grouping; no icon paths or textures are traced or extracted.
+See [ADAPTIVE_CONTROLS.md](ADAPTIVE_CONTROLS.md) for the proposal and references.
+
 ## Third-party components
 
 Third-party source, binary dependencies, shader code and notices stay beside the profile that needs them. Their original copyright and license notices must be preserved.

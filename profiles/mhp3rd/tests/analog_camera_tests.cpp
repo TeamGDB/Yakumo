@@ -407,7 +407,7 @@ void test_aiming_sizes_the_games_steps() {
 
 // The mouse while aiming: it has no stick, so the direction it shows the game
 // makes the game step, and the driver sizes the step from its degrees.
-void test_mouse_aim() {
+void test_mouse_aim(mhp3rd::camera::Source pointer) {
     constexpr std::uint32_t hunter = 0x08904000u;
     Fixture f;
     f.enable();
@@ -423,7 +423,7 @@ void test_mouse_aim() {
     bool pending_step = false;
     const auto mouse_frame = [&](float yaw, float pitch, bool late = false, bool game_steps = true) {
         f.flip(0.0f, 0.0f);
-        if (yaw != 0.0f || pitch != 0.0f) add_motion(Source::Mouse, yaw, pitch);
+        if (yaw != 0.0f || pitch != 0.0f) add_motion(pointer, yaw, pitch);
         game_camera_anticipate_aim(f.runtime);
         const auto shown = game_camera_mouse_aim();
         game.yaw_step = 0;
@@ -489,7 +489,7 @@ void test_mouse_aim() {
 
     m.store8(camera_address + 0x91u, 0xFFu);
     f.frame(0.0f, 0.0f);
-    add_motion(Source::Mouse, 3.0f, 0.0f);
+    add_motion(pointer, 3.0f, 0.0f);
     check(!game_camera_mouse_aim(), "out of the aim the mouse shows the game nothing");
 }
 
@@ -682,6 +682,106 @@ void test_mouse_stock_turn() {
     f.update();
 }
 
+// A native aim may give vertical commands priority over horizontal commands.
+// A mostly horizontal finger drag must not become a full diagonal and stall yaw.
+void test_touch_aim_axis_priority() {
+    constexpr std::uint32_t hunter = 0x08904000u;
+    constexpr float units = 65536.0f / 360.0f;
+    Fixture f;
+    f.enable();
+    auto &m = f.runtime.memory();
+    f.ctx.gpr[21] = hunter;
+    m.store16(hunter + 0x188u, 20000u);
+    m.store16(hunter + 0x74u, 20000u);
+    GameAim game{hunter};
+    f.frame(0.0f, 0.0f);
+    m.store8(camera_address + 0x91u, 0u);
+    f.frame(0.0f, 0.0f);
+    int previous_seen = 20000;
+    const auto frame = [&](float yaw, float pitch, bool permitted = true) {
+        const auto before = m.load16(hunter + 0x188u);
+        f.flip(0.0f, 0.0f);
+        add_motion(Source::Touch, yaw, pitch);
+        game_camera_anticipate_aim(f.runtime);
+        const auto direction = game_camera_mouse_aim();
+        game.yaw_step = game.pitch_step = 0;
+        if (direction && permitted) {
+            if (direction->y != 0.f)
+                game.pitch_step = direction->y > 0.f ? -8 : 8;
+            else if (direction->x != 0.f)
+                game.yaw_step = direction->x > 0.f ? -624 : 624;
+        }
+        game.step(m);
+        previous_seen = m.load16(hunter + 0x188u);
+        f.update();
+        return static_cast<int>(static_cast<std::int16_t>(m.load16(hunter + 0x188u) - before));
+    };
+    for (const auto &[yaw, pitch] : std::vector<std::pair<float, float>>{{-7.5f, -.5f}, {-9.f, -.08f}, {-7.25f, 0.f}}) {
+        const int moved = frame(yaw, pitch);
+        check(std::abs(moved + yaw * units) <= 2.f,
+            "a noisy horizontal touch turns every update instead of releasing several frames at once");
+    }
+    for (int i = 0; i < 12; ++i) {
+        const auto before = m.load16(hunter + 0x188u);
+        const int moved = frame(-2.f, -.06f);
+        check(std::abs(moved - 2.f * units) <= 2.f, "small vertical touch noise cannot starve horizontal aim");
+        check(previous_seen == before, "view prediction uses the actual cardinal command, not a false diagonal step");
+    }
+    // A diagonal must service both axes; whichever waits is carried to a later
+    // game update, rather than losing an axis to vertical priority forever.
+    frame(0.f, 0.f);
+    frame(0.f, 0.f);
+    const auto start_yaw = m.load16(hunter + 0x188u);
+    const int start_pitch = static_cast<std::int8_t>(m.load8(hunter + 0xC22u));
+    unsigned yaw_frames = 0, pitch_frames = 0;
+    for (int i = 0; i < 16; ++i) {
+        const int pitch_before = static_cast<std::int8_t>(m.load8(hunter + 0xC22u));
+        if (frame(-.8f, -.8f) != 0) ++yaw_frames;
+        if (static_cast<std::int8_t>(m.load8(hunter + 0xC22u)) != pitch_before) ++pitch_frames;
+    }
+    check(yaw_frames >= 6 && pitch_frames >= 6, "diagonal touch services both native axes without starvation");
+    frame(0.f, 0.f);
+    frame(0.f, 0.f);
+    const int total = static_cast<std::int16_t>(m.load16(hunter + 0x188u) - start_yaw);
+    check(std::abs(total - 12.8f * units) <= 3.f, "diagonal touch preserves horizontal distance");
+    const int pitch_total = static_cast<std::int8_t>(m.load8(hunter + 0xC22u)) - start_pitch;
+    check(std::abs(pitch_total - 12.8f * 8.f / (624.f / units)) <= 2.f, "diagonal touch preserves vertical distance");
+    const auto stopped = m.load16(hunter + 0x188u);
+    for (int i = 0; i < 6; ++i) frame(0.f, 0.f);
+    check(m.load16(hunter + 0x188u) == stopped, "touch aim stops after pending motion drains");
+    check(frame(2.f, 0.f) < 0, "reversing the touch reverses the aim immediately");
+    // An intentionally shallow diagonal must not lose its slower axis merely
+    // because that axis waits while the larger horizontal motion is serviced.
+    frame(0.f, 0.f);
+    frame(0.f, 0.f);
+    const auto shallow_yaw = m.load16(hunter + 0x188u);
+    const int shallow_pitch = static_cast<std::int8_t>(m.load8(hunter + 0xC22u));
+    for (int i = 0; i < 40; ++i) frame(-.5f, .06f);
+    frame(0.f, 0.f);
+    frame(0.f, 0.f);
+    check(std::abs(static_cast<std::int16_t>(m.load16(hunter + 0x188u) - shallow_yaw) - 20.f * units) <= 3.f,
+        "shallow diagonal retains horizontal distance");
+    check(std::abs(static_cast<std::int8_t>(m.load8(hunter + 0xC22u)) - shallow_pitch + 2.4f * 8.f / (624.f / units)) <=
+            2.f,
+        "a deliberately slower axis is deferred, not dropped as a blocked request");
+    const auto blocked = m.load16(hunter + 0x188u);
+    for (int i = 0; i < 6; ++i) frame(1.f, 0.f, false);
+    check(m.load16(hunter + 0x188u) == blocked, "touch does not bypass a game state that forbids aiming");
+    m.store8(camera_address + 0x91u, 0xffu);
+    f.frame(0.f, 0.f);
+    add_motion(Source::Touch, 2.f, 1.f);
+    check(!game_camera_mouse_aim(), "leaving aim clears touch aim routing");
+    m.store8(camera_address + 0x91u, 0u);
+    f.frame(0.f, 0.f);
+    add_motion(Source::Touch, 1.f, 1.f);
+    const auto touch = game_camera_mouse_aim();
+    check(touch && (touch->x == 0.f || touch->y == 0.f), "touch starts with a cardinal native request");
+    (void)take(Source::Touch);
+    add_motion(Source::Mouse, 1.f, 1.f);
+    const auto mouse = game_camera_mouse_aim();
+    check(mouse && mouse->x != 0.f && mouse->y != 0.f, "a real mouse retains its existing aim path after touch");
+}
+
 int main() {
     test_passthrough();
     test_rates_and_release();
@@ -694,8 +794,10 @@ int main() {
     test_frame_rate_independence();
     test_motion_source();
     test_aiming_sizes_the_games_steps();
-    test_mouse_aim();
+    test_mouse_aim(mhp3rd::camera::Source::Mouse);
+    test_mouse_aim(mhp3rd::camera::Source::Touch);
     test_mouse_aim_view_is_steady();
+    test_touch_aim_axis_priority();
     test_scope_is_an_aim();
     test_mouse_axes_do_not_pile_up();
     test_mouse_stock_turn();

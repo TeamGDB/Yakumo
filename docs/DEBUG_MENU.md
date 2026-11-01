@@ -420,3 +420,20 @@ came back to the village. Hunter rank points were not checked.
   9,999,999 (the Status screen showed it) and gave an item and an armor
   piece; that equipment was not opened in the game's equipment screen on the
   early save.
+
+### Read-only control context observations
+
+The Adaptive context reader uses the validated task header at `0x0A05E600`.
+`lobby_task.ovl` selects the hub dispatcher described above: walking state 0,
+Start 12, home chest 25, quest counter list 2 and Smithy crafting 11 were observed.
+Nonzero dispatcher states use interface controls, including departure.
+
+On a quest, the shared menu manager pointer is at `0x09FF53B0`. Its byte at
+`+4` is the active Start state; `+0x18` suppresses Start while an interaction UI
+owns input. The quest supply box set the latter, and closing it cleared it.
+The active-state query at `0x08922548` also checks `+0xB95`. Start and supplies
+are separate states, not one common menu flag. The reader validates the pointer
+and range, polls once per original flip, and never writes guest state.
+Unknown tasks and unavailable state use interface controls. These observations
+are NPJB-40001 facts from local runtime snapshots and call tracing; no game
+bytes or generated code are included in tests or documentation.

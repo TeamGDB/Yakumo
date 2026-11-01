@@ -1,0 +1,42 @@
+{
+  "format": "SVG",
+  "viewBox": "0 0 64 64",
+  "glyphs": [
+    "long-sword",
+    "draw-weapon",
+    "sheathe",
+    "spirit-slash",
+    "evade",
+    "sprint",
+    "interact",
+    "talk",
+    "gather",
+    "carve",
+    "climb",
+    "use-item",
+    "lock-on",
+    "camera-center",
+    "d-pad",
+    "menu",
+    "interface",
+    "confirm",
+    "cancel",
+    "inventory",
+    "select",
+    "guard",
+    "scope",
+    "bow-shot"
+  ],
+  "frames": [
+    "button",
+    "button-pressed"
+  ],
+  "status": "Built-in Adaptive vector glyphs; per-device gameplay validation remains partial",
+  "origin": "Independently drawn; not traced or extracted from MHFU artwork",
+  "revision": 3,
+  "style": "Simplified silhouettes and round strokes; non-overlapping components",
+  "semanticColors": {
+    "cancel": "#EB6B67",
+    "confirm": "#79CC8A"
+  }
+}
