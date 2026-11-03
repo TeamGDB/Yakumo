@@ -15,7 +15,8 @@ void check(bool ok, const char *why) {
 void task(BufferRam &ram, std::string_view name, std::uint32_t at = 0x0A05E600u) {
     ram.store32(at, 0x336F574Du);
     ram.store32(at + 8, at);
-    for (unsigned i = 0; i < 32; ++i) ram.store8(at + 32 + i, i < name.size() ? name[i] : 0);
+    for (unsigned i = 0; i < 32 && ram.contains(at + 32 + i, 1u); ++i)
+        ram.store8(at + 32 + i, i < name.size() ? name[i] : 0);
 }
 }
 int main() {
@@ -85,6 +86,8 @@ int main() {
     task(partial, "game_task.ovl");
     partial.store32(0x09FF53B0u, manager);
     task(partial, "result.ovl", result);
+    check(partial.contains(result, 63u) && !partial.contains(result, 64u),
+        "fixture retains the incomplete result header");
     check(read(partial) == Context{Scene::Quest, false}, "truncated result header is not inspected past mapped RAM");
     BufferRam tiny(0x08800000u, 32);
     check(read(tiny) == Context{}, "unmapped overlay header");
