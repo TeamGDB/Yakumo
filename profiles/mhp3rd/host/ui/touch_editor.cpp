@@ -125,6 +125,7 @@ void touch_editor_frame(bool back) {
             look.hidden = look.hidden || !s.touch_dpad;
         if (st.adaptive && st.adaptive_mode == input::touch::AdaptiveMode::Quest) {
             const auto element = static_cast<A>(i);
+            look.bow_aiming = element == A::LeftFire && st.preview == input::touch::AttackProfile::Bow;
             if (element == A::Attack || element == A::Special)
                 look.available = input::touch::gesture_directions(
                     element == A::Special ? input::touch::secondary_profile(st.preview) : st.preview);

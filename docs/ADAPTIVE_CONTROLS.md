@@ -17,7 +17,7 @@ and public design references.
 | Village | Movement, sprint, camera, NPC/context Circle, Square with interaction-hand icon, optional D-pad and Commands. Ordinary X is hidden, including in older saved layouts. Deliberately rebound X entries are preserved. |
 | Quest, weapon sheathed | Immediate draw/basic attack, separate sprint and evade buttons, accessible Circle fallback and item tap/swipe. |
 | Quest, weapon drawn | Weapon-specific main selector and special action, evade, item/sheath surface, R3 and camera. Unsupported weapons retain ordinary button input. |
-| Interface | D-pad, four PSP face buttons, L/R paging and Commands. Combat gestures, item swipes and camera drags are disabled. Also used before a character is loaded. |
+| Interface | D-pad, four PSP face buttons, L/R paging and Commands. Combat gestures, item swipes and camera drags are disabled. Also used before a character is loaded, on quest rewards and on post-quest save prompts, including after Abandon. |
 
 Positions stay relative to the safe area. The user can independently edit Quest,
 Village and Interface layouts. Floating/fixed movement, the on-screen D-pad
@@ -27,7 +27,10 @@ The context reader uses observed guest task/menu state, and weapon identity uses
 the actual equipped record. A separate validated local quest actor supplies
 sheathed/drawn posture. A validated Long Sword transition reader now supplies main-selector follow-ups
 and their input-buffer windows. Other weapon combo state, nearby interaction
-prompts and Demon mode remain unverified. Unknown context has a safe
+prompts and Demon mode remain unverified. Quest rewards and post-Abandon save
+prompts are recognized by a separately validated result overlay, since their
+ordinary menu flags remain clear. Its header is checked only in the quest task;
+a stale or unrelated slot cannot override village walking. Unknown context has a safe
 Interface fallback and an explicit Interface/Auto override. Unknown posture
 retains the earlier attack behavior.
 
@@ -279,14 +282,24 @@ placements remain respected. See the aim-toggle behavior below.
 ## Bow aim-toggle candidate
 
 The combined charge/aim-stick experiment was reverted. Outside aim, Bow keeps
-its original main gestures: hold/release Triangle, down Circle melee and a late
-right flick for the native arc input. The secondary scope button now toggles aim
+hold/release Triangle. An upward flick sends Circle; downward flicks are
+unassigned. Applying coating stays on the separate coating control. After
+holding to charge, an upward flick adds Circle while
+preserving Triangle for native Arc Shot; it does not discharge the charge first.
+The game decides the required charge level and action availability. The secondary scope button now toggles aim
 on a deliberate tap; entering aim holds R without charging or owning the camera.
 Free screen drags remain camera motion, including while the other hand fires.
 
-During aim the main selector becomes a plain charge/fire button. An editable
+During aim the main selector becomes a charge/fire stick. An editable
 **Left Fire Button** appears on the left and duplicates it. Hold either to charge;
-release to shoot. A short tap is retained for three actual guest reads if needed.
+release to shoot. An upward swipe on either held fire surface adds Circle without
+releasing Triangle or the latched R. The fire contact stays captured and never
+turns into camera motion. A short tap or a released Arc Shot not yet observed by
+the game is retained for three actual guest reads if needed.
+Both surfaces keep a visible upward chevron and a movable inner cap. The owning
+cap follows small drags, latches upward when Arc Shot is recognized and returns
+to its own edited centre on release. The other fire cap stays at rest. Arrows are
+fixed gesture legends, not a charge-level or action-availability indicator.
 Both surfaces share one owner: another finger cannot release or repeat the first
 finger's shot. Fire contacts never become camera or melee gestures. Free-space
 taps do not send L recentering while aiming. Tap the scope button again to exit.

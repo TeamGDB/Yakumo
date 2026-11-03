@@ -122,12 +122,16 @@ bool AdaptiveControls::bow_aiming() const {
 std::uint16_t AdaptiveControls::fire_buttons() const {
     if (!bow_toggle_available()) return 0;
     if (fire_phase_ == FirePhase::Cancel) return 0x5200;
+    const bool firing = fire_phase_ == FirePhase::Held || fire_phase_ == FirePhase::Tap;
     return static_cast<std::uint16_t>(
-        (bow_aiming() ? 0x200 : 0) | ((fire_phase_ == FirePhase::Held || fire_phase_ == FirePhase::Tap) ? 0x1000 : 0));
+        (bow_aiming() ? 0x200 : 0) | (firing ? 0x1000 : 0) | (firing && fire_arc_ ? 0x2000 : 0));
 }
 std::uint16_t AdaptiveControls::sample_fire_buttons(bool advance) {
     const auto bits = fire_buttons();
-    if (advance && (fire_phase_ == FirePhase::Held || fire_phase_ == FirePhase::Tap)) fire_sampled_ = true;
+    if (advance && (fire_phase_ == FirePhase::Held || fire_phase_ == FirePhase::Tap)) {
+        fire_sampled_ = true;
+        if (fire_arc_) arc_sampled_ = true;
+    }
     if (advance && (fire_phase_ == FirePhase::Tap || fire_phase_ == FirePhase::Cancel) && ++fire_reads_ >= 3)
         fire_phase_ = FirePhase::Idle;
     return bits;
@@ -137,6 +141,7 @@ void AdaptiveControls::cancel_fire(bool leave_aim) {
         fire_phase_ = fire_sampled_ ? FirePhase::Cancel : FirePhase::Idle;
         fire_reads_ = 0;
     }
+    fire_arc_ = arc_sampled_ = false;
     for (auto &f : fingers_)
         if (f.role == Role::Fire) f.role = Role::None;
     if (leave_aim) aiming_ = false;
@@ -231,6 +236,7 @@ void AdaptiveControls::set_weapon_posture(WeaponPosture posture) {
     posture_ = posture;
     aiming_ = false;
     fire_phase_ = FirePhase::Idle;
+    fire_arc_ = arc_sampled_ = false;
     set_layout(layout_, area_, scale_);
     if (mode_ != AdaptiveMode::Quest) return;
     if (ammo_busy()) {
@@ -391,6 +397,7 @@ void AdaptiveControls::finger_down(std::uint64_t id, Point at, std::uint64_t ms)
                     f->role = Role::Fire;
                     fire_phase_ = FirePhase::Held;
                     fire_sampled_ = false;
+                    fire_arc_ = arc_sampled_ = false;
                     fire_reads_ = 0;
                     ++haptics_;
                 }
@@ -540,8 +547,17 @@ void AdaptiveControls::finger_move(std::uint64_t id, Point at, std::uint64_t ms)
     }
     const Point delta{at.x - f->at.x, at.y - f->at.y};
     switch (f->role) {
-    case Role::Fire:
-        break; // A fire contact never becomes camera input or another attack.
+    case Role::Fire: {
+        // One captured fire contact may add Circle; it never becomes camera input.
+        const float x = at.x - f->start.x, y = at.y - f->start.y;
+        const float threshold = std::max(6.f, placed(f->element).radius * .42f);
+        if (!fire_arc_ && -y >= threshold && -y > std::abs(x)) {
+            fire_arc_ = true;
+            arc_sampled_ = false;
+            ++haptics_;
+        }
+        break;
+    }
     case Role::AimToggle: {
         const auto &p = placed(E::Special);
         f->over = std::hypot(at.x - p.centre.x, at.y - p.centre.y) <= p.radius * 1.55f;
@@ -637,7 +653,8 @@ void AdaptiveControls::finger_up(std::uint64_t id, std::uint64_t ms, bool cancel
         if (canceled)
             cancel_fire(false);
         else {
-            fire_phase_ = fire_sampled_ ? FirePhase::Idle : FirePhase::Tap;
+            const bool observed = fire_arc_ ? arc_sampled_ : fire_sampled_;
+            fire_phase_ = observed ? FirePhase::Idle : FirePhase::Tap;
             fire_reads_ = 0;
         }
     }
@@ -746,15 +763,21 @@ bool AdaptiveControls::held(E e) const {
             return true;
     return false;
 }
-AttackDirection AdaptiveControls::attack_direction(std::uint64_t ms) const {
-    return attack_.direction(ms);
+AttackDirection AdaptiveControls::attack_direction(std::uint64_t ms, E element) const {
+    if (bow_aiming() && (element == E::Attack || element == E::LeftFire)) {
+        for (const auto &finger : fingers_)
+            if (finger.used && finger.role == Role::Fire && finger.element == element)
+                return fire_arc_ ? AttackDirection::Up : AttackDirection::Pending;
+        return AttackDirection::None;
+    }
+    return element == E::Attack ? attack_.direction(ms) : AttackDirection::None;
 }
-Point AdaptiveControls::attack_thumb(std::uint64_t ms) const {
-    const auto &pad = placed(E::Attack);
+Point AdaptiveControls::attack_thumb(std::uint64_t ms, E element) const {
+    const auto &pad = placed(element);
     const Point centre = pad.centre;
     if (attack_profile() == AttackProfile::Off) return centre;
     const float reach = pad.radius * .28f;
-    switch (attack_.direction(ms)) {
+    switch (attack_direction(ms, element)) {
     case AttackDirection::Left:
         return {centre.x - reach, centre.y};
     case AttackDirection::Right:
@@ -765,7 +788,8 @@ Point AdaptiveControls::attack_thumb(std::uint64_t ms) const {
         return {centre.x, centre.y + reach};
     case AttackDirection::Pending:
         for (const auto &finger : fingers_) {
-            if (!finger.used || finger.role != Role::Attack) continue;
+            if (!finger.used || finger.element != element || finger.role != (bow_aiming() ? Role::Fire : Role::Attack))
+                continue;
             const double dx = static_cast<double>(finger.at.x) - finger.start.x;
             const double dy = static_cast<double>(finger.at.y) - finger.start.y;
             const double length = std::hypot(dx, dy);

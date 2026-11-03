@@ -59,6 +59,7 @@ private:
     [[nodiscard]] bool allowed(AttackDirection direction) const;
     std::optional<std::uint8_t> available_;
     AttackProfile profile_{AttackProfile::LongSword};
+    bool bow_hold_{};
     std::optional<std::uint64_t> owner_;
     Point origin_{};
     float threshold_{};

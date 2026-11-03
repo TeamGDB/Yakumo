@@ -54,7 +54,7 @@ std::uint8_t gesture_directions(AttackProfile profile) {
     case AttackProfile::Hammer:
         return right;
     case AttackProfile::Bow:
-        return down | right;
+        return up;
     case AttackProfile::Guard:
         return down | left | right;
     default:
@@ -67,6 +67,7 @@ bool AdaptiveAttack::begin(std::uint64_t id, Point at, float radius, std::uint64
         !std::isfinite(at.x) || !std::isfinite(at.y) || !std::isfinite(radius) || radius <= 0.0f)
         return false;
     profile_ = profile;
+    bow_hold_ = false;
     owner_ = id;
     origin_ = at;
     threshold_ = std::max(6.0f, radius * 0.42f);
@@ -84,11 +85,13 @@ void AdaptiveAttack::move(std::uint64_t id, Point at, std::uint64_t ms) {
         clear();
         return;
     }
-    // Bow can add Circle to an already-held charge. No timer predicts charge level.
+    // A Bow flick may add Circle without dropping an already-held Triangle.
+    // This preserves native charge/Arc Shot handling instead of predicting it.
     if (profile_ == AttackProfile::Bow &&
-        (selected_ == AttackDirection::Pending || selected_ == AttackDirection::Primary) && ms - started_ >= kHoldMs &&
-        x >= threshold_ && x > std::abs(y)) {
-        selected_ = AttackDirection::Right;
+        (selected_ == AttackDirection::Pending || selected_ == AttackDirection::Primary) && -y >= threshold_ &&
+        -y > std::abs(x)) {
+        selected_ = AttackDirection::Up;
+        bow_hold_ = ms - started_ >= kHoldMs;
         return;
     }
     if (selected_ != AttackDirection::Pending) return;
@@ -108,8 +111,6 @@ void AdaptiveAttack::move(std::uint64_t id, Point at, std::uint64_t ms) {
         else
             selected_ = y < 0.0f ? AttackDirection::Up : AttackDirection::Down;
     }
-    if (profile_ == AttackProfile::Bow && selected_ == AttackDirection::Right && ms - started_ < kHoldMs)
-        selected_ = AttackDirection::Blocked; // a quick right flick must not attach coating instead of an arc
     if (selected_ != AttackDirection::Pending && !allowed(selected_))
         selected_ = guard_selector(profile_) ? AttackDirection::Pending : AttackDirection::Blocked;
 }
@@ -133,7 +134,7 @@ void AdaptiveAttack::end(std::uint64_t id, std::uint64_t ms, bool canceled) {
         profile_ == AttackProfile::Aim ||
         ((profile_ == AttackProfile::Bow) && chosen == AttackDirection::Primary && ms >= started_ &&
             ms - started_ >= kHoldMs) ||
-        (profile_ == AttackProfile::Bow && chosen == AttackDirection::Right) ||
+        (profile_ == AttackProfile::Bow && bow_hold_) ||
         (profile_ == AttackProfile::GreatSword &&
             (chosen == AttackDirection::Up ||
                 (chosen == AttackDirection::Primary && ms >= started_ && ms - started_ >= kHoldMs))) ||
@@ -149,6 +150,7 @@ void AdaptiveAttack::end(std::uint64_t id, std::uint64_t ms, bool canceled) {
 void AdaptiveAttack::clear() {
     owner_.reset();
     selected_ = pulse_ = AttackDirection::None;
+    bow_hold_ = false;
 }
 
 bool AdaptiveAttack::held() const {
@@ -179,7 +181,7 @@ AttackOutput AdaptiveAttack::output(std::uint64_t ms) const {
         if (d == AttackDirection::Primary) return {0x1000u, 0};
         switch (profile_) {
         case AttackProfile::Bow:
-            return {static_cast<std::uint16_t>(d == AttackDirection::Down ? 0x2000u : 0x3000u), 0};
+            return {static_cast<std::uint16_t>(d == AttackDirection::Up && !bow_hold_ ? 0x2000u : 0x3000u), 0};
         default:
             break;
         }

@@ -5,14 +5,15 @@
 namespace mhp3rd::game::control_context {
 namespace {
 constexpr std::uint32_t kTask = 0x0A05E600u;
+constexpr std::uint32_t kResult = 0x0A1BB000u;
 constexpr std::uint32_t kHubState = 0x0A25DD28u;
 constexpr std::uint32_t kMenu = 0x09FF53B0u;
 Context snapshot;
-bool named(const Ram &ram, std::string_view name) {
-    if (!ram.contains(kTask, 64u) || ram.load32(kTask) != 0x336F574Du || ram.load32(kTask + 8u) != kTask) return false;
+bool named(const Ram &ram, std::uint32_t at, std::string_view name) {
+    if (!ram.contains(at, 64u) || ram.load32(at) != 0x336F574Du || ram.load32(at + 8u) != at) return false;
     for (std::size_t i = 0; i < name.size(); ++i)
-        if (ram.load8(kTask + 32u + static_cast<std::uint32_t>(i)) != name[i]) return false;
-    return ram.load8(kTask + 32u + static_cast<std::uint32_t>(name.size())) == 0u;
+        if (ram.load8(at + 32u + static_cast<std::uint32_t>(i)) != name[i]) return false;
+    return ram.load8(at + 32u + static_cast<std::uint32_t>(name.size())) == 0u;
 }
 bool object(const Ram &ram, std::uint32_t slot, std::size_t size, std::uint32_t &out) {
     if (!ram.contains(slot, 4u)) return false;
@@ -23,13 +24,16 @@ bool object(const Ram &ram, std::uint32_t slot, std::size_t size, std::uint32_t 
 }
 Context read(const Ram &ram) {
     std::uint32_t p{};
-    if (named(ram, "lobby_task.ovl")) {
+    if (named(ram, kTask, "lobby_task.ovl")) {
         // The lobby dispatcher: zero while walking, nonzero for conversations,
         // menus and departure. See the traced quest-start facts in DEBUG_MENU.
         if (!object(ram, kHubState, 4u, p)) return {Scene::Hub, true};
         return {Scene::Hub, ram.load32(p) != 0u};
     }
-    if (named(ram, "game_task.ovl")) {
+    if (named(ram, kTask, "game_task.ovl")) {
+        // Rewards and the post-quest save prompt use a separate overlay while
+        // the ordinary menu flags remain clear, including after Abandon.
+        if (named(ram, kResult, "result.ovl")) return {Scene::Quest, true};
         // NPJB-40001 menu manager: +4 is Start's active state; +0x18
         // suppresses it while an interaction UI (such as supplies) owns input.
         // +0xB95 is an additional activation byte used by its active-state query. Observed

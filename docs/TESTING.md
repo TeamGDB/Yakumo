@@ -586,15 +586,20 @@ specialization constants, while the tested plain variant retains `OpKill`.
 ### Adaptive context controls
 
 `mhp3rd_control_context_tests` covers validated task headers, missing/malformed
-pointers, hub/quest interface states, return to gameplay and snapshot refresh
-using synthetic RAM. Adaptive gesture tests cover one item selection per contact,
+pointers, hub/quest interface states, validated result overlays, stale/unrelated
+and truncated result headers, return to gameplay and snapshot refresh using
+synthetic RAM. Real SDL tests exercise result-driven Interface selection, clearing
+a captured Bow Arc Shot without confirming the UI, ordinary confirmation and
+clean combat input in the next quest. Adaptive gesture tests cover one item selection per contact,
 mode transitions, queued-input cancellation and ordinary interface buttons.
 Settings and real renderer/UI tests exercise independent context layouts,
 manual interface override and editor profile selection.
 
 On a device, check title/character selection, village walking, NPC conversations,
 Start, home storage, quest counter and Smithy, then quest Start and supplies.
-Close each menu and verify the gameplay controls return with no held input.
+Finish a quest, navigate rewards and the save prompt, then repeat with Abandon.
+Check village movement and a new gathering quest without a large monster: neither
+may retain the result layout. Close each menu and verify the gameplay controls return with no held input.
 Check a long item swipe and reversal selects only one item; lift for another.
 Resize/reposition controls in each context and restart to check persistence.
 Android touch, haptics and unrecorded game dialogs need manual verification.
@@ -663,7 +668,17 @@ The adaptive input suite covers scope tap/drag cancellation, latched aim without
 charging, the main/left shared fire owner, short taps counted by guest reads,
 independent camera drags, cancel-before-release ordering, context/posture resets,
 custom bindings and the held-R comparison switch. The SDL renderer suite checks
-left-fire plus free-camera input, menu recovery and retained outside-aim melee.
+left-fire plus free-camera input, menu recovery and outside-aim up/down mapping.
+Rendered geometry checks require a visible up chevron on both aimed fire sticks,
+at rest and during Arc Shot, and no down/side hints. The reference capture shows
+the moved main/left caps; unit tests cover movement before recognition, isolation
+from the unused control, latching and return to each edited centre on lift.
+Both fire controls have upward Arc Shot regressions: native charge is preserved,
+short/subthreshold/downward/diagonal drags do not become Arc Shot, a second finger
+cannot steal the charge, a reversed recognized gesture stays latched, UI polls
+cannot consume pending input, and cancellation/results clear Circle. Outside aim,
+up sends Circle, down is unassigned (including after lift), and a charged upward swipe keeps
+Triangle while adding Circle, with no extra release pulse.
 The native pointer-aim fixture runs for both mouse and touch sources.
 `adaptive-bow-toggle.bmp` captures the ordinary selector, aimed fire surfaces and
 active scope control with synthetic backgrounds.
@@ -671,8 +686,10 @@ active scope control with synthetic backgrounds.
 On Android, draw a Bow in a quest and tap the scope button. Drag free space on
 the right while holding the left fire button; aim must move on both axes. Release
 to shoot, then repeat using the main fire button. A second fire contact must not
-release the first contact's charge. Tap the scope again to exit, and check melee
-and arc gestures outside aim. Check charge cancellation, stamina exhaustion,
+release the first contact's charge. While holding each fire button, charge and
+swipe upward: native Arc Shot must activate when the game permits it. Tap the
+scope again to exit; check quick up (Circle), ignored down (no coating), and hold
+then up (add Circle without discharging the held Triangle). Check charge cancellation, stamina exhaustion,
 Evade, sheathing, host-menu entry, scene changes and item/coating selection.
 Move/resize/hide the left duplicate in the Quest editor using the Bow preview.
 These native gameplay/physical multitouch checks remain manual; passing public

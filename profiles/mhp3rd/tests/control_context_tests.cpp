@@ -12,11 +12,11 @@ void check(bool ok, const char *why) {
         std::cerr << why << '\n';
     }
 }
-void task(BufferRam &ram, std::string_view name) {
-    constexpr auto at = 0x0A05E600u;
+void task(BufferRam &ram, std::string_view name, std::uint32_t at = 0x0A05E600u) {
     ram.store32(at, 0x336F574Du);
     ram.store32(at + 8, at);
-    for (unsigned i = 0; i < 32; ++i) ram.store8(at + 32 + i, i < name.size() ? name[i] : 0);
+    for (unsigned i = 0; i < 32 && ram.contains(at + 32 + i, 1u); ++i)
+        ram.store8(at + 32 + i, i < name.size() ? name[i] : 0);
 }
 }
 int main() {
@@ -37,6 +37,27 @@ int main() {
     constexpr auto manager = 0x09FF53B4u;
     ram.store32(0x09FF53B0u, manager);
     check(read(ram) == Context{Scene::Quest, false}, "quest walking");
+    constexpr auto result = 0x0A1BB000u;
+    task(ram, "result.ovl", result);
+    check(
+        read(ram) == Context{Scene::Quest, true}, "quest rewards and post-abandon save prompts use interface controls");
+    for (const auto bad_name : {"result.ovl.extra", "em003m0.ovl", ""}) {
+        task(ram, bad_name, result);
+        check(read(ram) == Context{Scene::Quest, false},
+            "an unrelated or partial result name does not block quest input");
+    }
+    task(ram, "result.ovl", result);
+    ram.store32(result + 8u, 0u);
+    check(!read(ram).interface_open, "a stale result load address is rejected");
+    task(ram, "result.ovl", result);
+    ram.store32(result, 0u);
+    check(!read(ram).interface_open, "an invalid result header is not an interface");
+    task(ram, "result.ovl", result);
+    task(ram, "lobby_task.ovl");
+    check(read(ram) == Context{Scene::Hub, false}, "result memory cannot override village walking");
+    task(ram, "game_task.ovl");
+    task(ram, "", result);
+    check(read(ram) == Context{Scene::Quest, false}, "the next quest releases the result interface");
     for (auto offset : {4u, 0x18u, 0xB95u}) {
         ram.store8(manager + offset, 1);
         check(read(ram).interface_open, "each active interface state takes priority");
@@ -61,6 +82,13 @@ int main() {
     ram.store32(0x0A05E608u, 0x0A05E600u);
     ram.store32(0x0A05E600u, 0);
     check(read(ram) == Context{}, "wrong overlay magic rejected");
+    BufferRam partial(0x08800000u, result - 0x08800000u + 63u);
+    task(partial, "game_task.ovl");
+    partial.store32(0x09FF53B0u, manager);
+    task(partial, "result.ovl", result);
+    check(partial.contains(result, 63u) && !partial.contains(result, 64u),
+        "fixture retains the incomplete result header");
+    check(read(partial) == Context{Scene::Quest, false}, "truncated result header is not inspected past mapped RAM");
     BufferRam tiny(0x08800000u, 32);
     check(read(tiny) == Context{}, "unmapped overlay header");
     return failures ? 1 : 0;
