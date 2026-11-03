@@ -170,7 +170,7 @@ const char *adaptive_gesture_help(E element, P profile) {
         case P::Hammer:
             return "Tap: primary chain or follow-up. Right: side swing. Charge on the separate weapon button.";
         case P::Bow:
-            return "Hold: charge; lift to fire. After holding, right adds the arc-shot input. Down: melee. Evade is separate.";
+            return "Hold: charge; lift to fire. Up: Circle; after charging it adds Circle without releasing Triangle for Arc Shot. Down is unassigned. In aim mode swipe either fire button up for Arc Shot.";
         default:
             return "Ordinary button input. A recognized weapon with the default binding enables its gestures.";
         }
@@ -186,7 +186,7 @@ const char *adaptive_gesture_help(E element, P profile) {
         case P::Hammer:
             return "Hold to charge; lift to release. Movement selects the native charge result. Evade cancels where the game permits.";
         case P::Bow:
-            return "Tap to enter/leave aim. Drag free screen space to aim. In aim mode either fire button holds charge and shoots on release. Outside aim, the main selector retains melee and arc gestures.";
+            return "Tap to enter/leave aim. Drag free screen space to aim. In aim mode either fire button holds charge and shoots on release; swipe up adds Circle for Arc Shot. Outside aim, up sends Circle; down is unassigned; an upward flick also preserves a held charge.";
         default:
             return "Ordinary R button; sprint while the weapon is sheathed.";
         }
@@ -200,7 +200,7 @@ const char *adaptive_gesture_help(E element, P profile) {
     if (element == E::Interact)
         return "Separate Square action to sheathe. While sheathed it uses the item; in the village it interacts.";
     if (element == E::LeftFire)
-        return "Appears on the left only while Bow aim is toggled on. Hold to charge; release to shoot while your right thumb aims. It shares one charge with the main button.";
+        return "Appears on the left only while Bow aim is toggled on. Hold to charge; release to shoot while your right thumb aims. Swipe up for Arc Shot. It shares one charge with the main button.";
     if (element == E::DPad)
         return "Drag across the cross to change direction. Diagonals press two directions; the centre is neutral.";
     return "";
@@ -270,15 +270,16 @@ void draw_adaptive_element(ImDrawList *list, E e, const input::touch::Placed &p,
         frame(list, c, r, a, look.held);
         ImVec2 cap = c;
         const bool quest_action = !sheathed && mode == input::touch::AdaptiveMode::Quest;
-        const bool selector = !(look.bow_aiming && profile == P::Bow) && quest_action &&
-            ((e == E::Attack && profile != P::Off) || (e == E::Special && (profile == P::SwordAndShield)));
+        const bool bow_fire = look.bow_aiming && profile == P::Bow && (e == E::Attack || e == E::LeftFire);
+        const bool selector = quest_action &&
+            (bow_fire || (e == E::Attack && profile != P::Off) || (e == E::Special && profile == P::SwordAndShield));
         if (selector) {
             ImVec2 axis{};
             if (direction == D::Up) axis.y = -1;
             if (direction == D::Down) axis.y = 1;
             if (direction == D::Left) axis.x = -1;
             if (direction == D::Right) axis.x = 1;
-            if (e == E::Attack && direction != D::None) {
+            if ((e == E::Attack || bow_fire) && direction != D::None) {
                 const float dx = thumb.x - c.x, dy = thumb.y - c.y, length = std::hypot(dx, dy);
                 if (std::isfinite(length) && length > 0) {
                     const float k = std::min(r * .22f / length, 1.f);
@@ -302,7 +303,7 @@ void draw_adaptive_element(ImDrawList *list, E e, const input::touch::Placed &p,
                 list->AddPolyline(points, 3, colour(0x080e11u, alpha), 0, width + std::max(2.f, r * .05f));
                 list->AddPolyline(points, 3, colour(selected ? 0xffd38au : 0xf1edd8u, alpha), 0, width);
             };
-            auto hints = look.available;
+            auto hints = bow_fire ? std::optional{input::touch::gesture_directions(P::Bow)} : look.available;
             // These are fixed input legends. Only LS supplies live combo availability.
             if (!hints && profile != P::LongSword && profile != P::SwordAndShield)
                 hints = input::touch::gesture_directions(
@@ -365,9 +366,10 @@ void draw_adaptive_controls(const input::touch::AdaptiveControls &controls, floa
         look.held = controls.held(e) || (look.bow_aiming && e == E::Special);
         if (e == E::Attack) look.available = controls.available();
         if (e == E::DPad) look.directions = controls.dpad_held();
-        const auto direction = e == E::Special ? controls.special_direction(ms) : controls.attack_direction(ms);
-        draw_adaptive_element(list, e, p, e == E::Attack ? controls.attack_thumb(ms) : controls.stick_thumb(), look,
-            direction, controls.mode(), controls.weapon_posture(), controls.weapon_profile());
+        const auto direction = e == E::Special ? controls.special_direction(ms) : controls.attack_direction(ms, e);
+        const auto thumb = e == E::Attack || e == E::LeftFire ? controls.attack_thumb(ms, e) : controls.stick_thumb();
+        draw_adaptive_element(
+            list, e, p, thumb, look, direction, controls.mode(), controls.weapon_posture(), controls.weapon_profile());
         if (controls.commands_open() && e != E::Pause) {
             const char *label = e == E::YakumoMenu ? "Yakumo"
                 : e == E::Start                    ? "Game Menu"

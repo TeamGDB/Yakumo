@@ -912,7 +912,7 @@ void remaining_weapon_profiles() {
         P p;
         std::uint16_t primary, up, down, left, right;
     };
-    const Row rows[] = {{P::Bow, 0x1000, 0, 0x2000, 0, 0}};
+    const Row rows[] = {{P::Bow, 0x1000, 0x2000, 0, 0, 0}};
     const Point directions[] = {{0, -50}, {0, 50}, {-50, 0}, {50, 0}};
     for (const auto &row : rows) {
         check(weapon_profile(row.p), "new weapon profile is a real weapon, not a secondary recognizer");
@@ -972,12 +972,12 @@ void remaining_weapon_profiles() {
     AdaptiveAttack bow;
     bow.begin(1, {0, 0}, 50, 1000, P::Bow);
     check(bow.output(1110).buttons == 0x1000, "Bow starts native charge");
-    bow.move(1, {60, 0}, 2000);
-    check(bow.output(2000).buttons == 0x3000, "late Bow right flick adds Circle without first releasing Triangle");
+    bow.move(1, {0, -60}, 2000);
+    check(bow.output(2000).buttons == 0x3000, "late Bow upward flick adds Circle while preserving held Triangle");
     bow.move(1, {-60, 0}, 2001);
-    check(bow.output(2001).buttons == 0x3000, "arc request cannot turn into a second action");
+    check(bow.output(2001).buttons == 0x3000, "upward charge gesture stays latched after a direction reversal");
     bow.end(1, 2010, false);
-    check(bow.output(2010).buttons == 0, "arc contact releases both buttons without a second release pulse");
+    check(bow.output(2010).buttons == 0, "an upward charged gesture releases without a second shot pulse");
 }
 void ranged_controls() {
     using P = AttackProfile;
@@ -1521,6 +1521,108 @@ void touch_comfort() {
     c.release_all();
 }
 
+void bow_upward_gestures() {
+    using E = AdaptiveElement;
+    AdaptiveAttack main;
+    main.begin(1, {100, 100}, 50, 1000, AttackProfile::Bow);
+    main.move(1, {100, 40}, 1010);
+    check(main.output(1010).buttons == 0x2000, "outside aim an upward Bow flick sends melee Circle only");
+    main.end(1, 1020, true);
+    main.begin(1, {100, 100}, 50, 1200, AttackProfile::Bow);
+    main.move(1, {100, 160}, 1210);
+    check(main.output(1210).buttons == 0, "downward Bow flick is unassigned and cannot apply coating");
+    main.end(1, 1220, false);
+    check(main.output(1220).buttons == 0, "removed downward Bow gesture cannot become a release tap");
+    main.begin(1, {100, 100}, 50, 1400, AttackProfile::Bow);
+    check(main.output(1600).buttons == 0x1000, "outside aim the held main button starts native charge");
+    main.move(1, {100, 40}, 1610);
+    check(main.output(1610).buttons == 0x3000, "outside aim upward flick adds Circle without releasing the charge");
+    main.end(1, 1620, false);
+    check(main.output(1620).buttons == 0, "outside-aim Arc Shot has no extra release pulse");
+    main.begin(1, {100, 100}, 50, 1800, AttackProfile::Bow);
+    main.move(1, {100, 160}, 2000);
+    check(main.output(2000).buttons == 0x1000, "downward drift during charge cannot apply coating or drop Triangle");
+    main.end(1, 2010, false);
+    check(main.output(2010).buttons == 0, "lifting after downward charge drift has no extra pulse");
+    main.begin(1, {100, 100}, 50, 2000, AttackProfile::Bow);
+    main.move(1, {160, 100}, 2200);
+    check(main.output(2200).buttons == 0x1000, "old rightward Bow motion cannot add Arc Shot input");
+    main.end(1, 2210, true);
+    for (auto element : {E::Attack, E::LeftFire}) {
+        AdaptiveControls c;
+        c.set_layout(default_adaptive_layout(), {0, 0, 1000, 600}, 1);
+        c.set_attack_profile(AttackProfile::Bow);
+        c.set_weapon_posture(WeaponPosture::Drawn);
+        const auto aim = c.placed(E::Special).centre;
+        const auto fire = c.placed(element).centre;
+        c.finger_down(99, aim, 1000);
+        c.finger_up(99, 1001);
+        check(c.attack_direction(1090, element) == AttackDirection::None && c.attack_thumb(1090, element).x == fire.x &&
+                c.attack_thumb(1090, element).y == fire.y,
+            "either idle Bow fire stick rests at its own centre");
+        c.finger_down(1, fire, 1100);
+        check(c.sample_fire_buttons(true) == 0x1200, "aimed charge starts with R and Triangle");
+        c.finger_move(1, {fire.x + 3.f, fire.y - 4.f}, 1101);
+        check(c.attack_direction(1101, element) == AttackDirection::Pending &&
+                c.attack_thumb(1101, element).x > fire.x && c.attack_thumb(1101, element).y < fire.y &&
+                c.buttons(1101) == 0x1200,
+            "either fire cap follows a small drag without prematurely requesting Arc Shot");
+        const float threshold = std::max(6.f, c.placed(element).radius * .42f);
+        for (const auto delta : {Point{0.f, -threshold + .01f}, Point{0.f, 80.f}, Point{80.f, -80.f}}) {
+            c.finger_move(1, {fire.x + delta.x, fire.y + delta.y}, 1110);
+            check(c.buttons(1110) == 0x1200, "short, downward and horizontal-dominant fire drags do not add Circle");
+        }
+        const auto other = c.placed(element == E::Attack ? E::LeftFire : E::Attack).centre;
+        c.finger_down(2, other, 1111);
+        c.finger_move(2, {other.x, other.y - 80.f}, 1112);
+        c.finger_up(2, 1113);
+        check(c.buttons(1113) == 0x1200, "a second fire contact cannot change or release the owner's charge");
+        c.finger_move(1, {fire.x, fire.y - threshold - .01f}, 1120);
+        check(c.buttons(1120) == 0x3200, "upward swipe adds Circle to either aimed fire button");
+        const auto cap = c.attack_thumb(1120, element);
+        check(c.attack_direction(1120, element) == AttackDirection::Up && cap.x == fire.x && cap.y < fire.y &&
+                std::hypot(cap.x - fire.x, cap.y - fire.y) < c.placed(element).radius,
+            "Arc Shot moves the owning fire cap upward inside its own circle");
+        const auto other_element = element == E::Attack ? E::LeftFire : E::Attack;
+        check(c.attack_direction(1120, other_element) == AttackDirection::None &&
+                c.attack_thumb(1120, other_element).x == other.x && c.attack_thumb(1120, other_element).y == other.y,
+            "the unused fire stick stays at rest instead of following the other owner's gesture");
+        c.finger_move(1, {fire.x + 80, fire.y + 80}, 1121);
+        check(c.buttons(1121) == 0x3200 && c.attack_thumb(1121, element).x == cap.x &&
+                c.attack_thumb(1121, element).y == cap.y,
+            "Arc Shot input and cap stay latched after direction reversal");
+        const auto camera = c.take_camera_drag();
+        check(camera.x == 0.f && camera.y == 0.f, "the firing contact never steals aim-camera ownership");
+        c.finger_up(1, 1130);
+        check(c.attack_direction(1130, element) == AttackDirection::None && c.attack_thumb(1130, element).x == fire.x &&
+                c.attack_thumb(1130, element).y == fire.y,
+            "lifting releases the visual fire cap without consuming input");
+        for (int i = 0; i < 5; ++i)
+            check(c.sample_fire_buttons(false) == 0x3200, "UI polls preserve an Arc Shot pending a real game read");
+        for (int i = 0; i < 3; ++i)
+            check(c.sample_fire_buttons(true) == 0x3200, "a short Arc Shot survives release until sampled");
+        check(
+            c.sample_fire_buttons(true) == 0x200 && c.bow_aiming(), "Arc Shot releases its face buttons and keeps aim");
+        c.finger_down(1, fire, 1200);
+        c.finger_move(1, {fire.x, fire.y - 80}, 1210);
+        check(c.sample_fire_buttons(true) == 0x3200, "held Arc Shot reaches a real game sample");
+        c.finger_up(1, 1220);
+        check(c.buttons(1220) == 0x200, "an observed Arc Shot has no extra release pulse");
+        c.finger_down(1, fire, 1250);
+        c.finger_move(1, {fire.x, fire.y - 80}, 1251);
+        check(c.sample_fire_buttons(true) == 0x3200, "a new contact can request an independent Arc Shot");
+        c.finger_up(1, 1252, true);
+        for (int i = 0; i < 3; ++i)
+            check(c.sample_fire_buttons(true) == 0x5200, "canceling Arc Shot sends native cancellation without Circle");
+        check(c.sample_fire_buttons(true) == 0x200, "Arc Shot cancellation preserves only intended aim");
+        c.finger_down(1, fire, 1300);
+        c.finger_move(1, {fire.x, fire.y - 80}, 1310);
+        c.set_mode(AdaptiveMode::Interface);
+        check(c.buttons(1310) == 0 && c.sample_fire_buttons(true) == 0 && !c.bow_aiming(),
+            "the quest results transition discards a pending Arc Shot instead of confirming UI");
+    }
+}
+
 void bow_toggle_controls() {
     using E = AdaptiveElement;
     AdaptiveControls c;
@@ -1535,8 +1637,8 @@ void bow_toggle_controls() {
     };
     check(!c.bow_aiming() && !c.visible(E::LeftFire), "left fire is absent outside aim");
     c.finger_down(1, main, 100);
-    c.finger_move(1, {main.x, main.y + 80}, 110);
-    check(c.buttons(110) == 0x2000, "Bow melee down gesture is preserved outside aim");
+    c.finger_move(1, {main.x, main.y - 80}, 110);
+    check(c.buttons(110) == 0x2000, "Bow melee uses an upward gesture outside aim");
     c.finger_up(1, 120, true);
     c.finger_down(99, aim, 200);
     check(
@@ -1673,6 +1775,7 @@ void unavailable_weapons() {
 }
 
 int main() {
+    bow_upward_gestures();
     bow_toggle_controls();
     touch_comfort();
     available_choices();

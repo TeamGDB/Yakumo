@@ -393,7 +393,8 @@ Adaptive switches between three contexts:
   keeps its binding and uses the interaction-hand icon.
 - **Quest**: weapon controls, item gestures, evade, camera and lock-on.
 - **Interfaces**: D-pad, the four ordinary PSP face buttons, L/R, Start and
-  Select. This also covers the title and character-selection screens. Combat,
+  Select. This also covers title/character selection, quest rewards and the
+  post-quest save prompt, including after Abandon. Combat,
   item swipes and camera drags are disabled while navigating interfaces.
 
 The editor's **Layout** row selects **Quest**, **Village** or **Interfaces**.
@@ -403,7 +404,9 @@ Each keeps its own positions, sizes, bindings and visibility, under
 interface controls or return to automatic selection. Changing context releases
 held touch input and queued item gestures. D-pad navigation remains available
 in Interfaces regardless of the gameplay D-pad toggle. The initial detector uses Windows snapshots of Start, the home chest, the
-quest counter, Smithy crafting and a quest supply box. Automatic switching in
+quest counter, Smithy crafting, a quest supply box, successful rewards and the
+post-Abandon save prompt. Return to the village and a fresh gathering quest
+were also recorded. Automatic switching in
 live play, other interactions and Android still need manual verification. `MHP3RD_ADAPTIVE_CONTEXT=0` disables automatic switching
 for comparison with the previous quest-only arrangement.
 
@@ -483,8 +486,15 @@ weapon special action is unchanged.
 For a drawn **Bow**, tap the scope button to enter/leave aim. Drag free screen
 space to aim. In this mode the main selector becomes a charge/fire button and a
 smaller **Left Fire Button** appears on the left: hold either to charge, release
-to shoot. Both share one charge. Outside aim, the previous main-selector melee
-and arc gestures remain available. The left duplicate can be moved, resized or
+to shoot. While charging, swipe either button upward to add Circle for native
+Arc Shot without releasing Triangle. Both share one charge. Outside aim, an
+upward flick sends Circle; downward flicks are unassigned. Coatings remain on
+the separate coating control. Holding
+the main selector first charges with Triangle; an upward swipe then adds Circle
+without dropping that charge. The game decides whether the charge permits Arc Shot.
+Both aimed fire surfaces show the same upward arrow and movable inner cap as the
+ordinary selector. Only the owning finger moves its cap; lifting returns it to
+its edited centre. The left duplicate keeps its smaller editable size. The left duplicate can be moved, resized or
 hidden in the Quest editor with Weapon Preview set to Bow. This is a testable
 candidate; cancellation and native animation timing still need device checks.
 
@@ -515,7 +525,7 @@ buttons; Confirm is green and Cancel red.
 | Dual Blades | Tap/hold Triangle; up Triangle + Circle; sides Circle (left also supplies left analog); down unassigned | Immediate R mode button with a short release pulse for quick taps |
 | Hammer | Tap/hold Triangle; right Circle; other flicks unassigned | Hold to charge with R, lift to release immediately; finger drift keeps the charge held |
 
-| Bow | Outside aim: hold/release Triangle, late right arc, down melee. In aim: hold/release to fire, also duplicated on the left | Tap to enter/leave aim; drag free screen space to aim |
+| Bow | Outside aim: hold/release Triangle, up Circle, down unassigned; up during a charge adds Circle without releasing Triangle. In aim: hold/release either fire button; up adds Circle for Arc Shot | Tap to enter/leave aim; drag free screen space to aim |
 
 These are experimental P3rd button mappings, not a claim that the iOS gesture
 bindings carry over unchanged. The game still controls legal combos and charge

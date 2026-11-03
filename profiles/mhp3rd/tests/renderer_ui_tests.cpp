@@ -75,7 +75,7 @@
 
 namespace {
 using namespace mhp3rd;
-void touch_context(game::control_context::Scene scene, bool interface_open = false) {
+void touch_context(game::control_context::Scene scene, bool interface_open = false, bool results = false) {
     game::BufferRam ram(0x08800000u, 0x03800000u);
     if (scene != game::control_context::Scene::Unknown) {
         constexpr auto slot = 0x0A05E600u;
@@ -87,6 +87,14 @@ void touch_context(game::control_context::Scene scene, bool interface_open = fal
         ram.store32(0x0A25DD2Cu, interface_open ? 12u : 0u);
         ram.store32(0x09FF53B0u, 0x09FF53B4u);
         ram.store8(0x09FF53B8u, interface_open ? 1u : 0u);
+        if (results) {
+            constexpr auto result = 0x0A1BB000u;
+            ram.store32(result, 0x336F574Du);
+            ram.store32(result + 8u, result);
+            constexpr std::string_view name = "result.ovl";
+            for (std::size_t i = 0; i < name.size(); ++i)
+                ram.store8(result + 32u + static_cast<std::uint32_t>(i), name[i]);
+        }
     }
     game::control_context::refresh(ram);
 }
@@ -4130,6 +4138,21 @@ void touch_event_contracts(gpu::VulkanRenderer &renderer) {
             finger(SDL_EVENT_FINGER_UP, 192, free);
             finger(SDL_EVENT_FINGER_UP, 191, left);
             expect(renderer.pad().buttons == 0x200, "SDL release fires while keeping aim active");
+            for (const auto control : {E::Attack, E::LeftFire}) {
+                const auto fire = renderer.adaptive_touch_controls().placed(control).centre;
+                finger(SDL_EVENT_FINGER_DOWN, 195, fire);
+                renderer.sample_pad();
+                expect(renderer.pad().buttons == 0x1200, "either SDL fire control begins native aimed charge");
+                finger(SDL_EVENT_FINGER_MOTION, 195, {fire.x, fire.y - 80.f});
+                expect(renderer.pad().buttons == 0x3200, "upward SDL fire swipe adds Circle without releasing charge");
+                finger(SDL_EVENT_FINGER_UP, 195, fire);
+                for (unsigned n = 0; n < 3; ++n) {
+                    renderer.sample_pad();
+                    expect(renderer.pad().buttons == 0x3200, "unsampled SDL Arc Shot survives lift until guest reads");
+                }
+                renderer.sample_pad();
+                expect(renderer.pad().buttons == 0x200, "SDL Arc Shot releases face buttons while keeping aim");
+            }
             finger(SDL_EVENT_FINGER_DOWN, 191, left);
             renderer.sample_pad();
             renderer.set_game_input(false);
@@ -4143,9 +4166,43 @@ void touch_event_contracts(gpu::VulkanRenderer &renderer) {
                 "menu recovery cannot leave charge or aim held");
             finger(SDL_EVENT_FINGER_UP, 191, left);
             finger(SDL_EVENT_FINGER_DOWN, 193, adaptive_at);
-            finger(SDL_EVENT_FINGER_MOTION, 193, {adaptive_at.x, adaptive_at.y + 80});
-            expect(renderer.pad().buttons == 0x2000, "Bow melee is still reachable after exiting aim");
+            finger(SDL_EVENT_FINGER_MOTION, 193, {adaptive_at.x, adaptive_at.y - 80});
+            expect(renderer.pad().buttons == 0x2000, "upward Bow melee is still reachable after exiting aim");
             finger(SDL_EVENT_FINGER_CANCELED, 193, adaptive_at);
+            finger(SDL_EVENT_FINGER_DOWN, 193, adaptive_at);
+            SDL_Delay(120);
+            renderer.sample_pad();
+            expect(renderer.pad().buttons == 0x1000, "outside aim SDL hold starts Triangle charge");
+            finger(SDL_EVENT_FINGER_MOTION, 193, {adaptive_at.x, adaptive_at.y - 80});
+            expect(renderer.pad().buttons == 0x3000, "outside aim upward SDL swipe preserves charge and adds Circle");
+            finger(SDL_EVENT_FINGER_UP, 193, adaptive_at);
+            expect(renderer.pad().buttons == 0, "outside aim charged SDL Arc Shot releases without another pulse");
+            finger(SDL_EVENT_FINGER_DOWN, 193, adaptive_at);
+            finger(SDL_EVENT_FINGER_MOTION, 193, {adaptive_at.x, adaptive_at.y + 80});
+            expect(renderer.pad().buttons == 0, "downward SDL Bow swipe cannot apply coating or start a shot");
+            finger(SDL_EVENT_FINGER_CANCELED, 193, adaptive_at);
+            finger(SDL_EVENT_FINGER_DOWN, 190, aim);
+            finger(SDL_EVENT_FINGER_UP, 190, aim);
+            finger(SDL_EVENT_FINGER_DOWN, 191, left);
+            renderer.sample_pad();
+            finger(SDL_EVENT_FINGER_MOTION, 191, {left.x, left.y - 80});
+            touch_context(game::control_context::Scene::Quest, false, true);
+            renderer.pump_events();
+            expect(renderer.adaptive_touch_controls().mode() == input::touch::AdaptiveMode::Interface &&
+                    renderer.pad().buttons == 0 && !renderer.adaptive_touch_controls().bow_aiming(),
+                "result overlay selects Interface and discards the active Arc Shot through SDL");
+            finger(SDL_EVENT_FINGER_UP, 191, left);
+            renderer.sample_pad();
+            expect(renderer.pad().buttons == 0, "old result-transition contact cannot confirm a reward or save prompt");
+            const auto confirm = renderer.adaptive_touch_controls().placed(E::Alternate).centre;
+            finger(SDL_EVENT_FINGER_DOWN, 196, confirm);
+            expect(renderer.pad().buttons == 0x2000, "result screens expose ordinary interface confirmation");
+            finger(SDL_EVENT_FINGER_UP, 196, confirm);
+            touch_context(game::control_context::Scene::Quest);
+            renderer.pump_events();
+            expect(renderer.adaptive_touch_controls().mode() == input::touch::AdaptiveMode::Quest &&
+                    renderer.pad().buttons == 0,
+                "the next active quest restores clean combat controls");
         }
         if (kind == 11 || kind == 9 || kind == 15) {
             const auto ammo =
@@ -7184,7 +7241,7 @@ int run_contracts(int scripts) {
             const auto size = ImGui::GetIO().DisplaySize;
             list->AddRectFilled({0, 0}, size, IM_COL32(35, 44, 43, 255));
             const char *names[] = {
-                "Normal: Melee + Arc", "Aim: Hold / Release", "Left Fire Duplicate", "Tap: Aim On / Off"};
+                "Normal: Melee + Arc", "Aim: Swipe Up / Arc", "Left Fire: Swipe Up / Arc", "Tap: Aim On / Off"};
             const float r = std::min(size.x / 9.f, size.y / 6.f);
             using E = input::touch::AdaptiveElement;
             const E elements[] = {E::Attack, E::Attack, E::LeftFire, E::Special};
@@ -7193,10 +7250,30 @@ int run_contracts(int scripts) {
                 ui::ElementLook look;
                 look.opacity = 1;
                 look.bow_aiming = i != 0;
-                look.held = i == 3;
-                ui::draw_adaptive_element(list, elements[i], {c, i == 2 ? r * .65f : r, i == 2 ? r * .65f : r}, c, look,
-                    input::touch::AttackDirection::None, input::touch::AdaptiveMode::Quest,
-                    input::touch::WeaponPosture::Drawn, input::touch::AttackProfile::Bow);
+                const float radius = i == 2 ? r * .65f : r;
+                const bool arc = (i == 1 || i == 2) && frame != 1;
+                look.held = arc || i == 3;
+                const input::touch::Point thumb{c.x, c.y - (arc ? radius * .28f : 0.f)};
+                const int first = list->VtxBuffer.Size;
+                ui::draw_adaptive_element(list, elements[i], {c, radius, radius}, thumb, look,
+                    arc ? input::touch::AttackDirection::Up : input::touch::AttackDirection::None,
+                    input::touch::AdaptiveMode::Quest, input::touch::WeaponPosture::Drawn,
+                    input::touch::AttackProfile::Bow);
+                bool north = false, south = false, west = false, east = false, bright = false;
+                for (int v = first; v < list->VtxBuffer.Size; ++v) {
+                    const auto &vertex = list->VtxBuffer[v];
+                    const float dx = vertex.pos.x - c.x, dy = vertex.pos.y - c.y;
+                    if (std::max(std::abs(dx), std::abs(dy)) <= radius * 1.05f) continue;
+                    north |= dy < -radius;
+                    south |= dy > radius;
+                    west |= dx < -radius;
+                    east |= dx > radius;
+                    const auto rgb = vertex.col & ~IM_COL32_A_MASK;
+                    bright |=
+                        rgb == (IM_COL32(arc ? 255 : 241, arc ? 211 : 237, arc ? 138 : 216, 255) & ~IM_COL32_A_MASK);
+                }
+                expect(north == (i < 3) && !south && !west && !east && bright == (i < 3),
+                    "Bow selectors show only a readable up arrow, including both aimed fire sticks");
                 const auto text = ImGui::CalcTextSize(names[i]);
                 list->AddText(
                     {c.x - text.x * .5f, std::min(c.y + r * 1.2f, size.y - text.y - 4)}, IM_COL32_WHITE, names[i]);

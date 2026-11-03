@@ -434,6 +434,16 @@ owns input. The quest supply box set the latter, and closing it cleared it.
 The active-state query at `0x08922548` also checks `+0xB95`. Start and supplies
 are separate states, not one common menu flag. The reader validates the pointer
 and range, polls once per original flip, and never writes guest state.
+Quest rewards and the post-Abandon save prompt leave all three menu bytes
+clear while `game_task.ovl` remains loaded. In both observed screens the slot at
+`0x0A1BB000` contains `result.ovl`, with overlay magic, self-load address and exact
+terminated name intact. An active monster quest instead contained an unrelated
+overlay there; the return to the village and a new gathering quest without a
+large monster both cleared the valid result header. The context reader checks
+this header only under the validated quest task, without timers or guest writes.
+Successful rewards and the Abandon save prompt were recorded on Windows; other
+quest exit paths and Android still need device validation.
+
 Unknown tasks and unavailable state use interface controls. These observations
 are NPJB-40001 facts from local runtime snapshots and call tracing; no game
 bytes or generated code are included in tests or documentation.

@@ -99,9 +99,10 @@ public:
     [[nodiscard]] Point stick_thumb() const;
     [[nodiscard]] bool held(AdaptiveElement element) const;
     [[nodiscard]] std::uint16_t dpad_held() const;
-    [[nodiscard]] AttackDirection attack_direction(std::uint64_t ms) const;
+    [[nodiscard]] AttackDirection attack_direction(
+        std::uint64_t ms, AdaptiveElement element = AdaptiveElement::Attack) const;
     // Visual cap position: follows recognition, then stays on the latched action.
-    [[nodiscard]] Point attack_thumb(std::uint64_t ms) const;
+    [[nodiscard]] Point attack_thumb(std::uint64_t ms, AdaptiveElement element = AdaptiveElement::Attack) const;
     [[nodiscard]] Point take_camera_drag();
     [[nodiscard]] bool take_menu();
     [[nodiscard]] bool take_dpad_toggle();
@@ -128,7 +129,7 @@ private:
     [[nodiscard]] bool bow_toggle_available() const;
     [[nodiscard]] std::uint16_t fire_buttons() const;
     void cancel_fire(bool leave_aim);
-    bool bow_toggle_{true}, aiming_{}, fire_sampled_{};
+    bool bow_toggle_{true}, aiming_{}, fire_sampled_{}, fire_arc_{}, arc_sampled_{};
     FirePhase fire_phase_{};
     unsigned fire_reads_{};
     bool compact_{true}, commands_{};
