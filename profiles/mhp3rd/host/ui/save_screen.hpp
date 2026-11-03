@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 // The System page's save import and export: a folder chosen with the file
 // browser, the saves found in it checked and shown beside the ones they would
 // replace, and the import itself (see save_data/save_transfer.hpp).
@@ -24,5 +26,8 @@ bool save_screen(bool back);
 
 // Once, after the player chose to restart the game to load an imported save.
 [[nodiscard]] bool take_restart_request();
+
+// Current nested screen, empty at the owning tab.
+[[nodiscard]] std::string save_screen_path();
 
 } // namespace mhp3rd::ui

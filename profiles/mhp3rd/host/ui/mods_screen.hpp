@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 // The menu's Mods page: the mods in the mods folder with what each one is
 // and changes, turning them on and off, their order where two change the same
 // file, the conflicts, when a change applies, and importing a downloaded mod
@@ -19,5 +21,8 @@ void mods_page(bool back);
 
 // Once, after the player chose "Restart Now" to apply a change.
 [[nodiscard]] bool take_mods_restart_request();
+
+// Current nested screen, empty at the owning tab.
+[[nodiscard]] std::string mods_screen_path();
 
 } // namespace mhp3rd::ui

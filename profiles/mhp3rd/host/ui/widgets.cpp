@@ -12,11 +12,19 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
+#include <map>
 
 namespace mhp3rd::ui {
 namespace {
 
 bool focus_next = false;
+bool keep_focus = false;
+bool help_enabled{};
+struct Help {
+    bool open{}, pending{};
+    std::string title, description;
+} help;
 
 // Moves the gamepad and keyboard focus to the item just submitted when
 // focus_next_row() asked for it. SetKeyboardFocusHere() would not do: it
@@ -62,22 +70,46 @@ void draw_triangle(ImDrawList *draw, ImVec2 center, float size, bool right, ImU3
             {center.x - h * 0.8f, center.y}, color);
 }
 
+// Keep the fixed controls reachable even in a short landscape window.
+bool short_touch_window() {
+    return Layer::get().comfortable() && ImGui::GetIO().DisplaySize.y < font() * 24.f;
+}
+float footer_description_height() {
+    return font() * (short_touch_window() ? 1.8f : 2.7f);
+}
+
+enum class ScrollIntent { None, Pending, Vertical, Horizontal, Cancelled };
+ImGuiID scroll_key(const char *name) {
+    return ImHashStr(name, 0, ImGui::GetCurrentWindow()->ID);
+}
+ScrollIntent scroll_intent() {
+    return static_cast<ScrollIntent>(ImGui::GetStateStorage()->GetInt(scroll_key("scroll_intent")));
+}
+void set_scroll_intent(ScrollIntent value) {
+    ImGui::GetStateStorage()->SetInt(scroll_key("scroll_intent"), static_cast<int>(value));
+}
+
 struct Row {
     ImVec2 min;
     ImVec2 max;
     bool pressed{};
     bool focused{};
     bool hovered{};
+    ImVec2 full_max;
 };
 
 // The part every row shares: a full-width focusable strip with its label.
 Row row(const char *label, const RowOptions &options, ImU32 color = colors::kText, float height_lines = 1.0f) {
-    const float height = std::round(font() * (0.9f + height_lines));
+    touch_scroll();
+    const float height = std::max(
+        std::round(font() * (0.9f + height_lines)), Layer::get().comfortable() ? Layer::get().touch_target() : 0.0f);
     Row result;
     result.min = ImGui::GetCursorScreenPos();
     const float width = ImGui::GetContentRegionAvail().x;
-    result.max = {result.min.x + width, result.min.y + height};
-    result.pressed = ImGui::InvisibleButton(label, {width, height}, ImGuiButtonFlags_EnableNav);
+    const float body_width = std::max(1.0f, width - setting_help_width(options));
+    result.full_max = {result.min.x + width, result.min.y + height};
+    result.max = {result.min.x + body_width, result.min.y + height};
+    result.pressed = ImGui::InvisibleButton(label, {body_width, height}, ImGuiButtonFlags_EnableNav);
     take_focus();
     result.focused = ImGui::IsItemFocused();
     result.hovered = ImGui::IsItemHovered();
@@ -224,6 +256,89 @@ const char *select_name() {
 
 } // namespace
 
+void enable_context_help(bool enabled) {
+    help_enabled = enabled;
+    if (!enabled) close_context_help();
+}
+bool context_help_open() {
+    return help.open;
+}
+void close_context_help() {
+    help.open = false;
+    help.pending = false;
+}
+float setting_help_width(const RowOptions &options) {
+    return help_enabled && !options.help.empty()
+        ? std::max(font() * 1.8f, Layer::get().comfortable() ? Layer::get().touch_target() : 0.f)
+        : 0.f;
+}
+void setting_help_button(const char *label, const RowOptions &options, ImVec2 min, ImVec2 max) {
+    const float width = setting_help_width(options);
+    if (width <= 0) return;
+    const bool keyboard = ImGui::IsItemFocused() && ImGui::IsKeyPressed(ImGuiKey_F1, false);
+    const ImVec2 cursor = ImGui::GetCursorScreenPos();
+    ImGui::SetCursorScreenPos({max.x - width, min.y});
+    ImGui::PushID(label);
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+    const bool pressed = ImGui::InvisibleButton("##setting_help", {width, max.y - min.y});
+    ImGui::PopItemFlag();
+    const ImVec2 centre{max.x - width * .5f, (min.y + max.y) * .5f};
+    const auto colour = ImGui::IsItemHovered() ? colors::kAccentBright : colors::kTextDim;
+    auto *draw = ImGui::GetWindowDrawList();
+    draw->AddCircle(centre, font() * .45f, colour, 20, px(1.2f));
+    const auto size = ImGui::CalcTextSize("i");
+    draw->AddText({centre.x - size.x * .5f, centre.y - size.y * .5f}, colour, "i");
+    if (pressed || keyboard) {
+        help.title.assign(label, shown_end(label));
+        help.description = options.help;
+        if (!options.note.empty()) help.description += "\n\n" + options.note;
+        help.open = help.pending = true;
+    }
+    ImGui::PopID();
+    ImGui::SetCursorScreenPos({cursor.x, cursor.y - ImGui::GetStyle().ItemSpacing.y});
+    ImGui::Dummy({0, 0});
+}
+void draw_context_help() {
+    if (!help.open && !help.pending && !ImGui::IsPopupOpen("Setting Help##context_help")) return;
+    const bool opening = help.pending;
+    if (opening) {
+        ImGui::OpenPopup("Setting Help##context_help");
+        help.pending = false;
+    }
+    const auto &io = ImGui::GetIO();
+    const float width = std::min(io.DisplaySize.x * .9f, font() * 28.f);
+    const float padding = ImGui::GetStyle().WindowPadding.y;
+    const float button_height = std::max(font() * 2.2f, Layer::get().comfortable() ? Layer::get().touch_target() : 0.f);
+    const float text_height = ImGui::CalcTextSize(help.description.c_str(), nullptr, false,
+        std::max(1.f, width - ImGui::GetStyle().WindowPadding.x * 2.f - ImGui::GetStyle().ScrollbarSize))
+                                  .y;
+    const float height = std::min(io.DisplaySize.y * .9f,
+        padding * 2.f + text_height + button_height + font() * 1.15f + px(4.f) + ImGui::GetStyle().ItemSpacing.y * 4.f);
+    ImGui::SetNextWindowPos({io.DisplaySize.x * .5f, io.DisplaySize.y * .5f}, ImGuiCond_Always, {.5f, .5f});
+    ImGui::SetNextWindowSize({width, height}, ImGuiCond_Always);
+    if (ImGui::BeginPopupModal("Setting Help##context_help", nullptr,
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                ImGuiWindowFlags_NoSavedSettings)) {
+        if (!help.open)
+            ImGui::CloseCurrentPopup();
+        else {
+            heading(help.title);
+            const float body_height =
+                std::max(1.f, ImGui::GetContentRegionAvail().y - button_height - ImGui::GetStyle().ItemSpacing.y);
+            ImGui::BeginChild("help_body", {0.f, body_height});
+            if (opening) ImGui::SetScrollY(0.f);
+            touch_scroll();
+            paragraph(help.description);
+            ImGui::EndChild();
+            if (big_button("Close##help_close", ImGui::GetContentRegionAvail().x, true)) {
+                close_context_help();
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::EndPopup();
+    }
+}
+
 ImGuiStyle make_style(float scale, float font_size) {
     ImGuiStyle style;
     ImGui::StyleColorsDark(&style);
@@ -237,7 +352,7 @@ ImGuiStyle make_style(float scale, float font_size) {
     style.WindowPadding = {26.0f, 20.0f};
     style.FramePadding = {12.0f, 7.0f};
     style.ItemSpacing = {10.0f, 4.0f};
-    style.ScrollbarSize = 10.0f;
+    style.ScrollbarSize = 12.0f;
     style.ScrollbarRounding = 5.0f;
     style.ScaleAllSizes(scale);
     style.FontSizeBase = font_size;
@@ -265,11 +380,14 @@ ImGuiStyle make_style(float scale, float font_size) {
     return style;
 }
 
-void begin_panel(const char *id, const std::string &title, const std::string &subtitle, bool dim_game) {
+void begin_panel(const char *id, const std::string &title, const std::string &subtitle, bool dim_game, bool *close,
+    bool close_disabled) {
     const ImGuiIO &io = ImGui::GetIO();
     if (dim_game) ImGui::GetBackgroundDrawList()->AddRectFilled({0, 0}, io.DisplaySize, colors::kBackdrop);
-    const float margin = std::round(std::min(io.DisplaySize.x, io.DisplaySize.y) * 0.03f);
-    const ImVec2 size{std::min(io.DisplaySize.x - 2.0f * margin, font() * 46.0f),
+    const bool comfortable = Layer::get().comfortable();
+    const float margin = std::round(std::min(io.DisplaySize.x, io.DisplaySize.y) * (comfortable ? 0.015f : 0.03f));
+    const ImVec2 size{
+        comfortable ? io.DisplaySize.x - 2.0f * margin : std::min(io.DisplaySize.x - 2.0f * margin, font() * 46.0f),
         std::min(io.DisplaySize.y - 2.0f * margin, font() * 31.0f)};
     ImGui::SetNextWindowPos({io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f}, ImGuiCond_Always, {0.5f, 0.5f});
     ImGui::SetNextWindowSize(size, ImGuiCond_Always);
@@ -285,10 +403,29 @@ void begin_panel(const char *id, const std::string &title, const std::string &su
     ImGui::PopStyleColor();
     const float title_height = ImGui::GetItemRectSize().y;
     ImGui::PopFont();
+    const float close_size =
+        close ? std::max(font() * 1.9f, Layer::get().comfortable() ? Layer::get().touch_target() : 0.f) : 0.f;
     if (!subtitle.empty()) {
         const float width = ImGui::CalcTextSize(subtitle.c_str()).x;
-        const float right = ImGui::GetWindowPos().x + ImGui::GetWindowSize().x - ImGui::GetStyle().WindowPadding.x;
+        const float right = ImGui::GetWindowPos().x + ImGui::GetWindowSize().x - ImGui::GetStyle().WindowPadding.x -
+            (close ? close_size + font() * .5f : 0.f);
         draw->AddText({right - width, title_at.y + title_height - font() * 1.15f}, colors::kTextDim, subtitle.c_str());
+    }
+    if (close) {
+        const float right = ImGui::GetWindowPos().x + ImGui::GetWindowSize().x - ImGui::GetStyle().WindowPadding.x;
+        ImGui::SetCursorScreenPos({right - close_size, title_at.y});
+        ImGui::BeginDisabled(close_disabled);
+        if (ImGui::InvisibleButton("##panel_close", {close_size, close_size})) *close = true;
+        const ImU32 colour = close_disabled ? colors::kTextDisabled
+            : ImGui::IsItemHovered()        ? colors::kAccentBright
+                                            : colors::kText;
+        const ImVec2 centre{right - close_size * .5f, title_at.y + close_size * .5f};
+        const float radius = font() * .3f;
+        draw->AddLine({centre.x - radius, centre.y - radius}, {centre.x + radius, centre.y + radius}, colour, px(2.f));
+        draw->AddLine({centre.x - radius, centre.y + radius}, {centre.x + radius, centre.y - radius}, colour, px(2.f));
+        ImGui::EndDisabled();
+        ImGui::SetCursorScreenPos(
+            {title_at.x, title_at.y + std::max(close_size, title_height) + ImGui::GetStyle().ItemSpacing.y});
     }
     const ImVec2 line = ImGui::GetCursorScreenPos();
     const float line_width = ImGui::GetContentRegionAvail().x;
@@ -298,21 +435,100 @@ void begin_panel(const char *id, const std::string &title, const std::string &su
 }
 
 void begin_content(bool touch_footer) {
-    const float footer = std::round(font() * (touch_footer ? 5.5f : 4.3f));
-    const float content = std::max(font() * 3.0f, ImGui::GetContentRegionAvail().y - footer);
+    const auto &layer = Layer::get();
+    auto *window = ImGui::GetCurrentWindow();
+    auto &store = window->StateStorage;
+    const float width = ImGui::GetContentRegionAvail().x;
+    const float estimated = font() * 1.5f * std::max(1.f, std::ceil(font() * 36.f / std::max(width, 1.f)));
+    const bool measured = std::abs(store.GetFloat(ImHashStr("hint_width", 0, window->ID)) - width) < 1.f &&
+        store.GetInt(ImHashStr("hint_device", 0, window->ID), -1) == static_cast<int>(layer.input_device()) &&
+        std::abs(store.GetFloat(ImHashStr("hint_font", 0, window->ID)) - font()) < .1f;
+    const float action_height = layer.input_device() == InputDevice::Touch || touch_footer
+        ? std::max(font() * 2.2f, layer.comfortable() ? layer.touch_target() : 0.f)
+        : measured ? store.GetFloat(ImHashStr("hint_height", 0, window->ID), estimated)
+                   : estimated;
+    const float footer = px(10.f) + ImGui::GetStyle().ItemSpacing.y * 3.f + footer_description_height() + action_height;
+    const float content = std::max(1.f, ImGui::GetContentRegionAvail().y - footer);
     ImGui::BeginChild("content", {0.0f, content}, ImGuiChildFlags_NavFlattened);
+    touch_scroll();
 }
 
+void stop_scroll_motion() {
+    auto *store = ImGui::GetStateStorage();
+    store->SetInt(scroll_key("scroll_intent"), static_cast<int>(ScrollIntent::None));
+    store->SetInt(scroll_key("scroll_slider"), 0);
+    store->SetFloat(scroll_key("scroll_velocity"), 0.f);
+    store->SetInt(scroll_key("scroll_frame"), ImGui::GetFrameCount());
+}
 void touch_scroll() {
     ImGuiIO &io = ImGui::GetIO();
-    if (io.MouseSource != ImGuiMouseSource_TouchScreen) return;
-    if (!ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem))
+    auto *window = ImGui::GetCurrentWindow();
+    auto *store = ImGui::GetStateStorage();
+    const ImGuiID frame_id = scroll_key("scroll_frame");
+    if (store->GetInt(frame_id, -1) == ImGui::GetFrameCount()) return;
+    store->SetInt(frame_id, ImGui::GetFrameCount());
+    float velocity = store->GetFloat(scroll_key("scroll_velocity"));
+    const float dt = std::isfinite(io.DeltaTime) ? std::clamp(io.DeltaTime, .001f, .05f) : 1.f / 60.f;
+    const bool touch = io.MouseSource == ImGuiMouseSource_TouchScreen;
+    const auto *modal = ImGui::GetTopMostPopupModal();
+    const bool blocked = modal && modal != window && window->RootWindow != modal;
+    const bool navigation = io.MouseWheel != 0.f || ImGui::IsKeyPressed(ImGuiKey_UpArrow, false) ||
+        ImGui::IsKeyPressed(ImGuiKey_DownArrow, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown, false) ||
+        ImGui::IsKeyPressed(ImGuiKey_GamepadDpadUp, false);
+    if (blocked || navigation) {
+        stop_scroll_motion();
         return;
-    if (!ImGui::IsMouseDragging(ImGuiMouseButton_Left, font() * 0.4f)) return;
-    ImGui::SetScrollY(ImGui::GetScrollY() - io.MouseDelta.y);
-    // A drag is a scroll, not a press: the row the finger started on must not
-    // act when it lifts.
-    ImGui::ClearActiveID();
+    }
+    const bool hovered =
+        GImGui->HoveredWindow == window && ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+    if (ImGui::IsMouseClicked(0)) {
+        velocity = 0;
+        if (hovered && io.MousePos.x < window->InnerRect.Max.x) {
+            set_scroll_intent(ScrollIntent::Pending);
+            store->SetFloat(scroll_key("scroll_start_x"), io.MousePos.x);
+            store->SetFloat(scroll_key("scroll_start_y"), io.MousePos.y);
+            store->SetFloat(scroll_key("scroll_start"), ImGui::GetScrollY());
+            store->SetInt(scroll_key("scroll_slider"), 0);
+        } else
+            set_scroll_intent(ScrollIntent::None);
+    }
+    auto intent = scroll_intent();
+    if (io.MouseDown[0] && intent != ScrollIntent::None) {
+        const float dx = io.MousePos.x - store->GetFloat(scroll_key("scroll_start_x"));
+        const float dy = io.MousePos.y - store->GetFloat(scroll_key("scroll_start_y"));
+        const float threshold = std::max(font() * .4f, io.MouseDragThreshold);
+        if (intent == ScrollIntent::Pending) {
+            const bool slider = store->GetInt(scroll_key("scroll_slider")) != 0;
+            if (slider && std::abs(dx) > threshold && std::abs(dx) > std::abs(dy) * 1.2f)
+                intent = ScrollIntent::Horizontal;
+            else if (std::abs(dy) > threshold && (!slider || std::abs(dy) >= std::abs(dx)))
+                intent = ScrollIntent::Vertical;
+            else if (!slider && std::abs(dx) > threshold)
+                intent = ScrollIntent::Cancelled;
+            set_scroll_intent(intent);
+        }
+        if (intent == ScrollIntent::Vertical) {
+            const float target = std::clamp(store->GetFloat(scroll_key("scroll_start")) - dy, 0.f, window->ScrollMax.y);
+            ImGui::SetScrollY(target);
+            const float sample = std::clamp(-io.MouseDelta.y / dt, -window->Size.y * 8.f, window->Size.y * 8.f);
+            velocity = io.MouseDelta.y == 0.f ? velocity * .5f : velocity * .6f + sample * .4f;
+            if (target == 0.f || target == window->ScrollMax.y) velocity = 0.f;
+            ImGui::ClearActiveID();
+        } else if (intent == ScrollIntent::Cancelled)
+            ImGui::ClearActiveID();
+    } else {
+        const char *inertia = std::getenv("MHP3RD_MENU_INERTIA");
+        const bool enabled = !inertia || std::string_view(inertia) != "0";
+        if (touch && enabled && intent == ScrollIntent::Vertical && std::abs(velocity) > 8.f) {
+            const float target = std::clamp(ImGui::GetScrollY() + velocity * dt, 0.f, window->ScrollMax.y);
+            ImGui::SetScrollY(target);
+            velocity *= std::exp(-10.f * dt);
+            if (target == 0.f || target == window->ScrollMax.y) velocity = 0.f;
+        } else
+            velocity = 0.f;
+        if (!ImGui::IsMouseReleased(0) && std::abs(velocity) < 8.f) set_scroll_intent(ScrollIntent::None);
+    }
+    store->SetFloat(scroll_key("scroll_velocity"), velocity);
 }
 
 void begin_footer() {
@@ -324,25 +540,32 @@ void begin_footer() {
     draw->AddLine(
         {line.x, line.y + px(4.0f)}, {line.x + width, line.y + px(4.0f)}, IM_COL32(143, 93, 36, 90), px(1.0f));
     ImGui::Dummy({0.0f, px(10.0f)});
-    // Two lines for the description, whatever it holds, so the hints stay put.
-    const float description_height = font() * 2.4f;
-    const ImVec2 at = ImGui::GetCursorScreenPos();
-    // A description that would wrap past its two lines (a narrow or a very
-    // wide window) is set smaller rather than run into the hints below.
-    const std::string &description = Layer::get().description();
-    float size = ImGui::GetStyle().FontSizeBase * 0.88f;
-    const float smallest = ImGui::GetStyle().FontSizeBase * 0.66f;
-    while (size > smallest &&
-        ImGui::GetFont()->CalcTextSizeA(size, FLT_MAX, width, description.c_str()).y > description_height)
-        size -= 1.0f;
-    ImGui::PushFont(nullptr, size);
-    ImGui::PushStyleColor(ImGuiCol_Text, colors::kTextDim);
-    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
-    ImGui::TextUnformatted(description.c_str());
-    ImGui::PopTextWrapPos();
-    ImGui::PopStyleColor();
+    // A fixed readable region keeps the actions stable; long descriptions scroll.
+    struct Description {
+        std::string text;
+        ImGuiID window{};
+    };
+    static std::map<ImGuiID, Description> descriptions;
+    auto &state = descriptions[ImGui::GetCurrentWindow()->ID];
+    const auto *previous = ImGui::FindWindowByID(state.window);
+    const bool reading = previous && (GImGui->HoveredWindow == previous || GImGui->NavWindow == previous);
+    const auto &layer = Layer::get();
+    const bool changed = (layer.description_set() || !reading) && state.text != layer.description();
+    if (layer.description_set() || !reading) state.text = layer.description();
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{});
+    ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * .88f);
+    ImGui::BeginChild("footer_description", {0.f, footer_description_height()}, ImGuiChildFlags_None,
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing);
+    ImGui::PopStyleVar();
+    state.window = ImGui::GetCurrentWindow()->ID;
+    if (changed) {
+        stop_scroll_motion();
+        ImGui::SetScrollY(0.f);
+    }
+    touch_scroll();
+    paragraph(state.text, colors::kTextDim);
     ImGui::PopFont();
-    ImGui::SetCursorScreenPos({at.x, at.y + description_height});
+    ImGui::EndChild();
 }
 
 void end_panel() {
@@ -352,14 +575,17 @@ void end_panel() {
 bool tab_bar(const char *const *labels, int count, int &selected) {
     const int before = selected;
     const bool typing = ImGui::GetIO().WantTextInput;
-    if (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) || (!typing && ImGui::IsKeyPressed(ImGuiKey_Q, false)))
+    const bool modal = ImGui::GetTopMostPopupModal() != nullptr;
+    if (!modal &&
+        (ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) || (!typing && ImGui::IsKeyPressed(ImGuiKey_Q, false))))
         selected = (selected + count - 1) % count;
-    if (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) || (!typing && ImGui::IsKeyPressed(ImGuiKey_W, false)))
+    if (!modal &&
+        (ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) || (!typing && ImGui::IsKeyPressed(ImGuiKey_W, false))))
         selected = (selected + 1) % count;
 
     ImDrawList *draw = ImGui::GetWindowDrawList();
     const bool pad = Layer::get().input_device() == InputDevice::Gamepad;
-    const float height = font() * 1.9f;
+    const float height = std::max(font() * 1.9f, Layer::get().comfortable() ? Layer::get().touch_target() : 0.0f);
     const ImVec2 start = ImGui::GetCursorScreenPos();
     const float width = ImGui::GetContentRegionAvail().x;
     float inner_left = start.x;
@@ -377,16 +603,24 @@ bool tab_bar(const char *const *labels, int count, int &selected) {
     }
     float label_width = 0.0f;
     for (int i = 0; i < count; ++i) label_width = std::max(label_width, ImGui::CalcTextSize(labels[i]).x);
-    const float tab_width = std::max(inner_width / static_cast<float>(std::min(count, 6)), label_width + px(24.0f));
+    const float minimum_width =
+        std::max(label_width + px(24.0f), Layer::get().comfortable() ? Layer::get().touch_target() : 0.0f);
+    const bool scrollable = minimum_width * count > inner_width + 1.0f;
+    const float arrow_width = scrollable ? height : 0.0f;
+    const float track_left = inner_left;
+    const float track_width = inner_width;
+    inner_left += arrow_width;
+    inner_width = std::max(1.0f, inner_width - arrow_width * 2.0f);
+    const float tab_width = std::max(inner_width / static_cast<float>(count), minimum_width);
     const float total_width = tab_width * static_cast<float>(count);
-    const bool scrollable = total_width > inner_width;
-    const float strip_height = height + (scrollable ? ImGui::GetStyle().ScrollbarSize : 0.0f);
+    const float strip_height = height + (scrollable && !short_touch_window() ? ImGui::GetStyle().ScrollbarSize : 0.0f);
     ImGui::SetCursorScreenPos({inner_left, start.y});
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{});
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2{});
     ImGui::SetNextWindowContentSize({total_width, 0.0f});
     ImGui::BeginChild("tab_strip", {inner_width, strip_height}, ImGuiChildFlags_None,
-        ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
+            (short_touch_window() ? ImGuiWindowFlags_NoScrollbar : ImGuiWindowFlags_None));
     ImGui::PopStyleVar(2);
     ImGuiStorage *tab_state = ImGui::GetStateStorage();
     const ImGuiID previous_id = ImGui::GetID("previous_tab");
@@ -436,14 +670,49 @@ bool tab_bar(const char *const *labels, int count, int &selected) {
                 colors::kAccent, px(2.0f));
     }
     ImGui::PopItemFlag();
+    ImGuiWindow *strip = ImGui::GetCurrentWindow();
+    const float scroll = ImGui::GetScrollX();
+    const float maximum = std::max(0.0f, total_width - inner_width);
+    if (scrollable) {
+        const float fade = std::min(px(14.0f), inner_width * .12f);
+        const ImU32 transparent = colors::kPanel & 0x00FFFFFFu;
+        if (scroll > 1.0f)
+            draw->AddRectFilledMultiColor({strip->Pos.x, start.y}, {strip->Pos.x + fade, start.y + height},
+                colors::kPanel, transparent, transparent, colors::kPanel);
+        if (scroll < maximum - 1.0f)
+            draw->AddRectFilledMultiColor({strip->Pos.x + inner_width - fade, start.y},
+                {strip->Pos.x + inner_width, start.y + height}, transparent, colors::kPanel, colors::kPanel,
+                transparent);
+    }
     ImGui::EndChild();
+    if (scrollable) {
+        const auto arrow = [&](bool right) {
+            const bool available = right ? scroll < maximum - 1.0f : scroll > 1.0f;
+            if (!available) return;
+            const ImVec2 at{right ? track_left + track_width - arrow_width : track_left, start.y};
+            ImGui::SetCursorScreenPos(at);
+            if (ImGui::InvisibleButton(right ? "##tabs_next" : "##tabs_previous", {arrow_width, height}))
+                ImGui::SetScrollX(strip, std::clamp(scroll + (right ? 1.f : -1.f) * inner_width * .7f, 0.f, maximum));
+            auto *arrows = ImGui::GetWindowDrawList();
+            if (ImGui::IsItemHovered())
+                arrows->AddRectFilled(at, {at.x + arrow_width, at.y + height}, colors::kRowHover, px(6.f));
+            draw_triangle(arrows, {at.x + arrow_width * .5f, at.y + height * .5f}, font() * .75f, right,
+                ImGui::IsItemActive() ? colors::kAccentBright : colors::kAccent);
+        };
+        arrow(false);
+        arrow(true);
+    }
     ImGui::SetCursorScreenPos({start.x, start.y + strip_height + px(8.0f)});
     ImGui::Dummy({0.0f, 0.0f});
     return selected != before;
 }
 
 void focus_next_row() {
-    focus_next = true;
+    if (!keep_focus) focus_next = true;
+}
+void keep_row_focus(bool keep) {
+    keep_focus = keep;
+    if (keep) focus_next = false;
 }
 
 int choice_row(const char *label, const std::string &value, const RowOptions &options) {
@@ -464,10 +733,14 @@ int choice_row(const char *label, const std::string &value, const RowOptions &op
     ImDrawList *draw = ImGui::GetWindowDrawList();
     draw_value(r, value, options, px(16.0f) + font() * 1.1f, live ? colors::kAccentBright : colors::kText);
     // A locked row shows its value without the arrows that would change it.
-    if (options.disabled) return 0;
+    if (options.disabled) {
+        setting_help_button(label, options, r.min, r.full_max);
+        return 0;
+    }
     const ImU32 arrow = live ? colors::kAccent : colors::kTextDim;
     draw_triangle(draw, {right_arrow_x, mid_y}, font() * 0.55f, true, arrow);
     draw_triangle(draw, {left_arrow_x, mid_y}, font() * 0.55f, false, arrow);
+    setting_help_button(label, options, r.min, r.full_max);
     return delta;
 }
 
@@ -490,6 +763,7 @@ bool toggle_row(const char *label, bool value, const RowOptions &options) {
     draw->AddCircleFilled(knob_center, knob, options.disabled ? colors::kTextDisabled : colors::kText);
     draw_value(
         r, on ? "On" : "Off", options, px(16.0f) + width + px(12.0f), on ? colors::kAccentBright : colors::kTextDim);
+    setting_help_button(label, options, r.min, r.full_max);
     return toggled;
 }
 
@@ -505,19 +779,28 @@ bool slider_row(
 
     if (!options.disabled) {
         if (r.focused) value += horizontal_press() * step;
-        // Dragging along the bar sets the value directly.
+        // Touch waits for horizontal intent; a vertical swipe never edits the value.
         static ImGuiID dragging = 0;
         const ImGuiID id = ImGui::GetItemID();
         const ImVec2 mouse = ImGui::GetIO().MousePos;
-        if (ImGui::IsItemActivated() && mouse.x >= bar_min.x - font() && mouse.x <= bar_max.x + font()) dragging = id;
+        const bool touch = ImGui::GetIO().MouseSource == ImGuiMouseSource_TouchScreen;
+        if (ImGui::IsItemActivated() && mouse.x >= bar_min.x - font() && mouse.x <= bar_max.x + font()) {
+            dragging = id;
+            ImGui::GetStateStorage()->SetInt(scroll_key("scroll_slider"), static_cast<int>(id));
+            if (!touch) set_scroll_intent(ScrollIntent::Horizontal);
+        }
         if (dragging == id) {
-            if (ImGui::IsMouseDown(0)) {
+            const auto intent = scroll_intent();
+            const bool horizontal = !touch || intent == ScrollIntent::Horizontal;
+            const bool tap =
+                touch && r.pressed && intent != ScrollIntent::Vertical && intent != ScrollIntent::Cancelled;
+            if ((ImGui::IsMouseDown(0) && horizontal) || tap) {
                 const float t = std::clamp((mouse.x - bar_min.x) / bar_width, 0.0f, 1.0f);
                 const float raw = static_cast<float>(minimum) + t * static_cast<float>(maximum - minimum);
-                value = minimum + static_cast<int>(std::round((raw - static_cast<float>(minimum)) / step)) * step;
-            } else {
-                dragging = 0;
+                value = minimum + static_cast<int>(std::round((raw - minimum) / step)) * step;
             }
+            if (!ImGui::IsMouseDown(0) || intent == ScrollIntent::Vertical || intent == ScrollIntent::Cancelled)
+                dragging = 0;
         }
         value = std::clamp(value, minimum, maximum);
     }
@@ -534,6 +817,7 @@ bool slider_row(
     char text[32];
     std::snprintf(text, sizeof(text), format, value);
     draw_value(r, text, options, px(16.0f) + bar_width + font() * 1.0f, live ? colors::kAccentBright : colors::kText);
+    setting_help_button(label, options, r.min, r.full_max);
     return value != before;
 }
 
@@ -549,6 +833,7 @@ bool button_row(const char *label, const RowOptions &options, ImU32 color) {
     draw->AddLine({x - s, mid_y - s * 1.6f}, {x + s * 0.6f, mid_y}, chevron, px(2.0f));
     draw->AddLine({x + s * 0.6f, mid_y}, {x - s, mid_y + s * 1.6f}, chevron, px(2.0f));
     if (options.disabled && !options.note.empty()) draw_value(r, "", options, px(16.0f) + font() * 1.2f, 0);
+    setting_help_button(label, options, r.min, r.full_max);
     return r.pressed && !options.disabled;
 }
 
@@ -566,6 +851,7 @@ bool value_row(const char *label, const std::string &value, const RowOptions &op
         options.warning ? colors::kDanger
             : live      ? colors::kAccentBright
                         : colors::kText);
+    setting_help_button(label, options, r.min, r.full_max);
     return r.pressed && !options.disabled;
 }
 
@@ -645,7 +931,8 @@ void section(const char *title) {
 }
 
 bool big_button(const char *label, float width, bool primary, bool disabled) {
-    const float height = std::round(font() * 2.2f);
+    const float height =
+        std::max(std::round(font() * 2.2f), Layer::get().comfortable() ? Layer::get().touch_target() : 0.0f);
     const ImVec2 min = ImGui::GetCursorScreenPos();
     const ImVec2 max{min.x + width, min.y + height};
     const bool pressed = ImGui::InvisibleButton(label, {width, height}, ImGuiButtonFlags_EnableNav);
@@ -717,34 +1004,40 @@ void hints(std::initializer_list<Hint> list) {
     const SDL_GamepadButton confirm = south ? SDL_GAMEPAD_BUTTON_SOUTH : SDL_GAMEPAD_BUTTON_EAST;
     const SDL_GamepadButton back = south ? SDL_GAMEPAD_BUTTON_EAST : SDL_GAMEPAD_BUTTON_SOUTH;
     const ImVec2 start = ImGui::GetCursorScreenPos();
+    const float available = ImGui::GetContentRegionAvail().x;
     ImVec2 at = start;
-    const float gap = px(6.0f);
-    for (const Hint &hint : list) {
-        // The browser's file filter switch has a button on the pad only.
-        const bool pad_only = hint.control == Control::Toggle || hint.control == Control::Shift ||
-            hint.control == Control::Space || hint.control == Control::Symbols || hint.control == Control::Reset;
-        if (pad_only && !pad) continue;
+    const float gap = px(6.f);
+    const auto group = [&](const Hint &hint, ImVec2 at, bool paint) {
         float x = at.x;
-        const auto cap = [&](const char *text) { x += draw_cap(draw, {x, at.y}, text, false) + gap; };
+        const auto cap = [&](const char *text) {
+            x += (paint ? draw_cap(draw, {x, at.y}, text, false)
+                        : std::max(font() * 1.15f, ImGui::CalcTextSize(text).x + font() * .7f)) +
+                gap;
+        };
+        const auto face = [&](SDL_GamepadButton button) {
+            x += (paint ? draw_face(draw, {x, at.y}, button) : font() * 1.24f) + gap;
+        };
         const auto arrows = [&] {
             const float size = font() * 1.15f;
             for (int i = 0; i < 2; ++i) {
-                const ImVec2 min{x, at.y + (font() - size) * 0.5f};
-                draw->AddRect(min, {min.x + size, min.y + size}, colors::kTextDim, size * 0.3f, 0, px(1.5f));
-                draw_triangle(draw, {min.x + size * 0.5f, min.y + size * 0.5f}, size * 0.4f, i == 1, colors::kText);
+                const ImVec2 min{x, at.y + (font() - size) * .5f};
+                if (paint) {
+                    draw->AddRect(min, {min.x + size, min.y + size}, colors::kTextDim, size * .3f, 0, px(1.5f));
+                    draw_triangle(draw, {min.x + size * .5f, min.y + size * .5f}, size * .4f, i == 1, colors::kText);
+                }
                 x += size + gap;
             }
         };
         switch (hint.control) {
         case Control::Confirm:
             if (pad)
-                x += draw_face(draw, {x, at.y}, confirm) + gap;
+                face(confirm);
             else
                 cap("Enter");
             break;
         case Control::Back:
             if (pad)
-                x += draw_face(draw, {x, at.y}, back) + gap;
+                face(back);
             else
                 cap("Esc");
             break;
@@ -768,23 +1061,23 @@ void hints(std::initializer_list<Hint> list) {
             break;
         case Control::Toggle:
         case Control::Space:
-            x += draw_face(draw, {x, at.y}, SDL_GAMEPAD_BUTTON_NORTH) + gap;
+            face(SDL_GAMEPAD_BUTTON_NORTH);
             break;
         case Control::Delete:
             if (pad)
-                x += draw_face(draw, {x, at.y}, back) + gap;
+                face(back);
             else
                 cap("Backspace");
             break;
         case Control::Shift:
-            x += draw_face(draw, {x, at.y}, SDL_GAMEPAD_BUTTON_WEST) + gap;
+            face(SDL_GAMEPAD_BUTTON_WEST);
             break;
         case Control::Reset:
             cap(select_name());
             break;
         case Control::Clear:
             if (pad)
-                x += draw_face(draw, {x, at.y}, SDL_GAMEPAD_BUTTON_NORTH) + gap;
+                face(SDL_GAMEPAD_BUTTON_NORTH);
             else
                 cap("Del");
             break;
@@ -800,11 +1093,28 @@ void hints(std::initializer_list<Hint> list) {
             }
             break;
         }
-        draw->AddText({x + px(2.0f), at.y}, colors::kTextDim, hint.text);
-        at.x = x + ImGui::CalcTextSize(hint.text).x + px(26.0f);
+        if (paint) draw->AddText({x + px(2.f), at.y}, colors::kTextDim, hint.text);
+        return x + px(2.f) + ImGui::CalcTextSize(hint.text).x - at.x;
+    };
+    for (const Hint &hint : list) {
+        const bool pad_only = hint.control == Control::Toggle || hint.control == Control::Shift ||
+            hint.control == Control::Space || hint.control == Control::Symbols || hint.control == Control::Reset;
+        if (pad_only && !pad) continue;
+        const float width = group(hint, {}, false);
+        if (at.x > start.x && at.x + width > start.x + available) {
+            at.x = start.x;
+            at.y += font() * 1.5f;
+        }
+        group(hint, at, true);
+        at.x += width + px(26.f);
     }
-    // Room for what was drawn, so a window around the hints can fit them.
-    ImGui::Dummy({std::max(0.0f, at.x - start.x - px(24.0f)), font()});
+    const float height = at.y - start.y + font() * 1.2f;
+    auto *window = ImGui::GetCurrentWindow();
+    window->StateStorage.SetFloat(ImHashStr("hint_height", 0, window->ID), height);
+    window->StateStorage.SetFloat(ImHashStr("hint_width", 0, window->ID), available);
+    window->StateStorage.SetFloat(ImHashStr("hint_font", 0, window->ID), font());
+    window->StateStorage.SetInt(ImHashStr("hint_device", 0, window->ID), static_cast<int>(Layer::get().input_device()));
+    ImGui::Dummy({available, height});
 }
 
 } // namespace mhp3rd::ui

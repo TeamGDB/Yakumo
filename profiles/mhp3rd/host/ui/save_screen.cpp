@@ -878,4 +878,11 @@ bool run_backup_reminder() {
     return window_open;
 }
 
+std::string save_screen_path() {
+    static constexpr const char *names[] = {"", "Saves › Import", "Saves › Review Import", "Saves › Imported",
+        "Saves › Export", "Saves › Exported", "Saves › Backups", "Saves › Choose Backup", "Saves › Restore Backup",
+        "Saves › Backup Result", "Saves › Backup Reminder"};
+    return names[static_cast<unsigned>(state().stage)];
+}
+
 } // namespace mhp3rd::ui

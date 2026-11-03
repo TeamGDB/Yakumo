@@ -66,6 +66,7 @@ bool touch_editor_open() {
 }
 
 void touch_editor_frame(bool back) {
+    auto &layer = Layer::get();
     State &st = state();
     settings::Settings &s = settings::current();
     const ImGuiIO &io = ImGui::GetIO();
@@ -421,7 +422,10 @@ void touch_editor_frame(bool back) {
             settings::save();
         }
     }
-    if (button_row("Done", {false, {}, "Back to the menu."})) done = true;
+    if (layer.input_device() == InputDevice::Touch) {
+        if (big_button("Back##touch_editor_back", ImGui::GetContentRegionAvail().x)) layer.request_back();
+    } else if (button_row("Done", {false, {}, "Back to the menu."}))
+        done = true;
     ImGui::End();
     ImGui::PopStyleVar();
     if (done) {

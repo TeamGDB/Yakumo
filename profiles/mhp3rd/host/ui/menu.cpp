@@ -117,11 +117,14 @@ constexpr int kTabCount = static_cast<int>(std::size(kTabs));
 // was scrolled and which row had the focus. Opening the menu again goes back
 // there. The page is also kept in settings.ini for the next start; the rest
 // only for this session, as rows come and go between runs.
-struct MenuPlace {
+struct PagePlace {
     bool known{};
-    int tab{};
     float scroll{};
     ImGuiID focus{};
+};
+struct MenuPlace {
+    int tab{};
+    std::map<std::string, PagePlace> pages;
 };
 MenuPlace &menu_place() {
     static MenuPlace place = [] {
@@ -140,8 +143,9 @@ MenuPlace &menu_place() {
 
 class Menu {
 public:
-    explicit Menu(bool paused) : paused_(paused), tab_(menu_place().tab) {}
+    explicit Menu(bool paused) : paused_(paused), tab_(menu_place().tab) { enable_context_help(true); }
     ~Menu() {
+        enable_context_help(false);
         // The page for the next start, in settings.ini, when it changed.
         std::string name = kTabs[menu_place().tab];
         std::transform(
@@ -161,6 +165,8 @@ public:
 private:
     enum class Confirm { None, Quit, Setup, DeletePreset };
 
+    std::string path() const;
+    std::string previous_path_;
     void video();
     void audio();
     void controls();
@@ -186,6 +192,31 @@ private:
     std::string screenshot_path_; // where Take a screenshot saved to
 };
 
+std::string Menu::path() const {
+    std::string child;
+    if ((tab_ == 0 || tab_ == 6) && texture_pack_screen_open())
+        child = texture_pack_screen_path();
+    else if (tab_ == 0 && font_list_open())
+        child = "Fonts";
+    else if (tab_ == 2)
+        child = controllers_screen_path();
+    else if (tab_ == 4)
+        child = layered_armor_screen_path();
+    else if (tab_ == 5)
+        child = mods_screen_path();
+    else if (tab_ == 6) {
+        if (translation_screen_open())
+            child = translation_screen_path();
+        else
+            child = save_screen_path();
+    }
+#if defined(MHP3RD_DEBUG_MENU)
+    else if (tab_ == 7 && debug_screen_open())
+        child = "Developer Tools";
+#endif
+    return std::string(kTabs[tab_]) + (child.empty() ? "" : " › " + child);
+}
+
 bool Menu::frame() {
     Layer &layer = Layer::get();
     // A text field's keyboard takes the whole screen until it closes.
@@ -196,10 +227,14 @@ bool Menu::frame() {
     // A texture pack copy keeps the menu open until it ends.
     texture_pack_import_tick();
     if (layer.take_menu_toggle() && !texture_pack_import_busy() && !mods_import_busy()) return false;
-    const bool back = layer.take_back();
+    bool back = layer.take_back();
     // The pad's back button closes the menu too, once nothing is being edited.
     const ImGuiKey cancel = layer.confirm_south() ? ImGuiKey_GamepadFaceRight : ImGuiKey_GamepadFaceDown;
-    const bool pad_back = ImGui::IsKeyPressed(cancel, false);
+    bool pad_back = ImGui::IsKeyPressed(cancel, false);
+    if (context_help_open()) {
+        if (back || pad_back) close_context_help();
+        back = pad_back = false;
+    }
     const bool start = ImGui::IsKeyPressed(ImGuiKey_GamepadStart, false);
     // Back closes the font list, or the save import and export, before it
     // closes the menu.
@@ -224,7 +259,8 @@ bool Menu::frame() {
         return true;
     }
 
-    begin_panel("##menu", "Yakumo", paused_ ? "Paused" : "Running", true);
+    begin_panel("##menu", "Yakumo", paused_ ? "Paused" : "Running", true, &close_,
+        texture_pack_import_busy() || mods_import_busy());
 #if defined(MHP3RD_DEBUG_MENU)
     // The developer tools' page, in developer builds run with MHP3RD_DEBUG_MENU=1.
     const int tab_count = debug::enabled() ? 8 : 7;
@@ -244,24 +280,31 @@ bool Menu::frame() {
     const bool switched = (!transfer && requested_tab != tab_) || first_frame_;
     if (!transfer) tab_ = requested_tab;
     first_frame_ = false;
+    const std::string current_path = path();
+    if (current_path != kTabs[tab_]) {
+        ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * .8f);
+        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(colors::kAccent), "%s", current_path.c_str());
+        ImGui::PopFont();
+    }
     const bool touch_footer = layer.input_device() == InputDevice::Touch;
     begin_content(touch_footer);
     MenuPlace &place = menu_place();
+    PagePlace &page = place.pages[current_path];
+    const bool changed_path = opening || current_path != previous_path_;
+    if (changed_path) stop_scroll_motion();
     bool restoring = false;
-    if (opening && place.known && place.tab == tab_ && !font_list_was_open) {
-        // Back where the menu closed: the same scroll, the same row.
-        ImGui::SetScrollY(place.scroll);
-        if (place.focus != 0u) {
-            ImGui::SetFocusID(place.focus, ImGui::GetCurrentWindow());
+    if (changed_path && page.known) {
+        ImGui::SetScrollY(page.scroll);
+        if (page.focus != 0u) {
+            ImGui::SetFocusID(page.focus, ImGui::GetCurrentWindow());
             ImGui::GetCurrentContext()->NavCursorVisible = true;
             restoring = true;
-        } else {
-            focus_next_row();
         }
-    } else if (switched) {
+    } else if (changed_path || switched) {
         focus_next_row();
         ImGui::SetScrollY(0.0f);
     }
+    keep_row_focus(restoring);
     switch (tab_) {
     case 0:
         video();
@@ -291,30 +334,37 @@ bool Menu::frame() {
         system();
         break;
     }
+    keep_row_focus(false);
     // The row that had the focus is gone (a row this platform or this state
     // does not have): the top of the page, as when the page is opened.
     if (restoring && !ImGui::GetCurrentContext()->NavIdIsAlive) {
         focus_next_row();
         ImGui::SetScrollY(0.0f);
     }
-    // Where the menu is now, unless a screen of its own is over the page.
-    if (!font_list_was_open && !restoring) {
+    // Each parent and child screen retains its own scroll and focused row.
+    if (!restoring) {
         const ImGuiContext &g = *ImGui::GetCurrentContext();
-        place.known = true;
-        place.tab = tab_;
-        place.scroll = ImGui::GetScrollY();
-        if (g.NavWindow == ImGui::GetCurrentWindow() && g.NavId != 0u)
-            place.focus = g.NavId;
-        else if (switched)
-            place.focus = 0u;
+        page.known = true;
+        page.scroll = ImGui::GetScrollY();
+        if (g.NavWindow == ImGui::GetCurrentWindow()) page.focus = g.NavId;
     }
+    place.tab = tab_;
+    previous_path_ = current_path;
     begin_footer();
     const BindingsFocus binding = tab_ == 2 ? bindings_focus() : BindingsFocus::None;
     if (touch_footer) {
         const float available = ImGui::GetContentRegionAvail().x;
-        const float width = std::min(available, ImGui::CalcTextSize("Close Menu").x + layer.font_size() * 2.0f);
+        const bool nested = path() != kTabs[tab_];
+        const char *label = nested ? "Back##touch_back_menu" : "Close Menu##touch_close_menu";
+        const float width =
+            std::min(available, ImGui::CalcTextSize(nested ? "Back" : "Close Menu").x + layer.font_size() * 2.0f);
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + available - width);
-        if (big_button("Close Menu##touch_close_menu", width, false, transfer)) close_ = true;
+        if (big_button(label, width, false, transfer)) {
+            if (nested)
+                layer.request_back();
+            else
+                close_ = true;
+        }
     } else if (binding == BindingsFocus::Binding && bindings_focus_resettable())
         hints({{Control::Confirm, "Rebind"}, {Control::Clear, "Clear"}, {Control::Reset, "Reset action"},
             {Control::Back, "Back"}, {Control::Tabs, "Section"}});
@@ -689,9 +739,11 @@ bool text_row(const char *id, const char *label, std::string &value, std::size_t
     }
     if (!ImGui::IsAnyItemActive() || !field.focused)
         std::snprintf(field.buffer.data(), field.buffer.size(), "%s", value.c_str());
-    const float row_height = std::round(Layer::get().font_size() * 1.9f);
+    const float row_height = std::max(
+        std::round(Layer::get().font_size() * 1.9f), Layer::get().comfortable() ? Layer::get().touch_target() : 0.f);
     const ImVec2 start = ImGui::GetCursorScreenPos();
-    const float width = ImGui::GetContentRegionAvail().x;
+    const float full_width = ImGui::GetContentRegionAvail().x;
+    const float width = std::max(1.f, full_width - setting_help_width(o));
     ImDrawList *draw = ImGui::GetWindowDrawList();
     // Highlighted like the other rows; the field reports its focus only after
     // it is drawn, so last frame's state is used.
@@ -743,6 +795,7 @@ bool text_row(const char *id, const char *label, std::string &value, std::size_t
         committed = true;
     }
     if (o.disabled) ImGui::EndDisabled();
+    setting_help_button(label, o, start, {start.x + full_width, start.y + row_height});
     ImGui::SetCursorScreenPos({start.x, start.y + row_height});
     ImGui::Dummy({0.0f, 0.0f});
     return committed;
@@ -1587,14 +1640,28 @@ void Menu::qol() {
         }
     }
     section("Experimental Options:");
-    if (toggle_row("Free Camera", s.free_camera,
-            options_for("experimental.free_camera",
-                "Experimental, and it may break or change. F6, or Back and R3 on a gamepad, "
-                "detaches the view from the game's camera and flies it about; the same again gives "
-                "the game's camera back. The game keeps running and gets no input meanwhile. "
-                "What the game does not draw from its own camera's place is missing."))) {
-        s.free_camera = !s.free_camera;
-        settings::save();
+    {
+        RowOptions o = options_for("experimental.free_camera",
+            "Experimental, and it may break or change. F6, or Back and R3 on a gamepad, "
+            "detaches the view from the game's camera and flies it about; the same again gives "
+            "the game's camera back. The game keeps running and gets no input meanwhile. "
+            "What the game does not draw from its own camera's place is missing.");
+        o.help = o.description +
+            "\n\nOn and Off\nF6; Back and R3"
+            "\n\nFly\nW A S D; E and Q up and down; left stick, RB and LB"
+            "\n\nLook\nMouse; right stick"
+            "\n\nFaster, Slower\nLeft Shift, Left Ctrl; RT, LT"
+            "\n\nChange Speed\nMouse wheel, + and -; D-pad"
+            "\n\nPhoto Mode\nP, or Start: the game stands still"
+            "\n\nStep One Frame (Photo Mode)\n" +
+            binds_of(input::Action::FrameStep) +
+            "\n\nBack to the Game's Camera\nR, or Y"
+            "\n\nScreenshot\n" +
+            binds_of(input::Action::Screenshot);
+        if (toggle_row("Free Camera", s.free_camera, o)) {
+            s.free_camera = !s.free_camera;
+            settings::save();
+        }
     }
     {
         RowOptions o = options_for("experimental.free_camera_speed",
@@ -1622,16 +1689,6 @@ void Menu::qol() {
             s.free_camera_hide_hud = !s.free_camera_hide_hud;
             settings::save();
         }
-    }
-    if (s.free_camera) {
-        info_row("On and off", "F6; Back and R3");
-        info_row("Fly", "W A S D, E and Q up and down; left stick, RB and LB");
-        info_row("Look", "Mouse; right stick");
-        info_row("Faster, slower", "Left Shift, Left Ctrl; RT, LT");
-        info_row("Photo mode", "P, or Start: the game stands still");
-        info_row("Step one frame (photo mode)", binds_of(input::Action::FrameStep));
-        info_row("Back to the game's camera", "R, or Y");
-        info_row("Screenshot", binds_of(input::Action::Screenshot));
     }
     section("Reset to Defaults:");
     if (button_row("Restore QoL Defaults", {false, {}, "Every setting on this page back to how Yakumo ships."})) {

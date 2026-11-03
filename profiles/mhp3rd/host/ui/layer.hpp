@@ -55,6 +55,11 @@ public:
     // Requests from the player, each reported once.
     bool take_menu_toggle(); // L3+R3; Esc while the game runs
     bool take_back();        // Esc while a screen runs
+    void request_back() noexcept { back_ = true; }
+    void request_menu_close() noexcept { menu_toggle_ = true; }
+    // Touch geometry stays stable until the current interface session closes.
+    [[nodiscard]] bool comfortable() const noexcept { return comfortable_; }
+    [[nodiscard]] float touch_target() const noexcept { return 48.0f * density_; }
     std::optional<std::filesystem::path> take_dropped_file();
     [[nodiscard]] bool window_closed() const noexcept { return window_closed_; }
 
@@ -104,7 +109,11 @@ public:
     [[nodiscard]] float scale() const noexcept { return font_size_ / 20.0f; }
 
     // Explanation of the focused row, shown above the button hints.
-    void set_description(const std::string &text) { description_ = text; }
+    void set_description(const std::string &text) {
+        description_ = text;
+        description_set_ = true;
+    }
+    [[nodiscard]] bool description_set() const noexcept { return description_set_; }
     [[nodiscard]] const std::string &description() const noexcept { return description_; }
 
 private:
@@ -117,7 +126,12 @@ private:
     bool window_closed_{};
     InputDevice device_{InputDevice::Keyboard};
     float font_size_{};
+    float density_{1.0f};
+    float styled_density_{};
+    bool comfortable_{};
+    bool styled_comfortable_{};
     std::string description_;
+    bool description_set_{};
 
     using Clock = std::chrono::steady_clock;
     std::optional<Clock::time_point> escape_pending_;

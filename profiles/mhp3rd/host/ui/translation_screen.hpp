@@ -35,4 +35,7 @@ void translation_rows();
 // pressed this frame. True while the screen is open.
 bool translation_screen(bool back);
 
+// Current nested screen, empty at the owning tab.
+[[nodiscard]] std::string translation_screen_path();
+
 } // namespace mhp3rd::ui

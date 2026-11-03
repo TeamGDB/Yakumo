@@ -3,6 +3,7 @@
 import contextlib
 import io
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -45,16 +46,36 @@ class CoveragePolicyTests(unittest.TestCase):
             root = Path(temporary)
             repository = root / 'repo'
             repository.mkdir()
-            outside = root / 'outside.py'
+            external = root / 'external scripts'
+            external.mkdir()
+            outside = external / 'outside.py'
             outside.touch()
-            link = repository / 'escape.py'
-            link.symlink_to(outside)
-            with mock.patch.object(native_coverage, 'ROOT', repository):
-                for script in (outside, link):
-                    with self.subTest(script=script), self.assertRaises(ValueError):
-                        native_test_objects([{'command': [sys.executable, str(script)]}])
-                with self.assertRaises(SystemExit):
-                    native_test_objects([{'command': [sys.executable, str(repository / 'missing.py')]}])
+            inside = repository / 'inside.py'
+            inside.touch()
+            link = repository / 'escape directory'
+            # A junction exercises the real Windows path escape without the
+            # administrator/Developer Mode privilege required for symlinks.
+            if os.name == 'nt':
+                subprocess.run(['cmd.exe', '/d', '/c', 'mklink', '/J', str(link), str(external)],
+                               check=True, capture_output=True, timeout=10)
+            else:
+                link.symlink_to(external, target_is_directory=True)
+            try:
+                self.assertEqual(link.resolve(), external.resolve())
+                self.assertTrue((link / outside.name).is_file())
+                with mock.patch.object(native_coverage, 'ROOT', repository):
+                    self.assertEqual(native_test_objects([{'command': [sys.executable, str(inside)]}]), set())
+                    for script in (outside, link / outside.name):
+                        with self.subTest(script=script), self.assertRaises(ValueError):
+                            native_test_objects([{'command': [sys.executable, str(script)]}])
+                    with self.assertRaises(SystemExit):
+                        native_test_objects([{'command': [sys.executable, str(repository / 'missing.py')]}])
+            finally:
+                if os.name == 'nt':
+                    link.rmdir()
+                else:
+                    link.unlink()
+            self.assertTrue(outside.is_file(), 'Removing the link must preserve its external target')
 
     def test_summary_does_not_write_to_environment_selected_path(self):
         with tempfile.TemporaryDirectory() as temporary:

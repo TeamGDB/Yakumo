@@ -197,6 +197,7 @@ bool Layer::attach(gpu::VulkanRenderer &renderer) {
 void Layer::set_interactive(bool interactive) {
     if (interactive == interactive_) return;
     interactive_ = interactive;
+    if (interactive) comfortable_ = device_ == InputDevice::Touch || settings::kPlatform == settings::Platform::Android;
     ImGuiIO &io = ImGui::GetIO();
     // Nothing typed while the game ran is replayed into a screen, and nothing
     // held when a screen closes stays held for the next one.
@@ -268,7 +269,10 @@ std::optional<input::Chord> Layer::take_captured_binding() {
 
 bool Layer::handle_event(const SDL_Event &event) {
     const Clock::time_point now = Clock::now();
-    if (event.type == SDL_EVENT_FINGER_DOWN) device_ = InputDevice::Touch;
+    if (event.type == SDL_EVENT_FINGER_DOWN) {
+        device_ = InputDevice::Touch;
+        comfortable_ = true;
+    }
     // Presses go to the binding being captured. Releases of what was held
     // before still reach ImGui, which saw the press that started the capture.
     if (capturing_binding_ && interactive_) {
@@ -398,6 +402,7 @@ bool Layer::handle_event(const SDL_Event &event) {
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
         device_ = event.button.which == SDL_TOUCH_MOUSEID ? InputDevice::Touch : InputDevice::Keyboard;
+        if (device_ == InputDevice::Touch) comfortable_ = true;
         break;
     case SDL_EVENT_MOUSE_WHEEL:
         if (event.wheel.which != SDL_TOUCH_MOUSEID) device_ = InputDevice::Keyboard;
@@ -481,10 +486,26 @@ void Layer::apply_theme() {
     const ImGuiIO &io = ImGui::GetIO();
     // About 27 px on a Steam Deck's 800 lines, 18 px in the default 544-line
     // window, growing with larger windows.
-    const float size = std::clamp(std::round(io.DisplaySize.y * 0.034f), 16.0f, 72.0f);
-    if (size == font_size_) return;
+    const float display_scale = SDL_GetWindowDisplayScale(renderer_->window());
+    density_ = std::isfinite(display_scale) && display_scale > 0.0f ? std::clamp(display_scale, 1.0f, 4.0f) : 1.0f;
+    const char *compact = std::getenv("MHP3RD_MENU_COMFORT");
+    if (compact && std::string_view(compact) == "0") comfortable_ = false;
+    const float minimum = comfortable_ ? 16.0f * density_ : 16.0f;
+    const float size = std::clamp(std::round(io.DisplaySize.y * 0.034f), minimum, 72.0f);
+    if (size == font_size_ && styled_comfortable_ == comfortable_ && styled_density_ == density_) return;
     font_size_ = size;
-    ImGui::GetStyle() = make_style(scale(), font_size_);
+    styled_comfortable_ = comfortable_;
+    styled_density_ = density_;
+    ImGuiStyle style = make_style(scale(), font_size_);
+    if (comfortable_) {
+        style.ScrollbarSize = 22.0f * density_;
+        style.GrabMinSize = 48.0f * density_;
+        style.WindowPadding = {16.0f * density_, 10.0f * density_};
+        style.ItemSpacing.y = 6.0f * density_;
+        style.Colors[ImGuiCol_ScrollbarBg] = ImGui::ColorConvertU32ToFloat4(IM_COL32(143, 93, 36, 35));
+        style.Colors[ImGuiCol_ScrollbarGrab] = ImGui::ColorConvertU32ToFloat4(colors::kPanelEdge);
+    }
+    ImGui::GetStyle() = style;
 }
 
 void Layer::begin_frame() {
@@ -530,9 +551,11 @@ void Layer::begin_frame() {
     apply_theme();
     ImGui::NewFrame();
     description_.clear();
+    description_set_ = false;
 }
 
 void Layer::end_frame() {
+    draw_context_help();
     ImGui::Render();
     renderer_->set_ui_draw_data(ImGui::GetDrawData());
 }

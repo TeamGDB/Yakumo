@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 union SDL_Event;
 
 // Controls > Controllers (#147): every controller connected, what SDL makes
@@ -25,5 +27,8 @@ bool controllers_screen(bool back);
 void note_unknown_controller(const SDL_Event &event);
 // The same for the controllers connected at start.
 void note_unknown_controllers();
+
+// Current nested screen, empty at the owning tab.
+[[nodiscard]] std::string controllers_screen_path();
 
 } // namespace mhp3rd::ui

@@ -745,4 +745,10 @@ bool take_mods_restart_request() {
     return std::exchange(state().restart, false);
 }
 
+std::string mods_screen_path() {
+    static constexpr const char *names[] = {"", "Mod Details", "Import Mods › Choose Folder",
+        "Import Mods › Choose Folder", "Import Mods › Review", "Mods › Result"};
+    return names[static_cast<unsigned>(state().stage)];
+}
+
 } // namespace mhp3rd::ui
