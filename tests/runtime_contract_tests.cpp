@@ -73,6 +73,16 @@ void fault(psprecomp::Runtime &, psprecomp::AllegrexContext &) {
     throw psprecomp::Error("synthetic guest memory fault");
 }
 void stay(psprecomp::Runtime &, psprecomp::AllegrexContext &) {}
+// A store from inside a dispatched function, with a caller and a stack.
+void watched_store(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &cpu) {
+    cpu.gpr[31] = 0x08812340u;
+    cpu.gpr[29] = 0x09FF0000u;
+    runtime.memory().aot_store8(base, 0x5A);
+    runtime.stop("watched store done");
+}
+void stop_here(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &) {
+    runtime.stop("interpreted store done");
+}
 void entry(
     psprecomp::Runtime &, psprecomp::AllegrexContext &cpu, std::uint16_t, psprecomp::GuestMemory::AotFastView &memory) {
     cpu.gpr[2] = memory.aot_load32(scratch);
@@ -1157,6 +1167,51 @@ void guest_memory_contracts(bool armed) {
                 diagnostics.str().find("op=store16") != std::string::npos &&
                 diagnostics.str().find("op=store32") != std::string::npos,
             "Armed write watch must observe all AOT store widths");
+        check(diagnostics.str().find(" ra=0x00000000 sp=0x00000000 ") != std::string::npos,
+            "Outside a dispatched function the write watch names no guest registers");
+        std::ostringstream inside;
+        auto *saved = std::cerr.rdbuf(inside.rdbuf());
+        {
+            psprecomp::Runtime dispatching;
+            dispatching.register_function(base + 0x100u, &watched_store, "public_watched_store");
+            dispatching.run(base + 0x100u, 2);
+        }
+        memory.aot_store8(base, 0x12);
+        std::cerr.rdbuf(saved);
+        const std::string hits = inside.str();
+        check(hits.find(" ra=0x08812340 sp=0x09FF0000 ") != std::string::npos,
+            "Inside a dispatched function the write watch names its ra and sp");
+        const auto after = hits.rfind(" ra=0x00000000 sp=0x00000000 ");
+        check(after != std::string::npos && after > hits.find(" ra=0x08812340 "),
+            "The registers are forgotten once that function returns");
+        // Code no generated function claims runs in the interpreter, with the
+        // same names: it sets ra and sp, stores, then jumps to a registered stop.
+        std::ostringstream interpreted;
+        saved = std::cerr.rdbuf(interpreted.rdbuf());
+        {
+            psprecomp::Runtime fallback;
+            const std::uint32_t code = base + 0x200u;
+            const std::uint32_t done = base + 0x300u;
+            const std::array<std::uint32_t, 9> program{
+                i(0x0Fu, 0u, 5u, static_cast<std::uint16_t>(base >> 16)), // lui a1, base
+                i(0x0Du, 5u, 5u, static_cast<std::uint16_t>(base)),       // ori a1, a1, base
+                i(0x09u, 0u, 4u, 0x66u),                                  // addiu a0, zero, 0x66
+                i(0x0Fu, 0u, 31u, 0x0881u),                               // lui ra, 0x0881
+                i(0x0Du, 31u, 31u, 0x2344u),                              // ori ra, ra, 0x2344
+                i(0x0Fu, 0u, 29u, 0x09FFu),                               // lui sp, 0x09FF
+                i(0x28u, 5u, 4u, 0u),                                     // sb a0, 0(a1)
+                0x02u << 26u | (done >> 2u & 0x03FFFFFFu),                // j done
+                0u,                                                       // nop
+            };
+            for (std::size_t n = 0; n < program.size(); ++n)
+                fallback.memory().store32(code + static_cast<std::uint32_t>(n * 4u), program[n]);
+            fallback.register_function(done, &stop_here, "public_interpreted_stop");
+            fallback.run(code, 4);
+            check(fallback.stop_reason() == "interpreted store done", "The interpreted program reaches its stop");
+        }
+        std::cerr.rdbuf(saved);
+        check(interpreted.str().find(" ra=0x08812344 sp=0x09FF0000 ") != std::string::npos,
+            "A store from interpreted code names its ra and sp as well");
     } else {
         check(diagnostics.str().find("not armed at start-up") != std::string::npos,
             "Unarmed write watch must explain why observation cannot be enabled");

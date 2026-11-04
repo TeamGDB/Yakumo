@@ -188,7 +188,12 @@ void frame(psprecomp::Runtime &runtime) {
     GuestRam ram(runtime.memory());
     run_pending(ram);
     console_frame(ram);
-    if (blocked_reason().empty()) held_cheats_frame(ram, s.held);
+    if (blocked_reason().empty()) {
+        held_cheats_frame(ram, s.held);
+        held_actors_frame(ram);
+    } else {
+        release_held_actors();
+    }
     const auto before = s.encounter.phase();
     const auto action = s.encounter.tick(ram, monotonic_ms(), encounter_writes_allowed());
 #if defined(MHP3RD_HAS_RENDERER)
