@@ -5546,7 +5546,7 @@ void footer_readability_contracts(gpu::VulkanRenderer &renderer, const std::file
                 frame();
                 frame();
                 ImGui::FocusWindow(footer);
-                ImGui::SetFocusID(0, footer);
+                expect(GImGui->NavWindow == footer, "reading a description focuses its window without an item ID");
                 publish = false;
                 io.AddMouseWheelEvent(0.f, -1.f);
                 frame();
