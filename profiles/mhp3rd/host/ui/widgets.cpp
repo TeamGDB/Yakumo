@@ -339,6 +339,16 @@ void draw_context_help() {
     }
 }
 
+float menu_touch_scale(float display_scale, float framebuffer_scale, float window_height) {
+    // SDL's display scale includes pixel density; ImGui already applies the
+    // framebuffer scale when rendering. Budget touch geometry in UI units.
+    const float display = std::isfinite(display_scale) && display_scale > 0.f ? display_scale : 1.f;
+    const float framebuffer = std::isfinite(framebuffer_scale) && framebuffer_scale > 0.f ? framebuffer_scale : 1.f;
+    const float density = std::clamp(display / framebuffer, 1.f, 4.f);
+    const float height = std::isfinite(window_height) ? std::max(0.f, window_height) : 0.f;
+    return std::min(density, std::max(1.f, height / 800.f));
+}
+
 ImGuiStyle make_style(float scale, float font_size) {
     ImGuiStyle style;
     ImGui::StyleColorsDark(&style);
@@ -384,10 +394,8 @@ void begin_panel(const char *id, const std::string &title, const std::string &su
     bool close_disabled) {
     const ImGuiIO &io = ImGui::GetIO();
     if (dim_game) ImGui::GetBackgroundDrawList()->AddRectFilled({0, 0}, io.DisplaySize, colors::kBackdrop);
-    const bool comfortable = Layer::get().comfortable();
-    const float margin = std::round(std::min(io.DisplaySize.x, io.DisplaySize.y) * (comfortable ? 0.015f : 0.03f));
-    const ImVec2 size{
-        comfortable ? io.DisplaySize.x - 2.0f * margin : std::min(io.DisplaySize.x - 2.0f * margin, font() * 46.0f),
+    const float margin = std::round(std::min(io.DisplaySize.x, io.DisplaySize.y) * 0.03f);
+    const ImVec2 size{std::min(io.DisplaySize.x - 2.0f * margin, font() * 46.0f),
         std::min(io.DisplaySize.y - 2.0f * margin, font() * 31.0f)};
     ImGui::SetNextWindowPos({io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f}, ImGuiCond_Always, {0.5f, 0.5f});
     ImGui::SetNextWindowSize(size, ImGuiCond_Always);
@@ -605,22 +613,24 @@ bool tab_bar(const char *const *labels, int count, int &selected) {
     for (int i = 0; i < count; ++i) label_width = std::max(label_width, ImGui::CalcTextSize(labels[i]).x);
     const float minimum_width =
         std::max(label_width + px(24.0f), Layer::get().comfortable() ? Layer::get().touch_target() : 0.0f);
-    const bool scrollable = minimum_width * count > inner_width + 1.0f;
-    const float arrow_width = scrollable ? height : 0.0f;
+    const float visible_count = static_cast<float>(std::min(count, 6));
+    const bool scrollable = std::max(inner_width / visible_count, minimum_width) * count > inner_width + 1.0f;
+    const float arrow_width = Layer::get().input_device() == InputDevice::Touch && scrollable ? height : 0.0f;
     const float track_left = inner_left;
     const float track_width = inner_width;
     inner_left += arrow_width;
     inner_width = std::max(1.0f, inner_width - arrow_width * 2.0f);
-    const float tab_width = std::max(inner_width / static_cast<float>(count), minimum_width);
+    const float tab_width = std::max(inner_width / visible_count, minimum_width);
     const float total_width = tab_width * static_cast<float>(count);
-    const float strip_height = height + (scrollable && !short_touch_window() ? ImGui::GetStyle().ScrollbarSize : 0.0f);
+    const bool show_scrollbar = Layer::get().input_device() != InputDevice::Touch && !short_touch_window();
+    const float strip_height = height + (scrollable && show_scrollbar ? ImGui::GetStyle().ScrollbarSize : 0.0f);
     ImGui::SetCursorScreenPos({inner_left, start.y});
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{});
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2{});
     ImGui::SetNextWindowContentSize({total_width, 0.0f});
     ImGui::BeginChild("tab_strip", {inner_width, strip_height}, ImGuiChildFlags_None,
         ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
-            (short_touch_window() ? ImGuiWindowFlags_NoScrollbar : ImGuiWindowFlags_None));
+            (show_scrollbar ? ImGuiWindowFlags_None : ImGuiWindowFlags_NoScrollbar));
     ImGui::PopStyleVar(2);
     ImGuiStorage *tab_state = ImGui::GetStateStorage();
     const ImGuiID previous_id = ImGui::GetID("previous_tab");
@@ -685,7 +695,7 @@ bool tab_bar(const char *const *labels, int count, int &selected) {
                 transparent);
     }
     ImGui::EndChild();
-    if (scrollable) {
+    if (arrow_width > 0.f) {
         const auto arrow = [&](bool right) {
             const bool available = right ? scroll < maximum - 1.0f : scroll > 1.0f;
             if (!available) return;

@@ -80,8 +80,8 @@
     "reason": "Reviewed function declarations and comments only; no executable function body is exempted. Nested menu paths, navigation, context help and touch widget behavior are exercised in renderer/UI contracts; out-of-line implementations retain the normal diff gate."
   },
   "profiles/mhp3rd/host/ui/widgets.hpp": {
-    "sha256": "b3bfe5081cfb54914924bc9e2dd53e10dca2f1055d891b602aa47f3cb9e95932",
-    "reason": "Reviewed function declarations and aggregate fields, including the explicit extended-help string; no executable body is exempted. Free Camera-only help, guide dismissal and scrollable footer/hint layout are covered by renderer/UI contracts. Out-of-line implementations retain the normal diff gate."
+    "sha256": "8a4bd1068941cd8a7805074e4515e981c9d3d1aacb7d70c9c46c45e8d681ff50",
+    "reason": "Reviewed function declarations and aggregate fields, including the explicit extended-help string and touch-density sizing declaration; no executable body is exempted. Renderer/UI contracts cover density boundaries, Free Camera help, guide dismissal and scrollable footer/hint layout. Out-of-line implementations retain the normal diff gate."
   },
   "profiles/mhp3rd/host/gpu/game_hud.hpp": {
     "sha256": "a60ac56430a96bb0b205b8001b20dc51d16c67329c87b0efd4c6df592bab8caa",

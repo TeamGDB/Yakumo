@@ -880,7 +880,7 @@ bool run_backup_reminder() {
 
 std::string save_screen_path() {
     static constexpr const char *names[] = {"", "Saves › Import", "Saves › Review Import", "Saves › Imported",
-        "Saves › Export", "Saves › Exported", "Saves › Backups", "Saves › Choose Backup", "Saves › Restore Backup",
+        "Saves › Export", "Saves › Exported", "Saves › Backups", "Saves › Choose Backup", "Saves › Replace Backup",
         "Saves › Backup Result", "Saves › Backup Reminder"};
     return names[static_cast<unsigned>(state().stage)];
 }

@@ -5099,6 +5099,19 @@ void setup_screen_contracts(gpu::VulkanRenderer &renderer, const std::filesystem
 }
 
 void menu_touch_widget_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::path &sandbox) {
+    expect(std::abs(ui::menu_touch_scale(3.f, 1.f, 1224.f) - 1.53f) < .001f,
+        "phone touch sizes are bounded by usable height instead of raw display DPI");
+    expect(ui::menu_touch_scale(2.f, 2.f, 900.f) == 1.f,
+        "logical high-DPI windows do not apply framebuffer density twice");
+    expect(ui::menu_touch_scale(1.f, 1.f, 544.f) == 1.f && ui::menu_touch_scale(4.f, 1.f, 800.f) == 1.f &&
+            ui::menu_touch_scale(4.f, 1.f, 1600.f) == 2.f && ui::menu_touch_scale(20.f, 1.f, 4000.f) == 4.f,
+        "touch geometry keeps desktop minimums and bounded scaling across viewport sizes");
+    for (const float invalid :
+        {0.f, -1.f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()}) {
+        expect(ui::menu_touch_scale(invalid, 1.f, 1224.f) == 1.f && ui::menu_touch_scale(1.f, invalid, 1224.f) == 1.f &&
+                ui::menu_touch_scale(3.f, 1.f, invalid) == 1.f,
+            "invalid scale and viewport observations retain finite minimum touch geometry");
+    }
     auto &layer = ui::Layer::get();
     auto &io = ImGui::GetIO();
     const auto flags = io.ConfigFlags;
@@ -5410,6 +5423,34 @@ void menu_navigation_improvements_contracts(gpu::VulkanRenderer &renderer, const
     renderer.capture_window(sandbox / "menu-navigation-update.bmp");
     frame();
     frame();
+    SDL_SetWindowSize(renderer.window(), 2720, 1224);
+    // The preceding Back tap used the scripted desktop mouse. Restore a real
+    // finger source before asserting the phone-only tab and footer geometry.
+    touch.type = SDL_EVENT_FINGER_DOWN;
+    expect(SDL_PushEvent(&touch), "phone viewport selects finger input");
+    touch.type = SDL_EVENT_FINGER_UP;
+    expect(SDL_PushEvent(&touch), "phone viewport releases its finger");
+    renderer.pump_events();
+    for (int i = 0; i < 4; ++i) frame();
+    expect(layer.input_device() == ui::InputDevice::Touch, "phone geometry is measured with touch input active");
+    auto *phone_panel = ImGui::FindWindowByName("##menu");
+    auto *phone_content = content();
+    const ImGuiWindow *phone_tabs{};
+    for (const auto *candidate : GImGui->Windows)
+        if (std::string_view(candidate->Name).find("##menu/tab_strip") != std::string_view::npos)
+            phone_tabs = candidate;
+    const float phone_row = std::max(std::round(layer.font_size() * 1.9f), layer.touch_target());
+    expect(phone_content && phone_panel && phone_content->Size.y >= phone_row * 5.f &&
+            phone_content->Size.y >= phone_panel->Size.y * .5f,
+        "landscape phone menu reserves at least five option rows and half the panel for its list");
+    expect(phone_tabs && !phone_tabs->ScrollbarX && phone_tabs->ScrollMax.x > 0.f,
+        "phone tabs still scroll horizontally with no visible horizontal scrollbar");
+    renderer.capture_window(sandbox / "menu-phone-landscape.bmp");
+    frame();
+    frame();
+    SDL_SetWindowSize(renderer.window(), 1280, 720);
+    renderer.pump_events();
+    for (int i = 0; i < 4; ++i) frame();
     // The header close action resumes directly, including from a child screen.
     expect(focus("Layered Armor"), "Layered Armor parent row is restored after Back");
     press_key(ImGuiKey_Space);
@@ -5530,7 +5571,7 @@ void footer_readability_contracts(gpu::VulkanRenderer &renderer, const std::file
     io.ConfigFlags = flags;
 }
 
-void tab_drag_contracts(gpu::VulkanRenderer &renderer) {
+void tab_drag_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::path &sandbox) {
     auto &layer = ui::Layer::get();
     layer.set_interactive(true);
     ScriptedUiMouse mouse(renderer.window());
@@ -5580,27 +5621,68 @@ void tab_drag_contracts(gpu::VulkanRenderer &renderer) {
     selected = 0;
     frame();
     frame();
-    if (strip) {
-        const auto at = ImVec2{strip->Pos.x + strip->Size.x + layer.font_size() * .8f,
-            strip->Pos.y + std::max(layer.font_size() * 1.9f, layer.comfortable() ? layer.touch_target() : 0.f) * .5f};
-        mouse.move(at);
-        frame();
-        mouse.button(true);
-        frame();
-        mouse.button(false);
-        frame();
-        frame();
-    }
-    expect(strip && strip->Scroll.x > 0 && selected == 0,
-        "the visible next arrow scrolls narrow tabs without selecting a different section");
     int old_width{}, old_height{};
     SDL_GetWindowSize(renderer.window(), &old_width, &old_height);
     SDL_SetWindowSize(renderer.window(), 1600, 900);
     renderer.pump_events();
-    frame();
-    frame();
-    frame();
-    expect(strip && strip->ScrollMax.x < 1.f, "all seven tabs fit a wide window without forced horizontal scrolling");
+    for (const auto device : {ui::InputDevice::Keyboard, ui::InputDevice::Touch}) {
+        SDL_Event event{};
+        event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+        event.button.windowID = SDL_GetWindowID(renderer.window());
+        event.button.which = device == ui::InputDevice::Touch ? SDL_TOUCH_MOUSEID : gpu::kScriptedMouse;
+        event.button.button = SDL_BUTTON_LEFT;
+        event.button.down = true;
+        event.button.x = event.button.y = -100.f;
+        SDL_PushEvent(&event);
+        event.type = SDL_EVENT_MOUSE_BUTTON_UP;
+        event.button.down = false;
+        SDL_PushEvent(&event);
+        renderer.pump_events();
+        frame();
+        frame();
+        frame();
+        const auto *panel = ImGui::FindWindowByName("##drag-tabs");
+        expect(layer.input_device() == device, "compact menu fixture selects physical and touch input");
+        const float margin = std::round(std::min(io.DisplaySize.x, io.DisplaySize.y) * .03f);
+        const float expected_width = std::min(io.DisplaySize.x - 2.f * margin, layer.font_size() * 46.f);
+        expect(panel && std::abs(panel->Size.x - expected_width) <= 1.f &&
+                std::abs(panel->Pos.x + panel->Size.x * .5f - io.DisplaySize.x * .5f) <= 1.f,
+            "wide mouse and touch menus retain the centered width limit instead of filling the screen");
+        expect(strip && strip->ScrollMax.x > 0.f,
+            "seven tabs retain their original scrollable layout in wide mouse and touch menus");
+        expect(strip && (device == ui::InputDevice::Touch ? !strip->ScrollbarX : strip->ScrollbarX),
+            "touch tabs reclaim scrollbar height while physical input retains its scrollbar");
+        if (panel && strip) {
+            const float arrow =
+                device == ui::InputDevice::Touch ? std::max(layer.font_size() * 1.9f, layer.touch_target()) : 0.f;
+            const float cap_space = strip->Pos.x - panel->WorkRect.Min.x;
+            expect(device != ui::InputDevice::Touch || std::abs(cap_space - arrow) < 1.f,
+                "touch swipe arrows occupy the space beside the tab strip");
+            if (device == ui::InputDevice::Touch) {
+                const ImVec2 at{strip->Pos.x + strip->Size.x + arrow * .5f, strip->Pos.y + arrow * .5f};
+                mouse.move(at);
+                frame();
+                mouse.button(true);
+                frame();
+                mouse.button(false);
+                frame();
+                frame();
+                expect(strip->Scroll.x > 0.f && selected == 0,
+                    "touch next arrow scrolls the tabs without selecting another section");
+            }
+        }
+        renderer.capture_window(
+            sandbox / (device == ui::InputDevice::Touch ? "compact-tabs-touch.bmp" : "compact-tabs-keyboard.bmp"));
+        frame();
+        frame();
+        selected = 6;
+        frame();
+        frame();
+        expect(strip && strip->Scroll.x > 0.f, "compact tabs still reveal the selected last section");
+        selected = 0;
+        frame();
+        frame();
+    }
     SDL_SetWindowSize(renderer.window(), old_width, old_height);
     renderer.pump_events();
     io.AddMouseSourceEvent(ImGuiMouseSource_Mouse);
@@ -5662,10 +5744,11 @@ void touch_menu_footer_contracts(gpu::VulkanRenderer &renderer, const std::files
         for (const auto *candidate : GImGui->Windows)
             if (std::string_view(candidate->Name).find("##menu/tab_strip") != std::string_view::npos) strip = candidate;
         if (!window || !strip) return false;
-        const float arrow = strip->ScrollMax.x > 0.f
+        const float arrow = layer.input_device() == ui::InputDevice::Touch && strip->ScrollMax.x > 0.f
             ? std::max(layer.font_size() * 1.9f, layer.comfortable() ? layer.touch_target() : 0.f)
             : 0.f;
-        return std::abs(strip->Pos.x - window->WorkRect.Min.x - arrow) < 1.0f &&
+        return layer.input_device() == ui::InputDevice::Touch &&
+            std::abs(strip->Pos.x - window->WorkRect.Min.x - arrow) < 1.0f &&
             std::abs(strip->Size.x - window->WorkRect.GetWidth() + arrow * 2.f) < 1.0f;
     };
     keyboard();
@@ -7499,6 +7582,7 @@ int run_contracts(int scripts) {
             expect(!SDL_PushEvent(&physical), "physical pointer cannot replace scripted touch coordinates");
         }
         render_contracts(renderer);
+        tab_drag_contracts(renderer, sandbox);
         touch_menu_footer_contracts(renderer, sandbox);
         hud_editor_contracts(renderer);
         hud_gamepad_contracts(renderer);
@@ -7993,7 +8077,7 @@ int run_contracts(int scripts) {
     file_browser_boundary_contracts(renderer, sandbox);
     focused_widget_contracts(renderer);
     font_menu_contracts(renderer, sandbox);
-    tab_drag_contracts(renderer);
+    tab_drag_contracts(renderer, sandbox);
     menu_contracts(renderer, fixture.runtime);
     setup_screen_contracts(renderer, sandbox);
     texture_pack_screen_contracts(renderer, sandbox);

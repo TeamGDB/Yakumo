@@ -28,6 +28,8 @@ inline constexpr ImU32 kGood = IM_COL32(150, 196, 120, 255);
 inline constexpr ImU32 kTrack = IM_COL32(255, 240, 210, 36);
 } // namespace colors
 
+// Touch sizes in ImGui coordinates, bounded by the available window height.
+float menu_touch_scale(float display_scale, float framebuffer_scale, float window_height);
 ImGuiStyle make_style(float scale, float font_size);
 
 // The panel every screen sits in, centred in the window: title and optional

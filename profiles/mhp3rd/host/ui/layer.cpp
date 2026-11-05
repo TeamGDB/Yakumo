@@ -487,7 +487,7 @@ void Layer::apply_theme() {
     // About 27 px on a Steam Deck's 800 lines, 18 px in the default 544-line
     // window, growing with larger windows.
     const float display_scale = SDL_GetWindowDisplayScale(renderer_->window());
-    density_ = std::isfinite(display_scale) && display_scale > 0.0f ? std::clamp(display_scale, 1.0f, 4.0f) : 1.0f;
+    density_ = menu_touch_scale(display_scale, io.DisplayFramebufferScale.y, io.DisplaySize.y);
     const char *compact = std::getenv("MHP3RD_MENU_COMFORT");
     if (compact && std::string_view(compact) == "0") comfortable_ = false;
     const float minimum = comfortable_ ? 16.0f * density_ : 16.0f;
