@@ -5098,7 +5098,480 @@ void setup_screen_contracts(gpu::VulkanRenderer &renderer, const std::filesystem
     layer.set_interactive(false);
 }
 
-void tab_drag_contracts(gpu::VulkanRenderer &renderer) {
+void menu_touch_widget_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::path &sandbox) {
+    expect(std::abs(ui::menu_touch_scale(3.f, 1.f, 1224.f) - 1.53f) < .001f,
+        "phone touch sizes are bounded by usable height instead of raw display DPI");
+    expect(ui::menu_touch_scale(2.f, 2.f, 900.f) == 1.f,
+        "logical high-DPI windows do not apply framebuffer density twice");
+    expect(ui::menu_touch_scale(1.f, 1.f, 544.f) == 1.f && ui::menu_touch_scale(4.f, 1.f, 800.f) == 1.f &&
+            ui::menu_touch_scale(4.f, 1.f, 1600.f) == 2.f && ui::menu_touch_scale(20.f, 1.f, 4000.f) == 4.f,
+        "touch geometry keeps desktop minimums and bounded scaling across viewport sizes");
+    for (const float invalid :
+        {0.f, -1.f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()}) {
+        expect(ui::menu_touch_scale(invalid, 1.f, 1224.f) == 1.f && ui::menu_touch_scale(1.f, invalid, 1224.f) == 1.f &&
+                ui::menu_touch_scale(3.f, 1.f, invalid) == 1.f,
+            "invalid scale and viewport observations retain finite minimum touch geometry");
+    }
+    auto &layer = ui::Layer::get();
+    auto &io = ImGui::GetIO();
+    const auto flags = io.ConfigFlags;
+    io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+    int old_width{}, old_height{};
+    SDL_GetWindowSize(renderer.window(), &old_width, &old_height);
+    SDL_SetWindowSize(renderer.window(), 960, 544);
+    renderer.pump_events();
+    IsolatedTouchPointer isolate;
+    ScriptedUiMouse mouse(renderer.window());
+    layer.set_interactive(true);
+    ui::enable_context_help(true);
+    int value = 40, activations = 0;
+    bool reset_scroll = false;
+    ImRect slider_rect;
+    ImGuiWindow *content{};
+    auto frame = [&] {
+        mouse.prepare_frame();
+        layer.begin_frame();
+        io.DeltaTime = 1.f / 60.f;
+        ImGui::SetNextWindowPos({10, 10}, ImGuiCond_Always);
+        ImGui::SetNextWindowSize({640, 490}, ImGuiCond_Always);
+        ImGui::Begin("##touch-widget-improvements", nullptr, ImGuiWindowFlags_NoDecoration);
+        ui::begin_content(true);
+        content = ImGui::GetCurrentWindow();
+        if (reset_scroll) {
+            ui::stop_scroll_motion();
+            ImGui::SetScrollY(0);
+        }
+        const auto at = ImGui::GetCursorScreenPos();
+        const float width = ImGui::GetContentRegionAvail().x;
+        ui::slider_row("Touch Volume", value, 0, 100, 5, "%d%%", {false, {}, "Public volume help."});
+        slider_rect = {at, {at.x + width, at.y + std::max(layer.font_size() * 1.9f, layer.touch_target())}};
+        for (int i = 0; i < 16; ++i) {
+            const auto label = "Public row " + std::to_string(i);
+            if (ui::button_row(label.c_str())) ++activations;
+        }
+        ui::begin_footer();
+        ui::end_panel();
+        layer.end_frame();
+        renderer.present_ui(false);
+    };
+    auto settle = [&] {
+        for (int i = 0; i < 16; ++i) {
+            frame();
+            if (GImGui->InputEventsQueue.empty()) break;
+        }
+        frame();
+    };
+    SDL_Event touch{};
+    touch.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    touch.button.windowID = SDL_GetWindowID(renderer.window());
+    touch.button.which = SDL_TOUCH_MOUSEID;
+    touch.button.button = SDL_BUTTON_LEFT;
+    touch.button.down = true;
+    touch.button.x = touch.button.y = -100;
+    SDL_PushEvent(&touch);
+    touch.type = SDL_EVENT_MOUSE_BUTTON_UP;
+    touch.button.down = false;
+    SDL_PushEvent(&touch);
+    renderer.pump_events();
+    settle();
+    expect(layer.comfortable() && ImGui::GetStyle().ScrollbarSize >= 20.f &&
+            slider_rect.GetHeight() >= layer.touch_target(),
+        "touch uses larger rows and a visible scrollbar with a substantial minimum thumb");
+    auto point = [&](ImVec2 at) {
+        io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
+        io.AddMousePosEvent(at.x, at.y);
+        settle();
+    };
+    auto press = [&](bool down) {
+        io.AddMouseSourceEvent(ImGuiMouseSource_TouchScreen);
+        io.AddMouseButtonEvent(0, down);
+        settle();
+    };
+    const auto target = [&] { return ImVec2{slider_rect.Max.x - layer.font_size() * 7.f, slider_rect.GetCenter().y}; };
+    ImVec2 at = target();
+    point(at);
+    press(true);
+    expect(value == 40, "a touch press waits for gesture direction before editing the slider");
+    point({at.x, at.y - 80});
+    expect(value == 40 && content && content->Scroll.y > 0.f,
+        "vertical swipe starting on a slider scrolls without changing its value");
+    press(false);
+    const float released = content ? content->Scroll.y : 0;
+    for (int i = 0; i < 8; ++i) frame();
+    expect(content && content->Scroll.y >= released && content->Scroll.y <= content->ScrollMax.y && activations == 0,
+        "released touch scrolling remains bounded and never activates crossed rows");
+    for (int i = 0; i < 100; ++i) frame();
+    const float stopped = content ? content->Scroll.y : 0;
+    for (int i = 0; i < 8; ++i) frame();
+    expect(content && std::abs(content->Scroll.y - stopped) < 1.f, "scroll momentum settles without a permanent loop");
+    reset_scroll = true;
+    frame();
+    frame();
+    reset_scroll = false;
+    at = target();
+    point(at);
+    press(true);
+    point({at.x + 75, at.y});
+    expect(value > 40 && content && content->Scroll.y == 0.f,
+        "horizontal touch movement edits a slider while keeping vertical scroll stationary");
+    press(false);
+    const int horizontal = value;
+    for (int i = 0; i < 8; ++i) frame();
+    expect(value == horizontal, "a released slider has no delayed value changes");
+    expect(ui::setting_help_width({false, {}, "Public volume help."}) == 0.f && !ui::context_help_open(),
+        "ordinary described settings reserve no information button or empty right column");
+    const auto scrollbar = ImGui::GetStyle().ScrollbarSize;
+    SDL_Event key{};
+    key.type = SDL_EVENT_KEY_DOWN;
+    key.key.windowID = SDL_GetWindowID(renderer.window());
+    key.key.scancode = SDL_SCANCODE_F10;
+    key.key.key = SDLK_F10;
+    key.key.down = true;
+    SDL_PushEvent(&key);
+    key.type = SDL_EVENT_KEY_UP;
+    key.key.down = false;
+    SDL_PushEvent(&key);
+    renderer.pump_events();
+    settle();
+    expect(layer.comfortable() && ImGui::GetStyle().ScrollbarSize == scrollbar,
+        "switching back to keyboard hints does not resize an open touch interface");
+    ui::enable_context_help(false);
+    layer.set_interactive(false);
+    SDL_SetWindowSize(renderer.window(), old_width, old_height);
+    renderer.pump_events();
+    io.ConfigFlags = flags;
+}
+
+void menu_navigation_improvements_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::path &sandbox) {
+    auto &layer = ui::Layer::get();
+    auto &io = ImGui::GetIO();
+    const auto flags = io.ConfigFlags;
+    io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+    int old_width{}, old_height{};
+    SDL_GetWindowSize(renderer.window(), &old_width, &old_height);
+    SDL_SetWindowSize(renderer.window(), 1280, 720);
+    renderer.pump_events();
+    IsolatedTouchPointer isolate;
+    ScriptedUiMouse mouse(renderer.window());
+    ui::open_menu_over_game();
+    auto frame = [&] {
+        mouse.prepare_frame();
+        ui::draw_over_game();
+        renderer.present_ui(true);
+    };
+    auto press_key = [&](ImGuiKey key) {
+        io.AddKeyEvent(key, true);
+        frame();
+        io.AddKeyEvent(key, false);
+        frame();
+        frame();
+    };
+    auto content = [&]() -> ImGuiWindow * {
+        for (auto *w : GImGui->Windows)
+            if (std::string_view(w->Name).find("##menu/content") != std::string_view::npos) return w;
+        return nullptr;
+    };
+    auto focus = [&](const char *label) {
+        auto *w = content();
+        if (!w) return false;
+        ImGui::FocusWindow(w);
+        ImGui::SetFocusID(w->GetID(label), w);
+        frame();
+        return GImGui->NavId == w->GetID(label) && GImGui->NavIdIsAlive;
+    };
+    auto select_page = [&](const char *label) {
+        for (int i = 0; i < 8; ++i) {
+            if (focus(label)) return true;
+            press_key(ImGuiKey_W);
+        }
+        return false;
+    };
+    frame();
+    frame();
+    expect(select_page("Resolution"), "navigation fixture finds the Video page by its real setting");
+    auto *w = content();
+    const float requested = w ? std::min(100.f, w->ScrollMax.y * .4f) : 0.f;
+    if (w) ImGui::SetScrollY(w, requested);
+    frame();
+    frame();
+    const float remembered = w ? w->Scroll.y : 0.f;
+    press_key(ImGuiKey_W);
+    press_key(ImGuiKey_Q);
+    frame();
+    frame();
+    expect(w && remembered > 0.f && std::abs(w->Scroll.y - remembered) < 1.f,
+        "returning to a tab restores that tab's own scroll instead of jumping to the top");
+    expect(select_page("Master Volume"), "navigation fixture finds the Audio page");
+    const auto volume = settings::current().volume;
+    press_key(ImGuiKey_F1);
+    expect(!ui::context_help_open() && settings::current().volume == volume,
+        "ordinary Audio rows do not open a duplicate help dialog");
+    expect(select_page("Free Camera"), "navigation fixture finds the sole contextual guide");
+    const auto free_camera = settings::current().free_camera;
+    press_key(ImGuiKey_F1);
+    expect(ui::context_help_open() && settings::current().free_camera == free_camera,
+        "Free Camera opens its extended guide without toggling the setting");
+    const auto guide_path = sandbox / "free-camera-guide.txt";
+    {
+        UiTextLog log(guide_path);
+        frame();
+    }
+    std::ifstream guide_file(guide_path);
+    const std::string guide{std::istreambuf_iterator<char>(guide_file), std::istreambuf_iterator<char>()};
+    for (const auto *label : {"On and Off", "Fly", "Look", "Faster, Slower", "Change Speed", "Photo Mode",
+             "Step One Frame", "Back to the Game's Camera", "Screenshot"})
+        expect(
+            guide.find(label) != std::string::npos, "Free Camera guide contains every former inline control section");
+    renderer.capture_window(sandbox / "free-camera-help.bmp");
+    frame();
+    frame();
+    const auto active_tab = [&] {
+        for (auto *window : GImGui->Windows)
+            if (std::string_view(window->Name).find("##menu/tab_strip") != std::string_view::npos)
+                return window->StateStorage.GetInt(window->GetID("previous_tab"), -1);
+        return -1;
+    };
+    press_key(ImGuiKey_W);
+    expect(active_tab() == 4, "help blocks the next-tab shortcut");
+    press_key(ImGuiKey_Q);
+    expect(active_tab() == 4 && ui::context_help_open() && settings::current().free_camera == free_camera,
+        "help blocks the previous-tab shortcut and leaves Free Camera unchanged");
+    auto *help_window = ImGui::FindWindowByName("Setting Help##context_help");
+    expect(help_window && help_window->ScrollMax.y == 0.f,
+        "a long Free Camera guide scrolls its body while keeping Close fixed");
+    if (help_window) {
+        ImGui::FocusWindow(help_window);
+        ImGui::SetFocusID(help_window->GetID("Close##help_close"), help_window);
+        frame();
+        auto button = help_window->NavRectRel[ImGuiNavLayer_Main];
+        button.Translate(help_window->Pos);
+        expect(button.Max.y <= help_window->InnerRect.Max.y && button.Min.y >= help_window->InnerRect.Min.y,
+            "the guide Close button remains inside the modal with overflowing instructions");
+        mouse.move(button.GetCenter());
+        frame();
+        mouse.button(true);
+        frame();
+        mouse.button(false);
+        frame();
+        frame();
+        expect(!ui::context_help_open() && ui::menu_over_game(), "the guide Close button dismisses only the guide");
+    }
+    expect(focus("Free Camera"), "the guide returns focus to its setting");
+    press_key(ImGuiKey_F1);
+    // Back dismisses only help; the menu remains open on its original page.
+    layer.request_back();
+    frame();
+    frame();
+    expect(!ui::context_help_open() && ui::menu_over_game() && focus("Free Camera"),
+        "Back dismisses the guide without leaving its parent page");
+    expect(focus("Free Camera Speed"), "the adjacent speed setting is present");
+    press_key(ImGuiKey_F1);
+    expect(!ui::context_help_open(), "Free Camera Speed has no duplicate information button");
+    const auto inline_path = sandbox / "free-camera-inline.txt";
+    settings::current().free_camera = true;
+    {
+        UiTextLog log(inline_path);
+        frame();
+    }
+    settings::current().free_camera = free_camera;
+    std::ifstream inline_file(inline_path);
+    const std::string inline_text{std::istreambuf_iterator<char>(inline_file), std::istreambuf_iterator<char>()};
+    expect(inline_text.find("W A S D") == std::string::npos && inline_text.find("On and off") == std::string::npos,
+        "enabling Free Camera does not duplicate the control guide among the options");
+    expect(select_page("Layered Armor"), "navigation fixture finds the QoL page");
+    press_key(ImGuiKey_Space);
+    frame();
+    frame();
+    expect(ui::layered_armor_screen_open() && ui::layered_armor_screen_path() == "Layered Armor",
+        "Layered Armor exposes a descriptive child-screen path");
+    SDL_Event touch{};
+    touch.type = SDL_EVENT_FINGER_DOWN;
+    touch.tfinger.windowID = SDL_GetWindowID(renderer.window());
+    touch.tfinger.touchID = 1;
+    touch.tfinger.fingerID = 99;
+    touch.tfinger.x = touch.tfinger.y = -1;
+    SDL_PushEvent(&touch);
+    touch.type = SDL_EVENT_FINGER_UP;
+    SDL_PushEvent(&touch);
+    renderer.pump_events();
+    frame();
+    frame();
+    renderer.capture_window(sandbox / "menu-child-navigation.bmp");
+    frame();
+    frame();
+    auto *parent = ImGui::FindWindowByName("##menu");
+    if (parent) {
+        ImGui::FocusWindow(parent);
+        ImGui::SetFocusID(parent->GetID("Back##touch_back_menu"), parent);
+    }
+    frame();
+    expect(parent && GImGui->NavId == parent->GetID("Back##touch_back_menu") && GImGui->NavIdIsAlive,
+        "a touch submenu presents Back instead of Close Menu");
+    if (parent) {
+        auto button = parent->NavRectRel[ImGuiNavLayer_Main];
+        button.Translate(parent->Pos);
+        mouse.move(button.GetCenter());
+        frame();
+        mouse.button(true);
+        frame();
+        mouse.button(false);
+        frame();
+        frame();
+    }
+    expect(!ui::layered_armor_screen_open() && ui::menu_over_game(),
+        "the shared touch Back request returns to QoL without resuming the game");
+    renderer.capture_window(sandbox / "menu-navigation-update.bmp");
+    frame();
+    frame();
+    SDL_SetWindowSize(renderer.window(), 2720, 1224);
+    // The preceding Back tap used the scripted desktop mouse. Restore a real
+    // finger source before asserting the phone-only tab and footer geometry.
+    touch.type = SDL_EVENT_FINGER_DOWN;
+    expect(SDL_PushEvent(&touch), "phone viewport selects finger input");
+    touch.type = SDL_EVENT_FINGER_UP;
+    expect(SDL_PushEvent(&touch), "phone viewport releases its finger");
+    renderer.pump_events();
+    for (int i = 0; i < 4; ++i) frame();
+    expect(layer.input_device() == ui::InputDevice::Touch, "phone geometry is measured with touch input active");
+    auto *phone_panel = ImGui::FindWindowByName("##menu");
+    auto *phone_content = content();
+    const ImGuiWindow *phone_tabs{};
+    for (const auto *candidate : GImGui->Windows)
+        if (std::string_view(candidate->Name).find("##menu/tab_strip") != std::string_view::npos)
+            phone_tabs = candidate;
+    const float phone_row = std::max(std::round(layer.font_size() * 1.9f), layer.touch_target());
+    expect(phone_content && phone_panel && phone_content->Size.y >= phone_row * 5.f &&
+            phone_content->Size.y >= phone_panel->Size.y * .5f,
+        "landscape phone menu reserves at least five option rows and half the panel for its list");
+    expect(phone_tabs && !phone_tabs->ScrollbarX && phone_tabs->ScrollMax.x > 0.f,
+        "phone tabs still scroll horizontally with no visible horizontal scrollbar");
+    renderer.capture_window(sandbox / "menu-phone-landscape.bmp");
+    frame();
+    frame();
+    SDL_SetWindowSize(renderer.window(), 1280, 720);
+    renderer.pump_events();
+    for (int i = 0; i < 4; ++i) frame();
+    // The header close action resumes directly, including from a child screen.
+    expect(focus("Layered Armor"), "Layered Armor parent row is restored after Back");
+    press_key(ImGuiKey_Space);
+    frame();
+    auto *panel = ImGui::FindWindowByName("##menu");
+    if (panel) {
+        const float side = std::max(layer.font_size() * 1.9f, layer.comfortable() ? layer.touch_target() : 0.f);
+        const ImVec2 at{panel->WorkRect.Max.x - side * .5f, panel->WorkRect.Min.y + side * .5f};
+        mouse.move(at);
+        frame();
+        mouse.button(true);
+        frame();
+        mouse.button(false);
+        frame();
+        frame();
+    }
+    expect(!ui::menu_over_game() && !ui::take_quit_request(),
+        "header close resumes from a submenu without quitting the game");
+    if (ui::menu_over_game()) {
+        layer.request_menu_close();
+        frame();
+    }
+    SDL_SetWindowSize(renderer.window(), old_width, old_height);
+    renderer.pump_events();
+    io.ConfigFlags = flags;
+}
+
+void footer_readability_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::path &sandbox) {
+    auto &layer = ui::Layer::get();
+    auto &io = ImGui::GetIO();
+    const auto flags = io.ConfigFlags;
+    io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+    int old_width{}, old_height{};
+    SDL_GetWindowSize(renderer.window(), &old_width, &old_height);
+    IsolatedTouchPointer isolate;
+    ScriptedUiMouse mouse(renderer.window());
+    SDL_Event key{};
+    key.type = SDL_EVENT_KEY_DOWN;
+    key.key.windowID = SDL_GetWindowID(renderer.window());
+    key.key.key = SDLK_F10;
+    key.key.scancode = SDL_SCANCODE_F10;
+    key.key.down = true;
+    SDL_PushEvent(&key);
+    key.type = SDL_EVENT_KEY_UP;
+    key.key.down = false;
+    SDL_PushEvent(&key);
+    renderer.pump_events();
+    layer.set_interactive(true);
+    const std::string description =
+        "This public description is deliberately long. It explains a setting, its limits and what happens when "
+        "it changes. The footer must wrap it at a readable size and keep every word accessible without covering "
+        "the actions below. Scroll to read this final sentence. END OF PUBLIC DESCRIPTION.";
+    ImGuiWindow *footer{}, *panel{};
+    ImRect hint_bounds;
+    bool publish = true;
+    auto frame = [&] {
+        mouse.prepare_frame();
+        layer.begin_frame();
+        io.DeltaTime = 1.f / 60.f;
+        ui::begin_panel("##footer-readability", "Footer", "", true);
+        panel = ImGui::GetCurrentWindow();
+        ui::begin_content();
+        ui::button_row("Public Setting");
+        if (publish) layer.set_description(description);
+        ui::begin_footer();
+        for (auto *window : GImGui->Windows)
+            if (std::string_view(window->Name).find("##footer-readability/footer_description") !=
+                std::string_view::npos)
+                footer = window;
+        const int first_vertex = panel->DrawList->VtxBuffer.Size;
+        ui::hints({{ui::Control::Confirm, "Select"}, {ui::Control::Change, "Change"}, {ui::Control::Back, "Back"},
+            {ui::Control::Tabs, "Section"}, {ui::Control::Menu, "Resume"}});
+        hint_bounds = ImRect{ImVec2{FLT_MAX, FLT_MAX}, ImVec2{-FLT_MAX, -FLT_MAX}};
+        for (int i = first_vertex; i < panel->DrawList->VtxBuffer.Size; ++i)
+            hint_bounds.Add(panel->DrawList->VtxBuffer[i].pos);
+        ui::end_panel();
+        layer.end_frame();
+        renderer.present_ui(false);
+    };
+    for (const auto size : {ImVec2{480, 272}, ImVec2{360, 800}, ImVec2{1280, 720}}) {
+        SDL_SetWindowSize(renderer.window(), static_cast<int>(size.x), static_cast<int>(size.y));
+        renderer.pump_events();
+        for (int i = 0; i < 5; ++i) frame();
+        expect(footer && panel && hint_bounds.Min.x >= panel->InnerRect.Min.x - 1.f &&
+                hint_bounds.Max.x <= panel->InnerRect.Max.x + 1.f &&
+                hint_bounds.Min.y >= footer->Pos.y + footer->Size.y - 1.f &&
+                hint_bounds.Max.y <= panel->InnerRect.Max.y + 1.f && panel->ScrollMax.y == 0.f,
+            "wrapped hint groups stay inside the panel and below the description in short, portrait and wide windows");
+        if (size.x == 360) {
+            expect(footer && footer->ScrollMax.y > 0.f, "a long description has real scrolling in a narrow footer");
+            if (footer) {
+                mouse.move(footer->InnerRect.GetCenter());
+                frame();
+                frame();
+                ImGui::FocusWindow(footer);
+                expect(GImGui->NavWindow == footer, "reading a description focuses its window without an item ID");
+                publish = false;
+                io.AddMouseWheelEvent(0.f, -1.f);
+                frame();
+                frame();
+                expect(footer->Scroll.y > 0.f && footer->ContentSize.y > footer->InnerRect.GetHeight(),
+                    "mouse scrolling keeps the complete description accessible while reading it");
+                publish = true;
+            }
+            renderer.capture_window(sandbox / "footer-portrait.bmp");
+            frame();
+            frame();
+        }
+        if (size.x == 1280) {
+            renderer.capture_window(sandbox / "footer-wide.bmp");
+            frame();
+            frame();
+        }
+    }
+    layer.set_interactive(false);
+    SDL_SetWindowSize(renderer.window(), old_width, old_height);
+    renderer.pump_events();
+    io.ConfigFlags = flags;
+}
+
+void tab_drag_contracts(gpu::VulkanRenderer &renderer, const std::filesystem::path &sandbox) {
     auto &layer = ui::Layer::get();
     layer.set_interactive(true);
     ScriptedUiMouse mouse(renderer.window());
@@ -5145,6 +5618,73 @@ void tab_drag_contracts(gpu::VulkanRenderer &renderer) {
     frame();
     frame();
     expect(strip && strip->Scroll.x > 0, "selection changes still reveal the last tab");
+    selected = 0;
+    frame();
+    frame();
+    int old_width{}, old_height{};
+    SDL_GetWindowSize(renderer.window(), &old_width, &old_height);
+    SDL_SetWindowSize(renderer.window(), 1600, 900);
+    renderer.pump_events();
+    for (const auto device : {ui::InputDevice::Keyboard, ui::InputDevice::Touch}) {
+        SDL_Event event{};
+        event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+        event.button.windowID = SDL_GetWindowID(renderer.window());
+        event.button.which = device == ui::InputDevice::Touch ? SDL_TOUCH_MOUSEID : gpu::kScriptedMouse;
+        event.button.button = SDL_BUTTON_LEFT;
+        event.button.down = true;
+        event.button.x = event.button.y = -100.f;
+        SDL_PushEvent(&event);
+        event.type = SDL_EVENT_MOUSE_BUTTON_UP;
+        event.button.down = false;
+        SDL_PushEvent(&event);
+        renderer.pump_events();
+        frame();
+        frame();
+        frame();
+        const auto *panel = ImGui::FindWindowByName("##drag-tabs");
+        expect(layer.input_device() == device, "compact menu fixture selects physical and touch input");
+        const float margin = std::round(std::min(io.DisplaySize.x, io.DisplaySize.y) * .03f);
+        const float expected_width = std::min(io.DisplaySize.x - 2.f * margin, layer.font_size() * 46.f);
+        expect(panel && std::abs(panel->Size.x - expected_width) <= 1.f &&
+                std::abs(panel->Pos.x + panel->Size.x * .5f - io.DisplaySize.x * .5f) <= 1.f,
+            "wide mouse and touch menus retain the centered width limit instead of filling the screen");
+        expect(strip && strip->ScrollMax.x > 0.f,
+            "seven tabs retain their original scrollable layout in wide mouse and touch menus");
+        expect(strip && (device == ui::InputDevice::Touch ? !strip->ScrollbarX : strip->ScrollbarX),
+            "touch tabs reclaim scrollbar height while physical input retains its scrollbar");
+        if (panel && strip) {
+            const float arrow =
+                device == ui::InputDevice::Touch ? std::max(layer.font_size() * 1.9f, layer.touch_target()) : 0.f;
+            const float cap_space = strip->Pos.x - panel->WorkRect.Min.x;
+            expect(device != ui::InputDevice::Touch || std::abs(cap_space - arrow) < 1.f,
+                "touch swipe arrows occupy the space beside the tab strip");
+            if (device == ui::InputDevice::Touch) {
+                const ImVec2 at{strip->Pos.x + strip->Size.x + arrow * .5f, strip->Pos.y + arrow * .5f};
+                mouse.move(at);
+                frame();
+                mouse.button(true);
+                frame();
+                mouse.button(false);
+                frame();
+                frame();
+                expect(strip->Scroll.x > 0.f && selected == 0,
+                    "touch next arrow scrolls the tabs without selecting another section");
+            }
+        }
+        renderer.capture_window(
+            sandbox / (device == ui::InputDevice::Touch ? "compact-tabs-touch.bmp" : "compact-tabs-keyboard.bmp"));
+        frame();
+        frame();
+        selected = 6;
+        frame();
+        frame();
+        expect(strip && strip->Scroll.x > 0.f, "compact tabs still reveal the selected last section");
+        selected = 0;
+        frame();
+        frame();
+    }
+    SDL_SetWindowSize(renderer.window(), old_width, old_height);
+    renderer.pump_events();
     io.AddMouseSourceEvent(ImGuiMouseSource_Mouse);
     layer.set_interactive(false);
 }
@@ -5204,8 +5744,12 @@ void touch_menu_footer_contracts(gpu::VulkanRenderer &renderer, const std::files
         for (const auto *candidate : GImGui->Windows)
             if (std::string_view(candidate->Name).find("##menu/tab_strip") != std::string_view::npos) strip = candidate;
         if (!window || !strip) return false;
-        return std::abs(strip->Pos.x - window->WorkRect.Min.x) < 1.0f &&
-            std::abs(strip->Size.x - window->WorkRect.GetWidth()) < 1.0f;
+        const float arrow = layer.input_device() == ui::InputDevice::Touch && strip->ScrollMax.x > 0.f
+            ? std::max(layer.font_size() * 1.9f, layer.comfortable() ? layer.touch_target() : 0.f)
+            : 0.f;
+        return layer.input_device() == ui::InputDevice::Touch &&
+            std::abs(strip->Pos.x - window->WorkRect.Min.x - arrow) < 1.0f &&
+            std::abs(strip->Size.x - window->WorkRect.GetWidth() + arrow * 2.f) < 1.0f;
     };
     keyboard();
     ui::open_menu_over_game();
@@ -6528,12 +7072,6 @@ void terminal_audio_menu_contracts(gpu::VulkanRenderer &renderer) {
     };
     frame();
     frame();
-    for (int tab = 0; tab < 2; ++tab) {
-        ImGui::GetIO().AddKeyEvent(ImGuiKey_W, true);
-        frame();
-        ImGui::GetIO().AddKeyEvent(ImGuiKey_W, false);
-        frame();
-    }
     auto focus = [&] {
         for (auto *window : ImGui::GetCurrentContext()->Windows)
             if (std::string_view(window->Name).find("##menu/content") != std::string_view::npos) {
@@ -6543,6 +7081,20 @@ void terminal_audio_menu_contracts(gpu::VulkanRenderer &renderer) {
                 ImGui::SetScrollY(window, 0);
             }
     };
+    bool found = false;
+    for (int tab = 0; tab < 8; ++tab) {
+        focus();
+        frame();
+        if (GImGui->NavIdIsAlive && GImGui->NavWindow && GImGui->NavId == GImGui->NavWindow->GetID("Master Volume")) {
+            found = true;
+            break;
+        }
+        ImGui::GetIO().AddKeyEvent(ImGuiKey_W, true);
+        frame();
+        ImGui::GetIO().AddKeyEvent(ImGuiKey_W, false);
+        frame();
+    }
+    expect(found, "terminal Audio fixture finds its real setting independently of the remembered tab");
     focus();
     frame();
     focus();
@@ -7030,10 +7582,14 @@ int run_contracts(int scripts) {
             expect(!SDL_PushEvent(&physical), "physical pointer cannot replace scripted touch coordinates");
         }
         render_contracts(renderer);
+        tab_drag_contracts(renderer, sandbox);
         touch_menu_footer_contracts(renderer, sandbox);
         hud_editor_contracts(renderer);
         hud_gamepad_contracts(renderer);
         touch_editor_contracts(renderer, sandbox);
+        menu_touch_widget_contracts(renderer, sandbox);
+        menu_navigation_improvements_contracts(renderer, sandbox);
+        footer_readability_contracts(renderer, sandbox);
         touch_event_contracts(renderer);
         auto &player = settings::current();
         player.touch_layout = settings::TouchLayout::Psp;
@@ -7521,7 +8077,7 @@ int run_contracts(int scripts) {
     file_browser_boundary_contracts(renderer, sandbox);
     focused_widget_contracts(renderer);
     font_menu_contracts(renderer, sandbox);
-    tab_drag_contracts(renderer);
+    tab_drag_contracts(renderer, sandbox);
     menu_contracts(renderer, fixture.runtime);
     setup_screen_contracts(renderer, sandbox);
     texture_pack_screen_contracts(renderer, sandbox);
@@ -7532,6 +8088,9 @@ int run_contracts(int scripts) {
     hud_editor_contracts(renderer);
     hud_gamepad_contracts(renderer);
     touch_editor_contracts(renderer, sandbox);
+    menu_touch_widget_contracts(renderer, sandbox);
+    menu_navigation_improvements_contracts(renderer, sandbox);
+    footer_readability_contracts(renderer, sandbox);
     touch_event_contracts(renderer);
     scripted_mouse_contracts(renderer);
     virtual_gamepad_contracts(renderer);

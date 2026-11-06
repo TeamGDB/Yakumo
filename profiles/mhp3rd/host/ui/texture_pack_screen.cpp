@@ -695,4 +695,11 @@ void texture_pack_import_tick() {
     tick();
 }
 
+std::string texture_pack_screen_path() {
+    static constexpr const char *names[] = {"", "Import Textures › Choose Folder", "Import Textures › Choose Folder",
+        "Import Textures › Checking", "Import Textures › Review", "Import Textures › Copying", "Remove Texture Pack",
+        "Remove Texture Pack › Removing", "Textures › Result"};
+    return names[static_cast<unsigned>(state().stage)];
+}
+
 } // namespace mhp3rd::ui

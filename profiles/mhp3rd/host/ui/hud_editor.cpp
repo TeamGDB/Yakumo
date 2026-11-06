@@ -224,7 +224,12 @@ void hud_editor_frame(bool back) {
         layout = {};
         settings::save();
     }
-    const bool done = button_row("Done", panel_rows) || back;
+    bool done = back;
+    if (layer.input_device() == InputDevice::Touch) {
+        if (big_button("Back##hud_editor_back", ImGui::GetContentRegionAvail().x, false, panel_rows.disabled))
+            layer.request_back();
+    } else
+        done = button_row("Done", panel_rows) || done;
     // Custom rows use explicit colors, so fade every vertex of the panel.
     if (moving || st.moving)
         for (ImDrawVert &vertex : ImGui::GetWindowDrawList()->VtxBuffer) {

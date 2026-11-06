@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 // The Video page's texture pack import: a folder chosen with the file browser
 // (or dropped on the window), the pack found in it checked and shown beside
 // the installed one, then copied into the data folder on a thread of its own,
@@ -26,5 +28,8 @@ void texture_pack_import_tick();
 // Draws the open screen in place of the page. `back`: the back button was
 // pressed this frame. True while the screen is open.
 bool texture_pack_screen(bool back);
+
+// Current nested screen, empty at the owning tab.
+[[nodiscard]] std::string texture_pack_screen_path();
 
 } // namespace mhp3rd::ui

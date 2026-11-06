@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 // The Layered armor page (game/layered_armor.hpp), opened from the QoL
 // page: the switch, the piece chosen for each armor part, and the list of
 // pieces to choose from, with the game's own names.
@@ -15,5 +17,8 @@ bool layered_armor_screen(bool back);
 
 // Whether the page is open, so back closes it before the menu.
 [[nodiscard]] bool layered_armor_screen_open();
+
+// Current nested screen, empty at the owning tab.
+[[nodiscard]] std::string layered_armor_screen_path();
 
 } // namespace mhp3rd::ui

@@ -221,4 +221,9 @@ bool translation_screen(bool back) {
     return true;
 }
 
+std::string translation_screen_path() {
+    static constexpr const char *names[] = {"", "Translations › Import", "Translations › Result"};
+    return names[static_cast<unsigned>(state().stage)];
+}
+
 } // namespace mhp3rd::ui

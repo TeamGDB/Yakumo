@@ -64,6 +64,15 @@ cmake --build out/ci --config Debug --target psprecomp_test_binaries -j2
 ctest --test-dir out/ci -C Debug --output-on-failure --no-tests=error --timeout 120
 ```
 
+On Windows, run configuration, builds and CTest from the same x64 Visual Studio
+Developer PowerShell or Native Tools command prompt. The runtime contract starts
+a nested CMake compilation of a public synthetic fixture, so it needs the MSVC
+SDK environment (`INCLUDE`, `LIB` and the tool paths) during testing too. Starting
+CTest from an ordinary shell after building in a separate child shell does not
+inherit that environment. The coverage-policy path-escape test uses a real
+directory junction on Windows and a directory symlink on POSIX; Windows does not
+need administrator privileges or Developer Mode for this test.
+
 For suspected vulnerabilities, follow [SECURITY.md](../SECURITY.md) and report privately. Dependabot alerts and security updates cover supported dependency manifests; libraries downloaded by CMake or vendored in the profile still need separate version and advisory checks. Secret scanning and push protection are enabled for this public repository.
 
 ### Native C++ coverage
@@ -573,7 +582,7 @@ shortcuts are diagnostic only.
 
 The font-spacing contracts in `mhp3rd_kernel_hle_tests` use an independently authored narrow glyph with Latin, Cyrillic and Japanese mappings. They verify wider half-width ink, unchanged full-width metrics/line height, cell bounds, bitmap/metric agreement, Sharp Text cell generation and the diagnostic opt-out. Manual comparisons must use the same font, text, internal resolution and game frame.
 
-- Touch menu footer: real SDL finger and touch-emulated mouse events replace the menu's bottom key hints with a bottom-right Close Menu button and hide the tab-switch caps, allowing the tab strip to fill the row. Renderer/UI contracts verify its bounds, cancelled drags, tap-to-resume, and restoration of keyboard/mouse/gamepad hints. The touch UI mode retains a window capture for inspection. Actual Android display and input hardware remain a manual check.
+- Menu navigation and touch geometry: the renderer/UI and touch suites use real SDL fingers, touch-emulated mouse events and synthetic keyboard/pointer input. They check comfortable rows, stable geometry across input-source changes, visible scrollbars, low-window Close Menu bounds, cancelled drags, tap-to-resume, child Back versus whole-menu header close, per-tab scroll restoration, descriptive child paths, the Free Camera-only control guide without toggling the setting, ordinary rows without duplicate help buttons, modal shortcut blocking, vertical-versus-horizontal slider intent and bounded momentum. Density contracts cover framebuffer conversion, phone-height limits and invalid scale observations; a landscape-phone render checks that at least five option rows fit and touch tabs have no horizontal scrollbar. Tab dragging and touch-arrow taps retain the selected section; wide pointer and touch menus retain their centered width limit and scrollable tabs. Footer regressions cover wrapped keyboard hints in short/portrait/wide windows, a long description with real scrolling and preservation while reading it, and separation from the actions below. Captures retain the actual Vulkan-rendered footer, Free Camera guide and menu. Physical Android display scaling, touch feel, rotation and full gameplay remain manual checks. Compare `MHP3RD_MENU_COMFORT=0` and `MHP3RD_MENU_INERTIA=0` when investigating geometry or momentum regressions.
 
 The three `mhp3rd_renderer_plain_alpha_{normal,legacy,refused}_tests` reuse the
 bounded primitive/opacity contracts in forced compatibility mode. They cover

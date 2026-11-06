@@ -24,8 +24,8 @@
     "reason": "Reviewed function/class declarations and aggregate member defaults only; no standalone function body is exempted. Folder staging, JNI transport and menu implementations remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/ui/translation_screen.hpp": {
-    "sha256": "be45fd2586182b46dfe5f08a84e0564c357ffca14dafc5e7e2932124ee5faa85",
-    "reason": "Function declarations and aggregate fields have no standalone LLVM line map; corresponding implementation mappings remain subject to the normal diff gate."
+    "sha256": "e55cdb8c8f28548d5e409e1295357819ac84b2858482ce7e60b0c5a1353040d2",
+    "reason": "Reviewed function declarations and comments only; no executable function body is exempted. Nested menu paths, navigation, context help and touch widget behavior are exercised in renderer/UI contracts; out-of-line implementations retain the normal diff gate."
   },
   "profiles/mhp3rd/host/fonts/game_font.hpp": {
     "sha256": "9223159afa8d5a6a8abd8de9847bdf72bec22c45ee24ecad398ebf6df2ef2e2d",
@@ -36,8 +36,8 @@
     "reason": "Reviewed function/class declarations and aggregate member defaults only; no standalone function body is exempted. Folder staging, JNI transport and menu implementations remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/ui/mods_screen.hpp": {
-    "sha256": "f81cd59c91e5f83e627bcf0327a5535404da18c0202fbc8162b7b3dd68f69b35",
-    "reason": "Reviewed function declarations only; this edit updates a documented menu label. No executable body is exempted. Mod menu implementations and renderer/UI regressions remain subject to the normal diff gate."
+    "sha256": "97759551dd1168a8ef3661dabda2ea4419bc079586be6d91a39c38a11c66b6bd",
+    "reason": "Reviewed function declarations and comments only; no executable function body is exempted. Nested menu paths, navigation, context help and touch widget behavior are exercised in renderer/UI contracts; out-of-line implementations retain the normal diff gate."
   },
   "profiles/mhp3rd/host/ui/touch_editor.hpp": {
     "sha256": "43177edc1f48321d457195b078ca235bcabe3a2d8dac69ac525937bfaca6ca5d",
@@ -48,8 +48,8 @@
     "reason": "Reviewed aggregate direction-mask field only; no executable body is exempted. Action and PSP D-pad drawing is exercised by renderer/touch UI tests and remains subject to the normal diff gate. Live Long Sword availability, bounded transition parsing, window boundaries, cancellation, unknown fallback and real SDL/arrow rendering have synthetic regressions."
   },
   "profiles/mhp3rd/host/ui/layered_armor_screen.hpp": {
-    "sha256": "c154c41c563ca09adbb76ecfe0376247dcf7c2867af6100b1b5a51602573ef96",
-    "reason": "Reviewed function declarations only; these edits document the move from Mods to QoL. No executable body is exempted. Layered armor menu implementations and renderer/UI regressions remain subject to the normal diff gate."
+    "sha256": "61a2f0c3478ed10402ca8a33e514affb10a7036eb4dd97755041e5c970645721",
+    "reason": "Reviewed function declarations and comments only; no executable function body is exempted. Nested menu paths, navigation, context help and touch widget behavior are exercised in renderer/UI contracts; out-of-line implementations retain the normal diff gate."
   },
   "profiles/mhp3rd/host/platform/android_display.hpp": {
     "sha256": "90e5ee597fbc6e1b5f91702c3fc588813a1065be286e1c415b2ec82107336843",
@@ -76,12 +76,12 @@
     "reason": "Reviewed installed-pack removal function declaration only; no executable body is exempted. Removal, rejection and file-preservation behavior is covered by texture-pack and renderer/UI tests and remains subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/ui/texture_pack_screen.hpp": {
-    "sha256": "c0e196012543d20dc76c6f1d1cb8f1d95f1b07d3c12b376d6136485b5491fe2a",
-    "reason": "Reviewed game-data row function declaration only; no executable body is exempted. Confirmation, cancellation and removal through the actual UI are tested and remain subject to the normal diff gate."
+    "sha256": "fb3c02e76f015d3c53fa86f3f76b5178889a9c7aa252d94357f4dc6903606a24",
+    "reason": "Reviewed function declarations and comments only; no executable function body is exempted. Nested menu paths, navigation, context help and touch widget behavior are exercised in renderer/UI contracts; out-of-line implementations retain the normal diff gate."
   },
   "profiles/mhp3rd/host/ui/widgets.hpp": {
-    "sha256": "b8da36c98559426edfcc5d276933983397ff89b512ad836d72df264b89e8e42f",
-    "reason": "Reviewed optional touch-footer parameter declaration and its documentation only; no executable function body is exempted. Actual touch-menu footer bounds, device switching, drag cancellation and tap-to-resume are tested in renderer/UI contracts. Widget and menu implementations remain subject to the normal diff gate."
+    "sha256": "8a4bd1068941cd8a7805074e4515e981c9d3d1aacb7d70c9c46c45e8d681ff50",
+    "reason": "Reviewed function declarations and aggregate fields, including the explicit extended-help string and touch-density sizing declaration; no executable body is exempted. Renderer/UI contracts cover density boundaries, Free Camera help, guide dismissal and scrollable footer/hint layout. Out-of-line implementations retain the normal diff gate."
   },
   "profiles/mhp3rd/host/gpu/game_hud.hpp": {
     "sha256": "a60ac56430a96bb0b205b8001b20dc51d16c67329c87b0efd4c6df592bab8caa",
@@ -146,5 +146,13 @@
   "profiles/mhp3rd/host/ui/touch_icons_data.hpp": {
     "sha256": "a12ca7e4f0cb76bdf67348bc6a8cb1693eddf56e9ef949694c970c0f42519e64",
     "reason": "Reviewed generated declarations and constexpr geometry tables baked only from the original public SVG icon manifests; no executable function body is exempted. Deterministic regeneration and input validation are checked by the public asset suite; drawing code remains subject to the normal diff gate and renderer tests."
+  },
+  "profiles/mhp3rd/host/ui/controllers_screen.hpp": {
+    "sha256": "95384360d261fd72262b2045461788da0e63f53a92bc058856a6dd69a31668e7",
+    "reason": "Reviewed function declarations and comments only; no executable function body is exempted. Nested menu paths, navigation, context help and touch widget behavior are exercised in renderer/UI contracts; out-of-line implementations retain the normal diff gate."
+  },
+  "profiles/mhp3rd/host/ui/save_screen.hpp": {
+    "sha256": "697198ad2975a5c791ad58404863fe0e06af177285b3b257cb78c0441e7433a7",
+    "reason": "Reviewed function declarations and comments only; no executable function body is exempted. Nested menu paths, navigation, context help and touch widget behavior are exercised in renderer/UI contracts; out-of-line implementations retain the normal diff gate."
   }
 }

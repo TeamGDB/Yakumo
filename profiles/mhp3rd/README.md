@@ -584,7 +584,13 @@ The menu's text fields (*Hunter Name*, *Server*, *Nickname*) open the same keybo
 
 ## In-game menu
 
-Drag the top tabs left or right with a mouse or a finger to scroll them. Releasing a drag does not switch tabs; a click does. Q/W and gamepad shoulder buttons still switch sections and reveal the selected tab. When using touch, the Q/W or shoulder-button hints beside the tabs disappear and the tabs use the full row. The bottom button hints give way to a **Close Menu** button at the bottom right. Pressing a keyboard key, mouse button or gamepad control restores its button hints.
+The menu keeps its centered, limited width for both pointer and touch input. Drag the top tabs left or right with a mouse or finger to scroll them. With touch, gold arrows beside the strip indicate available scrolling and can also be tapped; the horizontal scrollbar is hidden. Faded edges indicate tabs beyond the visible area. Releasing a drag does not switch tabs; a click does. Q/W and gamepad shoulder buttons switch sections and reveal the selected tab.
+
+Touch uses larger rows, vertical scrollbars and minimum scroll thumbs, bounded by the available height so high-density phone screens retain room for options. Drag vertically through the option list to scroll; a horizontal drag on a slider changes its value. A touch slider waits for that direction before editing, so scrolling past it does not change the setting. Touch scrolling has bounded momentum, cancelled by a new press or page navigation. Comfortable sizing stays enabled until the menu closes, even when another device restores its button hints. Footer descriptions wrap at a readable size in their own scrollable region. Long text can be read with the mouse wheel, a touch drag or by focusing that region with a gamepad. The key hints below wrap in complete groups when they need another line.
+
+With touch, the tab-switch key caps and bottom key hints disappear. The bottom-right action is **Close Menu** on a main tab and **Back** inside a child screen. Back returns one level; the separate close button in the header closes the whole menu. A path below the tabs identifies the current child screen. The fixed Close Menu or Back action stays reachable in short touch windows.
+
+Only **QoL > Free Camera** has an information button (or F1 while focused). It opens the complete free-camera control guide, including movement, looking, speed, photo mode, frame stepping, reset and current screenshot binds. The guide scrolls while its Close button stays visible. Back dismisses it before returning to the parent menu. Other settings keep their descriptions in the footer.
 
 QoL groups Lock-On, Lock-On Marker and Layered Armor under **Modern Features:**, quest HUD visibility, per-block size and positioning under **HUD Settings:**, Fast Loading under **Quality of Life:**, and Fast-Forward and Fast-Forward Speed under **Singleplayer Only Cheats:**. Free-camera options remain under **Experimental Options:**. The page ends with **Reset to Defaults:** and **Restore QoL Defaults**.
 
@@ -594,7 +600,7 @@ are preserved.
 
 Esc, or L3+R3 on a gamepad, opens Yakumo's menu over the game; the same again, back at its top level or Start closes it. Esc never quits the game: Steam's desktop controller layout on a Steam Deck sends Esc with the B button, so an Esc that arrives together with a gamepad button is ignored.
 
-The menu opens where it was last closed: the same page, scrolled as it was, with the same row focused. The page is also kept for the next start (`ui.menu_tab` in `settings.ini`); the scroll position and the row only for the session. When that row is not there any more, the page opens at its top.
+The menu opens where it was last closed. Each tab and child screen remembers its own scroll position and focused row for the session, including when returning with Back. The last tab is also kept for the next start (`ui.menu_tab` in `settings.ini`). When the remembered row is no longer present, that page opens at its top.
 
 BGM Volume and SFX Volume edit the same eight levels as the original game's Options menu; changing either menu is reflected in the other. They become available once the game initializes its sound settings. BGM changes also apply to the current music stream. Save through the game to persist these levels; they are not separate `settings.ini` overrides. Master Volume continues to control the entire host output independently. Restore Audio Defaults also returns available game sound levels to 7.
 
@@ -1426,6 +1432,8 @@ With the setting off nothing is hooked into the display lists, no input is read 
 
 | Variable | Effect |
 | --- | --- |
+| `MHP3RD_MENU_COMFORT=0` | Use compact menu geometry even with touch input, for comparison; touch navigation and button hints still follow the input device |
+| `MHP3RD_MENU_INERTIA=0` | Stop touch-list scrolling when the finger is lifted; direct dragging and horizontal slider editing remain available |
 | `MHP3RD_STRICT_HLE=1` | Do not bind logging stubs; stop at the first unimplemented import |
 | `MHP3RD_TRACE_KERNEL=1`, `MHP3RD_TRACE_IO=1` | Trace thread and file activity |
 | `MHP3RD_TRACE_GAME_AUDIO=1` | Log changes to the original BGM/SFX levels at frame boundaries |

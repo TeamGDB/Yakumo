@@ -584,4 +584,9 @@ void note_unknown_controllers() {
         }
 }
 
+std::string controllers_screen_path() {
+    if (!screen().open) return {};
+    return screen().wizard.active ? "Controllers › Set Up" : "Controllers";
+}
+
 } // namespace mhp3rd::ui

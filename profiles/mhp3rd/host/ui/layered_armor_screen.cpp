@@ -226,4 +226,10 @@ bool layered_armor_screen_open() {
     return state().screen != Screen::Closed;
 }
 
+std::string layered_armor_screen_path() {
+    const auto &s = state();
+    if (s.screen == Screen::Closed) return {};
+    return s.screen == Screen::Pieces ? std::string("Layered Armor › ") + layered::part_label(s.part) : "Layered Armor";
+}
+
 } // namespace mhp3rd::ui

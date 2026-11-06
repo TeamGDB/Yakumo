@@ -28,6 +28,8 @@ inline constexpr ImU32 kGood = IM_COL32(150, 196, 120, 255);
 inline constexpr ImU32 kTrack = IM_COL32(255, 240, 210, 36);
 } // namespace colors
 
+// Touch sizes in ImGui coordinates, bounded by the available window height.
+float menu_touch_scale(float display_scale, float framebuffer_scale, float window_height);
 ImGuiStyle make_style(float scale, float font_size);
 
 // The panel every screen sits in, centred in the window: title and optional
@@ -37,12 +39,15 @@ ImGuiStyle make_style(float scale, float font_size);
 //
 //   begin_panel(...); tab_bar(...); begin_content(); rows...;
 //   begin_footer(); hints(...); end_panel();
-void begin_panel(const char *id, const std::string &title, const std::string &subtitle, bool dim_game);
+void begin_panel(const char *id, const std::string &title, const std::string &subtitle, bool dim_game,
+    bool *close = nullptr, bool close_disabled = false);
 // Reserve room for a larger touch action instead of the ordinary button hints.
 void begin_content(bool touch_footer = false);
 // A drag with a finger scrolls the current window, as on any touch screen;
 // ImGui itself scrolls only with a wheel. Call before ending the window.
 void touch_scroll();
+// Stop momentum when navigating to another page or opening a modal.
+void stop_scroll_motion();
 void begin_footer();
 void end_panel();
 
@@ -55,7 +60,16 @@ struct RowOptions {
     std::string note;        // shown dimmed next to the value, e.g. who decides it
     std::string description; // shown in the footer while the row is focused
     bool warning{};          // the value clashes with something: drawn in the danger colour
+    std::string help;        // optional extended guide; ordinary descriptions stay in the footer
 };
+
+// Only rows with an explicit extended guide expose a context-help button.
+void enable_context_help(bool enabled);
+[[nodiscard]] bool context_help_open();
+void close_context_help();
+void draw_context_help();
+float setting_help_width(const RowOptions &options);
+void setting_help_button(const char *label, const RowOptions &options, ImVec2 min, ImVec2 max);
 
 // A setting with a few values, changed with left/right or by activating it.
 // Returns -1, 0 or +1.
@@ -82,6 +96,8 @@ void section(const char *title);
 
 // Focuses the next row, e.g. the first row after switching tabs.
 void focus_next_row();
+// Preserve a remembered parent row while a child screen returns.
+void keep_row_focus(bool keep);
 
 // A wide button for the setup screens. Returns true when activated.
 bool big_button(const char *label, float width, bool primary = false, bool disabled = false);
