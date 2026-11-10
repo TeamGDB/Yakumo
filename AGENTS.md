@@ -20,7 +20,7 @@ Read the documents relevant to the task before changing code, testing, packaging
 | [DEVICE_TESTING.md](docs/DEVICE_TESTING.md) | Shared device scenarios, regression reproduction, human/agent review and artifact-specific release matrices |
 | [DEVICE_SUITE.md](docs/DEVICE_SUITE.md) | Automatic pre-release scenario contracts, independent oracles and implementation gaps |
 | [TESTING.md](docs/TESTING.md) | Automated checks, manual smoke tests and subsystem regression checks |
-| [COMPATIBILITY.md](docs/COMPATIBILITY.md) | Verified behavior and remaining problems by platform, with tested commits |
+| [COMPATIBILITY.md](docs/COMPATIBILITY.md) | Verified behavior and remaining problems by platform, with what was tested |
 | [RELEASING.md](docs/RELEASING.md) | Release branches, stable/test policy, packaging, artifact checks and publishing; `release/X.Y` branches are retained for patch releases |
 | [NIGHTLY_BUILDS.md](docs/NIGHTLY_BUILDS.md) | Daily UTC and manual nightlies, private R2 inputs, isolated publication and game-data leak prevention |
 | [MACOS.md](docs/MACOS.md) | macOS installation, player data, updates and troubleshooting |
@@ -76,7 +76,7 @@ The [profile README](profiles/mhp3rd/README.md) covers player settings, environm
   - `MHP3RD_TRACE_*` variables log one subsystem each: GE, material and lighting registers, save data, fonts, pad, audio, ATRAC, MPEG, ad hoc, I/O, kernel.
   - All the variables are listed under *Diagnostics* in the [profile README](profiles/mhp3rd/README.md#diagnostics).
 - **Unit tests.** `cmake --build out/mhp3rd --target psprecomp_test_binaries -j2 && ctest --test-dir out/mhp3rd`.
-- **Manual smoke test.** [TESTING.md](docs/TESTING.md), about fifteen minutes. [COMPATIBILITY.md](docs/COMPATIBILITY.md) records results per platform, always with the commit that was tested.
+- **Manual smoke test.** [TESTING.md](docs/TESTING.md), about fifteen minutes. [COMPATIBILITY.md](docs/COMPATIBILITY.md) records results per platform, always with what was tested: a commit on `main` or a release branch, or the pull request. Never a commit that exists only on a pull request branch: squashing and the rebase merge replace it, and the reference then leads nowhere.
 
 ## Local test setup
 

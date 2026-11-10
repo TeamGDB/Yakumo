@@ -162,7 +162,7 @@ Windows gameplay check was performed for the follow-up fixes.
 
 ## Updating this page
 
-Run through [the smoke test](TESTING.md) on the platform, then change the cells you checked in the same pull request as the fix, or in a pull request of their own. Add a row to *Tested hardware* with the commit you tested. A result without a commit cannot be compared with anything later, so it does not go in the table.
+Run through [the smoke test](TESTING.md) on the platform, then change the cells you checked in the same pull request as the fix, or in a pull request of their own. Add a row to *Tested hardware* with what you tested: a commit on `main` or a release branch, or the pull request whose code you ran. Never name a commit that exists only on a pull request branch: squashing and the rebase merge replace it, and the reference then leads nowhere. A result without either cannot be compared with anything later, so it does not go in the table.
 
 To report a result without editing the page, open a **Test report** issue.
 
