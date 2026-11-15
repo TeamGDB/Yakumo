@@ -674,6 +674,9 @@ The Android app starts from other defaults where a phone differs, with the same 
 | QoL (Modern Features → Layered Armor) | Layered Armor | `look.layered_armor` | `MHP3RD_LAYERED_ARMOR` | Off (default) or on: the hunter is drawn in the pieces chosen below; stats, skills and the save keep the real armor. See [Layered armor](#layered-armor) |
 | QoL (Modern Features → Layered Armor) | Head, Chest, Arms, Waist, Legs | `look.layered_head`, `look.layered_chest`, `look.layered_arms`, `look.layered_waist`, `look.layered_legs` | | `real` (default): the piece worn; `0`: nothing; otherwise the id of the armor piece to show |
 | QoL (Modern Features → Layered Armor) | List All Armor | `look.layered_all` | | Off (default): the lists offer the pieces the hunter wears or keeps in the equipment box; on: every piece its sex can wear |
+| QoL (Combat Information) | Damage Numbers | `qol.damage_numbers` | | Off (default): floating numbers for the local hunter's validated direct hits. Companions, other hunters and unknown sources are omitted |
+| QoL (Combat Information) | Monster HP Overlay | `qol.monster_hp` | | Off (default), Large Monsters, or All Monsters: current/maximum HP for living monsters in the hunter's area. Hidden in interfaces and with Hide HUD |
+| QoL (Combat Information) | HP Panel Position | `qol.monster_hp_x`, `qol.monster_hp_y` | | Six screen presets or a manually placed HP stack. Drag with mouse/touch or fine-tune with keyboard/gamepad. Coordinates 0?1, default top center (0.5, 0); fits the game picture after resizing |
 | QoL (HUD Settings) | Hide HUD | | `MHP3RD_HIDE_HUD` | Off (default) or on, for this run: the game's HUD, name tags and prompts are left out of the picture; menus and dialogs stay. Same as the Hide HUD key. See [Hiding the HUD](#hiding-the-hud) |
 | QoL (HUD Settings → Edit HUD Layout) | Block Scale; Drag to Move | `hud.status.scale/x/y`, `hud.map.scale/x/y`, `hud.items.scale/x/y` | | Individual scale (50–200%) and offsets from the original corners, as fractions of the game picture; default scale 1, offsets 0 |
 | QoL (HUD Settings) | Restore HUD Defaults | | | Restores the original size and position of all three blocks, including while the HUD is hidden |
@@ -1437,6 +1440,7 @@ With the setting off nothing is hooked into the display lists, no input is read 
 | `MHP3RD_MENU_INERTIA=0` | Stop touch-list scrolling when the finger is lifted; direct dragging and horizontal slider editing remain available |
 | `MHP3RD_STRICT_HLE=1` | Do not bind logging stubs; stop at the first unimplemented import |
 | `MHP3RD_TRACE_KERNEL=1`, `MHP3RD_TRACE_IO=1` | Trace thread and file activity |
+| `MHP3RD_TRACE_DAMAGE=1` | Log local damage-hook enable/disable and the first 200 validated own-hit amounts; no raw memory snapshots |
 | `MHP3RD_TRACE_GAME_AUDIO=1` | Log changes to the original BGM/SFX levels at frame boundaries |
 | `MHP3RD_TRACE_LOAD=1` | Four `[loadtrace]` lines a second: real and emulated time, flips, disc and memory stick reads, the loudest audio sample, time spent holding the game to real time, and which guest threads had the CPU. What [Fast loading](#fast-loading) was measured with |
 | `MHP3RD_TRACE_MODS=1` | What the [mods](#mods) change at start and after each change, every `DATA.BIN` read they serve, and each write made after an overlay loads |

@@ -419,6 +419,31 @@ const std::vector<Field> &fields() {
             [](const Settings &s) { return std::string(s.lock_on ? "1" : "0"); },
             [](Settings &s, const char *t) { s.lock_on = variable_flag(t); }},
         BOOL_FIELD("input.lock_on_marker", lock_on_marker),
+        BOOL_FIELD("qol.damage_numbers", damage_numbers),
+        {"qol.monster_hp", nullptr,
+            [](Settings &s, const std::string &t) {
+                if (t == "off" || t == "0")
+                    s.monster_hp = MonsterHp::Off;
+                else if (t == "large" || t == "1")
+                    s.monster_hp = MonsterHp::Large;
+                else if (t == "all")
+                    s.monster_hp = MonsterHp::All;
+                else
+                    return false;
+                return true;
+            },
+            [](const Settings &s) {
+                return std::string(s.monster_hp == MonsterHp::Large ? "large"
+                        : s.monster_hp == MonsterHp::All            ? "all"
+                                                                    : "off");
+            },
+            nullptr},
+        hud_field(
+            "qol.monster_hp_x", [](Settings &s) -> float & { return s.monster_hp_x; },
+            [](const Settings &s) { return s.monster_hp_x; }, 0.f, 1.f),
+        hud_field(
+            "qol.monster_hp_y", [](Settings &s) -> float & { return s.monster_hp_y; },
+            [](const Settings &s) { return s.monster_hp_y; }, 0.f, 1.f),
         HUD_FIELD("hud.status.scale", blocks[0].scale, gpu::hud::kMinScale, gpu::hud::kMaxScale),
         HUD_FIELD("hud.status.x", blocks[0].x, -1.0f, 1.0f),
         HUD_FIELD("hud.status.y", blocks[0].y, -1.0f, 1.0f),

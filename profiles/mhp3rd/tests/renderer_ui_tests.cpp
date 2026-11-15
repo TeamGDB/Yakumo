@@ -12,6 +12,11 @@
 #include "game/weapon_state.hpp"
 #include "game/control_context.hpp"
 #include "game/layered_armor.hpp"
+#include "game/damage_hook.hpp"
+#include "game/damage_numbers.hpp"
+#include "ui/combat_overlay.hpp"
+#include "ui/combat_overlay_layout.hpp"
+#include "combat_fixture.hpp"
 #include "ui/layered_armor_screen.hpp"
 #include "ui/font_menu.hpp"
 #include "fonts/game_font.hpp"
@@ -6629,6 +6634,32 @@ void menu_contracts(gpu::VulkanRenderer &renderer, psprecomp::Runtime &runtime, 
     frame();
     expect(!ui::layered_armor_screen_open() && ui::menu_over_game() && !ui::take_quit_request(),
         "back closes the layered editor and returns to QoL without closing the menu");
+    {
+        const auto saved_combat = settings::current();
+        settings::current().damage_numbers = false;
+        settings::current().monster_hp = settings::MonsterHp::Off;
+        change_video("Damage Numbers", ImGuiKey_Space);
+        expect(settings::current().damage_numbers && settings::current().monster_hp == settings::MonsterHp::Off,
+            "QoL enables local damage numbers independently");
+        change_video("Monster HP Overlay", ImGuiKey_RightArrow);
+        expect(settings::current().damage_numbers && settings::current().monster_hp == settings::MonsterHp::Large,
+            "QoL enables monster health without disabling damage numbers");
+        change_video("Monster HP Overlay", ImGuiKey_RightArrow);
+        expect(settings::current().monster_hp == settings::MonsterHp::All, "HP choice cycles from Large to All");
+        change_video("Monster HP Overlay", ImGuiKey_RightArrow);
+        expect(settings::current().monster_hp == settings::MonsterHp::Off, "HP choice cycles from All to Off");
+        change_video("Monster HP Overlay", ImGuiKey_LeftArrow);
+        expect(settings::current().monster_hp == settings::MonsterHp::All, "HP choice also cycles backwards");
+        settings::current().monster_hp_x = 0.37f;
+        settings::current().monster_hp_y = 0.63f;
+        change_video("Restore QoL Defaults", ImGuiKey_Space);
+        expect(!settings::current().damage_numbers && settings::current().monster_hp == settings::MonsterHp::Off,
+            "QoL defaults restore the original game without combat overlays");
+        expect(settings::current().monster_hp_x == 0.5f && settings::current().monster_hp_y == 0.f,
+            "QoL reset restores the HP panel position");
+        settings::current() = saved_combat;
+        frame();
+    }
     if (gpu::hud::available() && gpu::hud::layout_enabled()) {
         const auto saved_hud = settings::current().hud;
         const bool hidden_before_menu = gpu::hud::hidden();
@@ -7439,6 +7470,191 @@ void gpu_compat_notice_contracts(gpu::VulkanRenderer &renderer, const std::files
 }
 
 }
+void combat_fixture_original(psprecomp::Runtime &runtime, psprecomp::AllegrexContext &ctx) {
+    const auto counter = ctx.gpr[4] + 0x1ECu + (ctx.gpr[5] & 0xFFu) * 2u;
+    runtime.memory().store16(counter, static_cast<std::uint16_t>(runtime.memory().load16(counter) + 15u));
+    ctx.pc = ctx.gpr[31];
+}
+void combat_overlay_contracts(
+    gpu::VulkanRenderer &renderer, psprecomp::Runtime &runtime, const std::filesystem::path &captures = {}) {
+    using namespace mhp3rd::test::combat_fixture;
+    const auto saved = settings::current();
+    int old_width{}, old_height{};
+    SDL_GetWindowSize(renderer.window(), &old_width, &old_height);
+    settings::current().window_scale = 2u;
+    settings::current().fullscreen = false;
+    settings::current().aspect = settings::Aspect::Original;
+    SDL_SetWindowSize(renderer.window(), 960, 544);
+    SDL_PumpEvents();
+    renderer.pump_events();
+    game::GuestRam ram(runtime.memory());
+    setup(ram);
+    game::attach(runtime);
+    game::control_context::refresh(ram);
+    auto &layer = ui::Layer::get();
+    const auto render = [&] {
+        layer.begin_frame();
+        const auto before = ImGui::GetBackgroundDrawList()->VtxBuffer.Size;
+        ui::draw_combat_overlay();
+        const int count = ImGui::GetBackgroundDrawList()->VtxBuffer.Size - before;
+        layer.end_frame();
+        renderer.present_ui(true);
+        return count;
+    };
+    settings::current().damage_numbers = false;
+    settings::current().monster_hp = settings::MonsterHp::Off;
+    expect(render() == 0, "default combat information adds no draw geometry");
+    settings::current().monster_hp = settings::MonsterHp::Large;
+    const int large_vertices = render();
+    expect(large_vertices > 0, "actual monster health text and bar draw on the game picture");
+    constexpr auto small = 0x09300000u;
+    ram.store32(0x0A1B0AE0u + 1u * 4u, small);
+    ram.store32(small + 4u, 0u);
+    ram.store8(small + 0x62u, 11u);
+    ram.store16(small + 0x246u, 50u);
+    ram.store16(small + 0x288u, 100u);
+    expect(render() == large_vertices, "Large Monsters excludes small-monster panels");
+    settings::current().monster_hp = settings::MonsterHp::All;
+    expect(render() > large_vertices, "All Monsters renders both large and small panels");
+    ram.store32(0x0A1B0AE0u + 1u * 4u, 0u);
+    settings::current().monster_hp = settings::MonsterHp::Large;
+    ram.store16(target + 0x246u, 0u);
+    expect(render() == 0, "dead monsters leave no health bar");
+    ram.store16(target + 0x246u, 700u);
+    ram.store32(target + 4u, 4u);
+    expect(render() == 0, "other-area monsters leave no health bar");
+    ram.store32(target + 4u, 0u);
+    settings::current().monster_hp = settings::MonsterHp::Off;
+    settings::current().damage_numbers = true;
+    constexpr auto camera = 0x09200000u;
+    ram.store32(0x08A2F958u, camera);
+    for (unsigned i = 0; i < 16; ++i) {
+        ram.store32(camera + 0xF50u + i * 4u, 0u);
+        ram.store32(camera + 0xFD0u + i * 4u, 0u);
+    }
+    for (unsigned i = 0; i < 4; ++i) {
+        ram.store32(camera + 0xF50u + i * 20u, std::bit_cast<std::uint32_t>(1.f));
+        ram.store32(camera + 0xFD0u + i * 20u, std::bit_cast<std::uint32_t>(i == 3 ? 2.f : 0.005f));
+    }
+    {
+        psprecomp::FunctionRegistrationScope observe(runtime, &game::combat::observe_damage_registration);
+        runtime.register_function(game::combat::kApplyDamage, &combat_fixture_original, "recomp_unit_combat_fixture");
+    }
+    game::combat::damage_frame(runtime);
+    psprecomp::AllegrexContext ctx;
+    ctx.gpr[4] = target;
+    ctx.gpr[5] = 4u;
+    ctx.gpr[18] = collision;
+    ctx.gpr[20] = hunter;
+    ctx.gpr[31] = game::combat::kDamageReturn;
+    expect(runtime.invoke_isolated_aot(game::combat::kApplyDamage, ctx),
+        "UI fixture drives the actual production hit wrapper");
+    expect(game::weapon::hunter_actor(ram) == hunter, "combat fixture has an unambiguous local hunter");
+    expect(game::combat::damage_history().numbers().size() == 1u,
+        "actual UI fixture captures exactly one local damage event");
+    const auto projected = game::combat::project_damage(ram, {0.f, 85.f, 0.f});
+    expect(
+        projected && (*projected)[0] > 0.4f && (*projected)[0] < 0.6f && (*projected)[1] > 0.f && (*projected)[1] < 1.f,
+        "independent synthetic camera places the hit inside the picture");
+    expect(ImGui::GetIO().DisplaySize.x >= 480.f && ImGui::GetIO().DisplaySize.y >= 272.f,
+        "combat text scenario has a real game-sized viewport");
+    const int number_vertices = render();
+    expect(number_vertices > 0, "the real local-hit event produces outlined floating damage text");
+    settings::current().monster_hp = settings::MonsterHp::Large;
+    expect(runtime.invoke_isolated_aot(game::combat::kApplyDamage, ctx),
+        "additional local hit invokes the original damage function");
+    expect(render() > number_vertices, "HP bars and damage numbers can draw together");
+    ram.store32(0x09103004u, 1u);
+    game::control_context::refresh(ram);
+    expect(render() == 0, "native interfaces hide all combat draw geometry");
+    ram.store32(0x09103004u, 0u);
+    game::control_context::refresh(ram);
+    settings::current().monster_hp = settings::MonsterHp::Off;
+    ram.store32(camera + 0x100Cu, std::bit_cast<std::uint32_t>(-2.f));
+    expect(render() == 0, "behind-camera damage is not pinned to a screen edge");
+    settings::current().damage_numbers = false;
+    settings::current().monster_hp = settings::MonsterHp::Large;
+    settings::current().monster_hp_x = 0.f;
+    settings::current().monster_hp_y = 0.25f;
+    layer.set_interactive(true);
+    ScriptedUiMouse mouse(renderer.window());
+    ui::open_hp_layout_editor();
+    const auto editor_frame = [&](const char *focused = nullptr, bool back = false) {
+        mouse.prepare_frame();
+        layer.begin_frame();
+        if (focused) {
+            if (auto *window = ImGui::FindWindowByName("##hp_layout_editor")) {
+                ImGui::FocusWindow(window);
+                ImGui::SetFocusID(window->GetID(focused), window);
+                ImGui::SetNavCursorVisible(true);
+            }
+        }
+        ui::hp_layout_editor_frame(back);
+        layer.end_frame();
+        renderer.present_ui(true);
+    };
+    const auto activate = [&](const char *label, ImGuiKey key = ImGuiKey_Space) {
+        editor_frame(label);
+        editor_frame(label);
+        ImGui::GetIO().AddKeyEvent(key, true);
+        editor_frame(label);
+        ImGui::GetIO().AddKeyEvent(key, false);
+        editor_frame();
+    };
+    editor_frame();
+    editor_frame();
+    expect(ui::hp_layout_editor_open(), "HP editor opens with a live quest preview");
+    const auto picture = renderer.game_picture();
+    const auto display = ImGui::GetIO().DisplaySize;
+    const auto stack = ui::combat_layout::place(
+        {picture[0] * display.x, picture[1] * display.y, picture[2] * display.x, picture[3] * display.y},
+        layer.font_size() * 0.65f, 1, 0.f, 0.25f);
+    mouse.move({stack.bounds.x + 10.f, stack.bounds.y + 5.f});
+    editor_frame();
+    editor_frame();
+    ImGui::GetIO().AddMouseButtonEvent(0, true);
+    editor_frame();
+    mouse.move({stack.bounds.x + 110.f, stack.bounds.y + 65.f});
+    editor_frame();
+    editor_frame();
+    expect(settings::current().monster_hp_x > 0.05f && settings::current().monster_hp_y > 0.25f,
+        "real pointer drag moves the complete HP stack");
+    auto *panel = ImGui::FindWindowByName("##hp_layout_editor");
+    expect(
+        panel && (panel->Flags & ImGuiWindowFlags_NoInputs) != 0, "HP editor options cannot intercept an active drag");
+    ImGui::GetIO().AddMouseButtonEvent(0, false);
+    editor_frame();
+    activate("Position", ImGuiKey_RightArrow);
+    expect(settings::current().monster_hp_x == 0.f && settings::current().monster_hp_y == 0.f,
+        "preset selection replaces a custom dragged position");
+    activate("Position", ImGuiKey_LeftArrow);
+    expect(settings::current().monster_hp_x == 1.f && settings::current().monster_hp_y == 1.f,
+        "position presets wrap backwards to bottom right");
+    activate("Horizontal Position", ImGuiKey_LeftArrow);
+    activate("Vertical Position", ImGuiKey_LeftArrow);
+    expect(settings::current().monster_hp_x < 1.f && settings::current().monster_hp_y < 1.f,
+        "keyboard fine adjustment changes both saved axes");
+    activate("Restore Panel Position");
+    expect(settings::current().monster_hp_x == 0.5f && settings::current().monster_hp_y == 0.f,
+        "position reset restores top center independently of HP mode");
+    if (!captures.empty()) {
+        renderer.capture_window(captures / "combat-hp-position.bmp");
+        editor_frame();
+        editor_frame();
+        expect(std::filesystem::exists(captures / "combat-hp-position.bmp"), "HP editor capture is produced");
+    }
+    activate("Done");
+    expect(!ui::hp_layout_editor_open(), "Done closes the HP position editor");
+    ui::open_hp_layout_editor();
+    editor_frame();
+    editor_frame(nullptr, true);
+    expect(!ui::hp_layout_editor_open(), "Back closes the HP position editor");
+    layer.set_interactive(false);
+    settings::current() = saved;
+    game::combat::damage_frame(runtime);
+    SDL_SetWindowSize(renderer.window(), old_width, old_height);
+}
+
 int run_contracts(int scripts) {
     if (scripts == 6) {
         set_environment("MHP3RD_FREE_CAMERA", "1");
@@ -7518,6 +7734,13 @@ int run_contracts(int scripts) {
         return 1;
     }
     auto &renderer = *selected;
+    if (scripts == 9) {
+        expect(ui::Layer::get().attach(renderer), "combat mode attaches the real UI backend");
+        combat_overlay_contracts(renderer, fixture.runtime, sandbox);
+        renderer.shutdown();
+        std::cout << "Combat overlay captures: " << sandbox.string() << '\n';
+        return failures ? 1 : 0;
+    }
     if (scripts == 8) {
         gpu_compat_notice_contracts(renderer, sandbox);
         renderer.shutdown();
@@ -8166,8 +8389,8 @@ int run_contracts(int scripts) {
     }
 #endif
     audio_device_contracts();
+    combat_overlay_contracts(renderer, fixture.runtime);
     terminal_audio_menu_contracts(renderer);
-    renderer.shutdown();
     renderer.shutdown();
     std::vector<std::uint8_t> stopped_pixels;
     std::uint32_t stopped_width = 0, stopped_height = 0;
@@ -8201,6 +8424,8 @@ int main(int argc, char **argv) {
                 mode = 7;
             else if (std::string_view(argv[1]) == "--gpu-compat-notice")
                 mode = 8;
+            else if (std::string_view(argv[1]) == "--combat-overlay")
+                mode = 9;
             else {
                 std::cerr << "FAIL: unknown test mode\n";
                 return 2;

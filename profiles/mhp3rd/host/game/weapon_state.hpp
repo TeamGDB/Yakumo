@@ -31,6 +31,7 @@ enum class Type : std::uint8_t {
 enum class Posture : std::uint8_t { Unknown, Sheathed, Drawn };
 
 // Validated local actor in a quest; unavailable during loading or outside quests.
+[[nodiscard]] std::uint32_t hunter_actor(const Ram &ram);
 [[nodiscard]] Posture read_posture(const Ram &ram);
 [[nodiscard]] Posture current_posture();
 

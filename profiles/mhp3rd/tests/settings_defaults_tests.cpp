@@ -431,7 +431,37 @@ void test_adaptive_settings() {
         "invalid Adaptive settings preserve defaults and cannot remove menu access");
 }
 
+void test_combat_settings() {
+    const auto desktop = defaults_for(Platform::Desktop), android = defaults_for(Platform::Android);
+    check(!desktop.damage_numbers && desktop.monster_hp == MonsterHp::Off && !android.damage_numbers &&
+            android.monster_hp == MonsterHp::Off,
+        "combat information is opt-in on every platform");
+    for (const auto &[text, mode] : std::initializer_list<std::pair<const char *, MonsterHp>>{
+             {"off", MonsterHp::Off}, {"large", MonsterHp::Large}, {"all", MonsterHp::All}}) {
+        auto chosen =
+            from_entries({{"qol.monster_hp", text}, {"qol.monster_hp_x", "0.3712"}, {"qol.monster_hp_y", "0.6389"}});
+        auto loaded = from_entries(to_entries(chosen));
+        check(loaded.monster_hp == mode && std::abs(loaded.monster_hp_x - 0.3712f) < 0.0001f &&
+                std::abs(loaded.monster_hp_y - 0.6389f) < 0.0001f,
+            "all HP modes and precise manual positions persist");
+    }
+    check(desktop.monster_hp_x == 0.5f && desktop.monster_hp_y == 0.f, "HP panels start at top center");
+    for (const char *bad : {"nan", "inf", "bad", "0.5garbage"}) {
+        auto invalid = from_entries({{"qol.monster_hp_x", bad}, {"qol.monster_hp_y", bad}});
+        check(invalid.monster_hp_x == 0.5f && invalid.monster_hp_y == 0.f, "invalid panel coordinates retain defaults");
+    }
+    const auto clamped = from_entries({{"qol.monster_hp_x", "-2"}, {"qol.monster_hp_y", "3"}});
+    check(clamped.monster_hp_x == 0.f && clamped.monster_hp_y == 1.f, "panel positions clamp to the picture");
+    const auto enabled = from_entries({{"qol.damage_numbers", "1"}, {"qol.monster_hp", "1"}});
+    const auto roundtrip = from_entries(to_entries(enabled));
+    check(roundtrip.damage_numbers && roundtrip.monster_hp == MonsterHp::Large,
+        "independent combat choices persist in settings.ini");
+    check(!from_entries({{"qol.damage_numbers", "invalid"}}).damage_numbers &&
+            from_entries({{"qol.monster_hp", "invalid"}}).monster_hp == MonsterHp::Off,
+        "invalid values retain safe defaults");
+}
 int main() {
+    test_combat_settings();
     test_adaptive_settings();
     {
         using namespace mhp3rd::gpu::hud;

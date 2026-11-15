@@ -1,4 +1,5 @@
 #include "psprecomp/runtime.hpp"
+#include "psprecomp/function_registration.hpp"
 #include "psprecomp/common.hpp"
 #include "psprecomp/interpreter.hpp"
 
@@ -169,6 +170,20 @@ std::uint64_t runtime_thread_switch_generation() noexcept {
 }
 bool runtime_thread_switch_generation_matches(std::uint64_t generation) noexcept {
     return generation == g_runtime_thread_switch_generation_fast;
+}
+
+namespace {
+thread_local Runtime *registration_runtime{};
+thread_local FunctionRegistrationObserver registration_observer{};
+}
+FunctionRegistrationScope::FunctionRegistrationScope(Runtime &runtime, FunctionRegistrationObserver observer)
+    : previous_runtime_(registration_runtime), previous_observer_(registration_observer) {
+    registration_runtime = &runtime;
+    registration_observer = observer;
+}
+FunctionRegistrationScope::~FunctionRegistrationScope() {
+    registration_runtime = previous_runtime_;
+    registration_observer = previous_observer_;
 }
 
 Runtime::Runtime(std::uint32_t ram_size) : memory_(ram_size) {
@@ -432,6 +447,7 @@ const NidRegistry &Runtime::nids() const noexcept {
 
 void Runtime::register_function(std::uint32_t address, RecompiledFunction function, std::string name) {
     if (!function) throw Error("Attempted to register a null recompiled function");
+    if (registration_runtime == this && registration_observer) registration_observer(*this, address, function, name);
     functions_[address] = FunctionEntry{function, std::move(name)};
     const std::uint32_t c = memory_.canonical(address);
     if ((c & 3u) != 0u || c < GuestMemory::kPhysicalBase) return;

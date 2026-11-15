@@ -35,6 +35,7 @@ enum class PresentMode { Fifo, Mailbox, Immediate };
 // field of view stays), and the 2D interface keeps the PSP's proportions.
 enum class Aspect { Original, Stretch, Fill };
 enum class PerfDisplay { Off, Overlay, OverlayAndLog, Log, Compact, CompactAndLog };
+enum class MonsterHp { Off, Large, All };
 // How the game's 2D textures are drawn at a high internal resolution
 // (gpu/ui_textures.hpp): as they are, sharp bilinear, or doubled with MMPX.
 enum class UiTextures { Off, Sharp, Mmpx };
@@ -87,6 +88,13 @@ struct Settings {
     // language the image is in. A new language needs a restart
     // (docs/TEXT_TRANSLATION.md).
     std::string language{"original"};
+
+    // Optional quest information; the original game remains the default.
+    bool damage_numbers{};
+    MonsterHp monster_hp{MonsterHp::Off};
+    // Fractions of the free space inside the game picture, for the whole HP stack.
+    float monster_hp_x{0.5f};
+    float monster_hp_y{};
 
     // Audio
     std::uint32_t volume{100u}; // percent

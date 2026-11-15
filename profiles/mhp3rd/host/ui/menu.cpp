@@ -21,6 +21,7 @@
 #include "ui/text_input.hpp"
 #include "ui/touch_editor.hpp"
 #include "ui/hud_editor.hpp"
+#include "ui/combat_overlay.hpp"
 #include "ui/touch_overlay.hpp"
 #include "ui/widgets.hpp"
 
@@ -245,6 +246,12 @@ bool Menu::frame() {
     font_list_was_open = font_list_was_open || (tab_ == 7 && debug_screen_open());
 #endif
     back_ = back || pad_back;
+
+    if (hp_layout_editor_open()) {
+        hp_layout_editor_frame(back_);
+        if (!hp_layout_editor_open()) focus_next_row();
+        return true;
+    }
 
     if (hud_editor_open()) {
         hud_editor_frame(back_);
@@ -1555,6 +1562,25 @@ void Menu::qol() {
         }
     }
     layered_armor_row();
+    section("Combat Information:");
+    if (toggle_row("Damage Numbers", s.damage_numbers,
+            options_for("qol.damage_numbers",
+                "Shows floating damage numbers for your own hits on monsters. Other hunters and companions are not counted."))) {
+        s.damage_numbers = !s.damage_numbers;
+        settings::save();
+    }
+    constexpr const char *hp_modes[]{"Off", "Large Monsters", "All Monsters"};
+    if (const int delta = choice_row("Monster HP Overlay", hp_modes[static_cast<int>(s.monster_hp)],
+            options_for("qol.monster_hp",
+                "Shows current and maximum health for large monsters or all monsters in your area. Hidden in interfaces and when the HUD is hidden."))) {
+        s.monster_hp = static_cast<settings::MonsterHp>((static_cast<int>(s.monster_hp) + delta + 3) % 3);
+        settings::save();
+    }
+    if (button_row("HP Panel Position",
+            {s.monster_hp == settings::MonsterHp::Off,
+                s.monster_hp == settings::MonsterHp::Off ? "Monster HP Overlay is off" : "",
+                "Choose a screen position or drag the HP panels with the mouse or touch. Changes are saved on this device."}))
+        open_hp_layout_editor();
     section("HUD Settings:");
     {
         const std::string key = input::format(s.controls.keys[static_cast<std::size_t>(input::Action::HideHud)]);
@@ -1701,6 +1727,10 @@ void Menu::qol() {
         restore("video.fast_forward_speed", s.fast_forward_speed, d.fast_forward_speed);
         restore("input.lock_on", s.lock_on, d.lock_on);
         restore("input.lock_on_marker", s.lock_on_marker, d.lock_on_marker);
+        restore("qol.damage_numbers", s.damage_numbers, d.damage_numbers);
+        restore("qol.monster_hp", s.monster_hp, d.monster_hp);
+        s.monster_hp_x = d.monster_hp_x;
+        s.monster_hp_y = d.monster_hp_y;
         s.hud = d.hud;
         restore("experimental.free_camera", s.free_camera, d.free_camera);
         restore("experimental.free_camera_speed", s.free_camera_speed, d.free_camera_speed);
@@ -2362,6 +2392,8 @@ void draw_over_game() {
     const bool adaptive_notice = !menu && adaptive_weapon_notice().open;
     const double hint_left = menu || settings::current().menu_hint_seen ? -1.0 : hint_seconds_left();
     const bool overlay = network_overlay();
+    const bool combat = !menu && !layer.renderer().window_capture_pending() && !gpu::hud::active() &&
+        (settings::current().damage_numbers || settings::current().monster_hp != settings::MonsterHp::Off);
     const bool touch = !menu && layer.renderer().touch_controls_visible();
     const std::string gpu_problem = menu || gpu_problem_seen() ? std::string() : layer.renderer().gpu_problem();
     const camera::FreeCameraStatus free_camera = camera::free_camera_status();
@@ -2372,9 +2404,10 @@ void draw_over_game() {
     const double hud_note = menu || layer.renderer().window_capture_pending() ? 0.0 : gpu::hud::note_seconds_left();
     const std::optional<std::array<float, 2>> marker = menu ? std::nullopt : lock_on_marker_at();
     if (hint_left <= 0.0 && !overlay && !menu && !touch && gpu_problem.empty() && !flying && !fast && !noted &&
-        !compat_noted && !adaptive_notice && hud_note <= 0.0 && !marker)
+        !compat_noted && !adaptive_notice && hud_note <= 0.0 && !marker && !combat)
         return;
     layer.begin_frame();
+    if (combat) draw_combat_overlay();
     if (marker) draw_lock_on_marker(*marker);
     if (noted) draw_note(note());
     if (compat_noted) draw_gpu_compat_notice(gpu_compat_notice());
