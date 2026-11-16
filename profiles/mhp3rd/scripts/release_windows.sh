@@ -117,6 +117,7 @@ rm -rf "$stage"
 mkdir -p "$stage/$name/overlays" "$stage/$name/licenses" "$dist"
 root="$stage/$name"
 cp "$bin/Yakumo.exe" "$root/"
+cp "$repo_dir/recomplauncher.json" "$root/"
 cp "$bin"/overlays/ovl*.dll "$root/overlays/"
 cp "$sdl3_dll" "$root/"
 for dll in "${ffmpeg_dlls[@]}"; do cp "$bin/$dll" "$root/"; done
