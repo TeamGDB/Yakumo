@@ -1,5 +1,7 @@
 <p align="center"><img src="docs/images/logo.svg" alt="Yakumo" width="720"></p>
 
+<a href="https://recomplauncher.com/game/yakumo"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a>
+
 <p align="center"><b>English</b> · <a href="README.ru.md">Русский</a> · <a href="README.es.md">Español</a></p>
 
 <p align="center">
