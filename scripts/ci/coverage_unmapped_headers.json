@@ -4,8 +4,8 @@
     "reason": "AudioSink method declarations have no standalone LLVM line map. Their out-of-line implementations and actual SDL output-gain behavior are covered by renderer/audio regression tests and remain subject to the normal diff gate."
   },
   "profiles/mhp3rd/host/settings/settings.hpp": {
-    "sha256": "4902e701e162cad90d1ff0fcfe06ae1bda70ac10a37bdda4d8402d97d5de5eff",
-    "reason": "Reviewed settings declarations and aggregate defaults, including independent PSP/Action/Adaptive arrangements; no handwritten function body is exempted. Three-mode selection, independent layout persistence, invalid inputs and resets are tested; out-of-line implementations retain the normal diff gate."
+    "sha256": "8854415e8ff48f453a93a563d8f0a7539e6d4637b3aad2501464a7792f311074",
+    "reason": "Reviewed settings declarations and aggregate defaults only, including independent damage-number, monster-HP mode, normalized placement and panel-scale settings. Default, round-trip, invalid-value, bounds and actual menu/reset tests cover the out-of-line behavior; no executable body is exempted."
   },
   "profiles/mhp3rd/host/perf/perf_overlay.hpp": {
     "sha256": "48d8fd2b2912a0231e0d8293bf0f9027a091235c0bae95d68845a6d4a058bc79",
@@ -124,8 +124,8 @@
     "reason": "Reviewed encounter command/status function declarations only; no new executable body is exempted. Native console refusal/status contracts, synthetic encounter lifecycle tests and out-of-line implementations remain subject to the normal changed-line coverage gate. Existing HeldCheats fields/defaulted comparison are unchanged."
   },
   "profiles/mhp3rd/host/game/weapon_state.hpp": {
-    "sha256": "9f910cf6e39769f3e55e44ea0b1da0e56ac0bd9bce544f7f94b54764d114299f",
-    "reason": "Reviewed weapon enum, aggregate declarations and compiler-defaulted equality only; no handwritten function body is exempted. All twelve kinds, type/ID changes, unavailable state and copied snapshot comparisons are exercised by weapon-state and real display-HLE tests. Out-of-line implementations retain the normal diff gate. Live Long Sword availability, bounded transition parsing, window boundaries, cancellation, unknown fallback and real SDL/arrow rendering have synthetic regressions."
+    "sha256": "505a7e2ef362abdbd075c1722cd62cc088998f4a70b34e021da42319d17b7e7b",
+    "reason": "Reviewed existing identity types/defaulted comparisons and the new local-hunter lookup declaration only; no handwritten executable body is exempted. Actor ownership, ambiguity, loading and actual damage-source rejection are tested in the out-of-line implementations, which retain the normal diff gate."
   },
   "profiles/mhp3rd/host/input/adaptive_attack.hpp": {
     "sha256": "ac011ca50366bba970696934b917d9702e1a1fdb72cefd80c901e595dec6ceaa",
@@ -154,5 +154,25 @@
   "profiles/mhp3rd/host/ui/save_screen.hpp": {
     "sha256": "697198ad2975a5c791ad58404863fe0e06af177285b3b257cb78c0441e7433a7",
     "reason": "Reviewed function declarations and comments only; no executable function body is exempted. Nested menu paths, navigation, context help and touch widget behavior are exercised in renderer/UI contracts; out-of-line implementations retain the normal diff gate."
+  },
+  "include/psprecomp/function_registration.hpp": {
+    "sha256": "0851bd35a8cbd9ad285ca9eb6efadef3127f24a8cdb2e2e5b62b3f349be9dbaa",
+    "reason": "Reviewed aliases, scope class declarations and deleted copy operations only; no executable body is exempted. Scope nesting, exception restoration, runtime isolation, null observers and original dispatch are exercised by function-registration tests; src/runtime.cpp remains subject to normal diff coverage."
+  },
+  "profiles/mhp3rd/host/game/damage_hook.hpp": {
+    "sha256": "97063815e4afae4892cb28a180cd0de491935b0712766087d0f8896607127c4b",
+    "reason": "Reviewed forward declaration and observer/frame/history function declarations only; no executable body is exempted. Production wrapper installation, original-call preservation, ownership filtering, disabled mode and interface cancellation have synthetic regressions; implementation coverage retains the normal diff gate."
+  },
+  "profiles/mhp3rd/host/game/damage_numbers.hpp": {
+    "sha256": "8c955ee6a1166715718adc1349414288bd523daab5f57a6d87dfdade6ca389ea",
+    "reason": "Reviewed constants, request/event structures and function/class declarations only; no executable body is exempted. Hit validation, damage accumulation, bounded history, expiry and camera projection are exercised in implementation and renderer tests subject to normal diff coverage."
+  },
+  "profiles/mhp3rd/host/game/monster_state.hpp": {
+    "sha256": "d943820df8938ba0a9ede5e4c304bd7007fac623950b8d4341cf51b1d26228da",
+    "reason": "Reviewed species/slot constants, snapshot aggregate defaults and reader/filter declarations only; no executable body is exempted. All species identities, early/late slots, ownership ranges, HP states, filtering and scene lifetimes have synthetic regressions in the measured implementations."
+  },
+  "profiles/mhp3rd/host/ui/combat_overlay.hpp": {
+    "sha256": "9b748b12e78971b6131a552e20ee04aaae1019a0f22200aa1166ea5fc5b90549",
+    "reason": "Reviewed function declarations and comments only; no executable body is exempted. Overlay rendering, menu choices, layout editing, scale, dragging, resets and closing are tested through real SDL/ImGui; executable implementation and inline layout geometry retain the normal diff gate."
   }
 }
