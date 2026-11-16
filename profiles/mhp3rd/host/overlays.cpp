@@ -11,6 +11,8 @@
 #include "overlay_module.hpp"
 #include "platform/utf8_path.hpp"
 #include "psprecomp/common.hpp"
+#include "psprecomp/function_registration.hpp"
+#include "game/damage_hook.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -278,7 +280,11 @@ bool install_overlay_for(Runtime &runtime, std::uint32_t pc) {
         auto &installed = installed_overlays();
         if (installed[slot_start] == corpus.hash) return false; // already installed: a real miss
         runtime.unregister_functions(slot_start, slot_start + corpus.size);
-        corpus.install(runtime);
+        {
+            psprecomp::FunctionRegistrationScope observe(runtime, &game::combat::observe_damage_registration);
+            corpus.install(runtime);
+        }
+        game::combat::damage_frame(runtime);
         installed[slot_start] = corpus.hash;
         installed_headers()[slot_start] = header_hash(runtime.memory(), slot_start);
         std::cout << "[overlay] installed " << corpus.name << " (" << corpus.size / 1024u << " KiB) at "

@@ -12,8 +12,8 @@ namespace {
 Posture posture = Posture::Unknown;
 std::optional<LongSwordActions> actions;
 bool mapped(const Ram &ram, std::uint32_t address, std::size_t size) {
-    return address >= 0x08800000u && address < 0x0C000000u && !(address & 3u) &&
-        size <= 0x0C000000u - address && ram.contains(address, size);
+    return address >= 0x08800000u && address < 0x0C000000u && !(address & 3u) && size <= 0x0C000000u - address &&
+        ram.contains(address, size);
 }
 std::optional<Equipped> &snapshot() {
     static std::optional<Equipped> value;
@@ -30,13 +30,12 @@ std::optional<Equipped> read(const Ram &ram) {
 
 namespace {
 std::uint32_t local_actor(const Ram &ram) {
-    if (!read(ram) || control_context::read(ram).scene != control_context::Scene::Quest)
-        return 0u;
+    if (!read(ram) || control_context::read(ram).scene != control_context::Scene::Quest) return 0u;
     // NPJB-40001: the camera calls the six-slot actor lookup at 0x088B6B30.
     // Validate its table access and the camera's test of actor +0x27C bit 3.
-    if (!ram.contains(0x088B6B68u, 4u) || ram.load32(0x088B6B68u) != 0x8C420008u ||
-        !ram.contains(0x088E49C8u, 4u) || ram.load32(0x088E49C8u) != 0x30420008u ||
-        !ram.contains(0x09FBE794u, 4u)) return 0u;
+    if (!ram.contains(0x088B6B68u, 4u) || ram.load32(0x088B6B68u) != 0x8C420008u || !ram.contains(0x088E49C8u, 4u) ||
+        ram.load32(0x088E49C8u) != 0x30420008u || !ram.contains(0x09FBE794u, 4u))
+        return 0u;
     const auto table = ram.load32(0x09FBE794u);
     if (!mapped(ram, table, 8u + 6u * 4u)) return 0u;
     std::uint32_t local{};
@@ -52,6 +51,10 @@ std::uint32_t local_actor(const Ram &ram) {
     return local;
 }
 }
+std::uint32_t hunter_actor(const Ram &ram) {
+    return local_actor(ram);
+}
+
 Posture read_posture(const Ram &ram) {
     const auto actor = local_actor(ram);
     if (!actor) return Posture::Unknown;
@@ -63,13 +66,13 @@ std::optional<LongSwordActions> read_actions(const Ram &ram) {
     if (!equipped || equipped->type != Type::LongSword || control_context::read(ram).interface_open)
         return std::nullopt;
     const auto actor = local_actor(ram);
-    if (!actor || !ram.contains(actor, 0x14B4u) || ram.load8(actor + 0x62u) != 7u ||
-        !(ram.load32(actor + 0x27Cu) & 8u)) return std::nullopt;
+    if (!actor || !ram.contains(actor, 0x14B4u) || ram.load8(actor + 0x62u) != 7u || !(ram.load32(actor + 0x27Cu) & 8u))
+        return std::nullopt;
     // NPJB-40001's action-table dispatcher, request predicate and animation accessor.
-    if (!ram.contains(0x0A10A3CCu, 4u) || ram.load32(0x0A10A3CCu) != 0x8C8214A8u ||
-        !ram.contains(0x0A10790Cu, 4u) || ram.load32(0x0A10790Cu) != 0x8C620304u ||
-        !ram.contains(0x088A687Cu, 4u) || ram.load32(0x088A687Cu) != 0x24820F80u ||
-        ram.load32(ram.load32(actor) + 0x44u) != 0x088A687Cu) return std::nullopt;
+    if (!ram.contains(0x0A10A3CCu, 4u) || ram.load32(0x0A10A3CCu) != 0x8C8214A8u || !ram.contains(0x0A10790Cu, 4u) ||
+        ram.load32(0x0A10790Cu) != 0x8C620304u || !ram.contains(0x088A687Cu, 4u) ||
+        ram.load32(0x088A687Cu) != 0x24820F80u || ram.load32(ram.load32(actor) + 0x44u) != 0x088A687Cu)
+        return std::nullopt;
     LongSwordActions result;
     const auto state = ram.load8(actor + 0x220u);
     if (state == 8u) return result; // Observed draw/sheathe/evade transition class.
@@ -81,7 +84,8 @@ std::optional<LongSwordActions> read_actions(const Ram &ram) {
     const auto real = [&](std::uint32_t offset) { return std::bit_cast<float>(ram.load32(actor + offset)); };
     const float frame = real(0x0F84u), step = real(0x0F8Cu), duration = real(0x0F94u);
     if (!std::isfinite(frame) || !std::isfinite(step) || !std::isfinite(duration) || frame < 0 || step < 0 ||
-        duration <= 0 || frame > duration) return std::nullopt;
+        duration <= 0 || frame > duration)
+        return std::nullopt;
     const auto flags = ram.load16(actor + 0x0FD0u);
     const bool stopped = (flags & 2u) || static_cast<std::int32_t>(ram.load32(actor + 0x0FC8u)) > 0 ||
         (ram.load32(actor + 0x0FA8u) == 1u && !(ram.load32(actor + 0x0FC0u) & 1u));
@@ -103,12 +107,15 @@ std::optional<LongSwordActions> read_actions(const Ram &ram) {
             return std::nullopt; // An additional unverified condition must not block a valid gesture.
         const auto threshold = [&](unsigned offset, unsigned override_offset) {
             const auto replacement = ram.load16(actor + override_offset);
-            return replacement ? static_cast<int>(replacement) : static_cast<int>(static_cast<std::int16_t>(ram.load16(entry + offset)));
+            return replacement ? static_cast<int>(replacement)
+                               : static_cast<int>(static_cast<std::int16_t>(ram.load16(entry + offset)));
         };
         int first = threshold(16u, 0x14ACu), last = threshold(18u, 0x14B0u), buffer = threshold(20u, 0x14AEu);
         if (first >= 999 || last >= 999 || buffer < 0 || buffer >= 999) return std::nullopt;
         const float begin = (first < 0 ? duration + first : static_cast<float>(first)) - buffer;
-        const float end = last == 0 ? duration : last < 0 ? duration + last : std::min(duration, static_cast<float>(last));
+        const float end = last == 0 ? duration
+            : last < 0              ? duration + last
+                                    : std::min(duration, static_cast<float>(last));
         if (end < 0 || begin > end) return std::nullopt;
         if (next < begin || next > end) continue;
         result.strike |= ((strike >> request) & 1u) != 0;
@@ -119,9 +126,13 @@ std::optional<LongSwordActions> read_actions(const Ram &ram) {
     }
     return std::nullopt; // No sentinel within the game's bounded row capacity.
 }
-std::optional<LongSwordActions> current_actions() { return actions; }
+std::optional<LongSwordActions> current_actions() {
+    return actions;
+}
 
-Posture current_posture() { return posture; }
+Posture current_posture() {
+    return posture;
+}
 
 bool refresh(const Ram &ram) {
     posture = read_posture(ram);

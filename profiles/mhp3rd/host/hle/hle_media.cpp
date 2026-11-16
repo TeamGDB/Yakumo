@@ -11,6 +11,7 @@
 #include "game/guest_ram.hpp"
 #include "game/audio_settings.hpp"
 #include "game/weapon_state.hpp"
+#include "game/damage_hook.hpp"
 #include "game/control_context.hpp"
 #include "game/layered_armor.hpp"
 #include "platform/utf8_path.hpp"
@@ -471,6 +472,7 @@ void present_frame(Runtime &rt) {
     game::weapon::refresh(game::GuestRam(rt.memory()));
     game::control_context::refresh(game::GuestRam(rt.memory()));
     game::sound::trace(game::GuestRam(rt.memory()));
+    game::combat::damage_frame(rt);
     // Layered armor puts its wrappers in place here, between two frames.
     game::layered::frame(rt);
     // The game's text, in the player's language when one is chosen: applied

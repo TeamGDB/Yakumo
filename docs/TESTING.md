@@ -2,6 +2,8 @@
 
 ## Automated
 
+- **Combat information** (`mhp3rd_monster_state_tests`, `mhp3rd_damage_numbers_tests`, settings and renderer/UI suites) uses synthetic guest memory and the production dispatch wrapper to check local collision ownership, independent original-function execution, actual per-part damage accumulation, history bounds/expiry and camera projection. HP tests cover Off / Large Monsters / All Monsters, forty large species and every small species independently of their slots within the twenty-slot manager, dead/other-area rejection, stable ordering, all panel counts, 50-200% panel scaling, picture bounds, persisted coordinates/scale and invalid values. Real UI tests exercise draw geometry, independent settings, defaults, panel dragging after resizing, the actual scale row, presets, fine adjustment, size/position resets and editor close behavior. `mhp3rd_renderer_ui_tests --combat-overlay` retains a synthetic editor capture. Game data is not required. Actual local-hit attribution, hit placement and interface/area transitions still require gameplay checks; projectiles, bombs, multiplayer and physical touch are separate device scenarios.
+
 - **Barioth encounter tools** (`mhp3rd_debug_tools_tests` and
   `scripts/ci/test_encounter_benchmark.py`) use synthetic RAM, model headers,
   observations and bounded owned child processes. They cover real quest

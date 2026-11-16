@@ -148,6 +148,7 @@ if(MHP3RD_RENDERER)
             host/ui/input_script.cpp
             host/ui/layer.cpp
             host/ui/menu.cpp
+            host/ui/combat_overlay.cpp
             host/ui/layered_armor_screen.cpp
             host/ui/mods_screen.cpp
             host/ui/save_screen.cpp
@@ -272,6 +273,9 @@ set(MHP3RD_HOST_SOURCES
     host/mods/mhp3rd_data_bin.cpp
     host/mods/mhp3rd_mod_format.cpp
     host/mods/mhp3rd_mods.cpp
+    host/game/monster_state.cpp
+    host/game/damage_numbers.cpp
+    host/game/damage_hook.cpp
     host/game/audio_settings.cpp
     host/game/guest_ram.cpp
     host/game/game_data.cpp
@@ -807,6 +811,14 @@ if(PSPRECOMP_BUILD_TESTS)
     add_test(NAME mhp3rd_control_context_tests COMMAND mhp3rd_control_context_tests)
 endif()
 
+# Read-only monster snapshots on bounded synthetic memory.
+add_executable(mhp3rd_monster_state_tests tests/monster_state_tests.cpp host/game/monster_state.cpp)
+target_include_directories(mhp3rd_monster_state_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+set_target_properties(mhp3rd_monster_state_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_monster_state_tests COMMAND mhp3rd_monster_state_tests)
+endif()
+
 # Independent Adaptive touch gesture ownership/timing, without a renderer or game.
 add_executable(mhp3rd_adaptive_attack_tests tests/adaptive_attack_tests.cpp
     host/input/adaptive_attack.cpp host/input/touch_adaptive.cpp host/input/touch_geometry.cpp host/input/touch_controls.cpp)
@@ -1151,6 +1163,13 @@ target_compile_definitions(mhp3rd_imgui_font_bitmap_tests PRIVATE TEST_IMGUI_STB
 
 # Synthetic HLE suites link the real headless host with a public empty registry.
 add_library(mhp3rd_test_host STATIC ${MHP3RD_HOST_SOURCES} host/generated_stub.cpp "${MHP3RD_NIDS_INC}")
+add_executable(mhp3rd_damage_numbers_tests tests/damage_numbers_tests.cpp)
+target_link_libraries(mhp3rd_damage_numbers_tests PRIVATE mhp3rd_test_host)
+target_include_directories(mhp3rd_damage_numbers_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+set_target_properties(mhp3rd_damage_numbers_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_damage_numbers_tests COMMAND mhp3rd_damage_numbers_tests)
+endif()
 target_compile_definitions(mhp3rd_test_host PRIVATE MHP3RD_DEVICE_CLOCK_TEST=1)
 target_include_directories(mhp3rd_test_host PUBLIC
     "${MHP3RD_PROFILE_DIR}/host" "${MHP3RD_PROFILE_DIR}/third_party"
