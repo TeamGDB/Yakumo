@@ -6652,11 +6652,13 @@ void menu_contracts(gpu::VulkanRenderer &renderer, psprecomp::Runtime &runtime, 
         expect(settings::current().monster_hp == settings::MonsterHp::All, "HP choice also cycles backwards");
         settings::current().monster_hp_x = 0.37f;
         settings::current().monster_hp_y = 0.63f;
+        settings::current().monster_hp_scale = 1.5f;
         change_video("Restore QoL Defaults", ImGuiKey_Space);
         expect(!settings::current().damage_numbers && settings::current().monster_hp == settings::MonsterHp::Off,
             "QoL defaults restore the original game without combat overlays");
-        expect(settings::current().monster_hp_x == 0.5f && settings::current().monster_hp_y == 0.f,
-            "QoL reset restores the HP panel position");
+        expect(settings::current().monster_hp_x == 0.5f && settings::current().monster_hp_y == 0.f &&
+                settings::current().monster_hp_scale == 1.f,
+            "QoL reset restores the HP panel position and scale");
         settings::current() = saved_combat;
         frame();
     }
@@ -7576,6 +7578,7 @@ void combat_overlay_contracts(
     settings::current().monster_hp = settings::MonsterHp::Large;
     settings::current().monster_hp_x = 0.f;
     settings::current().monster_hp_y = 0.25f;
+    settings::current().monster_hp_scale = 1.f;
     layer.set_interactive(true);
     ScriptedUiMouse mouse(renderer.window());
     ui::open_hp_layout_editor();
@@ -7604,11 +7607,15 @@ void combat_overlay_contracts(
     editor_frame();
     editor_frame();
     expect(ui::hp_layout_editor_open(), "HP editor opens with a live quest preview");
+    activate("Panel Scale", ImGuiKey_RightArrow);
+    expect(std::abs(settings::current().monster_hp_scale - 1.05f) < 0.001f && settings::current().monster_hp_x == 0.f &&
+            settings::current().monster_hp_y == 0.25f,
+        "real HP scale row changes size without changing saved position");
     const auto picture = renderer.game_picture();
     const auto display = ImGui::GetIO().DisplaySize;
     const auto stack = ui::combat_layout::place(
         {picture[0] * display.x, picture[1] * display.y, picture[2] * display.x, picture[3] * display.y},
-        layer.font_size() * 0.65f, 1, 0.f, 0.25f);
+        layer.font_size() * 0.65f, 1, 0.f, 0.25f, settings::current().monster_hp_scale);
     mouse.move({stack.bounds.x + 10.f, stack.bounds.y + 5.f});
     editor_frame();
     editor_frame();
@@ -7634,9 +7641,10 @@ void combat_overlay_contracts(
     activate("Vertical Position", ImGuiKey_LeftArrow);
     expect(settings::current().monster_hp_x < 1.f && settings::current().monster_hp_y < 1.f,
         "keyboard fine adjustment changes both saved axes");
-    activate("Restore Panel Position");
-    expect(settings::current().monster_hp_x == 0.5f && settings::current().monster_hp_y == 0.f,
-        "position reset restores top center independently of HP mode");
+    activate("Restore Panel Defaults");
+    expect(settings::current().monster_hp_x == 0.5f && settings::current().monster_hp_y == 0.f &&
+            settings::current().monster_hp_scale == 1.f,
+        "panel reset restores top center and 100 percent size independently of HP mode");
     if (!captures.empty()) {
         renderer.capture_window(captures / "combat-hp-position.bmp");
         editor_frame();

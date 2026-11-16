@@ -17,19 +17,21 @@ inline float fraction(float value, float fallback) {
 }
 // Coordinates describe the available space, keeping the entire stack inside
 // the game picture after a resize, aspect change or monster-count change.
-inline Stack place(Rect picture, float font, std::size_t count, float x, float y) {
+inline Stack place(Rect picture, float font, std::size_t count, float x, float y, float scale = 1.f) {
     if (!count || count > 20 || !std::isfinite(picture.x) || !std::isfinite(picture.y) ||
         !std::isfinite(picture.width) || !std::isfinite(picture.height) || picture.width <= 0.f ||
         picture.height <= 0.f || !std::isfinite(font) || font <= 0.f)
         return {};
+    scale = std::isfinite(scale) ? std::clamp(scale, 0.5f, 2.f) : 1.f;
     Stack s;
     s.margin = std::min({font * 0.6f, picture.width * 0.02f, picture.height * 0.02f});
     const float available_height = picture.height - 2.f * s.margin;
-    s.font = std::min(font, available_height / (2.1f * static_cast<float>(count) - 0.2f));
-    s.font = std::min(s.font, (picture.width - 2.f * s.margin) / 18.f);
+    const float available_width = std::min(picture.width * 0.40f * scale, picture.width - 2.f * s.margin);
+    s.font =
+        std::min({font * scale, available_height / (2.1f * static_cast<float>(count) - 0.2f), available_width / 16.f});
     s.row = 1.9f * s.font;
     s.gap = 0.2f * s.font;
-    s.bounds.width = std::min(s.font * 16.f, picture.width * 0.40f);
+    s.bounds.width = s.font * 16.f;
     s.bounds.height = s.row * static_cast<float>(count) + s.gap * static_cast<float>(count - 1);
     s.origin_x = picture.x + s.margin;
     s.origin_y = picture.y + s.margin;

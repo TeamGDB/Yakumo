@@ -31,7 +31,7 @@ combat_layout::Stack placement(std::size_t count) {
     const auto &s = settings::current();
     return combat_layout::place(
         {picture[0] * screen.x, picture[1] * screen.y, picture[2] * screen.x, picture[3] * screen.y},
-        Layer::get().font_size() * 0.65f, count, s.monster_hp_x, s.monster_hp_y);
+        Layer::get().font_size() * 0.65f, count, s.monster_hp_x, s.monster_hp_y, s.monster_hp_scale);
 }
 void draw_bars(
     const game::Ram &ram, const std::vector<game::combat::Monster> &monsters, const combat_layout::Stack &stack) {
@@ -168,7 +168,7 @@ void hp_layout_editor_frame(bool back) {
         focus_next_row();
         editor.focus = false;
     }
-    heading("HP Panel Position:");
+    heading("HP Panel Layout:");
     paragraph(
         "Drag the panels with the mouse or touch. Presets and fine adjustments also work with keyboard or gamepad.",
         colors::kTextDim);
@@ -178,6 +178,13 @@ void hp_layout_editor_frame(bool back) {
         const int next = (preset < 0 ? (delta > 0 ? 0 : 5) : (preset + delta + 6) % 6);
         s.monster_hp_x = combat_layout::kPresets[next][0];
         s.monster_hp_y = combat_layout::kPresets[next][1];
+        settings::save();
+    }
+    int scale = static_cast<int>(std::lround(s.monster_hp_scale * 100.f));
+    if (slider_row("Panel Scale", scale, 50, 200, 5, "%d%%",
+            {dragging, {},
+                "Scales the HP panels, text and bars together. Large groups automatically fit inside the game picture."})) {
+        s.monster_hp_scale = static_cast<float>(scale) / 100.f;
         settings::save();
     }
     int x = static_cast<int>(std::lround(s.monster_hp_x * 100.f));
@@ -190,9 +197,10 @@ void hp_layout_editor_frame(bool back) {
         s.monster_hp_y = static_cast<float>(y) / 100.f;
         settings::save();
     }
-    if (button_row("Restore Panel Position", rows)) {
+    if (button_row("Restore Panel Defaults", rows)) {
         s.monster_hp_x = settings::defaults().monster_hp_x;
         s.monster_hp_y = settings::defaults().monster_hp_y;
+        s.monster_hp_scale = settings::defaults().monster_hp_scale;
         settings::save();
     }
     bool done = back;

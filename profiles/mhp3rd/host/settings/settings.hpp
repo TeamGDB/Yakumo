@@ -95,6 +95,7 @@ struct Settings {
     // Fractions of the free space inside the game picture, for the whole HP stack.
     float monster_hp_x{0.5f};
     float monster_hp_y{};
+    float monster_hp_scale{1.0f}; // the whole panel, including text and bars
 
     // Audio
     std::uint32_t volume{100u}; // percent

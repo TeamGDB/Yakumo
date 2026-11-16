@@ -128,20 +128,40 @@ void test_filter_and_layout() {
              layout::Rect{0, 0, 2400, 1080}, layout::Rect{0, 0, 272, 480}}) {
         for (std::size_t count : {1u, 3u, 5u, 20u}) {
             for (const auto &xy : layout::kPresets) {
-                const auto s = layout::place(picture, 20.f, count, xy[0], xy[1]);
-                check(s.font > 0 && s.bounds.x >= picture.x && s.bounds.y >= picture.y &&
-                        s.bounds.x + s.bounds.width <= picture.x + picture.width + 0.001f &&
-                        s.bounds.y + s.bounds.height <= picture.y + picture.height + 0.001f,
-                    "all presets and monster counts stay inside the actual game picture");
-                const auto moved = layout::move_to(s, s.origin_x + s.free_x * 0.37f, s.origin_y + s.free_y * 0.63f);
-                check(std::abs(moved[0] - 0.37f) < 0.001f && (s.free_y < 0.001f || std::abs(moved[1] - 0.63f) < 0.001f),
-                    "manual placement round-trips available-space coordinates");
-                const auto edge = layout::move_to(s, -1000, 100000);
-                check(edge[0] == 0.f && (s.free_y == 0.f || edge[1] == 1.f),
-                    "dragging outside the picture clamps the whole stack");
+                for (const float scale : {0.5f, 1.f, 2.f}) {
+                    const auto s = layout::place(picture, 20.f, count, xy[0], xy[1], scale);
+                    check(s.font > 0 && s.bounds.x >= picture.x && s.bounds.y >= picture.y &&
+                            s.bounds.x + s.bounds.width <= picture.x + picture.width + 0.001f &&
+                            s.bounds.y + s.bounds.height <= picture.y + picture.height + 0.001f,
+                        "all presets and monster counts stay inside the actual game picture");
+                    const auto moved = layout::move_to(s, s.origin_x + s.free_x * 0.37f, s.origin_y + s.free_y * 0.63f);
+                    check(std::abs(moved[0] - 0.37f) < 0.001f &&
+                            (s.free_y < 0.001f || std::abs(moved[1] - 0.63f) < 0.001f),
+                        "manual placement round-trips available-space coordinates");
+                    const auto edge = layout::move_to(s, -1000, 100000);
+                    check(edge[0] == 0.f && (s.free_y == 0.f || edge[1] == 1.f),
+                        "dragging outside the picture clamps the whole stack");
+                }
             }
         }
     }
+    const auto base = layout::place({0, 0, 1920, 1080}, 20, 3, 1, 1, 1);
+    const auto bigger = layout::place({0, 0, 1920, 1080}, 20, 3, 1, 1, 2);
+    const auto smaller = layout::place({0, 0, 1920, 1080}, 20, 3, 1, 1, 0.5f);
+    check(bigger.font == 2.f * base.font && bigger.row == 2.f * base.row && bigger.gap == 2.f * base.gap &&
+            bigger.bounds.width == 2.f * base.bounds.width && bigger.bounds.height == 2.f * base.bounds.height,
+        "scale enlarges text, bars, panel width and spacing uniformly");
+    check(smaller.font == base.font * 0.5f && smaller.bounds.width == base.bounds.width * 0.5f,
+        "half scale produces a smaller panel instead of only smaller text");
+    check(std::abs(bigger.bounds.x + bigger.bounds.width - base.bounds.x - base.bounds.width) < 0.001f &&
+            std::abs(bigger.bounds.y + bigger.bounds.height - base.bounds.y - base.bounds.height) < 0.001f,
+        "resizing preserves the selected right and bottom anchors");
+    for (const float scale : {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()})
+        check(layout::place({0, 0, 1920, 1080}, 20, 3, 1, 1, scale).bounds.width == base.bounds.width,
+            "nonfinite scale safely falls back to 100 percent");
+    check(layout::place({0, 0, 1920, 1080}, 20, 3, 1, 1, -5).bounds.width == smaller.bounds.width &&
+            layout::place({0, 0, 1920, 1080}, 20, 3, 1, 1, 5).bounds.width == bigger.bounds.width,
+        "scale is bounded even when called outside settings");
     check(layout::preset(0.5f, 0.f) == 1 && layout::preset(0.37f, 0.63f) == -1,
         "default and custom positions have independent labels");
     for (float bad : {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()}) {

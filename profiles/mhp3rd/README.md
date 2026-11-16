@@ -676,9 +676,10 @@ The Android app starts from other defaults where a phone differs, with the same 
 | QoL (Modern Features → Layered Armor) | List All Armor | `look.layered_all` | | Off (default): the lists offer the pieces the hunter wears or keeps in the equipment box; on: every piece its sex can wear |
 | QoL (Combat Information) | Damage Numbers | `qol.damage_numbers` | | Off (default): floating numbers for the local hunter's validated direct hits. Companions, other hunters and unknown sources are omitted |
 | QoL (Combat Information) | Monster HP Overlay | `qol.monster_hp` | | Off (default), Large Monsters, or All Monsters: current/maximum HP for living monsters in the hunter's area. Hidden in interfaces and with Hide HUD |
-| QoL (Combat Information) | HP Panel Position | `qol.monster_hp_x`, `qol.monster_hp_y` | | Six screen presets or a manually placed HP stack. Drag with mouse/touch or fine-tune with keyboard/gamepad. Coordinates 0?1, default top center (0.5, 0); fits the game picture after resizing |
+| QoL (Combat Information) | HP Panel Layout | `qol.monster_hp_x`, `qol.monster_hp_y` | | Six screen presets or a manually placed HP stack. Drag with mouse/touch or fine-tune with keyboard/gamepad. Coordinates 0-1, default top center (0.5, 0); fits the game picture after resizing |
+| QoL (Combat Information) | Panel Scale (in HP Panel Layout) | `qol.monster_hp_scale` | | 50-200%, default 100%. Scales HP panel text, bars and spacing together; large groups fit inside the game picture |
 | QoL (HUD Settings) | Hide HUD | | `MHP3RD_HIDE_HUD` | Off (default) or on, for this run: the game's HUD, name tags and prompts are left out of the picture; menus and dialogs stay. Same as the Hide HUD key. See [Hiding the HUD](#hiding-the-hud) |
-| QoL (HUD Settings → Edit HUD Layout) | Block Scale; Drag to Move | `hud.status.scale/x/y`, `hud.map.scale/x/y`, `hud.items.scale/x/y` | | Individual scale (50–200%) and offsets from the original corners, as fractions of the game picture; default scale 1, offsets 0 |
+| QoL (HUD Settings → Edit HUD Layout) | Block Scale; Drag to Move | `hud.status.scale/x/y`, `hud.map.scale/x/y`, `hud.items.scale/x/y` | | Individual scale (50-200%) and offsets from the original corners, as fractions of the game picture; default scale 1, offsets 0 |
 | QoL (HUD Settings) | Restore HUD Defaults | | | Restores the original size and position of all three blocks, including while the HUD is hidden |
 | QoL (Quality of Life) | Fast Loading | `video.fast_loading` | `MHP3RD_FAST_LOADING` | On (default) or off: while the game loads, and only then, it runs ahead of real time. Disabled in multiplayer. See [Fast loading](#fast-loading) |
 | QoL (Singleplayer Only Cheats) | Fast-Forward | `video.fast_forward` | `MHP3RD_FAST_FORWARD` | `hold` (default): the game runs faster while the Fast-forward key is held; `toggle`: one press turns it on, the next off; `off`: the key does nothing. Single player only. See [Fast-forward](#fast-forward) |
@@ -1261,7 +1262,7 @@ It is the same clock as always, let go further. The kernel holds emulated time t
 **QoL → HUD Settings:** contains **Hide HUD**, **Edit HUD Layout** and
 **Restore HUD Defaults**. The editor changes three blocks independently:
 **Status** (clock, health, stamina, weapon gauges and party plates), **Map** and
-**Items**. Choose **Block** and adjust **Block Scale** (50–200%).
+**Items**. Choose **Block** and adjust **Block Scale** (50-200%).
 Tap/click a block and drag it to move it with the mouse or touch screen.
 
 **Move Block** starts keyboard/gamepad positioning for the selected block:

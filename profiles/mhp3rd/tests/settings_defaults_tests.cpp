@@ -452,6 +452,21 @@ void test_combat_settings() {
     }
     const auto clamped = from_entries({{"qol.monster_hp_x", "-2"}, {"qol.monster_hp_y", "3"}});
     check(clamped.monster_hp_x == 0.f && clamped.monster_hp_y == 1.f, "panel positions clamp to the picture");
+    check(desktop.monster_hp_scale == 1.f && android.monster_hp_scale == 1.f,
+        "both platforms and older settings retain 100 percent panel scale");
+    for (const char *value : {"0.5", "1", "1.35", "2"}) {
+        const auto chosen = from_entries({{"qol.monster_hp_scale", value}, {"qol.monster_hp_x", "0.3712"}});
+        const auto loaded = from_entries(to_entries(chosen));
+        check(std::abs(loaded.monster_hp_scale - std::stof(value)) < 0.0001f &&
+                loaded.monster_hp_x == chosen.monster_hp_x,
+            "panel scale persists independently of position and overlay mode");
+    }
+    for (const char *bad : {"nan", "inf", "bad", "1.2bad"})
+        check(from_entries({{"qol.monster_hp_scale", bad}}).monster_hp_scale == 1.f,
+            "invalid saved scale retains the default");
+    check(from_entries({{"qol.monster_hp_scale", "-5"}}).monster_hp_scale == 0.5f &&
+            from_entries({{"qol.monster_hp_scale", "5"}}).monster_hp_scale == 2.f,
+        "saved scale clamps to the supported range");
     const auto enabled = from_entries({{"qol.damage_numbers", "1"}, {"qol.monster_hp", "1"}});
     const auto roundtrip = from_entries(to_entries(enabled));
     check(roundtrip.damage_numbers && roundtrip.monster_hp == MonsterHp::Large,

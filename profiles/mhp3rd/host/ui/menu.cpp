@@ -1576,10 +1576,10 @@ void Menu::qol() {
         s.monster_hp = static_cast<settings::MonsterHp>((static_cast<int>(s.monster_hp) + delta + 3) % 3);
         settings::save();
     }
-    if (button_row("HP Panel Position",
+    if (button_row("HP Panel Layout",
             {s.monster_hp == settings::MonsterHp::Off,
                 s.monster_hp == settings::MonsterHp::Off ? "Monster HP Overlay is off" : "",
-                "Choose a screen position or drag the HP panels with the mouse or touch. Changes are saved on this device."}))
+                "Move and resize the HP panels. Choose a screen position or drag with the mouse or touch. Changes are saved on this device."}))
         open_hp_layout_editor();
     section("HUD Settings:");
     {
@@ -1731,6 +1731,7 @@ void Menu::qol() {
         restore("qol.monster_hp", s.monster_hp, d.monster_hp);
         s.monster_hp_x = d.monster_hp_x;
         s.monster_hp_y = d.monster_hp_y;
+        s.monster_hp_scale = d.monster_hp_scale;
         s.hud = d.hud;
         restore("experimental.free_camera", s.free_camera, d.free_camera);
         restore("experimental.free_camera_speed", s.free_camera_speed, d.free_camera_speed);

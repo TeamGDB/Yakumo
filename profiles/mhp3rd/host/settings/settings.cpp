@@ -439,6 +439,9 @@ const std::vector<Field> &fields() {
             },
             nullptr},
         hud_field(
+            "qol.monster_hp_scale", [](Settings &s) -> float & { return s.monster_hp_scale; },
+            [](const Settings &s) { return s.monster_hp_scale; }, 0.5f, 2.f),
+        hud_field(
             "qol.monster_hp_x", [](Settings &s) -> float & { return s.monster_hp_x; },
             [](const Settings &s) { return s.monster_hp_x; }, 0.f, 1.f),
         hud_field(
