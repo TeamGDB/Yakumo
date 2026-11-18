@@ -129,7 +129,7 @@ class ProbeCacheTests(unittest.TestCase):
         with self.assertRaises(nightly.Rejected):
             nightly.verify_overlays(output)
 
-    def test_existing_output_and_symlink_are_preserved(self):
+    def test_existing_output_and_directory_link_are_preserved(self):
         self.output.mkdir()
         sentinel = self.output / 'keep'
         sentinel.write_bytes(b'preserve me')
@@ -137,7 +137,14 @@ class ProbeCacheTests(unittest.TestCase):
             probe.create_probe(self.output, 'linux-x86_64', runner=self.compiler)
         self.assertEqual(sentinel.read_bytes(), b'preserve me')
         link = self.base / 'link'
-        link.symlink_to(self.output, target_is_directory=True)
+        if os.name == 'nt':
+            # Real directory redirection without Windows symlink privileges.
+            subprocess.run(['cmd.exe', '/d', '/c', 'mklink', '/J', str(link), str(self.output)],
+                           check=True, capture_output=True, timeout=10)
+            self.addCleanup(link.rmdir)
+        else:
+            link.symlink_to(self.output, target_is_directory=True)
+        self.assertTrue(os.path.samefile(link, self.output))
         with self.assertRaises(nightly.Rejected):
             probe.create_probe(link, 'linux-x86_64', runner=self.compiler)
         self.assertEqual(sentinel.read_bytes(), b'preserve me')

@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 from pathlib import Path
 import struct
 import subprocess
@@ -267,7 +268,7 @@ class PrivateInputTests(Fixture):
                               'abi_sha256': 'b' * 64, 'size': len(self.cache), 'sha256': checksum(self.cache)}}
         self.objects = {'EBOOT.ELF/part': self.game, 'disc.iso/part': self.disc, 'cache/package': self.cache}
 
-    def fetch(self):
+    def fetch(self, fingerprint='b' * 64):
         def get(bucket, name, target, limit, expected=None):
             data = json.dumps(self.manifest).encode() if name == 'manifest' else self.objects[name]
             self.assertLessEqual(len(data), limit)
@@ -276,7 +277,8 @@ class PrivateInputTests(Fixture):
             Path(target).write_bytes(data)
             return len(data)
         with mock.patch.object(nightly, 'r2_get', side_effect=get), \
-                mock.patch.object(nightly, 'abi_fingerprint', return_value='b' * 64), \
+                (mock.patch.object(nightly, 'abi_fingerprint', return_value=fingerprint)
+                 if fingerprint is not None else contextlib.nullcontext()), \
                 mock.patch.object(nightly, 'EXPECTED_EBOOT', checksum(self.game)):
             nightly.fetch_inputs(self.base / 'private', 'manifest', self.root)
 
@@ -288,6 +290,88 @@ class PrivateInputTests(Fixture):
         self.assertEqual(len(list((private / 'overlays').iterdir())), 355)
         if os.name == 'posix':
             self.assertEqual((private / 'disc.iso').stat().st_mode & 0o777, 0o600)
+
+    def prepare_source_transition(self):
+        # Real Git snapshots and hashes; only the private transport is synthetic.
+        subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        subprocess.run(['git', '-C', str(self.root), 'config', 'core.autocrlf', 'false'], check=True)
+        header = self.root / 'include/psprecomp/abi.hpp'
+        header.parent.mkdir(parents=True)
+        header.write_bytes(b'struct PublicAbi { int value; };\n')
+        cmake = self.root / 'CMakeLists.txt'
+        cmake.write_bytes(b'add_library(core OBJECT runtime.cpp)\n')
+        subprocess.run(['git', '-C', str(self.root), 'add', '.'], check=True)
+        subprocess.run(['git', '-C', str(self.root), '-c', 'user.name=Synthetic Test', '-c',
+                        'user.email=test@example.invalid', 'commit', '-qm', 'Synthetic seed'], check=True)
+        source = subprocess.check_output(['git', '-C', str(self.root), 'rev-parse', 'HEAD'], text=True).strip()
+        seed = nightly.abi_fingerprint(self.root, source)
+        self.manifest['overlay_cache'].update(source_commit=source, abi_sha256=seed)
+        cmake.write_bytes(cmake.read_bytes() + b'add_test(NAME host_test COMMAND host_test)\n')
+        (header.parent / 'host_observer.hpp').write_bytes(b'class HostObserver {};\n')
+        current = nightly.abi_fingerprint(self.root)
+        self.assertNotEqual(seed, current)
+        policy = mock.patch.object(nightly, 'REVIEWED_ABI_TRANSITIONS', {(seed, current)}, create=True)
+        policy.start()
+        self.addCleanup(policy.stop)
+        return seed, current
+
+    def test_reviewed_host_transition_restores_overlays_and_pins_current_tree(self):
+        seed, current = self.prepare_source_transition()
+        self.fetch(fingerprint=None)
+        private = self.base / 'private'
+        nightly.verify_overlays(private, self.root)
+        self.assertEqual(len(list((private / 'overlays').iterdir())), 355)
+        self.assertEqual((private / 'overlay-abi.sha256').read_text().strip(), current)
+        marker = json.loads((private / 'overlay-files.json').read_text())
+        self.assertEqual(marker['abi_sha256'], current)
+        self.assertEqual(self.manifest['overlay_cache']['abi_sha256'], seed)
+        (self.root / 'include/psprecomp/abi.hpp').write_bytes(b'struct PublicAbi { long value; };\n')
+        with self.assertRaises(nightly.Rejected):
+            nightly.verify_overlays(private, self.root)
+
+    def test_reviewed_transition_rejects_forged_seed_and_further_abi_changes(self):
+        seed, current = self.prepare_source_transition()
+        # A valid transition must not let an operator relabel the source/cache.
+        self.manifest['overlay_cache']['abi_sha256'] = current
+        with self.assertRaises(nightly.Rejected):
+            self.fetch(fingerprint=None)
+        self.assertFalse((self.base / 'private').exists())
+        self.manifest['overlay_cache']['abi_sha256'] = seed
+        for relative in ['include/psprecomp/abi.hpp', 'include/psprecomp/host_observer.hpp',
+                         'include/psprecomp/new.hpp', 'CMakeLists.txt', 'tools/codegen_main.cpp']:
+            path = self.root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            original = path.read_bytes() if path.exists() else None
+            path.write_bytes((original or b'') + b'ABI CHANGE\n')
+            with self.subTest(relative=relative), self.assertRaises(nightly.Rejected):
+                self.fetch(fingerprint=None)
+            self.assertFalse((self.base / 'private').exists())
+            if original is None:
+                path.unlink()
+            else:
+                path.write_bytes(original)
+
+    def test_registration_observer_policy_is_exact_and_directional(self):
+        seed = '31826f737673af3a5578b26afff9da95d4366e261fd1ae3a7b983187d2335fb1'
+        current = 'ce16d545b98b3153c0c4b54c8afb27e287ab603f1fe292faa822387ced77606f'
+        for cached, frozen, working, accepted in [
+                (seed, seed, current, True), (current, current, seed, False),
+                (seed, seed, 'd' * 64, False), ('d' * 64, 'd' * 64, current, False),
+                (seed, 'd' * 64, current, False), (current, seed, current, False)]:
+            self.manifest['overlay_cache']['abi_sha256'] = cached
+            def fingerprint(root, source=None):
+                return frozen if source else working
+            with self.subTest(cached=cached, frozen=frozen, working=working), \
+                    mock.patch.object(nightly, 'abi_fingerprint', side_effect=fingerprint):
+                if accepted:
+                    self.fetch(fingerprint=None)
+                    private = self.base / 'private'
+                    self.assertEqual((private / 'overlay-abi.sha256').read_text().strip(), current)
+                    shutil.rmtree(private)
+                else:
+                    with self.assertRaises(nightly.Rejected):
+                        self.fetch(fingerprint=None)
+                    self.assertFalse((self.base / 'private').exists())
 
     def test_bad_names_schema_sizes_hashes_and_cache_paths_leave_no_restore(self):
         cases = [lambda: self.manifest.update(schema=2),
