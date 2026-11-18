@@ -1310,6 +1310,7 @@ The renderer then leaves out the HUD packets' draws, and nothing else: their oth
 | --- | --- | --- |
 | `MHP3RD_NO_AUDIO` | off | Do not open a playback device; the game's audio timing is unchanged |
 | `MHP3RD_AUDIO_DUMP` | unset | Write the mixed output to a 44100 Hz stereo WAV file |
+| `MHP3RD_NO_AUDIO_RECOVERY` | off | Do not reopen a playback device that stopped playing, as before. Normally, when the device has not asked for audio for half a second while the game runs in the foreground and is not paused, the device is closed and opened again, and a device that could not be opened is tried again, waiting 1 s, then 2 s, up to 30 s between attempts. Android can take the low-latency audio stream away from the app while it is in the background (another app's system sound was enough on a Galaxy S23 Ultra); SDL then cannot restart it and the game stayed silent until it was restarted. The log says `Audio: playback stopped while running; reopening the device` |
 
 ### Input
 

@@ -199,6 +199,7 @@ set(MHP3RD_HOST_SOURCES
     host/movie/avc_decoder.cpp
     host/movie/psmf_demuxer.cpp
     host/audio/audio_sink.cpp
+    host/audio/playback_watchdog.cpp
     host/audio/sas_core.cpp
     host/camera_probe.cpp
     host/camera/camera_input.cpp
@@ -840,6 +841,15 @@ target_include_directories(mhp3rd_audio_settings_tests PRIVATE "${MHP3RD_PROFILE
 set_target_properties(mhp3rd_audio_settings_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 if(PSPRECOMP_BUILD_TESTS)
     add_test(NAME mhp3rd_audio_settings_tests COMMAND mhp3rd_audio_settings_tests)
+endif()
+
+# When a playback device that stopped asking for audio is reopened, on a
+# synthetic clock.
+add_executable(mhp3rd_playback_watchdog_tests tests/playback_watchdog_tests.cpp host/audio/playback_watchdog.cpp)
+target_include_directories(mhp3rd_playback_watchdog_tests PRIVATE "${MHP3RD_PROFILE_DIR}/host")
+set_target_properties(mhp3rd_playback_watchdog_tests PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(PSPRECOMP_BUILD_TESTS)
+    add_test(NAME mhp3rd_playback_watchdog_tests COMMAND mhp3rd_playback_watchdog_tests)
 endif()
 
 # Renderer helpers that need no GPU.
