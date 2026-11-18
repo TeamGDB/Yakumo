@@ -236,10 +236,28 @@ verified, and do not overwrite objects referenced by an active manifest.
 The initial cache seeds are the approved v0.7.5 distributions built from the
 frozen release source. Extraction accepts only the platform's native overlay
 modules, never game data or generated source. The seed's source and current
-source must have the same compatibility fingerprint over runtime headers,
+source must have the same compatibility fingerprint (or an explicitly reviewed
+transition described below) over runtime headers,
 profile/overlay ABI declarations, the overlay entry point, generator/parser
 sources, overlay/wrapper and DATA.BIN tools, the root CMake configuration and
 SDK pins.
+
+`REVIEWED_ABI_TRANSITIONS` in `scripts/ci/nightly.py` permits exact, directional
+pairs of source fingerprints after a compatibility review. The original cache
+fingerprint must still match its frozen source commit; no manifest relabeling,
+transitive matches or automatic acceptance of host-only changes is allowed.
+Restored file markers pin the current tree, so subsequent local changes still
+fail verification. Every header, root CMake edit and generator input remains
+in the fingerprint.
+
+The transition from `31826f73` to `ce16d545` covers [PR #384](https://github.com/TeamGDB/Yakumo/pull/384):
+only `include/psprecomp/function_registration.hpp` and the registration test's
+root CMake block changed among fingerprint inputs. The new observer is used by
+the host, not existing generated code or overlays. Existing runtime layouts,
+overlay declarations, production compiler flags and link contracts are unchanged.
+Windows and Android builds reused the existing 355 modules; nightly builds on
+all four platforms still require validation. Other fingerprint changes require
+a separate review or a deliberately rebuilt cache.
 
 The profile's `CMakeLists.txt` is outside the fingerprint. Nearly every change
 to it adds host sources, tests or shaders, and each one used to reject every

@@ -78,7 +78,7 @@ class ManifestIntegrationTests(Fixture):
         self.manifest = {'schema': 2, 'files': files, 'overlay_caches': caches}
         self.requested = []
 
-    def fetch(self, platform, output=None):
+    def fetch(self, platform, output=None, source_abi=FINGERPRINT, current_abi=FINGERPRINT):
         output = self.base / ('restored-' + platform) if output is None else output
 
         def get_object(Bucket, Key):
@@ -90,7 +90,7 @@ class ManifestIntegrationTests(Fixture):
         client.get_object.side_effect = get_object
 
         def fingerprint(root=nightly.ROOT, source=None):
-            return FINGERPRINT if source in (None, SOURCE) else 'c' * 64
+            return current_abi if source is None else source_abi if source == SOURCE else 'c' * 64
 
         with mock.patch.object(nightly, 'r2_client', return_value=client), \
                 mock.patch.object(nightly, 'EXPECTED_EBOOT', checksum(self.inputs['EBOOT.ELF'])), \
@@ -117,6 +117,18 @@ class ManifestIntegrationTests(Fixture):
                 self.assertEqual(marker['toolchain'], nightly.TOOLCHAINS[platform])
                 self.assertEqual(len(marker['files']), 355)
                 self.assertFalse((output / 'public-seed-metadata.txt').exists())
+
+    def test_reviewed_registration_transition_reuses_each_platform_seed(self):
+        seed = '31826f737673af3a5578b26afff9da95d4366e261fd1ae3a7b983187d2335fb1'
+        current = 'ce16d545b98b3153c0c4b54c8afb27e287ab603f1fe292faa822387ced77606f'
+        for platform in nightly_formats.PLATFORMS:
+            with self.subTest(platform=platform):
+                self.manifest['overlay_caches'][platform]['abi_sha256'] = seed
+                output = self.fetch(platform, source_abi=seed, current_abi=current)
+                self.assertEqual(len(list((output / 'overlays').iterdir())), 355)
+                marker = json.loads((output / 'overlay-files.json').read_text())
+                self.assertEqual(marker['abi_sha256'], current)
+                self.assertEqual(self.manifest['overlay_caches'][platform]['abi_sha256'], seed)
 
     def test_toolchain_provenance_catalog_and_container_corruption_fail_closed(self):
         platform = 'windows-x86_64'

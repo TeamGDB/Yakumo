@@ -48,6 +48,15 @@ ABI_PATHS = ['include/psprecomp', 'CMakeLists.txt',
              'profiles/mhp3rd/tools/add_overlay.py', 'profiles/mhp3rd/tools/wrap_overlay.py',
              'profiles/mhp3rd/tools/databin.py', 'profiles/mhp3rd/scripts/build_overlays.sh',
              'profiles/mhp3rd/packaging/linux/sources.sh']
+# Exact, directional source reviews; never infer compatibility or rewrite the
+# cache's original source/hash. PR #384 added only a host registration observer
+# header and its test target to ABI_PATHS. Existing generated/overlay declarations,
+# Runtime layout, production compiler flags and module linkage are unchanged.
+# Any further change to a fingerprint input still requires a new review or cache.
+REVIEWED_ABI_TRANSITIONS = frozenset({(
+    '31826f737673af3a5578b26afff9da95d4366e261fd1ae3a7b983187d2335fb1',
+    'ce16d545b98b3153c0c4b54c8afb27e287ab603f1fe292faa822387ced77606f',
+)})
 BAD_PART = re.compile(r'(?i)^(?:eboot.*|data\.bin|param\.sfo|umd_data.*|ms0|savedata|generated|'
                       r'analysis|overlay_corpora|game|.*\.(?:iso|cso|pbp|prx|elf|bin|ovl|cpp|o|lang))$')
 
@@ -451,8 +460,11 @@ def fetch_inputs(destination, manifest_key, root=ROOT, platform='linux-x86_64'):
         filename = cache['filename']
         import nightly_formats
         nightly_formats.version_from_name(platform, filename)
-        if (cache['abi_sha256'] != abi_fingerprint(root)
-                or abi_fingerprint(root, commit(cache['source_commit'])) != cache['abi_sha256']):
+        cached_abi = sha(cache['abi_sha256'])
+        current_abi = abi_fingerprint(root)
+        if (abi_fingerprint(root, commit(cache['source_commit'])) != cached_abi
+                or (cached_abi != current_abi
+                    and (cached_abi, current_abi) not in REVIEWED_ABI_TRANSITIONS)):
             raise Rejected('Overlay cache must be refreshed for this source.')
         if not isinstance(cache['size'], int) or not 0 < cache['size'] <= MAX_PACKAGE:
             raise Rejected('Invalid overlay cache size.')
