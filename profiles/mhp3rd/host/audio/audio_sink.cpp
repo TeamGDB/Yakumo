@@ -1,9 +1,12 @@
 #include "audio/audio_sink.hpp"
 
+#include "audio/playback_watchdog.hpp"
 #include "settings/settings.hpp"
 #include "platform/utf8_path.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -26,6 +29,11 @@ namespace {
 constexpr std::size_t kRingFrames = 8192u;
 // The device is kept two guest buffers ahead of the write cursor.
 constexpr std::size_t kPrebufferFrames = 2048u;
+
+[[nodiscard]] PlaybackWatchdog::Millis now_millis() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
 
 [[nodiscard]] std::int16_t saturate(std::int32_t value) noexcept {
     return static_cast<std::int16_t>(std::clamp(value, -32768, 32767));
@@ -118,7 +126,15 @@ struct AudioSink::Impl {
 
     float gain{1.0f};
     bool window_focused{true};
+    bool paused{};
+    // Reopening a device that stopped playing; MHP3RD_NO_AUDIO_RECOVERY turns
+    // it off.
+    bool recovery{true};
+    // When the device last asked for frames, from its own thread.
+    std::atomic<PlaybackWatchdog::Millis> last_feed{};
+    PlaybackWatchdog watchdog;
 #if defined(MHP3RD_HAS_SDL_AUDIO)
+    bool subsystem{}; // SDL's audio subsystem is initialized
     SDL_AudioStream *stream{};
 #endif
 
@@ -178,14 +194,33 @@ namespace {
 
 #if defined(MHP3RD_HAS_SDL_AUDIO)
 void SDLCALL feed_device(void *user, SDL_AudioStream *stream, int additional, int) {
-    if (additional <= 0) return;
     auto *impl = static_cast<AudioSink::Impl *>(user);
+    impl->last_feed.store(now_millis(), std::memory_order_relaxed);
+    if (additional <= 0) return;
     const std::size_t frames = static_cast<std::size_t>(additional) / (kChannels * 2u);
     if (frames == 0u) return;
     std::lock_guard<std::mutex> guard(impl->lock);
     impl->scratch.resize(frames * kChannels);
     impl->retire(frames, impl->scratch.data(), true);
     SDL_PutAudioStreamData(stream, impl->scratch.data(), static_cast<int>(frames * kChannels * 2u));
+}
+
+// Opens the default playback device at the sink's format and gain and starts
+// it, unless the sink is paused. False, and no stream, when it cannot.
+bool open_stream(AudioSink::Impl &impl) {
+    SDL_AudioSpec spec{};
+    spec.format = SDL_AUDIO_S16LE;
+    spec.channels = static_cast<int>(kChannels);
+    spec.freq = static_cast<int>(kSampleRate);
+    impl.stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, &feed_device, &impl);
+    if (impl.stream == nullptr) {
+        std::cerr << "Audio: SDL_OpenAudioDeviceStream failed (" << SDL_GetError() << "); running silent\n";
+        return false;
+    }
+    SDL_SetAudioStreamGain(impl.stream, impl.gain);
+    if (!impl.paused) SDL_ResumeAudioStreamDevice(impl.stream);
+    std::cout << "Audio: 44100 Hz stereo playback open\n";
+    return true;
 }
 #endif
 
@@ -207,6 +242,7 @@ void AudioSink::initialize() {
     impl.started = true;
     impl.trace = std::getenv("MHP3RD_TRACE_AUDIO") != nullptr;
     impl.enabled = std::getenv("MHP3RD_NO_AUDIO") == nullptr;
+    impl.recovery = std::getenv("MHP3RD_NO_AUDIO_RECOVERY") == nullptr;
     refresh_settings();
 
     if (const std::filesystem::path path = environment_path("MHP3RD_AUDIO_DUMP"); !path.empty()) {
@@ -225,18 +261,9 @@ void AudioSink::initialize() {
         std::cerr << "Audio: SDL_InitSubSystem failed (" << SDL_GetError() << "); running silent\n";
         return;
     }
-    SDL_AudioSpec spec{};
-    spec.format = SDL_AUDIO_S16LE;
-    spec.channels = static_cast<int>(kChannels);
-    spec.freq = static_cast<int>(kSampleRate);
-    impl.stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, &feed_device, &impl);
-    if (impl.stream == nullptr) {
-        std::cerr << "Audio: SDL_OpenAudioDeviceStream failed (" << SDL_GetError() << "); running silent\n";
-        return;
-    }
-    SDL_SetAudioStreamGain(impl.stream, impl.gain);
-    SDL_ResumeAudioStreamDevice(impl.stream);
-    std::cout << "Audio: 44100 Hz stereo playback open\n";
+    impl.subsystem = true;
+    if (!impl.recovery) std::cout << "Audio: device recovery off (MHP3RD_NO_AUDIO_RECOVERY)\n";
+    open_stream(impl);
 #else
     std::cout << "Audio: built without SDL; running silent\n";
 #endif
@@ -302,15 +329,35 @@ bool AudioSink::has_device() const {
 }
 
 void AudioSink::set_paused(bool paused) {
-#if defined(MHP3RD_HAS_SDL_AUDIO)
     Impl &impl = *impl_;
+    impl.paused = paused;
+#if defined(MHP3RD_HAS_SDL_AUDIO)
     if (impl.stream == nullptr) return;
     if (paused)
         SDL_PauseAudioStreamDevice(impl.stream);
     else
         SDL_ResumeAudioStreamDevice(impl.stream);
-#else
-    (void)paused;
+#endif
+}
+
+void AudioSink::check_playback() {
+#if defined(MHP3RD_HAS_SDL_AUDIO)
+    Impl &impl = *impl_;
+    if (!impl.recovery || !impl.subsystem || impl.closed) return;
+    const PlaybackWatchdog::Millis now = now_millis();
+    const PlaybackWatchdog::State state{impl.stream != nullptr, impl.paused, impl.window_focused};
+    if (!impl.watchdog.due(now, impl.last_feed.load(std::memory_order_relaxed), state)) return;
+    if (impl.stream != nullptr) {
+        std::cout << "Audio: playback stopped while running; reopening the device\n";
+        // Closing the only stream on the device closes the device, so the
+        // reopen builds a new one instead of restarting the dead one.
+        SDL_DestroyAudioStream(impl.stream);
+        impl.stream = nullptr;
+    } else {
+        std::cout << "Audio: no playback device; trying to open one again\n";
+    }
+    open_stream(impl);
+    impl.watchdog.reopened(now);
 #endif
 }
 

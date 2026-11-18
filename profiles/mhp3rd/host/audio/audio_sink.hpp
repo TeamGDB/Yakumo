@@ -46,6 +46,11 @@ public:
     // Stops and restarts the device, for the in-game menu's pause. What the
     // game queued before the pause stays in the ring and plays on resume.
     void set_paused(bool paused);
+    // Called once per frame from the main thread: reopens the device when it
+    // has stopped asking for audio while the game is running in the
+    // foreground, or tries again to open one that could not be opened (see
+    // PlaybackWatchdog). MHP3RD_NO_AUDIO_RECOVERY turns this off.
+    void check_playback();
     // Whether a playback device is open (not with MHP3RD_NO_AUDIO, or when
     // none could be opened).
     [[nodiscard]] bool has_device() const;

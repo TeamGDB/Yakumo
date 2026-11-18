@@ -6058,6 +6058,9 @@ bool VulkanRenderer::pump_events() {
     // direction it can never release.
     const bool focused = (SDL_GetWindowFlags(impl_->window) & SDL_WINDOW_INPUT_FOCUS) != 0u;
     audio::AudioSink::instance().set_window_focused(focused);
+    // Android can take the audio stream away while the app is in the
+    // background; reopen it once the game runs in the foreground again.
+    audio::AudioSink::instance().check_playback();
     if (impl_->background_gamepad_events != settings::current().background_gamepad) {
         impl_->background_gamepad_events = settings::current().background_gamepad;
         SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, impl_->background_gamepad_events ? "1" : "0");
