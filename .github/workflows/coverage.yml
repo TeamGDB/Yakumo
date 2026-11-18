@@ -17,7 +17,9 @@ jobs:
   coverage:
     name: Project coverage and 80% diff (Linux Clang 18)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # Cold package installation can consume 17 minutes on a slow Ubuntu mirror.
+    # Leave time for the complete native, Python and Java coverage suites.
+    timeout-minutes: 35
     outputs:
       badge: ${{ steps.badge.outputs.json }}
     steps:
