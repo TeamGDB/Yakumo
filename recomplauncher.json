@@ -1,0 +1,254 @@
+{
+    "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+    "format": 1,
+    "name": "Yakumo",
+    "game": {
+        "kind": "iso",
+        "label": "Your disc image (.iso) of Monster Hunter Portable 3rd HD Ver., serial NPJB-40001 (the PlayStation 3 release).",
+        "check": {
+            "ids": [
+                "NPJB-40001"
+            ]
+        }
+    },
+    "prepare": {
+        "program": [
+            "Yakumo.exe"
+        ],
+        "args": [
+            "--install",
+            "{game}"
+        ],
+        "label": "Setting up the game from your disc image",
+        "timeout": 1800
+    },
+    "start": {
+        "program": [
+            "Yakumo.exe"
+        ]
+    },
+    "config": [
+        {
+            "id": "main",
+            "format": "ini",
+            "file": [
+                {
+                    "path": "{install}/data/settings.ini",
+                    "if": "{install}/portable.txt"
+                },
+                {
+                    "path": "{config}/Yakumo/MHP3rd/settings.ini"
+                }
+            ]
+        }
+    ],
+    "folders": {
+        "saves": [
+            {
+                "path": "{install}/data",
+                "if": "{install}/portable.txt"
+            },
+            {
+                "path": "{config}/Yakumo/MHP3rd"
+            }
+        ]
+    },
+    "settings": [
+        {
+            "id": "window",
+            "label": "Full screen",
+            "choices": [
+                {
+                    "label": "Off",
+                    "set": {
+                        "video.fullscreen": "0"
+                    }
+                },
+                {
+                    "label": "On",
+                    "set": {
+                        "video.fullscreen": "1"
+                    }
+                }
+            ],
+            "defaults": {
+                "video.fullscreen": "0"
+            }
+        },
+        {
+            "id": "resolution",
+            "label": "Resolution",
+            "help": "What the game draws at. 272p is the PSP's own.",
+            "choices": [
+                {
+                    "label": "Match the window",
+                    "set": {
+                        "video.internal_scale": "auto"
+                    }
+                },
+                {
+                    "label": "272p (original)",
+                    "set": {
+                        "video.internal_scale": "1"
+                    }
+                },
+                {
+                    "label": "544p",
+                    "set": {
+                        "video.internal_scale": "2"
+                    }
+                },
+                {
+                    "label": "816p",
+                    "set": {
+                        "video.internal_scale": "3"
+                    }
+                },
+                {
+                    "label": "1088p",
+                    "set": {
+                        "video.internal_scale": "4"
+                    }
+                },
+                {
+                    "label": "1632p",
+                    "set": {
+                        "video.internal_scale": "6"
+                    }
+                }
+            ],
+            "defaults": {
+                "video.internal_scale": "2"
+            }
+        },
+        {
+            "id": "aspect",
+            "label": "Screen shape",
+            "help": "Fill widens the game's view to the window's shape.",
+            "choices": [
+                {
+                    "label": "Original",
+                    "set": {
+                        "video.aspect": "original"
+                    }
+                },
+                {
+                    "label": "Fill",
+                    "set": {
+                        "video.aspect": "fill"
+                    }
+                },
+                {
+                    "label": "Stretch",
+                    "set": {
+                        "video.aspect": "stretch"
+                    }
+                }
+            ],
+            "defaults": {
+                "video.aspect": "original"
+            }
+        },
+        {
+            "id": "fps",
+            "label": "Frame rate",
+            "help": "Higher rates add in-between frames for smoother motion.",
+            "choices": [
+                {
+                    "label": "30 fps (original)",
+                    "set": {
+                        "video.frame_rate": "30"
+                    }
+                },
+                {
+                    "label": "45 fps",
+                    "set": {
+                        "video.frame_rate": "45"
+                    }
+                },
+                {
+                    "label": "60 fps",
+                    "set": {
+                        "video.frame_rate": "60"
+                    }
+                },
+                {
+                    "label": "90 fps",
+                    "set": {
+                        "video.frame_rate": "90"
+                    }
+                },
+                {
+                    "label": "120 fps",
+                    "set": {
+                        "video.frame_rate": "120"
+                    }
+                },
+                {
+                    "label": "Monitor's refresh rate",
+                    "set": {
+                        "video.frame_rate": "display"
+                    }
+                }
+            ],
+            "defaults": {
+                "video.frame_rate": "30"
+            }
+        },
+        {
+            "id": "vsync",
+            "label": "V-Sync",
+            "choices": [
+                {
+                    "label": "On",
+                    "set": {
+                        "video.present_mode": "vsync"
+                    }
+                },
+                {
+                    "label": "Off (mailbox)",
+                    "set": {
+                        "video.present_mode": "mailbox"
+                    }
+                },
+                {
+                    "label": "Off (immediate)",
+                    "set": {
+                        "video.present_mode": "immediate"
+                    }
+                }
+            ],
+            "defaults": {
+                "video.present_mode": "vsync"
+            }
+        },
+        {
+            "id": "textures",
+            "label": "Texture filter",
+            "help": "Sharp keeps the original pixel look.",
+            "choices": [
+                {
+                    "label": "Smooth",
+                    "set": {
+                        "video.sharp_textures": "0"
+                    }
+                },
+                {
+                    "label": "Sharp",
+                    "set": {
+                        "video.sharp_textures": "1"
+                    }
+                }
+            ],
+            "defaults": {
+                "video.sharp_textures": "0"
+            }
+        }
+    ],
+    "requires": [
+        "start",
+        "setup",
+        "settings.ini",
+        "settings.choices"
+    ]
+}
