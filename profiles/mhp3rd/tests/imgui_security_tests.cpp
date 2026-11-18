@@ -91,7 +91,9 @@ void rejected_abort(int) {
 bool rejects_texture(const char *executable, int mode) {
 #ifdef _WIN32
     const std::string mode_text = std::to_string(mode);
-    return _spawnl(_P_WAIT, executable, executable, "--reject-texture", mode_text.c_str(),
+    // The CRT joins spawn arguments without quoting; argv[0] may contain spaces.
+    const std::string quoted_executable = "\"" + std::string(executable) + "\"";
+    return _spawnl(_P_WAIT, executable, quoted_executable.c_str(), "--reject-texture", mode_text.c_str(),
                static_cast<char *>(nullptr)) == 86;
 #else
     (void)executable;
