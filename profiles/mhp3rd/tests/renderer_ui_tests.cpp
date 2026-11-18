@@ -5193,12 +5193,24 @@ void menu_touch_widget_contracts(gpu::VulkanRenderer &renderer, const std::files
         settle();
     };
     const auto target = [&] { return ImVec2{slider_rect.Max.x - layer.font_size() * 7.f, slider_rect.GetCenter().y}; };
+    const auto expect_gesture = [&](bool ok, const char *what) {
+        if (!ok) {
+            std::cerr << "Touch fixture: value=" << value << ", scroll=" << (content ? content->Scroll.y : -1.f)
+                      << ", mouse=" << io.MousePos.x << ',' << io.MousePos.y << ", down=" << io.MouseDown[0]
+                      << ", source=" << io.MouseSource << ", focus_lost=" << io.AppFocusLost
+                      << ", queued=" << GImGui->InputEventsQueue.Size
+                      << ", hovered=" << (GImGui->HoveredWindow ? GImGui->HoveredWindow->Name : "none")
+                      << ", active=" << GImGui->ActiveId << ", slider=" << slider_rect.Min.x << ',' << slider_rect.Min.y
+                      << '-' << slider_rect.Max.x << ',' << slider_rect.Max.y << '\n';
+        }
+        expect(ok, what);
+    };
     ImVec2 at = target();
     point(at);
     press(true);
     expect(value == 40, "a touch press waits for gesture direction before editing the slider");
     point({at.x, at.y - 80});
-    expect(value == 40 && content && content->Scroll.y > 0.f,
+    expect_gesture(value == 40 && content && content->Scroll.y > 0.f,
         "vertical swipe starting on a slider scrolls without changing its value");
     press(false);
     const float released = content ? content->Scroll.y : 0;
@@ -5217,7 +5229,7 @@ void menu_touch_widget_contracts(gpu::VulkanRenderer &renderer, const std::files
     point(at);
     press(true);
     point({at.x + 75, at.y});
-    expect(value > 40 && content && content->Scroll.y == 0.f,
+    expect_gesture(value > 40 && content && content->Scroll.y == 0.f,
         "horizontal touch movement edits a slider while keeping vertical scroll stationary");
     press(false);
     const int horizontal = value;
