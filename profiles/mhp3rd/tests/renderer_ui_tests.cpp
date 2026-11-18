@@ -5121,9 +5121,6 @@ void menu_touch_widget_contracts(gpu::VulkanRenderer &renderer, const std::files
     auto &io = ImGui::GetIO();
     const auto flags = io.ConfigFlags;
     io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
-    int old_width{}, old_height{};
-    SDL_GetWindowSize(renderer.window(), &old_width, &old_height);
-    SDL_SetWindowSize(renderer.window(), 960, 544);
     renderer.pump_events();
     IsolatedTouchPointer isolate;
     ScriptedUiMouse mouse(renderer.window());
@@ -5138,7 +5135,9 @@ void menu_touch_widget_contracts(gpu::VulkanRenderer &renderer, const std::files
         layer.begin_frame();
         io.DeltaTime = 1.f / 60.f;
         ImGui::SetNextWindowPos({10, 10}, ImGuiCond_Always);
-        ImGui::SetNextWindowSize({640, 490}, ImGuiCond_Always);
+        // Keep both ends of the slider visible even in the initial 480x272 viewport.
+        ImGui::SetNextWindowSize(
+            {std::min(640.f, io.DisplaySize.x - 20.f), std::min(490.f, io.DisplaySize.y - 20.f)}, ImGuiCond_Always);
         ImGui::Begin("##touch-widget-improvements", nullptr, ImGuiWindowFlags_NoDecoration);
         ui::begin_content(true);
         content = ImGui::GetCurrentWindow();
@@ -5207,6 +5206,8 @@ void menu_touch_widget_contracts(gpu::VulkanRenderer &renderer, const std::files
     };
     ImVec2 at = target();
     point(at);
+    expect(GImGui->HoveredWindow == content && content->InnerClipRect.Contains(at),
+        "vertical slider gesture starts on the visible content");
     press(true);
     expect(value == 40, "a touch press waits for gesture direction before editing the slider");
     point({at.x, at.y - 80});
@@ -5227,6 +5228,8 @@ void menu_touch_widget_contracts(gpu::VulkanRenderer &renderer, const std::files
     reset_scroll = false;
     at = target();
     point(at);
+    expect(GImGui->HoveredWindow == content && content->InnerClipRect.Contains({at.x + 75, at.y}),
+        "horizontal slider gesture starts on the content and ends inside it");
     press(true);
     point({at.x + 75, at.y});
     expect_gesture(value > 40 && content && content->Scroll.y == 0.f,
@@ -5254,8 +5257,6 @@ void menu_touch_widget_contracts(gpu::VulkanRenderer &renderer, const std::files
         "switching back to keyboard hints does not resize an open touch interface");
     ui::enable_context_help(false);
     layer.set_interactive(false);
-    SDL_SetWindowSize(renderer.window(), old_width, old_height);
-    renderer.pump_events();
     io.ConfigFlags = flags;
 }
 
