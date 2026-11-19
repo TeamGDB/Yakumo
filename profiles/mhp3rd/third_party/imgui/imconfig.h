@@ -148,3 +148,12 @@ namespace ImGui
     void MyFunction(const char* name, MyMatrix44* mtx);
 }
 */
+
+//---- Yakumo (profiles/mhp3rd): the Android app resolves Vulkan through volk
+// instead of linking libvulkan.so directly, so a custom GPU driver can back
+// it (host/platform/android_gpu_driver.hpp). Desktop and other platforms are
+// untouched. See backends/imgui_impl_vulkan.h's own "Convenience support for
+// Volk" section above.
+#if defined(MHP3RD_ANDROID_APP)
+#define IMGUI_IMPL_VULKAN_USE_VOLK
+#endif

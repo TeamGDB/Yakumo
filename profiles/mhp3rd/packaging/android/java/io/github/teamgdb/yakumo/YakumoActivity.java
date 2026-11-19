@@ -30,6 +30,7 @@ import android.widget.TextView;
 
 import org.libsdl.app.SDLActivity;
 
+import java.io.File;
 import java.util.ArrayList;
 
 /**
@@ -375,6 +376,24 @@ public class YakumoActivity extends SDLActivity {
             return descriptor != null ? descriptor.detachFd() : -1;
         } catch (Exception e) {
             return -1;
+        }
+    }
+
+    /**
+     * Extracts a document's .zip into destDir (made by the caller; see
+     * DriverZip for what is kept and the size limits). Returns every .so file
+     * name extracted (the caller picks the main one among them; empty if
+     * none), or null when the document cannot be read or is not an acceptable
+     * driver package.
+     */
+    public static String[] installGpuDriverZip(String documentUri, String destDir) {
+        try {
+            ParcelFileDescriptor descriptor =
+                mSingleton.getContentResolver().openFileDescriptor(Uri.parse(documentUri), "r");
+            if (descriptor == null) return null;
+            return DriverZip.extract(new ParcelFileDescriptor.AutoCloseInputStream(descriptor), new File(destDir));
+        } catch (Exception e) {
+            return null;
         }
     }
 }

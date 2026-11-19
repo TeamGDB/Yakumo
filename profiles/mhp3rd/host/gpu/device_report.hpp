@@ -1,6 +1,12 @@
 #pragma once
 
+// See descriptor_pools.hpp: the Android app resolves vk* through volk instead
+// of linking libvulkan.so directly.
+#if defined(MHP3RD_ANDROID_APP)
+#include <volk.h>
+#else
 #include <vulkan/vulkan.h>
+#endif
 
 #include <cstdint>
 #include <string>
